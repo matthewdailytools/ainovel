@@ -22,7 +22,7 @@ SYSTEM = """你是中文原创小说工作台的执行模块。区分作者指�
 没有证据保留未知。按请求只输出正文、建议或符合指定结构的 JSON，不加 Markdown 代码围栏。
 未采纳候选的审查意见只用于纠错，不代表故事中已经发生的事实。
 """
-PROMPT_VERSION = "0.1.5"
+PROMPT_VERSION = "0.1.6"
 
 
 def parse_json(text):
@@ -734,6 +734,17 @@ class Worker:
                 }
                 context = self.context(branch_id, chapter["id"])
                 fixed = payload["fixed"] + [item for item in plot["fixed"] if item not in payload["fixed"]]
+                findings = [
+                    f
+                    for report in [
+                        result.get("completion", {}),
+                        *result.get("volume_reports", []),
+                        *result.get("aggregate_reports", []),
+                    ]
+                    for f in report.get("findings", [])
+                    if f["chapter"] == number and f["severity"] == "blocker"
+                ]
+                findings = list({dumps(f): f for f in findings}.values())
                 instructions = {
                     "动作": "按章纲写完整正文",
                     "全书简报": payload["brief"],
@@ -743,7 +754,15 @@ class Worker:
                     "预设": payload["writing_profile"],
                     "字数": f"正文非空白字符（含标点）{payload['min_chars']}—{payload['max_chars']}；不输出章标题，不能用重复段落凑数。",
                     "篇幅目标": f"本次以{(payload['min_chars'] + payload['max_chars']) // 2}个非空白字符为目标。先在心中将本章拆成有因果的若干场景节拍，再完整展开动作、对话、环境反馈和选择后果，写足目标篇幅，不用梗概替代场景。不要输出字数声明。",
-                    "本轮整书修订": result.get("completion", {}),
+                    "本轮整书修订": {
+                        "summary": result.get("completion", {}).get("summary", ""),
+                        "promises": [
+                            {"condition": p["condition"], "result": p["result"]}
+                            for p in result.get("completion", {}).get("promises", [])
+                        ],
+                        "本章问题": findings,
+                        "scope": "前次冻结版本的纠错材料；按当前原文核对，不把旧报告当成当前事实。",
+                    },
                 }
                 for rejected in reversed(result.get("interventions", [])):
                     prior = self.domain.artifact(rejected["artifact_id"])
@@ -760,13 +779,28 @@ class Worker:
                     {"number": number, "title": plot["title"]},
                     self.attempt,
                 )
-                text = await self.call(instructions, context=context, stream=True)
+                recheck = bool(chapter["content"].strip()) and (round_number > 0 or chapter["stale"])
+                text = (
+                    chapter["content"]
+                    if recheck
+                    else await self.call(instructions, context=context, stream=True)
+                )
                 review = None
                 for repair in range(3):
-                    review = await self.review(text, fixed, context, number, instructions)
+                    pending = [f for f in findings if f["quote"] in text] if recheck and repair == 0 else []
+                    review = (
+                        {
+                            "checks": [],
+                            "findings": pending,
+                            "summary": "整书检查定位的本章阻断项，先局部修订再独立复检。",
+                        }
+                        if pending
+                        else await self.review(text, fixed, context, number, instructions)
+                    )
                     length_ok = payload["min_chars"] <= char_count(text) <= payload["max_chars"]
                     passed = (
-                        length_ok
+                        not pending
+                        and length_ok
                         and all(check["result"] == "pass" for check in review["checks"])
                         and not any(f["severity"] == "blocker" for f in review["findings"])
                     )
@@ -828,6 +862,7 @@ class Worker:
                 )
                 return
             result["volume_reports"] = []
+            result["aggregate_reports"] = []
             if len(chapters) > 6:
                 for index in range(0, len(chapters), 6):
                     report = await self.completion_report(
@@ -835,9 +870,26 @@ class Worker:
                     )
                     result["volume_reports"].append(report)
                     self.checkpoint(result)
-            completion = await self.completion_report(
-                chapters, payload, result["plan"], "全书", result["volume_reports"]
-            )
+            reports = result["volume_reports"]
+            level = 1
+            while len(reports) > 3:
+                parents = []
+                for index in range(0, len(reports), 3):
+                    group = reports[index : index + 3]
+                    identifiers = {v["id"] for report in group for v in report["source_versions"]}
+                    report = await self.completion_report(
+                        [c for c in chapters if c["id"] in identifiers],
+                        payload,
+                        result["plan"],
+                        f"分段汇总{level}层{index // 3 + 1}组",
+                        group,
+                    )
+                    parents.append(report)
+                    result["aggregate_reports"].append(report)
+                    self.checkpoint(result)
+                reports = parents
+                level += 1
+            completion = await self.completion_report(chapters, payload, result["plan"], "全书", reports)
             if self.domain.branch(branch_id)["story_revision"] != result["expected_story_revision"]:
                 raise DomainError("story_changed", "完结检查期间正文改变，报告不得用于当前稿。", 409)
             result["completion"] = {
@@ -846,7 +898,7 @@ class Worker:
             }
             blockers = [
                 f
-                for report in [completion, *result["volume_reports"]]
+                for report in [completion, *result["volume_reports"], *result["aggregate_reports"]]
                 for f in report["findings"]
                 if f["severity"] == "blocker"
             ]

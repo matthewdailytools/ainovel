@@ -811,6 +811,77 @@ def test_pause_during_last_chapter_stops_before_completion_requests(settings, do
     assert "completion" not in state["result"]
 
 
+def test_wholebook_repair_patches_problem_and_rechecks_dependent_prose(settings, domain, story):
+    class RepairModel(FakeModel):
+        def __init__(self):
+            super().__init__()
+            self.writes = 0
+            self.closures = 0
+
+        async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+            data = json.loads(prompt.split("\n只返回")[0])["任务"]
+            action = data.get("动作")
+            output = await super().generate(account, task_id, system, prompt, max_output, **kwargs)
+            if action == "按章纲写完整正文":
+                self.writes += 1
+            elif action == "整书完结检查":
+                self.closures += 1
+                if self.closures == 1:
+                    report = json.loads(output["text"])
+                    report["closed"] = False
+                    report["findings"] = [
+                        {
+                            "severity": "blocker",
+                            "chapter": 1,
+                            "quote": "沈砚用旧尺测量潮水",
+                            "reason": "工程注入：缺少复核",
+                            "repair": "补入复核记录",
+                        }
+                    ]
+                    output["text"] = dumps(report)
+            elif action == "用局部替换修订正文":
+                original = data["可替换原文"][0]
+                output["text"] = dumps(
+                    {
+                        "edits": [
+                            {
+                                "original": original["source_id"],
+                                "replacement": original["text"] + "复核完成。",
+                            }
+                        ],
+                        "reason": "处理工程注入的阻断项",
+                    }
+                )
+            return output
+
+    payload = WorkflowInput(
+        novel_id=story["id"],
+        mode="assisted",
+        brief="工程样本不作为文学验收",
+        chapters=2,
+        plots=[{"number": n, "title": str(n), "plot": "测量并记录"} for n in [1, 2]],
+        min_chars=200,
+        max_chars=600,
+        account="openai_1",
+        adoption="automatic",
+    ).model_dump()
+    task = domain.queue("workflow", payload, story["branch_id"])
+    fake = RepairModel()
+    asyncio.run(Worker(settings, fake).run_once())
+    result = domain.task(task["id"])
+    assert result["status"] == "production_complete", result["error"]
+    chapters = domain.db.all(
+        "SELECT * FROM chapters WHERE branch_id=? ORDER BY position", (story["branch_id"],)
+    )
+    assert fake.writes == 2 and "复核完成。" in chapters[0]["content"]
+    first_version = domain.db.one(
+        "SELECT content FROM revisions WHERE chapter_id=? AND revision=1", (chapters[1]["id"],)
+    )
+    assert chapters[1]["content"] == first_version["content"]
+    assert all(c["revision"] == 2 and not c["stale"] for c in chapters)
+    assert all(f["source_revision"] == 2 for f in domain.db.all("SELECT * FROM facts WHERE stale=0"))
+
+
 def test_resume_manual_adoption_does_not_skip_newly_stale_chapters(client):
     story, first = create(client)
     domain = client.app.state.domain

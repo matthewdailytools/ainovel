@@ -80,8 +80,12 @@ def resolve_field(item, key, sources):
 def completion_sources(chapters, previous=()):
     """Read each batch in full; aggregate reports with quotations from the same revisions."""
     units = []
+    positions = {}
 
     def append(unit, chapter):
+        key = (chapter["id"], chapter["revision"], unit["start"], unit["end"])
+        if key in positions:
+            return positions[key]
         units.append(
             {
                 **unit,
@@ -90,6 +94,8 @@ def completion_sources(chapters, previous=()):
                 "chapter_id": chapter["id"],
             }
         )
+        positions[key] = unit["source_id"]
+        return unit["source_id"]
 
     for chapter in chapters[-1:] if previous else chapters:
         for unit in source_units(chapter["content"], f"C{chapter['position']:03}F", group_size=600):
@@ -113,7 +119,7 @@ def completion_sources(chapters, previous=()):
                     raise ValueError("Completion report quotation is not in the frozen chapters")
                 start = len(chapter["content"][: chapter["content"].find(quote)].encode("utf-16-le")) // 2
                 source_id = f"C{chapter['position']:03}R{len(units) + 1:04}"
-                append(
+                item[field] = append(
                     {
                         "source_id": source_id,
                         "text": quote,
@@ -122,5 +128,4 @@ def completion_sources(chapters, previous=()):
                     },
                     chapter,
                 )
-                item[field] = source_id
     return units, reports

@@ -64,6 +64,7 @@ def test_completion_aggregation_keeps_middle_evidence_and_original_reports():
     units, reports = completion_sources([chapter], [report])
     assert report["findings"][0]["quote"] == "😀中段矛盾"
     source_id = reports[0]["findings"][0]["quote"]
+    assert source_id == reports[0]["promises"][0]["evidence"]
     source = next(unit for unit in units if unit["source_id"] == source_id)
     assert source["revision"] == 2 and source["chapter_id"] == chapter["id"]
     assert utf16_slice(chapter["content"], source["start"], source["end"])[1] == "😀中段矛盾"
