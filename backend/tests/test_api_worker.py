@@ -782,6 +782,35 @@ def test_planned_chapter_creation_cannot_absorb_an_unseen_author_edit(domain, st
     assert len(domain.db.all("SELECT id FROM chapters WHERE branch_id=?", (story["branch_id"],))) == 1
 
 
+def test_pause_during_last_chapter_stops_before_completion_requests(settings, domain, story):
+    class PausingModel(FakeModel):
+        async def generate(self, *args, **kwargs):
+            output = await super().generate(*args, **kwargs)
+            if self.calls == 3:  # Writing, review, then fact extraction for the final chapter.
+                with domain.db.connect(True) as tx:
+                    tx.execute("UPDATE tasks SET pause=1 WHERE id=?", (task["id"],))
+            return output
+
+    payload = WorkflowInput(
+        novel_id=story["id"],
+        mode="assisted",
+        brief="原创建议",
+        chapters=1,
+        plots=[{"number": 1, "title": "量潮", "plot": "测量并记录"}],
+        min_chars=200,
+        max_chars=600,
+        account="openai_1",
+        adoption="automatic",
+    ).model_dump()
+    task = domain.queue("workflow", payload, story["branch_id"])
+    fake = PausingModel()
+    asyncio.run(Worker(settings, fake).run_once())
+    state = domain.task(task["id"])
+    assert state["status"] == "paused" and state["result"]["next_chapter"] == 2
+    assert fake.calls == 3 and domain.chapter(story["chapter_id"])["content"]
+    assert "completion" not in state["result"]
+
+
 def test_resume_manual_adoption_does_not_skip_newly_stale_chapters(client):
     story, first = create(client)
     domain = client.app.state.domain

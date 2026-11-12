@@ -75,3 +75,52 @@ def resolve_field(item, key, sources):
         item[key] = sources[value]["text"]
         return sources[value]
     return None
+
+
+def completion_sources(chapters, previous=()):
+    """Read each batch in full; aggregate reports with quotations from the same revisions."""
+    units = []
+
+    def append(unit, chapter):
+        units.append(
+            {
+                **unit,
+                "chapter": chapter["position"],
+                "revision": chapter["revision"],
+                "chapter_id": chapter["id"],
+            }
+        )
+
+    for chapter in chapters[-1:] if previous else chapters:
+        for unit in source_units(chapter["content"], f"C{chapter['position']:03}F", group_size=600):
+            append(unit, chapter)
+    reports = deepcopy(list(previous))
+    for report in reports:
+        for key, field in (("promises", "evidence"), ("findings", "quote")):
+            for item in report[key]:
+                quote = item[field]
+                if not quote:
+                    continue
+                chapter = next(
+                    (
+                        c
+                        for c in chapters
+                        if quote in c["content"] and (key != "findings" or c["position"] == item["chapter"])
+                    ),
+                    None,
+                )
+                if not chapter:
+                    raise ValueError("Completion report quotation is not in the frozen chapters")
+                start = len(chapter["content"][: chapter["content"].find(quote)].encode("utf-16-le")) // 2
+                source_id = f"C{chapter['position']:03}R{len(units) + 1:04}"
+                append(
+                    {
+                        "source_id": source_id,
+                        "text": quote,
+                        "start": start,
+                        "end": start + len(quote.encode("utf-16-le")) // 2,
+                    },
+                    chapter,
+                )
+                item[field] = source_id
+    return units, reports

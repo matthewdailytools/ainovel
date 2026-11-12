@@ -11,7 +11,7 @@ from time import time
 from .budget import Budget
 from .db import Database, DomainError, dumps, uid
 from .domain import Domain, char_count, utf16_slice
-from .evidence import source_units, resolve_field, source_schema
+from .evidence import source_units, resolve_field, source_schema, completion_sources
 from .models import Completion, Memory, Plan, Review, RevisionPatch
 from .providers import ModelClient
 from .settings import Settings
@@ -22,7 +22,7 @@ SYSTEM = """你是中文原创小说工作台的执行模块。区分作者指�
 没有证据保留未知。按请求只输出正文、建议或符合指定结构的 JSON，不加 Markdown 代码围栏。
 未采纳候选的审查意见只用于纠错，不代表故事中已经发生的事实。
 """
-PROMPT_VERSION = "0.1.4"
+PROMPT_VERSION = "0.1.5"
 
 
 def parse_json(text):
@@ -623,25 +623,7 @@ class Worker:
         return text
 
     async def completion_report(self, chapters, payload, plan, scope, previous=()):
-        opening, ending = (450, 900) if len(chapters) <= 12 else (120, 240)
-        units = []
-        for chapter in chapters:
-            for unit in source_units(
-                chapter["content"][:opening], f"C{chapter['position']:03}O", group_size=300
-            ) + source_units(
-                chapter["content"][-ending:],
-                f"C{chapter['position']:03}E",
-                len(chapter["content"][:-ending].encode("utf-16-le")) // 2,
-                group_size=300,
-            ):
-                units.append(
-                    {
-                        **unit,
-                        "chapter": chapter["position"],
-                        "revision": chapter["revision"],
-                        "chapter_id": chapter["id"],
-                    }
-                )
+        units, reports = completion_sources(chapters, previous)
         sources = {unit["source_id"]: unit for unit in units}
 
         def validate(report):
@@ -669,8 +651,8 @@ class Worker:
                 "固定方向": payload["fixed"],
                 "采用规划": plan,
                 "可引用原文": units,
-                "分卷报告": previous,
-                "要求": "核对主冲突、人物去向、承诺和伏笔。若范围为分卷，只核对该阶段推进及卷间承接，不能把计划后卷回收的伏笔当错误。若范围为全书，必须核对终局闭合，不能因章数满而closed。findings.quote及promises.evidence优先只填source_id编号，后端回填冻结原文；findings.chapter与编号中章节一致。不得改写或拼接引文；未知标unknown，解释放reason/summary。",
+                "分段全文报告": reports,
+                "要求": "核对简报、采用规划中的主冲突、人物去向、明确承诺和伏笔。分段范围提供该段全文，只核对阶段推进及承接，不能把后段计划回收的伏笔当错误。全书范围汇总全部分段全文报告、报告所引的冻结正文和末章全文，核对核心承诺终局；分段当时尚未发生的后段事件须结合后段报告判断。不能因章数满而closed。不要新增泛化的‘保证全书所有伏笔无遗漏’作为承诺项；模型可能漏检的局限单列summary，作者最终通读。具体承诺缺证据仍标unknown。findings.quote及promises.evidence只填本次source_id编号，后端回填冻结原文；findings.chapter与编号章节一致。不得拼接引文。",
             },
             Completion,
             None,
@@ -679,7 +661,10 @@ class Worker:
         )
         return {
             **report,
-            "coverage": f"{scope}：章纲与每章固定版本开头{opening}/结尾{ending}字符；作者仍需通读最终稿。",
+            "coverage": f"{scope}：{'全部分段全文报告、其原文证据及末章全文的汇总' if previous else '所列章节的固定版本全文'}；分段模型审阅不等于作者通读或零漏检保证。",
+            "source_versions": [
+                {"id": c["id"], "position": c["position"], "revision": c["revision"]} for c in chapters
+            ],
         }
 
     async def workflow(self):
@@ -825,7 +810,10 @@ class Worker:
                 ):
                     self.checkpoint(result, "queued")
                     return
-            # Completion uses fixed-version excerpts and summaries; coverage is explicit in the result.
+            if self.domain.task(self.task["id"])["pause"]:
+                self.checkpoint(result, "paused")
+                return
+            # Every batch reads frozen chapters in full; aggregation keeps grounded evidence.
             chapters = self.db.all(
                 "SELECT id,position,revision,title,content,stale FROM chapters WHERE branch_id=? AND archived=0 ORDER BY position",
                 (branch_id,),
@@ -840,10 +828,10 @@ class Worker:
                 )
                 return
             result["volume_reports"] = []
-            if len(chapters) > 12:
-                for index in range(0, len(chapters), 12):
+            if len(chapters) > 6:
+                for index in range(0, len(chapters), 6):
                     report = await self.completion_report(
-                        chapters[index : index + 12], payload, result["plan"], f"分卷{index // 12 + 1}"
+                        chapters[index : index + 6], payload, result["plan"], f"全文分段{index // 6 + 1}"
                     )
                     result["volume_reports"].append(report)
                     self.checkpoint(result)
@@ -875,7 +863,7 @@ class Worker:
                 result["next_chapter"] = min(f["chapter"] for f in blockers)
                 self.checkpoint(result)
             else:
-                self.checkpoint(result, "blocked_creative", "核心承诺尚未闭合，已保留整书修订报告。")
+                self.checkpoint(result, "blocked_creative", "整书检查仍有未通过或未知项，已保留报告供审阅。")
                 return
 
     async def run_once(self):

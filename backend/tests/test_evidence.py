@@ -1,5 +1,5 @@
 from ainovel.domain import utf16_slice
-from ainovel.evidence import resolve_field, source_units, source_schema
+from ainovel.evidence import resolve_field, source_units, source_schema, completion_sources
 from ainovel.models import Memory, Review, RevisionPatch
 
 
@@ -35,3 +35,36 @@ def test_grouped_source_fragments_keep_utf16_offsets():
     for unit in units:
         assert utf16_slice(text, unit["start"] - 30, unit["end"] - 30)[1] == unit["text"]
     assert "".join(unit["text"] for unit in units) == text
+
+
+def test_completion_batch_reads_middle_of_every_chapter_in_full():
+    chapters = [
+        {"id": str(n), "position": n, "revision": 3, "content": "开头" * 600 + "😀中段矛盾" + "结尾" * 600}
+        for n in range(1, 7)
+    ]
+    units, reports = completion_sources(chapters)
+    assert reports == []
+    for chapter in chapters:
+        selected = [unit for unit in units if unit["chapter_id"] == chapter["id"]]
+        assert "".join(unit["text"] for unit in selected) == chapter["content"]
+        assert all(unit["revision"] == 3 for unit in selected)
+
+
+def test_completion_aggregation_keeps_middle_evidence_and_original_reports():
+    chapter = {
+        "id": "chapter",
+        "position": 1,
+        "revision": 2,
+        "content": "前" * 1000 + "😀中段矛盾" + "后" * 1000,
+    }
+    report = {
+        "promises": [{"condition": "信息边界", "result": "fail", "evidence": "😀中段矛盾"}],
+        "findings": [{"chapter": 1, "quote": "😀中段矛盾", "reason": "原文矛盾", "severity": "blocker"}],
+    }
+    units, reports = completion_sources([chapter], [report])
+    assert report["findings"][0]["quote"] == "😀中段矛盾"
+    source_id = reports[0]["findings"][0]["quote"]
+    source = next(unit for unit in units if unit["source_id"] == source_id)
+    assert source["revision"] == 2 and source["chapter_id"] == chapter["id"]
+    assert utf16_slice(chapter["content"], source["start"], source["end"])[1] == "😀中段矛盾"
+    assert reports[0]["promises"][0]["result"] == "fail"
