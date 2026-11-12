@@ -22,7 +22,7 @@ SYSTEM = """你是中文原创小说工作台的执行模块。区分作者指�
 没有证据保留未知。按请求只输出正文、建议或符合指定结构的 JSON，不加 Markdown 代码围栏。
 未采纳候选的审查意见只用于纠错，不代表故事中已经发生的事实。
 """
-PROMPT_VERSION = "0.1.3"
+PROMPT_VERSION = "0.1.4"
 
 
 def parse_json(text):
@@ -474,6 +474,10 @@ class Worker:
     async def review(self, text, fixed, context, number, instructions=None):
         units = source_units(text, f"C{number:03}P")
         sources = {unit["source_id"]: unit for unit in units}
+        contract = source_schema(Review.model_json_schema(), units)
+        contract["properties"]["checks"].update(minItems=len(fixed), maxItems=len(fixed))
+        if fixed:
+            contract["$defs"]["ReviewCheck"]["properties"]["condition"]["enum"] = list(dict.fromkeys(fixed))
 
         def validate(result):
             issues = []
@@ -496,13 +500,14 @@ class Worker:
                 "可引用原文": units,
                 "固定条件": fixed,
                 "作者写作要求": instructions or {},
-                "情节覆盖": "同时核对作者写作要求中的本章情节、结果和禁止项。关键事件被拖延到后章或正文与明确要求的结果相反，应指出具体遗漏与原文，不能只检查固定条件清单。不要要求未来章纲在本章提前发生。",
+                "情节覆盖": "同时核对作者写作要求中的本章情节、结果和禁止项。清单之外的问题只写入findings，禁止向checks追加条件。关键事件被拖延到后章或正文与明确要求的结果相反，应指出具体遗漏与原文，不能只检查固定条件清单。不要要求未来章纲在本章提前发生。",
                 "要求": "checks对每条固定条件逐字列出且仅列一次。evidence和findings.quote优先只填「可引用原文」中的source_id编号，后端自动回填该版本原文；不要重写或概括引文。否定条件可选体现克制收场的段落。条件性约束须保留触发关系：本章明确没有实施受约束行动时，不得仅因前置条件仍待核实而判违规；检查正文是否遵守限制。明确要求本章完成的情节仍须核对是否完成。findings.chapter必须为本次章节号。解释放summary/reason，区分阻断与偏好。未知不冒充pass。",
                 "章节号": number,
             },
             Review,
             context,
             validate,
+            contract=contract,
         )
         return result
 
