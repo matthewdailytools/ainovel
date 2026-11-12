@@ -36,11 +36,15 @@ def export_evidence(settings, task_ids):
         for task_id in dict.fromkeys(task_ids):
             task = domain.task(task_id)
             branch_id = task["branch_id"]
+            related_tasks = db.all("SELECT * FROM tasks WHERE branch_id=? ORDER BY created", (branch_id,))
+            related_ids = [item["id"] for item in related_tasks]
+            placeholders = ",".join("?" for _ in related_ids)
             manuscript = domain.export(branch_id)
             (folder / (task_id + ".md")).write_text(manuscript, encoding="utf-8", newline="\n")
             chapters = db.all("SELECT * FROM chapters WHERE branch_id=? ORDER BY position", (branch_id,))
             entry = {
                 "task": task,
+                "related_tasks": related_tasks,
                 "branch": domain.branch(branch_id),
                 "completion": domain.completion(branch_id),
                 "chapters": [{**c, "nonblank_chars": char_count(c["content"])} for c in chapters],
@@ -49,8 +53,10 @@ def export_evidence(settings, task_ids):
                 "artifacts": db.all(
                     "SELECT * FROM artifacts WHERE branch_id=? ORDER BY created", (branch_id,)
                 ),
-                "events": db.all("SELECT * FROM task_events WHERE task_id=? ORDER BY id", (task_id,)),
-                "steps": db.all("SELECT * FROM task_steps WHERE task_id=?", (task_id,)),
+                "events": db.all(
+                    f"SELECT * FROM task_events WHERE task_id IN ({placeholders}) ORDER BY id", related_ids
+                ),
+                "steps": db.all(f"SELECT * FROM task_steps WHERE task_id IN ({placeholders})", related_ids),
             }
             ledger = restored / "usage-evidence.sqlite"
             if ledger.exists():
@@ -59,8 +65,8 @@ def export_evidence(settings, task_ids):
                     calls = [
                         dict(c)
                         for c in usage.execute(
-                            "SELECT c.*,m.actual_model,m.request_id FROM calls c LEFT JOIN call_metadata m ON m.call_id=c.id WHERE task_id=? ORDER BY created",
-                            (task_id,),
+                            f"SELECT c.*,m.actual_model,m.request_id FROM calls c LEFT JOIN call_metadata m ON m.call_id=c.id WHERE task_id IN ({placeholders}) ORDER BY created",
+                            related_ids,
                         )
                     ]
                 entry["calls"] = calls

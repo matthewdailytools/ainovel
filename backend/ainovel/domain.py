@@ -50,10 +50,16 @@ class Domain:
             raise DomainError("ownership", "章节不属于目标工作版本。", 403)
         return chapter
 
-    def create_chapter(self, branch_id, title, position=None):
+    def create_chapter(self, branch_id, title, position=None, expected_story_revision=None):
         self.branch(branch_id)
         chapter_id = uid()
         with self.db.connect(True) as db:
+            if (
+                expected_story_revision is not None
+                and db.execute("SELECT story_revision FROM branches WHERE id=?", (branch_id,)).fetchone()[0]
+                != expected_story_revision
+            ):
+                raise DomainError("story_changed", "新建计划章节前故事已改变，停止推进。", 409)
             next_position = db.execute(
                 "SELECT COALESCE(MAX(position),0)+1 FROM chapters WHERE branch_id=?", (branch_id,)
             ).fetchone()[0]
@@ -71,7 +77,10 @@ class Domain:
                 "INSERT INTO revisions VALUES(?,?,?,?,?,?)", (uid(), chapter_id, 0, "", "新建空稿", time())
             )
             db.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
-        return self.chapter(chapter_id)
+            story_revision = db.execute(
+                "SELECT story_revision FROM branches WHERE id=?", (branch_id,)
+            ).fetchone()[0]
+        return {**self.chapter(chapter_id), "story_revision": story_revision}
 
     @staticmethod
     def revise_tx(db, chapter, content, cause):
@@ -137,6 +146,7 @@ class Domain:
         artifact = self.db.one("SELECT * FROM artifacts WHERE id=?", (artifact_id,))
         for key in ("payload", "basis"):
             artifact[key] = json.loads(artifact[key])
+        artifact["candidate_revision"] = artifact["payload"].get("_candidate_revision", 0)
         return artifact
 
     @staticmethod
@@ -165,7 +175,15 @@ class Domain:
             ),
         )
 
-    def accept(self, artifact_id, key, require_review=False, attempt=None):
+    def accept(
+        self,
+        artifact_id,
+        key,
+        require_review=False,
+        attempt=None,
+        candidate_revision=None,
+        workflow_result=None,
+    ):
         with self.db.connect(True) as db:
             row = db.execute("SELECT * FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
             if not row:
@@ -188,6 +206,8 @@ class Domain:
             if attempt:
                 self.db.check_attempt(db, artifact["task_id"], attempt)
             payload = artifact["payload"]
+            if candidate_revision is not None and candidate_revision != payload.get("_candidate_revision", 0):
+                raise DomainError("candidate_conflict", "候选已有新修订，请重新比较后采纳；正文未改动。", 409)
             if "story_revision" in artifact["basis"]:
                 story_revision = db.execute(
                     "SELECT story_revision FROM branches WHERE id=?", (artifact["branch_id"],)
@@ -263,6 +283,29 @@ class Domain:
             db.execute("INSERT INTO receipts VALUES(?,?,?)", (key, artifact_id, dumps(result)))
             if artifact["task_id"]:
                 self.db.event(db, artifact["task_id"], "accepted", result)
+            if workflow_result is not None:
+                if not (require_review and attempt and artifact["kind"] == "chapter_draft"):
+                    raise DomainError("workflow_progress", "自动进度必须与已验证的执行尝试一起保存。", 409)
+                progress = {
+                    **workflow_result,
+                    "latest_artifact": artifact_id,
+                    "next_chapter": chapter["position"] + 1,
+                    "expected_story_revision": db.execute(
+                        "SELECT story_revision FROM branches WHERE id=?", (artifact["branch_id"],)
+                    ).fetchone()[0],
+                }
+                self.db.check_attempt(db, artifact["task_id"], attempt)
+                db.execute(
+                    "UPDATE tasks SET result=?,updated=? WHERE id=? AND attempt=?",
+                    (dumps(progress), time(), artifact["task_id"], attempt),
+                )
+                self.db.event(
+                    db,
+                    artifact["task_id"],
+                    "checkpoint",
+                    {"status": "running", "atomic_adoption": True, **progress},
+                )
+                workflow_result.update(progress)
             return result
 
     def context(self, branch_id, chapter_id=None):

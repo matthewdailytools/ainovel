@@ -69,14 +69,21 @@ export function WorkflowPage({
     let active = true
     setWaiting(undefined)
     const id = task?.result.waiting_artifact
-    if (id)
+    const poll = () => {
+      if (!id) return
       void api<Artifact>(`/artifacts/${id}`)
         .then((a) => {
           if (active) setWaiting(a)
         })
-        .catch(notify)
+        .catch((e) => {
+          if (active) notify(e)
+        })
+    }
+    poll()
+    const timer = id ? setInterval(poll, 2500) : undefined
     return () => {
       active = false
+      if (timer) clearInterval(timer)
     }
   }, [task?.result.waiting_artifact, task?.status, notify])
   async function perform(fn: () => Promise<unknown>) {
@@ -398,6 +405,7 @@ export function WorkflowPage({
                           acknowledge_changes: changes,
                           regenerate_pending: regenerate,
                           reason: retryReason,
+                          candidate_revision: waiting?.candidate_revision ?? 0,
                         })
                         await refresh()
                       })
@@ -420,6 +428,7 @@ export function WorkflowPage({
                           void perform(async () => {
                             await api(`/artifacts/${waiting.id}/accept`, 'POST', {
                               idempotency_key: 'manual-' + waiting.id,
+                              candidate_revision: waiting.candidate_revision,
                             })
                             setWaiting(await api(`/artifacts/${waiting.id}`))
                             setStatus('候选已采纳。点击恢复继续下一章。')

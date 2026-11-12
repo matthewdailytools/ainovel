@@ -15,6 +15,7 @@ export type Chapter = {
 }
 export type Artifact = {
   id: string
+  candidate_revision: number
   kind: string
   chapter_id: string | null
   base_revision: number | null

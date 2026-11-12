@@ -58,10 +58,16 @@ class ModuleInput(Input):
 
 class CandidateEdit(Input):
     text: str = Field(max_length=250_000)
+    candidate_revision: int = Field(default=0, ge=0)
+
+
+class CandidateVersionInput(Input):
+    candidate_revision: int = Field(default=0, ge=0)
 
 
 class AcceptInput(Input):
     idempotency_key: str = Field(min_length=8, max_length=128)
+    candidate_revision: int = Field(default=0, ge=0)
 
 
 class Fact(Input):

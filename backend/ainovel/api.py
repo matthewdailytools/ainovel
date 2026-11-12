@@ -22,6 +22,7 @@ from .models import (
     AcceptInput,
     AssessmentInput,
     CandidateEdit,
+    CandidateVersionInput,
     ChapterInput,
     FactInput,
     DefinitionInput,
@@ -58,6 +59,7 @@ class ResumeInput(Input):
     acknowledge_changes: bool = False
     regenerate_pending: bool = False
     reason: str = Field(default="", max_length=2000)
+    candidate_revision: int = Field(default=0, ge=0)
 
 
 class DownloadInput(Input):
@@ -507,6 +509,8 @@ def create_app(settings=None, schema_only=False):
                         "重做需要一份未采纳候选及明确原因；旧候选将拒绝，费用与干预保留。",
                         409,
                     )
+                if domain.artifact(waiting)["candidate_revision"] != data.candidate_revision:
+                    raise DomainError("candidate_conflict", "待审候选已更新，请重新比较后决定是否重做。", 409)
                 reject_pending = waiting
                 result["generation_epoch"] = uid()
                 result.setdefault("interventions", []).append(
@@ -524,13 +528,15 @@ def create_app(settings=None, schema_only=False):
             branch = domain.branch(current["branch_id"])
             branch_snapshot = branch["story_revision"]
             if result.get("expected_story_revision", branch["story_revision"]) != branch["story_revision"]:
-                if not data.acknowledge_changes and not waiting:
-                    raise DomainError("story_changed", "前文已改变；确认后从最早失效章重新检查生成。", 409)
                 stale = db.all(
                     "SELECT position FROM chapters WHERE branch_id=? AND stale=1 ORDER BY position LIMIT 1",
                     (current["branch_id"],),
                 )
-                if stale and not waiting:
+                if not data.acknowledge_changes and (not waiting or stale):
+                    raise DomainError("story_changed", "前文已改变；确认后从最早失效章重新检查生成。", 409)
+                if stale:
+                    result.pop("waiting_artifact", None)
+                    waiting = None
                     result["next_chapter"] = min(result.get("next_chapter", 1), stale[0]["position"])
                 result["expected_story_revision"] = branch["story_revision"]
         with db.connect(True) as tx:
@@ -582,17 +588,44 @@ def create_app(settings=None, schema_only=False):
             payload = json.loads(row["payload"])
             if "text" not in payload:
                 raise DomainError("candidate_kind", "结构化报告请用事实更正或重新审查。")
+            current_revision = payload.get("_candidate_revision", 0)
+            if current_revision != data.candidate_revision:
+                raise DomainError("candidate_conflict", "候选已在其他窗口更新，本地编辑请保留并比较。", 409)
+            if "review" in payload:
+                payload["previous_review"] = payload.pop("review")
             payload.update(text=data.text, review_passed=False, memory={})
+            payload["_candidate_revision"] = current_revision + 1
             tx.execute("UPDATE artifacts SET payload=? WHERE id=?", (dumps(payload), artifact_id))
+            if row["task_id"]:
+                tx.execute("UPDATE tasks SET updated=? WHERE id=?", (time(), row["task_id"]))
+                db.event(
+                    tx,
+                    row["task_id"],
+                    "candidate_edited",
+                    {
+                        "artifact_id": artifact_id,
+                        "candidate_revision": current_revision + 1,
+                        "previous_revision": current_revision,
+                    },
+                )
         return domain.artifact(artifact_id)
 
     @app.post("/api/artifacts/{artifact_id}/accept")
     def accept_candidate(artifact_id: str, data: AcceptInput):
-        return domain.accept(artifact_id, data.idempotency_key)
+        return domain.accept(artifact_id, data.idempotency_key, candidate_revision=data.candidate_revision)
 
     @app.post("/api/artifacts/{artifact_id}/reject")
-    def reject(artifact_id: str):
+    def reject(artifact_id: str, data: CandidateVersionInput | None = None):
         with db.connect(True) as tx:
+            row = tx.execute("SELECT status,payload FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
+            if not row:
+                raise DomainError("not_found", "候选不存在。", 404)
+            if row["status"] == "accepted":
+                raise DomainError("candidate_state", "该候选已经采纳，请在正文历史中恢复。", 409)
+            if row["status"] == "candidate" and json.loads(row["payload"]).get("_candidate_revision", 0) != (
+                data.candidate_revision if data else 0
+            ):
+                raise DomainError("candidate_conflict", "候选已有新修订，请比较后再拒绝。", 409)
             tx.execute(
                 "UPDATE artifacts SET status='rejected' WHERE id=? AND status='candidate'", (artifact_id,)
             )

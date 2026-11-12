@@ -169,3 +169,35 @@ def test_evidence_bundle_matches_restored_manuscript_without_spending(settings, 
     assert evidence["restore"]["integrity"] == "ok"
     assert "test-not-real" not in (folder / "evidence.json").read_text("utf-8")
     assert not (settings.data_dir / "usage.sqlite").exists()
+
+
+def test_book_evidence_includes_related_manual_module_usage(settings, domain, story):
+    from pathlib import Path
+    from ainovel.evidence_export import export_evidence
+
+    task = domain.queue(
+        "module",
+        {
+            "novel_id": story["id"],
+            "branch_id": story["branch_id"],
+            "account": "openai_1",
+            "action": "writing.advise",
+        },
+    )
+    manual = domain.queue(
+        "module",
+        {
+            "novel_id": story["id"],
+            "branch_id": story["branch_id"],
+            "account": "openai_1",
+            "action": "review.chapter",
+        },
+    )
+    ledger = Budget(settings)
+    call = ledger.reserve(settings.providers["openai_1"], manual["id"], 2, 1)
+    ledger.settle(call, {"input": 2, "output": 1})
+    result = export_evidence(settings, [task["id"]])
+    entry = json.loads((Path(result["folder"]) / "evidence.json").read_text("utf-8"))["tasks"][0]
+    assert len(entry["related_tasks"]) == 2
+    assert entry["calls"][0]["task_id"] == manual["id"]
+    assert entry["cost_by_currency"]["USD"]["settled"] == 0.000012

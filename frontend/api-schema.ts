@@ -884,6 +884,11 @@ export interface components {
     AcceptInput: {
       /** Idempotency Key */
       idempotency_key: string
+      /**
+       * Candidate Revision
+       * @default 0
+       */
+      candidate_revision: number
     }
     /** ArchiveInput */
     ArchiveInput: {
@@ -932,6 +937,19 @@ export interface components {
     CandidateEdit: {
       /** Text */
       text: string
+      /**
+       * Candidate Revision
+       * @default 0
+       */
+      candidate_revision: number
+    }
+    /** CandidateVersionInput */
+    CandidateVersionInput: {
+      /**
+       * Candidate Revision
+       * @default 0
+       */
+      candidate_revision: number
     }
     /** ChapterInput */
     ChapterInput: {
@@ -1175,6 +1193,11 @@ export interface components {
        * @default
        */
       reason: string
+      /**
+       * Candidate Revision
+       * @default 0
+       */
+      candidate_revision: number
     }
     /** SaveInput */
     SaveInput: {
@@ -2300,7 +2323,11 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['CandidateVersionInput'] | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {

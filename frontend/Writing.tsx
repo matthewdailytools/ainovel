@@ -840,6 +840,7 @@ export function Writing({
                     await save()
                     await api(`/artifacts/${candidate.id}/accept`, 'POST', {
                       idempotency_key: 'manual-' + candidate.id,
+                      candidate_revision: candidate.candidate_revision,
                     })
                     if (chapter) await loadChapter(chapter.id, 0, true)
                     setArtifacts(await api(`/artifacts?branch_id=${branch.id}`))
@@ -872,6 +873,8 @@ function Candidate({
   onUpdate: () => Promise<void>
 }) {
   const [edit, setEdit] = useState(artifact.payload.text || '')
+  const [editRevision, setEditRevision] = useState(artifact.candidate_revision)
+  const candidateChanged = editRevision !== artifact.candidate_revision
   const [baseline, setBaseline] = useState<string>()
   const [comparisonError, setComparisonError] = useState('')
   useEffect(() => {
@@ -903,6 +906,28 @@ function Candidate({
       <p className="small muted">
         {label(artifact.status)} · 基线修订 {artifact.base_revision ?? '设定'}。改变原文后采纳会再次校验。
       </p>
+      {candidateChanged && (
+        <div className="notice" role="status">
+          <p>候选已在其他窗口更新。本地编辑仍保留，可先复制，再载入已保存的候选进行比较。</p>
+          <button
+            onClick={() =>
+              void perform(async () => {
+                await navigator.clipboard.writeText(edit)
+              })
+            }
+          >
+            复制本地候选
+          </button>
+          <button
+            onClick={() => {
+              setEdit(artifact.payload.text || '')
+              setEditRevision(artifact.candidate_revision)
+            }}
+          >
+            载入已保存候选
+          </button>
+        </div>
+      )}
       {artifact.payload.text !== undefined ? (
         <>
           <label>
@@ -917,10 +942,14 @@ function Candidate({
           <p className="small muted">候选正文：{[...edit].filter((c) => !/\s/u.test(c)).length} 非空白字符</p>
           {artifact.status === 'candidate' && edit !== artifact.payload.text && (
             <button
-              disabled={busy}
+              disabled={busy || candidateChanged}
               onClick={() =>
                 void perform(async () => {
-                  await api(`/artifacts/${artifact.id}`, 'PATCH', { text: edit })
+                  const updated = await api<Artifact>(`/artifacts/${artifact.id}`, 'PATCH', {
+                    text: edit,
+                    candidate_revision: editRevision,
+                  })
+                  setEditRevision(updated.candidate_revision)
                   await onUpdate()
                 })
               }
@@ -955,7 +984,12 @@ function Candidate({
       <div className="actions">
         <button
           className="primary"
-          disabled={busy || artifact.status !== 'candidate' || edit !== (artifact.payload.text || '')}
+          disabled={
+            busy ||
+            candidateChanged ||
+            artifact.status !== 'candidate' ||
+            edit !== (artifact.payload.text || '')
+          }
           onClick={() => void perform(onAccept)}
         >
           {['text_patch', 'chapter_draft'].includes(artifact.kind)
@@ -968,7 +1002,7 @@ function Candidate({
           disabled={busy || artifact.status !== 'candidate'}
           onClick={() =>
             void perform(async () => {
-              await api(`/artifacts/${artifact.id}/reject`, 'POST')
+              await api(`/artifacts/${artifact.id}/reject`, 'POST', { candidate_revision: editRevision })
               await onUpdate()
             })
           }

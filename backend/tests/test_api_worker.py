@@ -6,7 +6,7 @@ import pytest
 
 from ainovel.db import DomainError, dumps
 from ainovel.models import WorkflowInput
-from ainovel.worker import Worker
+from ainovel.worker import PROMPT_VERSION, Worker
 
 
 def create(client):
@@ -112,6 +112,8 @@ class FakeModel:
     def __init__(self):
         self.calls = 0
         self.plan_context = None
+        self.review_instructions = None
+        self.generation_instructions = None
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         self.calls += 1
@@ -129,6 +131,7 @@ class FakeModel:
                 "ending": "公开核验，主冲突闭合",
             }
         elif action == "审查正文":
+            self.review_instructions = instruction.get("作者写作要求")
             output = {
                 "checks": [
                     {"condition": item, "result": "pass", "evidence": "沈砚用旧尺测量潮水"}
@@ -159,6 +162,8 @@ class FakeModel:
                 "summary": "工程模拟收尾，不能替代作者判断",
             }
         else:
+            if action == "按章纲写完整正文":
+                self.generation_instructions = instruction
             output = text
         return {
             "text": dumps(output) if isinstance(output, dict) else output,
@@ -259,7 +264,7 @@ def test_explicit_redo_does_not_reuse_rejected_step(settings, domain, story):
     )
     assert len(dispatched) == 2
     request = json.loads(dispatched[0]["payload"])
-    assert request["template_version"] == "0.1.1"
+    assert request["template_version"] == PROMPT_VERSION
     assert len(request["request"]["prompt_sha256"]) == 64
     assert "prompt" not in request["request"] and "system" not in request["request"]
     assert "test-not-real" not in dispatched[0]["payload"]
@@ -342,11 +347,73 @@ def test_rejected_candidate_redo_is_reasoned_and_gets_new_epoch(client):
         )
     path = f"/api/tasks/{task['id']}/resume"
     assert client.post(path, json={"regenerate_pending": True}).status_code == 409
-    response = client.post(path, json={"regenerate_pending": True, "reason": "拒绝人物矛盾并重新生成"})
+    edit = client.patch(
+        "/api/artifacts/" + artifact["id"], json={"text": "另一窗口编辑后的待审章", "candidate_revision": 0}
+    )
+    assert edit.status_code == 200
+    assert (
+        client.post(
+            path, json={"regenerate_pending": True, "reason": "明确重做", "candidate_revision": 0}
+        ).status_code
+        == 409
+    )
+    response = client.post(
+        path, json={"regenerate_pending": True, "reason": "拒绝人物矛盾并重新生成", "candidate_revision": 1}
+    )
     assert response.status_code == 200
     result = response.json()["result"]
     assert result["generation_epoch"] and result["interventions"][-1]["reason"]
     assert domain.artifact(artifact["id"])["status"] == "rejected"
+
+
+def test_redo_uses_rejected_review_without_treating_old_text_as_story(settings, domain, story):
+    spec = WorkflowInput(
+        novel_id=story["id"],
+        mode="assisted",
+        brief="原创样本",
+        plots=[{"number": 1, "title": "量潮", "plot": "测量并留下记录", "fixed": []}],
+        chapters=1,
+        min_chars=200,
+        max_chars=600,
+        account="openai_1",
+        adoption="automatic",
+    ).model_dump()
+    task = domain.queue("workflow", spec, story["branch_id"])
+    old = domain.stage(
+        {
+            "novel_id": story["id"],
+            "branch_id": story["branch_id"],
+            "chapter_id": story["chapter_id"],
+            "base_revision": 0,
+        },
+        "chapter_draft",
+        {
+            "text": "旧失败稿不得变成已发生事实",
+            "review": {"summary": "旧稿动作重复，要求修正"},
+            "review_passed": False,
+        },
+        {},
+        task["id"],
+    )
+    result = {
+        "plan": {"chapters": spec["plots"], "ending": "完成核对"},
+        "next_chapter": 1,
+        "repair_round": 0,
+        "generation_epoch": "fresh-redo",
+        "interventions": [{"artifact_id": old["id"], "reason": "明确重做"}],
+    }
+    with domain.db.connect(True) as tx:
+        tx.execute("UPDATE artifacts SET status='rejected' WHERE id=?", (old["id"],))
+        tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(result), task["id"]))
+    fake = FakeModel()
+    asyncio.run(Worker(settings, fake).run_once())
+    assert (
+        fake.generation_instructions["本章前次未采纳的审查意见"]["review"]["summary"]
+        == "旧稿动作重复，要求修正"
+    )
+    assert "旧失败稿" not in domain.chapter(story["chapter_id"])["content"]
+    assert domain.artifact(old["id"])["status"] == "rejected"
+    assert domain.task(task["id"])["status"] == "production_complete"
 
 
 @pytest.mark.parametrize(
@@ -556,6 +623,68 @@ def test_single_plot_expansion_checks_candidate_before_author_adoption(settings,
     assert artifact["status"] == "candidate" and domain.chapter(story["chapter_id"])["content"] == ""
 
 
+def test_review_module_honors_requested_review_scope(settings, domain, story):
+    from ainovel.models import ModuleInput
+
+    request = ModuleInput(
+        novel_id=story["id"],
+        branch_id=story["branch_id"],
+        chapter_id=story["chapter_id"],
+        base_revision=0,
+        action="review.chapter",
+        instruction="只核对观察位置与证据边界",
+        account="openai_1",
+    ).model_dump()
+    domain.queue("module", request)
+    fake = FakeModel()
+    asyncio.run(Worker(settings, fake).run_once())
+    assert fake.review_instructions == request["instruction"]
+    assert domain.chapter(story["chapter_id"])["content"] == ""
+
+
+def test_candidate_cross_window_edits_and_acceptance_require_seen_version(client):
+    story, chapter = create(client)
+    domain = client.app.state.domain
+    artifact = domain.stage(
+        {
+            "novel_id": story["id"],
+            "branch_id": story["branch_id"],
+            "chapter_id": chapter["id"],
+            "base_revision": 0,
+        },
+        "chapter_draft",
+        {"text": "初始候选", "review": {"summary": "旧版检查"}, "review_passed": True},
+        {"story_revision": domain.branch(story["branch_id"])["story_revision"]},
+    )
+    path = "/api/artifacts/" + artifact["id"]
+    seen = client.get(path).json()
+    edited = client.patch(
+        path, json={"text": "另一窗口的新候选", "candidate_revision": seen["candidate_revision"]}
+    )
+    assert edited.status_code == 200 and edited.json()["candidate_revision"] == 1
+    assert "review" not in edited.json()["payload"] and edited.json()["payload"]["previous_review"]
+    assert client.patch(path, json={"text": "旧窗口不能覆盖", "candidate_revision": 0}).status_code == 409
+    assert client.post(path + "/reject", json={"candidate_revision": 0}).status_code == 409
+    assert (
+        client.post(
+            path + "/accept", json={"idempotency_key": "stale-window-accept", "candidate_revision": 0}
+        ).status_code
+        == 409
+    )
+    assert client.get("/api/chapters/" + chapter["id"]).json()["content"] == ""
+    accepted = client.post(
+        path + "/accept", json={"idempotency_key": "current-window-accept", "candidate_revision": 1}
+    )
+    assert accepted.status_code == 200
+    assert client.get("/api/chapters/" + chapter["id"]).json()["content"] == "另一窗口的新候选"
+    assert (
+        client.post(
+            path + "/accept", json={"idempotency_key": "current-window-accept", "candidate_revision": 0}
+        ).json()
+        == accepted.json()
+    )
+
+
 def test_manual_adoption_waits_and_resume_does_not_use_other_prose(settings, domain, story):
     payload = WorkflowInput(
         novel_id=story["id"],
@@ -580,3 +709,118 @@ def test_manual_adoption_waits_and_resume_does_not_use_other_prose(settings, dom
         tx.execute("UPDATE tasks SET status='queued',result=? WHERE id=?", (dumps(result), task["id"]))
     asyncio.run(worker.run_once())
     assert domain.task(task["id"])["status"] == "production_complete"
+
+
+def test_accepted_chapter_and_next_checkpoint_survive_worker_loss_together(settings, domain, story):
+    task = domain.queue("workflow", {"novel_id": story["id"], "account": "openai_1"}, story["branch_id"])
+    worker = Worker(settings, FakeModel())
+    claimed = worker.claim()
+    progress = {
+        "next_chapter": 1,
+        "expected_story_revision": domain.branch(story["branch_id"])["story_revision"],
+    }
+    artifact = domain.stage(
+        {
+            "novel_id": story["id"],
+            "branch_id": story["branch_id"],
+            "chapter_id": story["chapter_id"],
+            "base_revision": 0,
+        },
+        "chapter_draft",
+        {"text": "已采用的原稿😀", "review_passed": True},
+        {"story_revision": progress["expected_story_revision"]},
+        task["id"],
+        claimed["attempt"],
+    )
+    domain.accept(artifact["id"], "atomic-progress", True, claimed["attempt"], workflow_result=progress)
+    # No outer worker checkpoint gets a chance to run before its lease expires.
+    with domain.db.connect(True) as tx:
+        tx.execute("UPDATE tasks SET lease_until=? WHERE id=?", (time() - 1, task["id"]))
+    assert Worker(settings).claim() is None
+    recovered = domain.task(task["id"])
+    assert recovered["status"] == "blocked_runtime"
+    assert recovered["result"]["next_chapter"] == 2
+    assert (
+        recovered["result"]["expected_story_revision"] == domain.branch(story["branch_id"])["story_revision"]
+    )
+    assert domain.chapter(story["chapter_id"])["content"] == "已采用的原稿😀"
+    assert len(domain.db.all("SELECT * FROM receipts WHERE artifact_id=?", (artifact["id"],))) == 1
+
+
+def test_author_edit_after_generation_stops_before_review_call(settings, domain, story):
+    from ainovel.models import ModuleInput
+
+    class EditingModel(FakeModel):
+        async def generate(self, *args, **kwargs):
+            output = await super().generate(*args, **kwargs)
+            if self.calls == 1:
+                domain.save(story["chapter_id"], 0, "作者在等待时继续手写😀")
+            return output
+
+    spec = ModuleInput(
+        novel_id=story["id"],
+        branch_id=story["branch_id"],
+        chapter_id=story["chapter_id"],
+        base_revision=0,
+        action="writing.expand_plot",
+        instruction="量潮并记录",
+        account="openai_1",
+    ).model_dump()
+    task = domain.queue("module", spec)
+    fake = EditingModel()
+    asyncio.run(Worker(settings, fake).run_once())
+    assert fake.calls == 1
+    assert domain.task(task["id"])["status"] == "blocked_runtime"
+    assert domain.chapter(story["chapter_id"])["content"] == "作者在等待时继续手写😀"
+
+
+def test_planned_chapter_creation_cannot_absorb_an_unseen_author_edit(domain, story):
+    expected = domain.branch(story["branch_id"])["story_revision"]
+    domain.save(story["chapter_id"], 0, "作者刚刚修改前文")
+    with pytest.raises(DomainError, match="故事已改变"):
+        domain.create_chapter(story["branch_id"], "计划第二章", 2, expected)
+    assert len(domain.db.all("SELECT id FROM chapters WHERE branch_id=?", (story["branch_id"],))) == 1
+
+
+def test_resume_manual_adoption_does_not_skip_newly_stale_chapters(client):
+    story, first = create(client)
+    domain = client.app.state.domain
+    domain.save(first["id"], 0, "旧的第一章")
+    second = domain.create_chapter(story["branch_id"], "第二章")
+    task = domain.queue("workflow", {"novel_id": story["id"], "account": "openai_1"}, story["branch_id"])
+    revision = domain.branch(story["branch_id"])["story_revision"]
+    artifact = domain.stage(
+        {
+            "novel_id": story["id"],
+            "branch_id": story["branch_id"],
+            "chapter_id": second["id"],
+            "base_revision": 0,
+        },
+        "chapter_draft",
+        {"text": "第二章的待审稿"},
+        {"story_revision": revision},
+        task["id"],
+    )
+    with domain.db.connect(True) as tx:
+        tx.execute(
+            "UPDATE tasks SET status='needs_review',result=? WHERE id=?",
+            (
+                dumps(
+                    {
+                        "waiting_artifact": artifact["id"],
+                        "next_chapter": 2,
+                        "expected_story_revision": revision,
+                    }
+                ),
+                task["id"],
+            ),
+        )
+    domain.accept(artifact["id"], "manual-second")
+    domain.save(first["id"], 1, "作者重新修改了第一章")
+    path = f"/api/tasks/{task['id']}/resume"
+    assert client.post(path, json={}).status_code == 409
+    response = client.post(path, json={"acknowledge_changes": True})
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["next_chapter"] == 2 and "waiting_artifact" not in result
+    assert domain.chapter(second["id"])["stale"]
