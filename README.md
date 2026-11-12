@@ -3,10 +3,18 @@ ai写小说，自用，根据使用进行迭代
 
 ## 项目规范
 
-- [协作规则入口](AGENTS.md)
-- [任务流程与 GitHub 自动提交](TASK_RULES.md)
-- [设计规范](DESIGN_RULES.md)
-- [编码规范](CODING_RULES.md)
-- [UI 交互规范](UI_RULES.md)
+[协作规则入口](AGENTS.md) 统一引导读取规范；[规范决策清单](RULES_ROADMAP.md) 分开记录业务与工程的待确定事项。
+
+### 业务规范：创作流程与正确结果
+
+- [业务规范](BUSINESS_RULES.md)：产品范围、小说领域行为、内容保护、AI 创作流程与业务验收。
+
+### 工程规范：通用质量、实现与交付
+
+- [工程规范](ENGINEERING_RULES.md)：通用质量、技术架构、实现、数据安全、验证与运行维护。
+- [设计规范](DESIGN_RULES.md)：通用信息层级、视觉与布局要求。
+- [UI 交互规范](UI_RULES.md)：通用控件、反馈、状态与可访问体验。
+- [编码规范](CODING_RULES.md)：代码组织、数据处理、服务调用与界面实现。
+- [任务流程与 GitHub 自动提交](TASK_RULES.md)：开发协作、检查、提交与推送。
 
 每次完成有文件变更的任务后，按任务规则验证、提交并推送到 GitHub。默认文字成果使用 Markdown。
