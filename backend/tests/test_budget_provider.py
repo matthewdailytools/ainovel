@@ -146,6 +146,39 @@ def test_explicit_output_limit_settles_known_usage_and_preserves_partial(setting
     assert ledger.report()[0]["settled"] > 0
 
 
+def test_provider_failed_event_keeps_sanitized_reason_and_does_not_retry(settings):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            content=stream(
+                [
+                    {
+                        "type": "response.failed",
+                        "response": {
+                            "status": "failed",
+                            "service_tier": "default",
+                            "error": {"code": "server_error", "message": "upstream failed test-not-real"},
+                            "usage": None,
+                        },
+                    }
+                ]
+            ),
+        )
+
+    ledger = Budget(settings)
+    client = ModelClient(settings, ledger, httpx.MockTransport(handler))
+    with pytest.raises(DomainError) as caught:
+        asyncio.run(client.generate("openai_1", "failed-terminal", "system", "prompt"))
+    assert len(requests) == 1 and requests[0]["service_tier"] == "default"
+    assert caught.value.code == "provider_error" and not caught.value.repairable
+    assert caught.value.provider_details["provider_code"] == "server_error"
+    assert "test-not-real" not in str(caught.value) and "[REDACTED]" in str(caught.value)
+    assert ledger.report()[0]["reserved_unknown"] > 0
+
+
 def test_unknown_timeout_is_not_repairable_or_retried(settings):
     calls = []
 

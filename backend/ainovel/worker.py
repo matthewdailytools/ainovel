@@ -211,6 +211,7 @@ class Worker:
                     "max_output_tokens": max_output,
                     "account": self.settings.providers[payload["account"]].public(),
                     "reasoning_effort": provider.reasoning,
+                    "service_tier": "default" if provider.kind == "openai" else None,
                     "timeout_seconds": self.settings.timeout,
                     "idle_timeout_seconds": self.settings.idle_timeout,
                     "story_revision": (context or {}).get("branch", {}).get("story_revision"),
@@ -945,7 +946,16 @@ class Worker:
                     (state, message, time(), task["id"], self.attempt),
                 )
                 if changed.rowcount:
-                    self.db.event(db, task["id"], "stopped", {"code": code, "message": message})
+                    self.db.event(
+                        db,
+                        task["id"],
+                        "stopped",
+                        {
+                            "code": code,
+                            "message": message,
+                            "provider_details": getattr(error, "provider_details", None),
+                        },
+                    )
         finally:
             beat.cancel()
             try:

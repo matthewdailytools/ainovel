@@ -46,14 +46,24 @@ class ModelClient:
         output, usage, completed = "", None, False
         received_terminal = False
         input_tokens = output_tokens = None
-        actual_model, request_id = "", ""
+        actual_model, request_id, actual_tier = "", "", ""
         repairable = False
 
         def identifier(value):
             if not isinstance(value, str):
                 return ""
-            value = value.replace(provider.key, "[REDACTED]")
+            for configured in self.settings.providers.values():
+                if configured.key:
+                    value = value.replace(configured.key, "[REDACTED]")
             return "".join(c for c in value if 32 <= ord(c) < 127)[:160]
+
+        def service_message(value):
+            if not isinstance(value, str):
+                return ""
+            for configured in self.settings.providers.values():
+                if configured.key:
+                    value = value.replace(configured.key, "[REDACTED]")
+            return " ".join("".join(c for c in value if c.isprintable()).split())[:600]
 
         body = {"model": provider.model, "stream": True}
         if provider.kind == "openai":
@@ -61,6 +71,7 @@ class ModelClient:
                 input=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
                 max_output_tokens=max_output,
                 store=False,
+                service_tier="default",
             )
             if provider.reasoning:
                 body["reasoning"] = {"effort": provider.reasoning}
@@ -179,6 +190,7 @@ class ModelClient:
                             metadata = event.get("response", {}) if provider.kind == "openai" else event
                             actual_model = identifier(metadata.get("model")) or actual_model
                             request_id = request_id or identifier(metadata.get("id"))
+                            actual_tier = identifier(metadata.get("service_tier")) or actual_tier
                             if provider.kind == "openai":
                                 event_type = event.get("type")
                                 if event_type == "response.output_text.delta":
@@ -201,12 +213,36 @@ class ModelClient:
                                     )
                                     reason = (incomplete.get("incomplete_details") or {}).get("reason")
                                     repairable = reason == "max_output_tokens"
-                                    raise DomainError(
-                                        "incomplete",
-                                        "模型达到输出上限，已保留部分产物。"
-                                        if repairable
-                                        else "模型未完整结束，已保留部分产物。",
+                                    raw_error = incomplete.get("error") or event.get("error") or event
+                                    raw_error = raw_error if isinstance(raw_error, dict) else {}
+                                    details = {
+                                        "event_type": identifier(event_type),
+                                        "status": identifier(incomplete.get("status")),
+                                        "provider_code": identifier(
+                                            raw_error.get("code") or raw_error.get("type")
+                                        ),
+                                        "reason": identifier(reason),
+                                        "service_tier": actual_tier,
+                                    }
+                                    hint = service_message(raw_error.get("message"))
+                                    error = DomainError(
+                                        "incomplete"
+                                        if event_type == "response.incomplete"
+                                        else "provider_error",
+                                        (
+                                            "模型达到输出上限，已保留部分产物。"
+                                            if repairable
+                                            else "模型服务未完整结束，产物与费用状态已保留。"
+                                        )
+                                        + (
+                                            f" 服务代码：{details['provider_code'] or details['reason']}。"
+                                            if details["provider_code"] or details["reason"]
+                                            else ""
+                                        )
+                                        + (" 服务提示：" + hint if hint else ""),
                                     )
+                                    error.provider_details = details
+                                    raise error
                             else:
                                 for choice in event.get("choices", []):
                                     delta += choice.get("delta", {}).get("content") or ""
@@ -251,6 +287,7 @@ class ModelClient:
                 "model": actual_model or provider.model,
                 "requested_model": provider.model,
                 "request_id": request_id,
+                "service_tier": actual_tier,
             }
         except BaseException as error:
             if (
