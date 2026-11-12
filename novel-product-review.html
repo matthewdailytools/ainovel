@@ -1,0 +1,2236 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="ainovel 产品设计审阅：页面入口、13 个使用场景、16 组功能及其协作关系。">
+  <title>ainovel · 产品场景与功能审阅</title>
+  <style>
+    :root {
+      --bg: #f4f5f1; --paper: #fff; --ink: #203632; --muted: #536861;
+      --line: #d6dfd8; --control: #72877e; --accent: #196257; --deep: #163e36;
+      --soft: #eaf3ee; --warm: #faf0de; --warm-ink: #77501c; --focus: #97621b;
+      --blue: #255b7c; --blue-soft: #eaf1f7; --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+    body { margin: 0; color: var(--ink); background: var(--bg); font: 16px/1.7 "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button, select, input, textarea { border: 1px solid var(--control); border-radius: 8px; background: var(--paper); }
+    button, .button { min-height: 44px; padding: 9px 15px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+    button:hover, .button:hover { background: var(--soft); }
+    button:disabled { cursor: default; color: #61746d; background: #f1f3f0; border-color: #aab7af; }
+    a { color: var(--accent); text-underline-offset: 4px; }
+    a, button, input, select, textarea, summary { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    h1, h2, h3, h4, p { margin: 0; }
+    h1 { font-size: clamp(26px, 3.3vw, 38px); line-height: 1.35; letter-spacing: -.03em; font-weight: 650; }
+    h2 { font-size: 27px; line-height: 1.4; letter-spacing: -.02em; }
+    h3 { font-size: 19px; line-height: 1.5; }
+    h4 { font-size: 16px; }
+    p + p { margin-top: 12px; }
+    ul, ol { padding-left: 22px; margin: 10px 0; }
+    small, .small { font-size: 13px; }
+    .muted { color: var(--muted); }
+    .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; letter-spacing: .04em; }
+    .eyebrow { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+    .skip { position: absolute; left: 16px; top: -80px; background: white; padding: 12px; z-index: 10; }
+    .skip:focus { top: 8px; }
+    .shell { max-width: 1580px; margin: auto; container: review / inline-size; }
+    .masthead { display: flex; justify-content: space-between; gap: 24px; align-items: center; padding: 20px 36px; background: var(--paper); border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-mark { background: var(--deep); color: white; font: 600 23px/1.2 Georgia, serif; width: 39px; height: 39px; display: grid; place-items: center; border-radius: 10px; }
+    .brand strong { font-size: 21px; letter-spacing: -.04em; }
+    .masthead .links { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+    .hero { background: var(--deep); color: white; padding: 32px 36px 29px; display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; }
+    .hero .eyebrow { color: #c2d6ca; margin-bottom: 10px; }
+    .hero p { color: #d0dfd7; max-width: 780px; margin-top: 13px; font-size: 14px; }
+    .stats { display: flex; flex-shrink: 0; gap: 25px; padding-bottom: 3px; }
+    .stats strong { display: block; font: 500 32px/1.3 Georgia, serif; color: #f1e1bb; }
+    .stats span { font-size: 12px; color: #d0dfd7; white-space: nowrap; }
+    .section-nav { display: flex; gap: 9px; flex-wrap: wrap; padding: 13px 36px; background: var(--paper); border-bottom: 1px solid var(--line); }
+    .section-nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 17px; text-decoration: none; color: var(--muted); border-radius: 8px; font-size: 14px; font-weight: 600; }
+    .section-nav a[aria-current="page"] { background: var(--soft); color: var(--accent); }
+    .section-nav a:hover { color: var(--accent); background: #f3f6f1; }
+    main { min-height: 630px; }
+    .workspace { display: grid; grid-template-columns: 244px minmax(0, 1fr); }
+    .sidebar { padding: 26px 18px 36px; border-right: 1px solid var(--line); min-width: 0; }
+    .sidebar-group { margin: 0 10px 10px; color: var(--muted); font-size: 12px; letter-spacing: .09em; }
+    .sidebar-group:not(:first-child) { margin-top: 23px; }
+    .nav-item { display: flex; align-items: baseline; text-decoration: none; padding: 11px 12px; margin-bottom: 5px; gap: 10px; color: var(--ink); border: 1px solid transparent; border-radius: 9px; min-height: 44px; font-size: 14px; }
+    .nav-item .mono { color: var(--muted); flex-shrink: 0; }
+    .nav-item:hover { background: #e9eeea; }
+    .nav-item[aria-current="page"] { background: var(--paper); border-color: var(--accent); box-shadow: 0 2px 6px #1b463a09; color: var(--accent); font-weight: 600; }
+    .nav-item[aria-current="page"] .mono { color: var(--accent); }
+    .side-note { font-size: 12px; color: var(--muted); padding: 16px 12px 0; line-height: 1.8; }
+    .content { padding: 30px 34px 40px; min-width: 0; }
+    .title-row, .spread { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+    .title-row .eyebrow { margin-bottom: 8px; }
+    .lead { color: var(--muted); margin-top: 11px; font-size: 15px; max-width: 900px; }
+    .tag { display: inline-flex; align-items: center; background: var(--soft); color: var(--accent); border-radius: 5px; padding: 3px 8px; font-size: 12px; font-weight: 600; }
+    .tag.warm { background: var(--warm); color: var(--warm-ink); }
+    .tag.neutral { background: #ecf0ec; color: #52665e; }
+    .tags { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+    .section { margin-top: 27px; }
+    .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
+    .section-heading .small { color: var(--muted); }
+    .panel { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
+    .panel + .panel { margin-top: 16px; }
+    .note { padding: 13px 17px; background: var(--soft); color: #284f40; border-left: 3px solid var(--accent); font-size: 14px; }
+    .note.warm { background: var(--warm); color: var(--warm-ink); border-color: #a2722d; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .actions { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+    .actions .button { border: 1px solid var(--control); border-radius: 8px; background: white; font-size: 14px; }
+    .actions .button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+    .actions .button.primary:hover { background: var(--deep); }
+    .scenario-card { display: block; background: var(--paper); border: 1px solid var(--line); border-radius: 11px; padding: 17px 18px; text-decoration: none; color: var(--ink); }
+    .scenario-card:hover { border-color: var(--accent); box-shadow: 0 3px 12px #1b463a0a; }
+    .scenario-card h4 { margin-top: 8px; }
+    .scenario-card p { margin-top: 7px; color: var(--muted); font-size: 13px; }
+    .card-link { display: block; font-size: 13px; color: var(--accent); margin-top: 11px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .feature-chip { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; padding: 7px 10px; color: var(--accent); background: white; border: 1px solid var(--control); border-radius: 7px; text-decoration: none; font-size: 13px; }
+    .feature-chip:hover { background: var(--soft); }
+    .wireframe { background: #f6f8f5; border: 1px solid #b7c8bb; border-radius: var(--radius); overflow: hidden; }
+    .wireframe-header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: #edf2ec; font-size: 12px; }
+    .wire-layout { display: grid; grid-template-columns: 145px minmax(0, 1fr) 190px; min-height: 240px; }
+    .wire-pane { padding: 20px 16px; min-width: 0; }
+    .wire-pane + .wire-pane { border-left: 1px solid var(--line); }
+    .wire-pane p { font-size: 13px; color: var(--muted); margin-top: 10px; }
+    .wire-center { background: white; padding: 26px; }
+    .wire-lines { margin: 20px 0; display: grid; gap: 11px; }
+    .wire-lines i { height: 5px; display: block; background: #dbe5dc; border-radius: 2px; }
+    .wire-lines i:nth-child(2n) { width: 83%; }
+    .wire-lines i:last-child { width: 54%; }
+    .wire-link { display: block; min-height: 44px; padding: 8px 0; font-size: 13px; }
+    .wire-region { border: 1px dashed var(--control); border-radius: 8px; padding: 15px; margin-top: 12px; }
+    .filter-field { margin: 0 8px 12px; }
+    .filter-field label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; }
+    .filter-field input, .filter-field select { min-height: 44px; width: 100%; padding: 8px; font-size: 13px; }
+    .empty { padding: 22px 12px; color: var(--muted); font-size: 14px; }
+    .flow-list { list-style: none; display: grid; gap: 9px; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 0; margin: 0; counter-reset: step; }
+    .flow-list li { min-width: 0; }
+    .step { width: 100%; height: 100%; text-align: left; display: flex; align-items: flex-start; justify-content: flex-start; gap: 11px; border-color: var(--control); padding: 14px 12px; line-height: 1.65; font-size: 13px; }
+    .step .number { display: grid; place-items: center; border-radius: 50%; flex-shrink: 0; width: 26px; height: 26px; background: #edf1eb; color: var(--muted); font: 12px/1 ui-monospace, monospace; }
+    .step[aria-current="step"] { border-color: var(--accent); background: var(--soft); }
+    .step[aria-current="step"] .number { background: var(--accent); color: white; }
+    .step-detail { margin-top: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
+    .step-detail h3 { margin: 7px 0 12px; }
+    .step-detail .actions { justify-content: flex-end; margin-top: 17px; }
+    .text-card { padding: 19px; border-radius: 10px; border: 1px solid var(--line); background: white; }
+    .text-card p { font-size: 14px; margin-top: 9px; }
+    details { border: 1px solid var(--line); border-radius: 10px; background: white; }
+    details + details { margin-top: 10px; }
+    summary { padding: 15px 18px; min-height: 44px; cursor: pointer; font-size: 14px; font-weight: 600; }
+    .details-body { padding: 0 18px 18px; font-size: 14px; }
+    .details-body dt { font-weight: 600; margin-top: 13px; }
+    .details-body dd { margin: 4px 0 0; color: var(--muted); }
+    .mode-card { padding: 18px; background: white; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+    .mode-card p { margin-top: 8px; }
+    .graph-scroll { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: #fafbf8; }
+    .graph { width: 920px; height: 460px; position: relative; }
+    .graph-column { position: absolute; top: 19px; font-size: 12px; font-weight: 600; color: var(--muted); }
+    .graph svg { width: 920px; height: 460px; position: absolute; inset: 0; pointer-events: none; }
+    .graph-node { position: absolute; width: 180px; height: 67px; justify-content: flex-start; text-align: left; border: 1px solid var(--control); border-radius: 10px; padding: 11px 12px; font-size: 14px; background: white; }
+    .graph-node span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 1px; }
+    .graph-node[aria-pressed="true"] { background: var(--accent); border: 2px solid var(--accent); color: white; }
+    .graph-node[aria-pressed="true"] span { color: #e0ece4; }
+    .graph-node.related { border: 2px solid var(--blue); background: var(--blue-soft); }
+    .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 12px 0; }
+    .legend span { display: flex; align-items: center; gap: 7px; }
+    .legend i { display: inline-block; width: 24px; height: 0; border-top: 2px solid var(--accent); }
+    .legend .dashed { border-top-style: dashed; border-color: var(--blue); }
+    .legend .return { border-color: var(--warm-ink); }
+    .relation-row { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr); gap: 10px; align-items: center; border-top: 1px solid var(--line); padding: 13px 0; font-size: 13px; }
+    .relation-row a { text-decoration: none; }
+    .relation-row .muted { display: block; font-size: 12px; margin-top: 2px; }
+    .feature-detail { margin-top: 18px; }
+    .feature-detail .panel p { font-size: 14px; margin-top: 7px; }
+    .roadmap { display: grid; gap: 12px; }
+    .phase { display: grid; grid-template-columns: 125px minmax(0, 1fr); gap: 20px; border-top: 1px solid var(--line); padding: 18px 0; }
+    .phase:first-child { border: 0; }
+    .phase strong { color: var(--accent); font-size: 15px; }
+    .phase p { font-size: 14px; }
+    .phase .small { margin-top: 9px; color: var(--muted); }
+    .acceptance { list-style: none; padding: 0; margin: 0; display: grid; gap: 11px; }
+    .acceptance li { border-top: 1px solid var(--line); padding-top: 13px; }
+    .acceptance li:first-child { border: 0; }
+    .acceptance p { font-size: 14px; margin-top: 5px; }
+    .review-box { margin-top: 28px; background: #f1f4ed; }
+    .review-form { display: grid; gap: 10px; padding-top: 6px; }
+    .review-form label { display: block; font-weight: 600; font-size: 13px; }
+    .review-form select { min-height: 44px; padding: 8px 10px; max-width: 260px; }
+    .review-form textarea { width: 100%; min-height: 105px; resize: vertical; padding: 11px; margin-top: 5px; }
+    .review-form .small { color: var(--muted); }
+    .notice { max-width: 1580px; padding: 12px 36px; margin: auto; color: var(--warm-ink); background: var(--warm); }
+    .footer { padding: 18px 36px 24px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    [hidden] { display: none !important; }
+    @container review (max-width: 1120px) {
+      .workspace { grid-template-columns: 215px minmax(0, 1fr); }
+      .content { padding: 26px 22px; }
+      .wire-layout { grid-template-columns: 105px minmax(0, 1fr); }
+      .wire-layout .wire-pane:last-child { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
+      .flow-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @container review (max-width: 760px) {
+      .hero { display: block; padding: 25px 20px; }
+      .stats { margin-top: 20px; gap: 27px; }
+      .stats strong { font-size: 26px; }
+      .masthead { padding: 16px 20px; flex-wrap: wrap; gap: 12px; }
+      .section-nav { padding: 9px 12px; gap: 3px; }
+      .section-nav a { padding: 8px 11px; font-size: 13px; }
+      .workspace { display: block; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); padding: 17px 14px; }
+      .sidebar-group { margin: 0 6px 6px; }
+      .sidebar-group:not(:first-child) { margin-top: 14px; }
+      .nav-list { display: flex; flex-wrap: wrap; gap: 6px; }
+      .nav-item { margin: 0; padding: 9px 10px; font-size: 13px; }
+      .nav-item .mono { font-size: 11px; }
+      .side-note { padding: 12px 6px 0; }
+      .scenario-nav .nav-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 235px; overflow-y: auto; padding: 3px; }
+      .scenario-nav .filter-field { display: inline-block; width: calc(50% - 16px); vertical-align: top; }
+      .feature-nav .nav-list { max-height: 194px; overflow-y: auto; padding: 3px; }
+      .content { padding: 24px 18px; }
+      .title-row { display: block; }
+      .title-row > .tags { margin-top: 12px; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .flow-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .section-heading { align-items: flex-start; flex-wrap: wrap; }
+      .footer { padding: 18px; }
+      .phase { grid-template-columns: 1fr; gap: 7px; }
+    }
+    @container review (max-width: 430px) {
+      h2 { font-size: 23px; }
+      .masthead .links { gap: 11px; }
+      .wire-layout { display: block; }
+      .wire-pane + .wire-pane { border-left: 0; border-top: 1px solid var(--line); }
+      .wire-pane { padding: 16px; }
+      .wire-lines { gap: 9px; margin: 15px 0; }
+      .panel, .step-detail { padding: 17px; }
+      .scenario-nav .nav-list { grid-template-columns: 1fr; }
+      .flow-list { grid-template-columns: 1fr; }
+      .scenario-nav .filter-field { display: block; width: auto; }
+      .review-form select { width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      body { background: white; }
+      .hero { color: var(--ink); background: white; }
+      .hero p, .hero .eyebrow, .stats span { color: var(--muted); }
+      .stats strong { color: var(--ink); }
+      .sidebar, .section-nav, .masthead .links, .review-box { display: none; }
+      .workspace { display: block; }
+      .content { padding: 20px 0; }
+      .graph-scroll { overflow: visible; }
+      .graph { zoom: .7; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">跳到审阅内容</a>
+  <div class="shell">
+    <header class="masthead">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">a.</span><strong>ainovel</strong><span class="small muted">产品设计审阅</span></div>
+      <div class="links"><a href="13-产品使用场景与功能设计.md">查看完整设计稿 ↗</a><button id="export-notes" type="button">导出审阅意见</button><span id="export-feedback" class="small muted" role="status" hidden></span></div>
+    </header>
+    <div class="hero">
+      <div><p class="eyebrow">Product review / 2026.11</p><h1>沿着作者的操作，<br>审阅整个创作工作台。</h1><p>从直接起笔，到设定情节、查阅资料，再到长篇续写与整书完结。页面、场景、功能相互关联，点击即可追踪。</p></div>
+      <div class="stats" aria-label="设计范围"><div><strong>09</strong><span>页面入口</span></div><div><strong>13</strong><span>使用场景</span></div><div><strong>16</strong><span>功能分组</span></div></div>
+    </div>
+    <nav class="section-nav" aria-label="审阅视图">
+      <a href="#pages/P05" data-view="pages">01 页面入口</a>
+      <a href="#flows/U04/0" data-view="flows">02 场景流程</a>
+      <a href="#features/F08" data-view="features">03 功能关系</a>
+      <a href="#delivery" data-view="delivery">04 分期与验收</a>
+    </nav>
+    <div id="storage-notice" class="notice small" role="status" hidden></div>
+    <main id="main" tabindex="-1"></main>
+    <footer class="footer"><span>设计审阅页 · 功能方案尚未实现 · 无模型调用与外部联网请求</span><span id="source-version"></span></footer>
+  </div>
+  <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+  <noscript><p class="notice">交互审阅需要启用 JavaScript。可直接阅读<a href="13-产品使用场景与功能设计.md">完整 Markdown 设计稿</a>。</p></noscript>
+  <script type="application/json" id="product-data">
+{
+  "schema": "ainovel-product-review/1",
+  "date": "2026-11-12",
+  "source": "13-产品使用场景与功能设计.md",
+  "sha256": "3013b8b1c8c756c97da157a0994eac066f39c33543bbfd123207255ef48e66ad",
+  "scenarios": [
+    {
+      "id": "U01",
+      "name": "空白起笔，卡住时获得帮助",
+      "fields": {
+        "触发与目标": "没有大纲，想先写一段；写到无名信出现时，不知道怎样继续。",
+        "输入与入口": "作品 → 写作；输入正文，或给一句想法。不要求人物卡、频道和世界设定齐备。",
+        "操作路径": "直接写 → 选中片段或定位光标 → 选择“分析卡点／给后续方向／改写选区” → 查看候选 → 采纳、编辑或拒绝 → 继续写。",
+        "AI 与作者分工": "AI 解释不同方向的后果；作者决定寄信者、秘密和后续剧情。只有请求改写时才生成替代正文。",
+        "可见产物": "原稿、候选、差异与适用范围；按需反向整理人物和事实候选。",
+        "异常与恢复": "调用失败保留提问与已生成片段；作者同时改过正文时，旧候选转为待比较，不直接套用。",
+        "成功判断": "无大纲能手写；检查逻辑不替换全文；拒绝候选不产生正式剧情。对应 F01、F08、F14。"
+      },
+      "features": [
+        "F01",
+        "F08",
+        "F14"
+      ],
+      "pages": [
+        "P01",
+        "P05"
+      ],
+      "modes": [
+        "建议"
+      ],
+      "steps": [
+        {
+          "label": "直接写",
+          "features": [
+            "F08"
+          ]
+        },
+        {
+          "label": "选中片段或定位光标",
+          "features": [
+            "F08"
+          ]
+        },
+        {
+          "label": "选择“分析卡点／给后续方向／改写选区”",
+          "features": [
+            "F08"
+          ]
+        },
+        {
+          "label": "查看候选",
+          "features": [
+            "F08"
+          ]
+        },
+        {
+          "label": "采纳、编辑或拒绝",
+          "features": [
+            "F14"
+          ]
+        },
+        {
+          "label": "继续写",
+          "features": [
+            "F08"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U02",
+      "name": "只给情绪、钩子和方向，让 AI 提出可写方案",
+      "fields": {
+        "触发与目标": "想写“被轻视的人凭判断赢得主动”，但不想逐项设计宗门、人物和能力体系。",
+        "输入与入口": "新建作品 → 从想法开始；一段自然语言即可，可引用预设。",
+        "操作路径": "系统整理读者目标感受、核心追问、固定方向和开放空间 → 显示理解摘要 → 按当前分工生成作品方案 → 作者修改核心取舍或选用方案 → 建立足以写开头的资料。",
+        "AI 与作者分工": "人物名、地点、普通背景和辅助机制由 AI 补齐；情绪回报、核心秘密、固定结果的改变另行提出。",
+        "可见产物": "作品简报、意图摘要、最小人物世界包、粗纲和暂定终局；注明作者原话与 AI 推导。",
+        "异常与恢复": "意图内部矛盾时定位冲突，只提出相关取舍；不把所有未设计内容变成待填写任务。",
+        "成功判断": "能解释每项核心设计怎样服务三类意图；作者不必完成整套百科才能起稿。对应 F02—F07。"
+      },
+      "features": [
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07"
+      ],
+      "pages": [
+        "P01",
+        "P06",
+        "P07"
+      ],
+      "modes": [
+        "建议",
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "系统整理读者目标感受、核心追问、固定方向和开放空间",
+          "features": [
+            "F02"
+          ]
+        },
+        {
+          "label": "显示理解摘要",
+          "features": [
+            "F02"
+          ]
+        },
+        {
+          "label": "按当前分工生成作品方案",
+          "features": [
+            "F03",
+            "F06"
+          ]
+        },
+        {
+          "label": "作者修改核心取舍或选用方案",
+          "features": [
+            "F02"
+          ]
+        },
+        {
+          "label": "建立足以写开头的资料",
+          "features": [
+            "F04",
+            "F05"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U03",
+      "name": "区分男女频，组合题材与机制",
+      "fields": {
+        "触发与目标": "同样写修仙，希望分别探索男频成长冒险与女频无 CP 事业成长；也可能叠加经营或悬疑。",
+        "输入与入口": "创作方向 → 读者与题材；沿用作者原话、现有配置或选择系统提出的预设。",
+        "操作路径": "选择或接受频道方案 → 确定主辅题材与机制 → 查看本书阅读承诺、叙事重点和专属检查 → 保留或调整例外 → 用同一场景试写比较。",
+        "AI 与作者分工": "系统装配相关设计主题；频道预设服从作者锁定的无 CP、关系终局和情节要求。",
+        "可见产物": "有版本的频道配置、题材组合、适用主题与暂不展开项；不为每个标签复制一套作品。",
+        "异常与恢复": "题材组合冲突先给兼容方案；改变频道显示后续方案的影响，不改写旧正文。",
+        "成功判断": "女频不会自动增加恋爱，男频不会自动增加后宫；可从同一题材得到不同重点。对应 F02—F04、F09、F10。"
+      },
+      "features": [
+        "F02",
+        "F03",
+        "F04",
+        "F09",
+        "F10"
+      ],
+      "pages": [
+        "P06",
+        "P07"
+      ],
+      "modes": [
+        "建议",
+        "半自动",
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "选择或接受频道方案",
+          "features": [
+            "F03"
+          ]
+        },
+        {
+          "label": "确定主辅题材与机制",
+          "features": [
+            "F03"
+          ]
+        },
+        {
+          "label": "查看本书阅读承诺、叙事重点和专属检查",
+          "features": [
+            "F03",
+            "F04"
+          ]
+        },
+        {
+          "label": "保留或调整例外",
+          "features": [
+            "F02"
+          ]
+        },
+        {
+          "label": "用同一场景试写比较",
+          "features": [
+            "F09",
+            "F08"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U04",
+      "name": "给定情节，直接补出正文",
+      "fields": {
+        "触发与目标": "作者已决定“交易失败、获得线索、没有战斗”，希望 AI 写出试探、对白和脱身过程。",
+        "输入与入口": "写作 → 按情节补写；自然语言情节，继承视角、文风等设置。",
+        "操作路径": "识别固定事件与结果 → 带入目标时点人物和规则 → 生成场景安排及正文 → 检查情节覆盖 → 对照采纳。",
+        "AI 与作者分工": "AI 决定允许的细节；发现写法需要改变“失败”或“不战斗”时，提出新方案而不偷改。",
+        "可见产物": "正文候选、固定条件覆盖、补充细节和状态变化候选；常用视图默认先展示正文。",
+        "异常与恢复": "关键结果未定时提供少量选项或写到边界；无明确承接状态时说明采用的假设，涉及核心结果则等待决定。",
+        "成功判断": "结果与禁止项保持，AI 新增资源和信息有来源；可一次补写作者排定的一批情节。对应 F02、F05、F07、F08、F10。"
+      },
+      "features": [
+        "F02",
+        "F05",
+        "F07",
+        "F08",
+        "F10"
+      ],
+      "pages": [
+        "P05"
+      ],
+      "modes": [
+        "半自动"
+      ],
+      "steps": [
+        {
+          "label": "识别固定事件与结果",
+          "features": [
+            "F02"
+          ]
+        },
+        {
+          "label": "带入目标时点人物和规则",
+          "features": [
+            "F05",
+            "F04"
+          ]
+        },
+        {
+          "label": "生成场景安排及正文",
+          "features": [
+            "F07",
+            "F08"
+          ]
+        },
+        {
+          "label": "检查情节覆盖",
+          "features": [
+            "F10"
+          ]
+        },
+        {
+          "label": "对照采纳",
+          "features": [
+            "F14",
+            "F11"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U05",
+      "name": "写好打斗或描写，比较不同写法",
+      "fields": {
+        "触发与目标": "打斗缺空间与攻防，或人物、环境、心理描写显得空泛；希望尝试另一种叙述方式。",
+        "输入与入口": "选区 → 改写；或写法试验 → 输入同一原创场景及固定结果。",
+        "操作路径": "选择重点与写法预设 → 固定人物能力、伤势、道具、结果 → 生成候选 → 比较动作因果、信息控制、详略和声音 → 保存偏好。",
+        "AI 与作者分工": "表达可变，情节和能力边界保持；改变打法若会改变伤势、资源或结果，要显示影响。",
+        "可见产物": "可读候选、重点说明和检查结果；预设记录来源及版本。",
+        "异常与恢复": "没有原著样本时说明是规则写作；未提供样本不阻止原创试写，不宣称已经完成原著提炼。",
+        "成功判断": "作者能指出哪种写法更合适；不能只展示“更像某书”的分数。对应 F08—F10、F14。"
+      },
+      "features": [
+        "F08",
+        "F09",
+        "F10",
+        "F14"
+      ],
+      "pages": [
+        "P04",
+        "P05"
+      ],
+      "modes": [
+        "建议",
+        "半自动",
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "选择重点与写法预设",
+          "features": [
+            "F09"
+          ]
+        },
+        {
+          "label": "固定人物能力、伤势、道具、结果",
+          "features": [
+            "F05",
+            "F02"
+          ]
+        },
+        {
+          "label": "生成候选",
+          "features": [
+            "F08"
+          ]
+        },
+        {
+          "label": "比较动作因果、信息控制、详略和声音",
+          "features": [
+            "F10"
+          ]
+        },
+        {
+          "label": "保存偏好",
+          "features": [
+            "F09"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U06",
+      "name": "查人物当时知道什么、能做什么",
+      "fields": {
+        "触发与目标": "重写前文时担心角色提前知道秘密，或忘记法器已损坏、资源不足。",
+        "输入与入口": "写作侧栏 → 人物当时状态；指定故事时点、正文位置及工作版本。",
+        "操作路径": "定位目标场景 → 查角色所知／误信／怀疑及来源 → 查能力掌握和当前可用条件 → 阅读相关事件证据 → 继续写或修订。",
+        "AI 与作者分工": "系统查资料并提示疑点；不把有依据的误判一律纠正成全知，也不把成长计划当现有能力。",
+        "可见产物": "时点状态卡、来源段落、缺证信息；作者真相、角色认知、读者所知可切换查看。",
+        "异常与恢复": "时间不确定时显示区间或歧义；正文依据冲突时保留分歧，不能用最新状态覆盖旧场景。",
+        "成功判断": "已损坏能力不能无因使用；角色秘密与读者获知保持各自顺序。对应 F05、F06、F11。"
+      },
+      "features": [
+        "F05",
+        "F06",
+        "F11"
+      ],
+      "pages": [
+        "P05",
+        "P07",
+        "P08"
+      ],
+      "modes": [
+        "建议",
+        "半自动",
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "定位目标场景",
+          "features": [
+            "F06"
+          ]
+        },
+        {
+          "label": "查角色所知／误信／怀疑及来源",
+          "features": [
+            "F05",
+            "F11"
+          ]
+        },
+        {
+          "label": "查能力掌握和当前可用条件",
+          "features": [
+            "F05"
+          ]
+        },
+        {
+          "label": "阅读相关事件证据",
+          "features": [
+            "F11"
+          ]
+        },
+        {
+          "label": "继续写或修订",
+          "features": [
+            "F08"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U07",
+      "name": "管理同期多线与伏笔回收",
+      "fields": {
+        "触发与目标": "主角赶路、对手布局、同伴调查同时发生，希望看清交汇与未回收承诺。",
+        "输入与入口": "故事设计 → 情节与多线；已有事件或当前卷粗纲。",
+        "操作路径": "按故事时间排列泳道 → 查看事件依赖 → 关联章节叙述顺序 → 标注埋设、强化和回收 → 检查时间与信息传播。",
+        "AI 与作者分工": "系统维护事件和提示遗漏；作者可指定交汇与秘密揭示，也可授权 AI 在方向内安排。",
+        "可见产物": "事件表／多线图、伏笔账本、正文证据；虚线表示铺垫回收关联，另用文字区分计划、已写和叙事可见性。",
+        "异常与恢复": "未发生事件不更新真实状态；没有精确日期可用相对先后；图形拥挤时切换表格和筛选。",
+        "成功判断": "不要求每章平均推进所有线；正文中的回收可回到先前承诺。对应 F06、F07、F11。"
+      },
+      "features": [
+        "F06",
+        "F07",
+        "F11"
+      ],
+      "pages": [
+        "P07",
+        "P08"
+      ],
+      "modes": [
+        "建议",
+        "半自动",
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "按故事时间排列泳道",
+          "features": [
+            "F06"
+          ]
+        },
+        {
+          "label": "查看事件依赖",
+          "features": [
+            "F06"
+          ]
+        },
+        {
+          "label": "关联章节叙述顺序",
+          "features": [
+            "F07"
+          ]
+        },
+        {
+          "label": "标注埋设、强化和回收",
+          "features": [
+            "F06",
+            "F11"
+          ]
+        },
+        {
+          "label": "检查时间与信息传播",
+          "features": [
+            "F11",
+            "F10"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U08",
+      "name": "找书、阅读、搜索并用于当前场景",
+      "fields": {
+        "触发与目标": "写渡口场景，需要查交通、交易或地方生活资料，也可能先独立阅读再写。",
+        "输入与入口": "独立资料书库或写作侧栏“查资料”；关键词、书名或本地文件。",
+        "操作路径": "找电子书 → 下载或导入 → 阅读 → 在明确范围内搜“渡船” → 跳到固定版本原文 → 保存摘录与笔记 → 加入当前任务资料包。",
+        "AI 与作者分工": "获取、阅读和关键词搜索无需模型；AI 可在选定片段上总结或取材，不能把外书情节作为当前小说事实。",
+        "可见产物": "来源、文件和解析索引状态、内容命中、摘录及实际选用片段。",
+        "异常与恢复": "只有书目时标明未取得正文；解析或索引部分失败时显示覆盖；仅能跳转的来源不伪装成已下载。",
+        "成功判断": "未建作品、未配模型也能读搜；从命中到原文再返回不丢位置；取材只发送选定范围。对应 F12、F08、F16。"
+      },
+      "features": [
+        "F12",
+        "F08",
+        "F16"
+      ],
+      "pages": [
+        "P02",
+        "P05"
+      ],
+      "modes": [
+        "独立使用",
+        "建议",
+        "半自动",
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "找电子书",
+          "features": [
+            "F12"
+          ]
+        },
+        {
+          "label": "下载或导入",
+          "features": [
+            "F12"
+          ]
+        },
+        {
+          "label": "阅读",
+          "features": [
+            "F12"
+          ]
+        },
+        {
+          "label": "在明确范围内搜“渡船”",
+          "features": [
+            "F12"
+          ]
+        },
+        {
+          "label": "跳到固定版本原文",
+          "features": [
+            "F12"
+          ]
+        },
+        {
+          "label": "保存摘录与笔记",
+          "features": [
+            "F12"
+          ]
+        },
+        {
+          "label": "加入当前任务资料包",
+          "features": [
+            "F12",
+            "F08"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U09",
+      "name": "导入已有稿件，继续创作",
+      "fields": {
+        "触发与目标": "已有多章正文，希望直接续写、审稿或建立连载记忆。",
+        "输入与入口": "作品 → 导入稿件；首期格式按已选定的导入方案支持。",
+        "操作路径": "预览编码与章界 → 确认新建作品或明确追加范围 → 保存原稿版本 → 反向提取人物、规则和事件候选 → 确定可用基线 → 续写或审稿。",
+        "AI 与作者分工": "AI 整理已有内容，缺少未来大纲时可提方案；不以整理为由改写原稿或编造缺章。",
+        "可见产物": "导入回执、章节列表、原稿快照、来源清楚的候选设定和记忆。",
+        "异常与恢复": "重复导入、同名章和章界识别错误先显示预览及可调整映射；无法识别的部分保留原文并标记。",
+        "成功判断": "没有完整设定仍能继续；整理出的推测与正文事实分开。对应 F01、F05、F11、F14。"
+      },
+      "features": [
+        "F01",
+        "F05",
+        "F11",
+        "F14"
+      ],
+      "pages": [
+        "P01",
+        "P08"
+      ],
+      "modes": [
+        "建议",
+        "半自动",
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "预览编码与章界",
+          "features": [
+            "F01"
+          ]
+        },
+        {
+          "label": "确认新建作品或明确追加范围",
+          "features": [
+            "F01"
+          ]
+        },
+        {
+          "label": "保存原稿版本",
+          "features": [
+            "F14"
+          ]
+        },
+        {
+          "label": "反向提取人物、规则和事件候选",
+          "features": [
+            "F05",
+            "F11"
+          ]
+        },
+        {
+          "label": "确定可用基线",
+          "features": [
+            "F11"
+          ]
+        },
+        {
+          "label": "续写或审稿",
+          "features": [
+            "F08",
+            "F10"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U10",
+      "name": "改动前文，修复后续影响",
+      "fields": {
+        "触发与目标": "将“角色收到密信”改为“没有收到”，需要知道后文哪些行动失去依据。",
+        "输入与入口": "正文修改／候选采纳 → 影响查看；指定当前作品版本。",
+        "操作路径": "保存新正文 → 标记相关摘要、事实和审查过期 → 列出受影响事件、章节和认知 → 作者选择修订范围或交给已授权流程 → 重新提取、检查和采纳。",
+        "AI 与作者分工": "系统负责追踪和提出修法；不得为了维持后文而偷偷恢复旧事实。",
+        "可见产物": "受影响清单、证据、修订候选与仍未解决的事项。",
+        "异常与恢复": "关系追踪不完整时说明覆盖，不宣称全书无影响；修订中断保留工作版本，不破坏当前可读稿。",
+        "成功判断": "后续生成使用有效基线，已过期的审稿报告不再显示为当前通过。对应 F10、F11、F14。"
+      },
+      "features": [
+        "F10",
+        "F11",
+        "F14"
+      ],
+      "pages": [
+        "P05",
+        "P08"
+      ],
+      "modes": [
+        "建议",
+        "半自动",
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "保存新正文",
+          "features": [
+            "F14"
+          ]
+        },
+        {
+          "label": "标记相关摘要、事实和审查过期",
+          "features": [
+            "F11"
+          ]
+        },
+        {
+          "label": "列出受影响事件、章节和认知",
+          "features": [
+            "F11"
+          ]
+        },
+        {
+          "label": "作者选择修订范围或交给已授权流程",
+          "features": [
+            "F10"
+          ]
+        },
+        {
+          "label": "重新提取、检查和采纳",
+          "features": [
+            "F11",
+            "F10",
+            "F14"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U11",
+      "name": "连续创作一卷，逐步完成全书",
+      "fields": {
+        "触发与目标": "已有或已选定世界、人物和粗纲，希望 AI 自主完成近期章节并持续推进到终局。",
+        "输入与入口": "自动创作 → 选择整书目标与本次范围；沿用预算、停止和采纳政策。",
+        "操作路径": "检查基线 → 补足近期必要设计 → 滚动细化 → 写作 → 审稿与有限修订 → 采纳正文及状态 → 卷审查 → 推进下一阶段与结局。",
+        "AI 与作者分工": "普通空白系统补齐；改变核心情绪、追问、固定事件或终局时提出创作决定。作者无需逐章安排情节。",
+        "可见产物": "可读章稿、当前阶段、已完成与待办范围、有限的待决定项、真实用量和停止原因。",
+        "异常与恢复": "预算到边界、服务故障、修订无法通过或基线过期时保留现场；按配置恢复，不无限重试。",
+        "成功判断": "后章读取已采纳前章，能够从检查点继续；章数结束但主线未闭合时不标记整书完成。对应 F02—F11、F13—F16。"
+      },
+      "features": [
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F13",
+        "F14",
+        "F15",
+        "F16"
+      ],
+      "pages": [
+        "P03",
+        "P05"
+      ],
+      "modes": [
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "检查基线",
+          "features": [
+            "F14"
+          ]
+        },
+        {
+          "label": "补足近期必要设计",
+          "features": [
+            "F04",
+            "F05"
+          ]
+        },
+        {
+          "label": "滚动细化",
+          "features": [
+            "F06",
+            "F07"
+          ]
+        },
+        {
+          "label": "写作",
+          "features": [
+            "F08"
+          ]
+        },
+        {
+          "label": "审稿与有限修订",
+          "features": [
+            "F10"
+          ]
+        },
+        {
+          "label": "采纳正文及状态",
+          "features": [
+            "F14",
+            "F11"
+          ]
+        },
+        {
+          "label": "卷审查",
+          "features": [
+            "F10"
+          ]
+        },
+        {
+          "label": "推进下一阶段与结局",
+          "features": [
+            "F13",
+            "F15"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U12",
+      "name": "审稿、精修并完成整书交付",
+      "fields": {
+        "触发与目标": "觉得某章拖沓，或初稿已写完，希望从问题定位走向可读定稿。",
+        "输入与入口": "审稿 → 选择范围和关注点；整书阶段进入定稿。",
+        "操作路径": "按维度检查 → 显示证据及确定性 → 选择问题生成修订 → 对照采纳 → 复检原问题 → 核对主冲突、人物去向、伏笔和开篇承诺 → 导出固定版本。",
+        "AI 与作者分工": "系统执行检查和有目标的修改；表达偏好可由作者保留，不用无限润色追求单一分数。",
+        "可见产物": "定位问题、修订差异、复检记录、完结缺口和导出稿件清单。",
+        "异常与恢复": "缺章、重要承诺未处理或导出不完整分别说明；导出失败不显示交付完成。",
+        "成功判断": "审稿能落到段落；“已写完计划章数”和“整书验收通过”分别表达。对应 F10、F14、F15。"
+      },
+      "features": [
+        "F10",
+        "F14",
+        "F15"
+      ],
+      "pages": [
+        "P08",
+        "P09"
+      ],
+      "modes": [
+        "建议",
+        "半自动",
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "按维度检查",
+          "features": [
+            "F10"
+          ]
+        },
+        {
+          "label": "显示证据及确定性",
+          "features": [
+            "F10"
+          ]
+        },
+        {
+          "label": "选择问题生成修订",
+          "features": [
+            "F10",
+            "F08"
+          ]
+        },
+        {
+          "label": "对照采纳",
+          "features": [
+            "F14"
+          ]
+        },
+        {
+          "label": "复检原问题",
+          "features": [
+            "F10"
+          ]
+        },
+        {
+          "label": "核对主冲突、人物去向、伏笔和开篇承诺",
+          "features": [
+            "F15"
+          ]
+        },
+        {
+          "label": "导出固定版本",
+          "features": [
+            "F15"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "U13",
+      "name": "配好模型并控制付费用量",
+      "fields": {
+        "触发与目标": "首次配置 DeepSeek 或 OpenAI API，判断连接能否用于实际任务，并控制长批次投入。",
+        "输入与入口": "设置 → 模型连接；使用本地配置或受保护凭据，避免在正文中填写密钥。",
+        "操作路径": "选服务和模型 → 单独发起连接测试 → 查看成功或失败类别 → 为写作等任务选择模型 → 设置可接受的运行边界 → 启动并查看实际用量。",
+        "AI 与作者分工": "连接测试不生成小说；应用按所选模型执行，不在失败后未经配置切换另一家付费服务。",
+        "可见产物": "脱敏连接状态、测试时间、服务返回结果、任务计量与费用估算依据。",
+        "异常与恢复": "认证、模型不可用、限流和网络错误分别说明；未知用量标记未知，取消后不承诺必然停止服务端计费。",
+        "成功判断": "连接成功不被当作写作质量通过；未配模型仍能手写和使用本地书库能力。对应 F16、F13。"
+      },
+      "features": [
+        "F16",
+        "F13"
+      ],
+      "pages": [
+        "P03",
+        "P04"
+      ],
+      "modes": [
+        "独立使用",
+        "建议",
+        "半自动",
+        "全自动"
+      ],
+      "steps": [
+        {
+          "label": "选服务和模型",
+          "features": [
+            "F16"
+          ]
+        },
+        {
+          "label": "单独发起连接测试",
+          "features": [
+            "F16"
+          ]
+        },
+        {
+          "label": "查看成功或失败类别",
+          "features": [
+            "F16"
+          ]
+        },
+        {
+          "label": "为写作等任务选择模型",
+          "features": [
+            "F16"
+          ]
+        },
+        {
+          "label": "设置可接受的运行边界",
+          "features": [
+            "F16",
+            "F13"
+          ]
+        },
+        {
+          "label": "启动并查看实际用量",
+          "features": [
+            "F16",
+            "F13"
+          ]
+        }
+      ]
+    }
+  ],
+  "features": [
+    {
+      "id": "F01",
+      "name": "作品与章节",
+      "action": "新建、继续写、章节重命名排序、导入预览、归档",
+      "output": "作品、章节、导入回执；稳定归属及保存保护",
+      "priority": "P0；完整导入语义逐步补齐",
+      "tier": "P0"
+    },
+    {
+      "id": "F02",
+      "name": "创作意图",
+      "action": "用一句话描述情绪、钩子、方向；锁定结果；查看继承",
+      "output": "意图摘要、固定条件、开放空间；局部辅助可为空",
+      "priority": "P0 的局部契约；全书编译在 P1",
+      "tier": "P0"
+    },
+    {
+      "id": "F03",
+      "name": "读者与题材",
+      "action": "男频／女频配置；主辅题材与机制组合；查看例外",
+      "output": "本书阅读承诺、适用主题和检查；引用 F02",
+      "priority": "P1",
+      "tier": "P1"
+    },
+    {
+      "id": "F04",
+      "name": "世界与社会",
+      "action": "生成或编辑必要规则；查看境界功法、灵气、生产交换、组织与生活",
+      "output": "世界规则、成长条件、资源和制度定义；按题材展开",
+      "priority": "P1",
+      "tier": "P1"
+    },
+    {
+      "id": "F05",
+      "name": "人物与状态",
+      "action": "人物关系、目标底线、成长计划、时点认知与能力、证据查询",
+      "output": "人物档案、关系、计划与实际状态；基于 F11 事件记录",
+      "priority": "P1；P0 可提供本次人物说明",
+      "tier": "P1"
+    },
+    {
+      "id": "F06",
+      "name": "大纲、多线与伏笔",
+      "action": "从想法或正文生成粗纲；安排卷弧、事件交汇、披露与回收",
+      "output": "终局方向、事件依赖、伏笔账本；依赖有效意图与资料",
+      "priority": "P1；图形视图可晚于表格",
+      "tier": "P1"
+    },
+    {
+      "id": "F07",
+      "name": "章节与场景",
+      "action": "拆情节、选视角、安排事件结果和信息变化",
+      "output": "章卡、场景卡、固定条件覆盖；可从单次情节直接建立",
+      "priority": "P0 的轻量场景；滚动规划在 P1",
+      "tier": "P0"
+    },
+    {
+      "id": "F08",
+      "name": "正文与局部辅助",
+      "action": "手写、续写、情节补写、选区改写扩缩、候选对照",
+      "output": "正文或文本补丁；绑定目标版本、范围及配置",
+      "priority": "P0",
+      "tier": "P0"
+    },
+    {
+      "id": "F09",
+      "name": "写法与表达预设",
+      "action": "选择文风、打斗或描写重点；比较同情节不同表达；保存偏好",
+      "output": "有版本的规则预设与试写记录；可引用样本和研究卡",
+      "priority": "P0 的常用预设；专项和校准在 P1",
+      "tier": "P0"
+    },
+    {
+      "id": "F10",
+      "name": "审稿与定向修订",
+      "action": "查情节忠实、连续性、动机、结构及语言；按问题修改复检",
+      "output": "带位置的问题、修订候选与复检记录；说明检查范围",
+      "priority": "P0 的局部检查；跨章审查在 P1",
+      "tier": "P0"
+    },
+    {
+      "id": "F11",
+      "name": "故事记录与影响",
+      "action": "提取已采纳事实、回顾、查询原文、发现前文改动影响并重建",
+      "output": "事件变化、摘要、状态、依赖和过期标记",
+      "priority": "P1",
+      "tier": "P1"
+    },
+    {
+      "id": "F12",
+      "name": "资料书库",
+      "action": "找书、下载导入、阅读、搜内容、摘录笔记、加入任务资料",
+      "output": "来源版本、命中和资料包；独立于作品与模型",
+      "priority": "P1 独立闭环；PDF/OCR 等后续扩展",
+      "tier": "P1"
+    },
+    {
+      "id": "F13",
+      "name": "自动创作与运行",
+      "action": "选择范围、预览任务、运行暂停取消、从检查点继续",
+      "output": "运行快照、阶段与章稿、停止原因；复用创作和检查功能",
+      "priority": "P2；P0 已有单任务状态",
+      "tier": "P2"
+    },
+    {
+      "id": "F14",
+      "name": "版本与恢复",
+      "action": "预览采纳、撤销、历史比较恢复、冲突处理、批次结果比较",
+      "output": "原稿版本、候选、采纳记录和恢复回执",
+      "priority": "P0 的必要保护；批次版本在 P2",
+      "tier": "P0"
+    },
+    {
+      "id": "F15",
+      "name": "完结与导出",
+      "action": "核对核心承诺、人物与伏笔；修订；选择版本和范围导出",
+      "output": "完结报告、缺口清单、导出稿与归档",
+      "priority": "P1 的基础导出；整书核查在 P2",
+      "tier": "P1"
+    },
+    {
+      "id": "F16",
+      "name": "模型与用量",
+      "action": "配置连接、测试、任务模型选择、预算边界、计量与恢复",
+      "output": "脱敏配置状态、请求记录、实际用量与估算",
+      "priority": "P0；多任务路由和汇总逐步扩展",
+      "tier": "P0"
+    }
+  ],
+  "pages": [
+    {
+      "id": "P01",
+      "features": [
+        "F01",
+        "F14"
+      ],
+      "actions": [
+        [
+          "直接开始写",
+          "U01"
+        ],
+        [
+          "从想法开始",
+          "U02"
+        ],
+        [
+          "导入已有稿件",
+          "U09"
+        ]
+      ],
+      "layout": "作品选择",
+      "hint": "近期作品与继续写作优先；构思和导入均为可选入口。",
+      "scope": "工作区",
+      "name": "作品",
+      "question": "继续哪本，还是开始新内容？",
+      "content": "近期作品、恢复写作、新建、导入、独立草稿"
+    },
+    {
+      "id": "P02",
+      "features": [
+        "F12"
+      ],
+      "actions": [
+        [
+          "查看找书与取材流程",
+          "U08"
+        ]
+      ],
+      "layout": "资料阅读",
+      "hint": "独立于作品与模型。找电子书和搜已入库内容分别表达。",
+      "scope": "工作区",
+      "name": "资料书库",
+      "question": "找书还是搜已入库内容？",
+      "content": "找电子书、我的书籍、搜内容、摘录与笔记"
+    },
+    {
+      "id": "P03",
+      "features": [
+        "F13",
+        "F14",
+        "F16"
+      ],
+      "actions": [
+        [
+          "查看整书自动创作",
+          "U11"
+        ],
+        [
+          "查看模型与用量",
+          "U13"
+        ]
+      ],
+      "layout": "任务监控",
+      "hint": "呈现可读成果、当前步骤、停止原因与恢复动作。",
+      "scope": "工作区",
+      "name": "任务与用量",
+      "question": "什么在运行，需要处理什么？",
+      "content": "按作品和任务分组的状态、恢复、计量；不默认展示全部内部步骤"
+    },
+    {
+      "id": "P04",
+      "features": [
+        "F09",
+        "F14",
+        "F16"
+      ],
+      "actions": [
+        [
+          "查看模型连接流程",
+          "U13"
+        ],
+        [
+          "查看写法试验",
+          "U05"
+        ]
+      ],
+      "layout": "设置",
+      "hint": "低频设置集中管理；已有预设可沿用，密钥不进入正文。",
+      "scope": "工作区",
+      "name": "设置",
+      "question": "连接与使用偏好是否可用？",
+      "content": "模型测试、写作预设、运行边界、数据位置与备份设置"
+    },
+    {
+      "id": "P05",
+      "features": [
+        "F01",
+        "F02",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F12",
+        "F14"
+      ],
+      "actions": [
+        [
+          "按情节补写",
+          "U04"
+        ],
+        [
+          "选区辅助",
+          "U01"
+        ],
+        [
+          "查资料",
+          "U08"
+        ],
+        [
+          "启动自动创作",
+          "U11"
+        ]
+      ],
+      "layout": "正文编辑",
+      "hint": "正文空间优先，目录和辅助面板按需收起；没有大纲也能直接写。",
+      "scope": "作品",
+      "name": "写作",
+      "question": "现在写哪一章，下一步需要什么帮助？",
+      "content": "章节目录、正文、按需 AI 辅助；默认工作入口"
+    },
+    {
+      "id": "P06",
+      "features": [
+        "F02",
+        "F03"
+      ],
+      "actions": [
+        [
+          "从三类意图开始",
+          "U02"
+        ],
+        [
+          "查看男女频与题材装配",
+          "U03"
+        ]
+      ],
+      "layout": "方向编排",
+      "hint": "情绪、钩子和方向可用一段话表达；作者锁定项优先于频道预设。",
+      "scope": "作品",
+      "name": "创作方向",
+      "question": "本书想让读者获得什么？",
+      "content": "情绪、钩子、方向、频道题材、锁定项、当前分工"
+    },
+    {
+      "id": "P07",
+      "features": [
+        "F04",
+        "F05",
+        "F06",
+        "F07"
+      ],
+      "actions": [
+        [
+          "查看人物时点状态",
+          "U06"
+        ],
+        [
+          "查看多线与伏笔",
+          "U07"
+        ],
+        [
+          "查看题材装配",
+          "U03"
+        ]
+      ],
+      "layout": "故事设计",
+      "hint": "只展开当前阶段需要的设定，不把覆盖清单变为必填百科。",
+      "scope": "作品",
+      "name": "故事设计",
+      "question": "当前阶段需要哪些人物、世界和情节？",
+      "content": "人物、世界、大纲、多线与场景；相关主题渐进展开"
+    },
+    {
+      "id": "P08",
+      "features": [
+        "F05",
+        "F06",
+        "F10",
+        "F11",
+        "F14"
+      ],
+      "actions": [
+        [
+          "查看审稿与修订",
+          "U12"
+        ],
+        [
+          "查看前文改动影响",
+          "U10"
+        ],
+        [
+          "回顾人物所知",
+          "U06"
+        ]
+      ],
+      "layout": "审稿记录",
+      "hint": "问题要有位置和证据；人物认知、读者所知和作者真相分开。",
+      "scope": "作品",
+      "name": "审稿与故事记录",
+      "question": "哪些地方有问题，哪些事实需要回顾？",
+      "content": "问题列表、时点状态、伏笔、回顾与过期影响"
+    },
+    {
+      "id": "P09",
+      "features": [
+        "F10",
+        "F14",
+        "F15"
+      ],
+      "actions": [
+        [
+          "查看定稿与导出流程",
+          "U12"
+        ]
+      ],
+      "layout": "整书交付",
+      "hint": "分别核对叙事闭合、稿件齐全和导出成功。",
+      "scope": "作品",
+      "name": "定稿",
+      "question": "距离完整可交付稿还缺什么？",
+      "content": "全书缺口、修订范围、版本、导出和归档"
+    }
+  ],
+  "edges": [
+    {
+      "from": "F02",
+      "to": "F03",
+      "type": "reference",
+      "label": "约束题材"
+    },
+    {
+      "from": "F03",
+      "to": "F04",
+      "type": "sequence",
+      "label": "装配规则"
+    },
+    {
+      "from": "F03",
+      "to": "F05",
+      "type": "reference",
+      "label": "适配人物"
+    },
+    {
+      "from": "F02",
+      "to": "F06",
+      "type": "reference",
+      "label": "锁定终局"
+    },
+    {
+      "from": "F04",
+      "to": "F07",
+      "type": "reference",
+      "label": "规则边界"
+    },
+    {
+      "from": "F05",
+      "to": "F07",
+      "type": "reference",
+      "label": "时点处境"
+    },
+    {
+      "from": "F06",
+      "to": "F07",
+      "type": "sequence",
+      "label": "拆章排场"
+    },
+    {
+      "from": "F07",
+      "to": "F08",
+      "type": "sequence",
+      "label": "提供情节"
+    },
+    {
+      "from": "F09",
+      "to": "F08",
+      "type": "reference",
+      "label": "表达预设"
+    },
+    {
+      "from": "F12",
+      "to": "F08",
+      "type": "reference",
+      "label": "选定资料"
+    },
+    {
+      "from": "F08",
+      "to": "F10",
+      "type": "sequence",
+      "label": "正文候选"
+    },
+    {
+      "from": "F10",
+      "to": "F08",
+      "type": "feedback",
+      "label": "定向返修"
+    },
+    {
+      "from": "F08",
+      "to": "F14",
+      "type": "sequence",
+      "label": "提交候选"
+    },
+    {
+      "from": "F14",
+      "to": "F11",
+      "type": "sequence",
+      "label": "采纳后更新"
+    },
+    {
+      "from": "F11",
+      "to": "F07",
+      "type": "reference",
+      "label": "有效状态"
+    },
+    {
+      "from": "F11",
+      "to": "F05",
+      "type": "reference",
+      "label": "查询时点"
+    },
+    {
+      "from": "F11",
+      "to": "F06",
+      "type": "reference",
+      "label": "追踪承诺"
+    },
+    {
+      "from": "F10",
+      "to": "F15",
+      "type": "sequence",
+      "label": "复检交付"
+    },
+    {
+      "from": "F06",
+      "to": "F15",
+      "type": "reference",
+      "label": "核对终局"
+    },
+    {
+      "from": "F01",
+      "to": "F08",
+      "type": "support",
+      "label": "作品归属"
+    },
+    {
+      "from": "F13",
+      "to": "F07",
+      "type": "support",
+      "label": "滚动规划"
+    },
+    {
+      "from": "F13",
+      "to": "F15",
+      "type": "support",
+      "label": "推进完结"
+    },
+    {
+      "from": "F14",
+      "to": "F08",
+      "type": "support",
+      "label": "版本保护"
+    },
+    {
+      "from": "F16",
+      "to": "F13",
+      "type": "support",
+      "label": "预算与恢复"
+    },
+    {
+      "from": "F16",
+      "to": "F08",
+      "type": "support",
+      "label": "模型调用"
+    }
+  ],
+  "modules": [
+    {
+      "features": [
+        "F01",
+        "F14"
+      ],
+      "author": "公共作品与版本能力",
+      "detail": "S02、S03、S04、S06"
+    },
+    {
+      "features": [
+        "F02"
+      ],
+      "author": "M0、M4",
+      "detail": "M01、M16、M17、Q01"
+    },
+    {
+      "features": [
+        "F03"
+      ],
+      "author": "M0、M2、M3",
+      "detail": "M02、T12、Q05"
+    },
+    {
+      "features": [
+        "F04"
+      ],
+      "author": "M2",
+      "detail": "M04—M11，按题材选 T03、T04、T06、T07、T08、T09、T10、T11"
+    },
+    {
+      "features": [
+        "F05"
+      ],
+      "author": "M1、M7",
+      "detail": "M12、M13、M21、Q02"
+    },
+    {
+      "features": [
+        "F06"
+      ],
+      "author": "M3、M7",
+      "detail": "M15、M17、M18、Q06；案件等按需引用专项模块"
+    },
+    {
+      "features": [
+        "F07"
+      ],
+      "author": "M4",
+      "detail": "M19"
+    },
+    {
+      "features": [
+        "F08"
+      ],
+      "author": "M5",
+      "detail": "M20"
+    },
+    {
+      "features": [
+        "F09"
+      ],
+      "author": "M5、M6、M9",
+      "detail": "M14、M20、Q04；写法研究不新增无依据的已实现模块"
+    },
+    {
+      "features": [
+        "F10"
+      ],
+      "author": "M6",
+      "detail": "M22、Q01—Q05"
+    },
+    {
+      "features": [
+        "F11"
+      ],
+      "author": "M7",
+      "detail": "M21、M23、S04"
+    },
+    {
+      "features": [
+        "F12"
+      ],
+      "author": "M10；M9、M2 等消费资料",
+      "detail": "S07 获取阅读检索，M03 考据与来源绑定"
+    },
+    {
+      "features": [
+        "F13"
+      ],
+      "author": "跨 M0—M8 的公共协调",
+      "detail": "S01、S05，复用各创作和审查模块"
+    },
+    {
+      "features": [
+        "F15"
+      ],
+      "author": "M8",
+      "detail": "M24、Q06、S06"
+    },
+    {
+      "features": [
+        "F16"
+      ],
+      "author": "公共模型能力",
+      "detail": "S05"
+    }
+  ],
+  "modes": [
+    {
+      "name": "建议",
+      "human": "作者决定全部剧情，随时直接手写",
+      "ai": "提建议、查资料、生成候选、按要求整理",
+      "missing": "只处理本次问题；缺资料时说明覆盖范围"
+    },
+    {
+      "name": "半自动",
+      "human": "作者确定本次事件、结果和不能改变的安排",
+      "ai": "补对白、动作、环境、心理、过渡及允许的小细节",
+      "missing": "给结果候选或写到已明确边界，不自行接管关键结果"
+    },
+    {
+      "name": "全自动",
+      "human": "作者确定或采用整书情绪、核心追问、方向和锁定项",
+      "ai": "补必要设定、细化大纲、写作、审查、维护状态并收尾",
+      "missing": "普通空白自主补齐；需要改变核心取舍时才回到创作决定"
+    }
+  ],
+  "phases": [
+    {
+      "name": "A0 起步闭环",
+      "deliverable": "最小作品章节、手写与保存、选区建议改写、候选对照采纳撤销、模型连接与单任务状态",
+      "scope": "U01、U13，局部 U05",
+      "gate": "原稿保护、取消与失败可恢复；用真实原创片段完成首次自用"
+    },
+    {
+      "name": "A1 情节到正文",
+      "deliverable": "自然语言情节契约、轻量场景、常用写作预设、固定条件检查、基础稿件导出",
+      "scope": "U04、U05；U02 的本次方向输入",
+      "gate": "能忠实补写“失败、不战斗”等固定情节；未定关键结果不擅自决定"
+    },
+    {
+      "name": "B1 独立取材",
+      "deliverable": "按 12 文档先做 TXT/Markdown 切片，再加 EPUB 和至少一个真实可下载来源",
+      "scope": "U08",
+      "gate": "找书到下载、阅读、内容搜索、原文定位与资料包真实可用；单有导入不算模块完成"
+    },
+    {
+      "name": "B2 长篇持续创作",
+      "deliverable": "全书意图、男女频与题材、必要人物世界、多线事件表、事实记忆、反向整理、前文修改影响",
+      "scope": "U02、U03、U06、U07、U09、U10",
+      "gate": "下一章正确承接已采纳内容；时点查询和失效更新可信；图形可后补"
+    },
+    {
+      "name": "C 完整小说串联",
+      "deliverable": "粗纲到章场景、跨章审稿、卷交接、终局检查与固定版本交付",
+      "scope": "U12，以及有人工调度的 U11",
+      "gate": "用一部有完整结局的原创验证作品证明组合成立"
+    },
+    {
+      "name": "D 整书自动化",
+      "deliverable": "独立批次版本、有限自修、自动采纳、预算、检查点和恢复",
+      "scope": "完整 U11",
+      "gate": "同一验证作品可在配置边界内自动完成，故障后可接续且不重复采纳"
+    },
+    {
+      "name": "E 扩展",
+      "deliverable": "题材专项加深、PDF/OCR、语义问答、丰富写法与资料来源",
+      "scope": "扩展 U03、U05、U08",
+      "gate": "根据实际使用问题排序，逐项验证效果"
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "A01",
+      "action": "空白作品，没有大纲和人物卡，直接输入正文",
+      "expected": "可写可保存，不出现设定必填拦截"
+    },
+    {
+      "id": "A02",
+      "action": "只请求检查选区逻辑",
+      "expected": "返回本范围问题与依据，不替换全文、不自动续章"
+    },
+    {
+      "id": "A03",
+      "action": "半自动要求交易失败、获得线索、不战斗",
+      "expected": "三项保持，新增细节和状态可查看"
+    },
+    {
+      "id": "A04",
+      "action": "半自动缺少关键结果",
+      "expected": "提候选或写到边界，不默选结果；普通描写可自主补充"
+    },
+    {
+      "id": "A05",
+      "action": "女频、无 CP、事业成长试写",
+      "expected": "不因频道预设增加爱情主线；既有方向优先"
+    },
+    {
+      "id": "A06",
+      "action": "当前人物未获知秘密，未来计划中才掌握新能力",
+      "expected": "当前场景不使用该秘密决策，不提前调用未来能力"
+    },
+    {
+      "id": "A07",
+      "action": "同期多线有相对先后，正文采用倒叙",
+      "expected": "时间轴和叙述顺序分别正确，读者与角色所知不混淆"
+    },
+    {
+      "id": "A08",
+      "action": "改掉前文密信事件",
+      "expected": "依赖事实、摘要和报告过期；后续行动进入影响清单"
+    },
+    {
+      "id": "A09",
+      "action": "生成中作者修改正文、切章或取消",
+      "expected": "晚到候选不改新目标；旧版本结果保留比较能力"
+    },
+    {
+      "id": "A10",
+      "action": "未配模型、未建作品，导入支持的资料文本",
+      "expected": "可阅读、关键词／短语搜索和摘录，无付费模型调用"
+    },
+    {
+      "id": "A11",
+      "action": "找书只有目录信息，或索引缺部分章节",
+      "expected": "不声称查阅全书，清楚展示实际内容覆盖"
+    },
+    {
+      "id": "A12",
+      "action": "用本章资料包生成正文",
+      "expected": "发送片段范围可知；未选书籍、另一作品笔记不进入上下文"
+    },
+    {
+      "id": "A13",
+      "action": "连续任务到预算或修订边界后恢复",
+      "expected": "保存检查点与停止原因；验证基线后继续，不重复采纳"
+    },
+    {
+      "id": "A14",
+      "action": "全自动计划章数已完成，核心问题仍无答案",
+      "expected": "显示未闭合；允许范围内修订或返回取舍，不显示整书通过"
+    },
+    {
+      "id": "A15",
+      "action": "导出指定作品版本与章节范围",
+      "expected": "输出与该版本一致、顺序齐全、内容可打开；不误称已经发布"
+    },
+    {
+      "id": "A16",
+      "action": "同一原创情节比较普通指令和写法预设",
+      "expected": "固定结果一致，能评价表达差别；不以未经验证的相似百分比通过"
+    }
+  ],
+  "decisions": [
+    {
+      "name": "首次产品范围",
+      "recommendation": "A0＋A1，优先正文辅助与忠实补写；书库随后作为独立闭环",
+      "when": "开始应用实现前"
+    },
+    {
+      "name": "自动化默认值",
+      "recommendation": "初期局部候选手动采纳；整书自动化采用明确配置的工作版本及检查点，不固定所有模式共用的审核频率",
+      "when": "接入自动采纳前"
+    },
+    {
+      "name": "频道缺失",
+      "recommendation": "手写和局部辅助可继续；需要题材装配时系统提出并标注推断配置，作者可调整",
+      "when": "实现 F03 前"
+    },
+    {
+      "name": "计划与正式设定流转",
+      "recommendation": "候选、已采用设定和实际剧情分开，按作用范围记录来源；具体确认和自动采纳条件单独确定",
+      "when": "实现跨章创作前"
+    },
+    {
+      "name": "卷、章节、场景关系",
+      "recommendation": "以章节承载编辑与交付，卷可选；场景支持与章边界不同的叙事安排，具体交换格式另定",
+      "when": "设计创作数据与导入前"
+    },
+    {
+      "name": "离线使用",
+      "recommendation": "优先支持已保存正文编辑、本地资料阅读检索；联网 AI 与外部找书显示各自不可用原因",
+      "when": "运行平台及存储选型时"
+    },
+    {
+      "name": "导入、恢复和历史保留",
+      "recommendation": "先预览范围、保留原稿、恢复生成新版本；保留周期和清理机制按真实数据规模确定",
+      "when": "使用真实原稿前"
+    },
+    {
+      "name": "预算与修订上限",
+      "recommendation": "允许作者配置，数值依据样例试跑；价格缺失不伪装为精确金额",
+      "when": "批次付费调用前"
+    },
+    {
+      "name": "第一个下载来源",
+      "recommendation": "沿用 12 的候选，按中文内容适用性和真实获取联调选择",
+      "when": "开发真实下载前"
+    },
+    {
+      "name": "风格研究投入",
+      "recommendation": "先用现有规则与原创样例比较；原著取样提炼和整书蒸馏另立范围",
+      "when": "作者确认值得投入后"
+    },
+    {
+      "name": "验证作品",
+      "recommendation": "新建一部可完结的原创样本，覆盖信息差、成长限制、多线交汇和承诺回收",
+      "when": "开始模块串联前"
+    }
+  ],
+  "states": [
+    {
+      "name": "正文保存",
+      "meaning": "未保存／保存中／已保存／保存失败；只有持久化成功显示已保存",
+      "recovery": "继续编辑、恢复或重试；离开时保留未落盘内容并提示风险"
+    },
+    {
+      "name": "无可用上下文",
+      "meaning": "资料不足，列出本次检查范围",
+      "recovery": "手写、补局部说明、只检查当前范围"
+    },
+    {
+      "name": "模型生成",
+      "meaning": "排队、生成中、已取消、部分结果、失败、完成",
+      "recovery": "取消、保留片段、重试或重新提问"
+    },
+    {
+      "name": "候选应用",
+      "meaning": "待采纳、已采纳、基线变化、已撤销",
+      "recovery": "比较、编辑后采纳、重新定位或拒绝"
+    },
+    {
+      "name": "状态记录",
+      "meaning": "待提取、待确认、有效、过期、重建失败",
+      "recovery": "查原文、纠正候选、重新提取；不依赖过期记录推进"
+    },
+    {
+      "name": "审稿",
+      "meaning": "检查中、局部完成、待修订、通过、因版本变化过期",
+      "recovery": "查看证据、处理问题、按新版本复检"
+    },
+    {
+      "name": "资料获取",
+      "meaning": "可查书目、下载中、文件就绪、解析中、索引可用或部分可用",
+      "recovery": "阅读可用部分、重试相应阶段、调整搜索范围"
+    },
+    {
+      "name": "无搜索命中",
+      "meaning": "当前词、范围与索引覆盖内未找到",
+      "recovery": "改词、清除筛选；不能推断未索引正文没有资料"
+    },
+    {
+      "name": "长批次中断",
+      "meaning": "已保存检查点，说明当前步骤和未完成范围",
+      "recovery": "恢复前检查基线；保留完整章与候选，不重复采纳"
+    },
+    {
+      "name": "用量不明",
+      "meaning": "服务端未返回完整计量或价格未配置",
+      "recovery": "查看已知用量与未知项，决定后续运行"
+    },
+    {
+      "name": "导出",
+      "meaning": "生成中、失败、已生成并核对范围",
+      "recovery": "重试或选择版本；导出成功不等于已经发布"
+    }
+  ]
+}
+</script>
+  <script>
+    'use strict';
+    const data = JSON.parse(document.getElementById('product-data').textContent);
+    const byId = items => new Map(items.map(item => [item.id, item]));
+    const featureMap = byId(data.features), pageMap = byId(data.pages), sceneMap = byId(data.scenarios);
+    const main = document.getElementById('main');
+    const storeKey = 'ainovel.product-review.notes.v1';
+    const statuses = ['未审阅', '认可', '需调整', '待讨论'];
+    const viewNames = { pages: '页面入口', flows: '场景流程', features: '功能关系', delivery: '分期与验收' };
+    let route = { view: 'pages', id: 'P05', step: 0 }, notes = {}, storageAvailable = Boolean(navigator.locks?.request);
+    let storedSnapshot = null, storageProtected = false, saveQueue = Promise.resolve();
+    let sceneQuery = '', sceneMode = '全部', composing = false;
+    const e = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const clean = value => String(value).replace(/\*\*/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/`/g, '');
+    const text = value => e(clean(value));
+    const announce = message => { document.getElementById('announcement').textContent = message; };
+    const tag = (label, style = '') => `<span class="tag ${style}">${text(label)}</span>`;
+    const featureLink = id => `<a class="feature-chip" href="#features/${id}"><span class="mono">${id}</span>${text(featureMap.get(id).name)}</a>`;
+    const chips = ids => `<div class="chips">${ids.map(featureLink).join('')}</div>`;
+    const navItem = (item, view) => `<a class="nav-item" href="#${view}/${item.id}${view === 'flows' ? '/0' : ''}" ${route.id === item.id ? 'aria-current="page"' : ''}><span class="mono">${item.id}</span><span>${text(item.name)}</span></a>`;
+    const sceneCard = u => `<a class="scenario-card" href="#flows/${u.id}/0"><span class="mono muted">${u.id}</span><h4>${text(u.name)}</h4><p>${text(u.fields['触发与目标'])}</p><span class="card-link">查看操作流程 →</span></a>`;
+    const header = (kind, id, name, lead, badges = []) => `<div class="title-row"><div><p class="eyebrow">${text(kind)}${id ? ` / ${id}` : ''}</p><h2 id="view-title" tabindex="-1">${text(name)}</h2><p class="lead">${text(lead)}</p></div><div class="tags">${badges.join('')}</div></div>`;
+    function showStorageNotice(message) {
+      const element = document.getElementById('storage-notice'); element.hidden = false; element.textContent = message;
+    }
+    function loadNotes() {
+      if (!storageAvailable) showStorageNotice('此浏览器缺少多窗口保存保护。意见仅保留在当前页面，请导出保存。');
+      try {
+        storedSnapshot = localStorage.getItem(storeKey);
+        const saved = JSON.parse(storedSnapshot || '{}');
+        if (saved?.version != null && saved.version !== 1) {
+          storageAvailable = false; storageProtected = true;
+          showStorageNotice('已有意见使用其他数据格式，原数据已保留。新意见仅保留在当前页面，请导出保存。'); return;
+        }
+        if (!storedSnapshot) return;
+        if (!saved || typeof saved !== 'object' || !saved.entries || typeof saved.entries !== 'object' || Array.isArray(saved.entries)) {
+          storageAvailable = false; storageProtected = true;
+          showStorageNotice('已有意见的数据结构无法识别，原数据已保留。新意见仅保留在当前页面，请导出保存。'); return;
+        }
+        const valid = new Set([...data.pages, ...data.scenarios, ...data.features].map(x => x.id).concat('delivery'));
+        for (const [key, value] of Object.entries(saved.entries)) {
+          if (valid.has(key) && value && statuses.includes(value.status) && typeof value.note === 'string') {
+            notes[key] = { status: value.status, note: value.note.slice(0, 8000) };
+          }
+        }
+        if (saved.sha256 !== data.sha256 && Object.values(notes).some(value => value.status !== '未审阅' || value.note.trim())) showStorageNotice('已载入其他设计版本的审阅意见，请结合本页方案重新核对。');
+      } catch {
+        storageAvailable = false; storageProtected = true;
+        showStorageNotice('浏览器存储不可用或笔记数据无法读取。新意见仅保留在当前页面，请导出保存。');
+      }
+    }
+    function reviewKey() { return route.view === 'delivery' ? 'delivery' : route.id; }
+    function reviewBox() {
+      const key = reviewKey(), note = notes[key] || { status: '未审阅', note: '' };
+      return `<details class="review-box"><summary>记录审阅意见 <span class="tag neutral">${text(note.status)}</span></summary><div class="details-body review-form"><label for="review-status">当前条目：${text(key)}</label><select id="review-status">${statuses.map(s => `<option ${s === note.status ? 'selected' : ''}>${s}</option>`).join('')}</select><label for="review-note">需要保留或调整的内容<textarea id="review-note" maxlength="8000" placeholder="记录页面入口、流程或功能关系中需要调整的地方。">${e(note.note)}</textarea></label><p id="note-feedback" class="small" role="status">${storageAvailable ? '意见保存在此浏览器，不修改设计稿；可从右上角导出 Markdown。' : '意见仅保留在当前页面，请从右上角导出保存。'}</p></div></details>`;
+    }
+    function saveNote() {
+      const key = reviewKey();
+      const status = document.getElementById('review-status').value;
+      const note = document.getElementById('review-note').value;
+      notes[key] = { status, note };
+      const serialized = JSON.stringify({ version: 1, sha256: data.sha256, entries: notes });
+      main.querySelector('.review-box summary .tag').textContent = status;
+      const feedback = message => { if (reviewKey() === key) document.getElementById('note-feedback').textContent = message; };
+      feedback('正在保存意见…');
+      saveQueue = saveQueue.then(async () => {
+        if (storageProtected || !navigator.locks?.request) {
+          storageAvailable = false; feedback('未能持久保存，请导出意见。'); return;
+        }
+        try {
+          await navigator.locks.request(storeKey, () => {
+            if (localStorage.getItem(storeKey) !== storedSnapshot) {
+              storageAvailable = false; storageProtected = true;
+              showStorageNotice('另一窗口已更新审阅意见，已停止自动保存以保护两个版本。当前意见仍可导出；导出后重新打开本页可载入另一版本。');
+              feedback('检测到多窗口冲突，当前意见请先导出。'); return;
+            }
+            localStorage.setItem(storeKey, serialized); storedSnapshot = serialized; storageAvailable = true;
+            feedback('已保存到此浏览器。未修改设计稿。');
+          });
+        } catch {
+          storageAvailable = false;
+          showStorageNotice('浏览器未能保存意见。当前页面仍保留内容，请导出后再关闭。');
+          feedback('未能持久保存，请导出意见。');
+        }
+      });
+      return saveQueue;
+    }
+    function exportNotes() {
+      const entries = Object.entries(notes).filter(([, value]) => value.status !== '未审阅' || value.note.trim());
+      const feedback = document.getElementById('export-feedback');
+      feedback.hidden = false;
+      if (!entries.length) { feedback.textContent = '尚无审阅意见。展开当前条目的“记录审阅意见”后可填写。'; return; }
+      const lines = ['# ainovel 产品设计审阅意见', '', `设计依据：${data.source}`, `设计版本：${data.sha256}`, '', '以下为审阅记录，不表示功能已实现或验收通过。', ''];
+      for (const [key, value] of entries) {
+        const item = featureMap.get(key) || pageMap.get(key) || sceneMap.get(key);
+        lines.push(`## ${key} ${item?.name || '分期与验收'}`, '', `审阅状态：${value.status}`, '', value.note || '未补充文字意见。', '');
+      }
+      const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'ainovel-产品设计审阅意见.md'; document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000); feedback.textContent = `已导出 ${entries.length} 条审阅意见。`;
+    }
+    function wireframe(page) {
+      const writing = page.id === 'P05';
+      const primary = page.features.includes('F08') ? 'F08' : page.features[0];
+      return `<div class="wireframe"><div class="wireframe-header"><strong>${text(page.layout)} · 页面结构示意</strong><span>方案预览，未连接模型</span></div><div class="wire-layout"><div class="wire-pane"><span class="eyebrow">${writing ? '章节目录' : '范围与目录'}</span><p>${writing ? '作品／卷／章节<br>当前章与写作位置' : text(page.name) + '<br>按当前任务筛选'}</p><div class="wire-lines" aria-hidden="true"><i></i><i></i><i></i></div><a class="wire-link" href="#features/${page.features[0]}">查看基础能力 →</a></div><div class="wire-pane wire-center"><span class="tag neutral">主要内容区</span><h3 style="margin-top:12px">${writing ? '正文始终在中心' : text(page.question)}</h3><p>${writing ? '作者可持续输入。局部辅助与资料查阅按需打开，不要求先完成设定表。' : text(page.content)}</p><div class="wire-lines" aria-hidden="true"><i></i><i></i><i></i><i></i></div><a class="wire-link" href="#features/${primary}">查看${text(featureMap.get(primary).name)} →</a></div><div class="wire-pane"><span class="eyebrow">辅助与操作</span>${page.actions.slice(0, 3).map(([label, id]) => `<a class="wire-link" href="#flows/${id}/0">${text(label)} →</a>`).join('')}</div></div></div>`;
+    }
+    function pagesView() {
+      const page = pageMap.get(route.id);
+      const scenes = data.scenarios.filter(u => u.pages.includes(page.id));
+      return `<div class="workspace"><aside class="sidebar" aria-label="产品页面入口">${['工作区', '作品'].map(scope => `<p class="sidebar-group">${scope === '工作区' ? 'WORKSPACE / 工作区' : 'NOVEL / 作品内部'}</p><div class="nav-list">${data.pages.filter(p => p.scope === scope).map(p => navItem(p, 'pages')).join('')}</div>`).join('')}<p class="side-note">选择页面，查看它承接的任务与功能。自动创作从作品内启动，也能在“任务与用量”中查看。</p></aside><section class="content">${header('页面入口', page.id, page.name, page.question, [tag(page.scope), tag('方案建议', 'warm')])}<div class="section">${wireframe(page)}</div><div class="section note">${text(page.hint)}</div><div class="section"><div class="section-heading"><h3>作者从这里做什么</h3><span class="small">点击动作，进入对应流程</span></div><div class="actions">${page.actions.map(([label, id], index) => `<a class="button ${index === 0 ? 'primary' : ''}" href="#flows/${id}/0">${text(label)} <span aria-hidden="true">→</span></a>`).join('')}</div></div><div class="section"><div class="section-heading"><h3>关联使用场景</h3><span class="small">${scenes.length} 个场景</span></div><div class="grid-2">${scenes.map(sceneCard).join('')}</div></div><div class="section"><div class="section-heading"><h3>这个页面承载的功能</h3><span class="small">点击追踪协作关系</span></div>${chips(page.features)}</div>${reviewBox()}</section></div>`;
+    }
+    function filteredScenes() {
+      const query = sceneQuery.trim().toLowerCase();
+      return data.scenarios.filter(u => (sceneMode === '全部' || u.modes.includes(sceneMode)) && (!query || `${u.id} ${u.name} ${Object.values(u.fields).join(' ')}`.toLowerCase().includes(query)));
+    }
+    function sceneList() {
+      const list = filteredScenes();
+      return list.length ? list.map(u => navItem(u, 'flows')).join('') : '<p class="empty">没有匹配场景。可清空关键词或切换为全部分工。</p>';
+    }
+    function flowsView() {
+      const scene = sceneMap.get(route.id), step = scene.steps[route.step];
+      const success = scene.fields['成功判断'].split('对应 ')[0];
+      return `<div class="workspace"><aside class="sidebar scenario-nav" aria-label="使用场景"><div class="filter-field"><label for="scene-query">查找场景</label><input type="search" id="scene-query" value="${e(sceneQuery)}" placeholder="人物、伏笔、资料…"></div><div class="filter-field"><label for="scene-mode">按适用分工筛选</label><select id="scene-mode">${['全部', '建议', '半自动', '全自动', '独立使用'].map(m => `<option ${sceneMode === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div><div class="nav-list" id="scene-list">${sceneList()}</div><p class="side-note" id="filter-count">显示 ${filteredScenes().length} / 13 个场景；筛选不改变右侧当前流程。</p></aside><section class="content">${header('场景流程', scene.id, scene.name, scene.fields['触发与目标'], scene.modes.map(m => tag(m, m === '独立使用' ? 'neutral' : '')))}<div class="section"><p class="small muted">页面入口：${scene.pages.map(id => `<a href="#pages/${id}">${text(pageMap.get(id).name)}</a>`).join(' ／ ')}</p><p class="lead"><strong>起步需要：</strong>${text(scene.fields['输入与入口'])}</p></div><div class="section"><div class="section-heading"><h3>操作流程</h3><span class="small">点击步骤逐项审阅 · 不执行实际创作</span></div><ol class="flow-list">${scene.steps.map((s, index) => `<li><button type="button" class="step" data-step="${index}" ${index === route.step ? 'aria-current="step"' : ''}><span class="number">${String(index + 1).padStart(2, '0')}</span><span>${text(s.label)}</span></button></li>`).join('')}</ol><div class="step-detail" id="step-detail"><span class="eyebrow">步骤 ${route.step + 1} / ${scene.steps.length}</span><h3>${text(step.label)}</h3><p class="small muted" style="margin-bottom:12px">参与这一步的功能（展示映射）：</p>${chips(step.features)}<div class="actions"><button type="button" data-step="${route.step - 1}" ${route.step === 0 ? 'disabled' : ''}>← 上一步</button><button type="button" data-step="${route.step + 1}" ${route.step === scene.steps.length - 1 ? 'disabled' : ''}>下一步 →</button></div></div></div><div class="section grid-2"><div class="text-card"><p class="eyebrow">分工边界</p><h3>作者与 AI 各自负责什么</h3><p>${text(scene.fields['AI 与作者分工'])}</p></div><div class="text-card"><p class="eyebrow">可见结果</p><h3>这次操作会得到什么</h3><p>${text(scene.fields['可见产物'])}</p></div></div><div class="section note"><strong>怎样算完成：</strong>${text(success)}</div><div class="section note warm"><strong>失败或缺信息时：</strong>${text(scene.fields['异常与恢复'])}</div><div class="section"><div class="section-heading"><h3>核心功能</h3><span class="small">来自设计稿场景卡</span></div>${chips(scene.features)}</div><details class="section"><summary>核对设计稿中的完整场景卡</summary><dl class="details-body">${Object.entries(scene.fields).map(([label, value]) => `<dt>${text(label)}</dt><dd>${text(value)}</dd>`).join('')}</dl></details>${reviewBox()}</section></div>`;
+    }
+    const graphGroups = [
+      { title: '确定创作方向', ids: ['F02', 'F03', 'F04', 'F05'] },
+      { title: '组织与创作', ids: ['F06', 'F07', 'F08', 'F09'] },
+      { title: '审查、记录与交付', ids: ['F10', 'F11', 'F12', 'F15'] },
+      { title: '作品与共用保障', ids: ['F01', 'F13', 'F14', 'F16'] },
+    ];
+    function graphView() {
+      const selected = route.id;
+      const connections = data.edges.filter(edge => edge.from === selected || edge.to === selected);
+      const related = new Set(connections.flatMap(edge => [edge.from, edge.to]));
+      const positions = new Map();
+      graphGroups.forEach((group, column) => group.ids.forEach((id, row) => positions.set(id, { x: 25 + column * 230, y: 61 + row * 96 })));
+      const paths = connections.map(edge => {
+        const a = positions.get(edge.from), b = positions.get(edge.to);
+        const sameColumn = a.x === b.x, forward = b.x > a.x;
+        const sx = a.x + (sameColumn || forward ? 180 : 0), sy = a.y + 34;
+        const tx = b.x + (sameColumn || !forward ? 180 : 0), ty = b.y + 34;
+        const bend = sameColumn ? a.x + 207 : (sx + tx) / 2;
+        const color = edge.type === 'feedback' ? '#77501c' : ['reference', 'support'].includes(edge.type) ? '#255b7c' : '#196257';
+        const dash = ['reference', 'support'].includes(edge.type) ? 'stroke-dasharray="6 5"' : '';
+        return `<path d="M${sx},${sy} C${bend},${sy} ${bend},${ty} ${tx},${ty}" stroke="${color}" stroke-width="2" fill="none" ${dash} marker-end="url(#arrow-${edge.type})"/>`;
+      }).join('');
+      return `<div class="legend"><span><i></i>推进</span><span><i class="dashed"></i>资料引用／保障</span><span><i class="return"></i>返修</span></div><div class="graph-scroll" tabindex="0" role="region" aria-label="功能协作图，可横向滚动，点击功能查看相邻连线"><div class="graph"><svg aria-hidden="true" viewBox="0 0 920 460"><defs>${['sequence', 'reference', 'feedback', 'support'].map(type => `<marker id="arrow-${type}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="${type === 'feedback' ? '#77501c' : type === 'sequence' ? '#196257' : '#255b7c'}"/></marker>`).join('')}</defs>${paths}</svg>${graphGroups.map((group, column) => `<span class="graph-column" style="left:${25 + column * 230}px">${column + 1} / ${group.title}</span>`).join('')}${[...positions].map(([id, pos]) => `<button type="button" class="graph-node ${related.has(id) && id !== selected ? 'related' : ''}" style="left:${pos.x}px;top:${pos.y}px" data-feature="${id}" aria-pressed="${selected === id}"><div><span>${id} ${selected === id ? '· 当前查看' : related.has(id) ? '· 相邻功能' : ''}</span>${text(featureMap.get(id).name)}</div></button>`).join('')}</div></div>`;
+    }
+    function featuresView() {
+      const feature = featureMap.get(route.id);
+      const links = data.edges.filter(edge => edge.from === feature.id || edge.to === feature.id);
+      const scenes = data.scenarios.filter(u => u.features.includes(feature.id));
+      const pages = data.pages.filter(p => p.features.includes(feature.id));
+      const modules = data.modules.find(m => m.features.includes(feature.id));
+      return `<div class="workspace"><aside class="sidebar feature-nav" aria-label="功能分组"><p class="sidebar-group">FUNCTIONS / 16 组能力</p><div class="nav-list">${data.features.map(f => navItem(f, 'features')).join('')}</div><p class="side-note">连线只展示所选功能的直接协作关系。带方向的连线不等于统一的强制前置条件。</p></aside><section class="content">${header('功能关系', feature.id, feature.name, feature.action, [tag(feature.tier), tag('方案建议', 'warm')])}<div class="section">${graphView()}</div><p class="small muted" style="margin-top:12px">图中显示当前功能的相邻关系。局部辅助可以直接开始，资料引用按需使用；返修构成新一轮任务。</p><div class="section grid-2"><div class="panel"><p class="eyebrow">功能交付</p><h3>产物与依赖</h3><p>${text(feature.output)}</p><p class="small muted">建议优先级：${text(feature.priority)}</p></div><div class="panel" style="margin:0"><p class="eyebrow">已有能力复用</p><h3>两套模块编号的对应</h3><p>作者模块：${text(modules.author)}</p><p>细模块：${text(modules.detail)}</p><p class="small muted">两套编号空间不同，功能组不等于一个 Agent。</p></div></div><div class="section"><div class="section-heading"><h3>相邻功能怎样合作</h3><span class="small">${links.length} 条直接关系 · 可键盘逐项阅读</span></div><div class="panel">${links.map(edge => `<div class="relation-row"><a href="#features/${edge.from}"><span class="mono">${edge.from}</span> ${text(featureMap.get(edge.from).name)}<span class="muted">${text(edge.label)} · ${{ sequence: '推进', reference: '资料引用', feedback: '返修', support: '保障' }[edge.type]}</span></a><span aria-hidden="true">→</span><a href="#features/${edge.to}"><span class="mono">${edge.to}</span> ${text(featureMap.get(edge.to).name)}</a></div>`).join('')}</div></div><div class="section"><h3 style="margin-bottom:12px">哪些页面使用它</h3><div class="actions">${pages.map(p => `<a class="button" href="#pages/${p.id}">${text(p.scope)} · ${text(p.name)} →</a>`).join('')}</div></div><div class="section"><h3 style="margin-bottom:12px">对应哪些使用场景</h3><div class="grid-2">${scenes.map(sceneCard).join('')}</div></div>${reviewBox()}</section></div>`;
+    }
+    function deliveryView() {
+      return `<section class="content" style="max-width:1190px;margin:auto">${header('交付计划', '', '先让一个写作闭环可用，再把整本书串起来。', '阶段以作者能完成的任务验收。优先级、默认值和分期均为建议，功能验收尚未执行。', [tag('首版建议 A0 + A1')])}<div class="section grid-3">${data.modes.map(m => `<div class="mode-card"><span class="tag">${text(m.name)}</span><p><strong>作者：</strong>${text(m.human)}</p><p><strong>AI：</strong>${text(m.ai)}</p><p class="muted"><strong>不足时：</strong>${text(m.missing)}</p></div>`).join('')}</div><p class="section note">三种模式按创作分工区分。一次写多少、何时检查、如何采纳、使用什么模型分别配置，不以确认次数定义半自动。</p><div class="section panel"><div class="section-heading"><h3>从首次自用到整书自动化</h3><span class="small">先交付 A0，再扩展 A1</span></div><div class="roadmap">${data.phases.map(p => `<div class="phase"><strong>${text(p.name)}</strong><div><p>${text(p.deliverable)}</p><p class="small">适用场景：${text(p.scope)}</p><p class="small"><strong>阶段出口：</strong>${text(p.gate)}</p></div></div>`).join('')}</div></div><div class="section"><h3 style="margin-bottom:13px">验收与待决定事项</h3><details open><summary>16 个功能验收例子 · 待实现验证</summary><div class="details-body"><ul class="acceptance">${data.acceptance.map(a => `<li><span class="mono muted">${a.id}</span><p><strong>${text(a.action)}</strong></p><p class="muted">${text(a.expected)}</p></li>`).join('')}</ul></div></details><details><summary>关键状态与失败恢复 · ${data.states.length} 类</summary><dl class="details-body">${data.states.map(s => `<dt>${text(s.name)}</dt><dd>${text(s.meaning)}</dd><dd>继续方式：${text(s.recovery)}</dd>`).join('')}</dl></details><details><summary>待确定事项 · ${data.decisions.length} 项推荐选择</summary><dl class="details-body">${data.decisions.map(d => `<dt>${text(d.name)}</dt><dd>${text(d.recommendation)}</dd><dd>确定时机：${text(d.when)}</dd>`).join('')}</dl></details></div><div class="section note warm">当前页面是产品方案审阅工具。设计建议不自动成为正式业务规则；生成质量、下载阅读、保存恢复等能力仍需在实际应用中验证。</div>${reviewBox()}</section>`;
+    }
+    function parseRoute(hash) {
+      let parts;
+      try { parts = hash.replace(/^#/, '').split('/').map(decodeURIComponent); } catch { return { view: 'pages', id: 'P05', step: 0 }; }
+      const [view, id, value] = parts;
+      if (view === 'pages' && pageMap.has(id)) return { view, id, step: 0 };
+      if (view === 'features' && featureMap.has(id)) return { view, id, step: 0 };
+      if (view === 'flows' && sceneMap.has(id)) {
+        const step = /^\d+$/.test(value || '') ? Number(value) : 0;
+        return { view, id, step: Math.min(step, sceneMap.get(id).steps.length - 1) };
+      }
+      if (view === 'delivery') return { view, id: '', step: 0 };
+      return { view: 'pages', id: 'P05', step: 0 };
+    }
+    function render() {
+      route = parseRoute(location.hash);
+      document.querySelectorAll('[data-view]').forEach(link => {
+        if (link.dataset.view === route.view) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+      });
+      main.innerHTML = ({ pages: pagesView, flows: flowsView, features: featuresView, delivery: deliveryView })[route.view]();
+      const title = route.view === 'delivery' ? '分期与验收' : (pageMap.get(route.id) || sceneMap.get(route.id) || featureMap.get(route.id)).name;
+      document.title = `${title} · ainovel 产品审阅`;
+      announce(`${viewNames[route.view]}：${title}`);
+    }
+    main.addEventListener('click', event => {
+      const step = event.target.closest('[data-step]');
+      if (step && !step.disabled) { location.hash = `flows/${route.id}/${step.dataset.step}`; return; }
+      const feature = event.target.closest('[data-feature]');
+      if (feature) location.hash = `features/${feature.dataset.feature}`;
+    });
+    function updateSceneFilter() {
+      document.getElementById('scene-list').innerHTML = sceneList();
+      document.getElementById('filter-count').textContent = `显示 ${filteredScenes().length} / 13 个场景；筛选不改变右侧当前流程。`;
+      announce(`找到 ${filteredScenes().length} 个场景。`);
+    }
+    main.addEventListener('compositionstart', event => { if (event.target.id === 'scene-query') composing = true; });
+    main.addEventListener('compositionend', event => { if (event.target.id === 'scene-query') { composing = false; sceneQuery = event.target.value; updateSceneFilter(); } });
+    main.addEventListener('input', event => {
+      if (event.target.id === 'scene-query' && !composing) { sceneQuery = event.target.value; updateSceneFilter(); }
+      if (event.target.id === 'review-note') return saveNote();
+    });
+    main.addEventListener('change', event => {
+      if (event.target.id === 'scene-mode') { sceneMode = event.target.value; updateSceneFilter(); }
+      if (event.target.id === 'review-status') return saveNote();
+    });
+    document.getElementById('export-notes').addEventListener('click', exportNotes);
+    document.querySelector('.skip').addEventListener('click', event => { event.preventDefault(); main.focus(); });
+    window.addEventListener('hashchange', () => {
+      const previous = { ...route };
+      const graphScroll = main.querySelector('.graph-scroll')?.scrollLeft || 0;
+      render();
+      if (previous.view === route.view && previous.id === route.id && route.view === 'flows') {
+        main.querySelector(`[data-step="${route.step}"]`)?.focus({ preventScroll: true });
+      } else if (previous.view === route.view && route.view === 'features') {
+        main.querySelector('.graph-scroll').scrollLeft = graphScroll;
+        main.querySelector(`[data-feature="${route.id}"]`)?.focus();
+      } else document.getElementById('view-title')?.focus();
+    });
+    loadNotes();
+    document.getElementById('source-version').textContent = `设计稿 v0.1 · ${data.date} · ${data.sha256.slice(0, 8)}`;
+    render();
+  </script>
+</body>
+</html>
