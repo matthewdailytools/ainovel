@@ -21,6 +21,7 @@ SYSTEM = """你是中文原创小说工作台的执行模块。区分作者指�
 允许角色有依据地误判。叙述应具体，动作有因果，人物声音有区别，避免重复解释与为凑字数重复段落。
 没有证据保留未知。按请求只输出正文、建议或符合指定结构的 JSON，不加 Markdown 代码围栏。
 """
+PROMPT_VERSION = "0.1.0"
 
 
 def parse_json(text):
@@ -178,6 +179,39 @@ class Worker:
                 "fingerprint": fingerprint,
                 "action": instruction.get("动作", instruction.get("action", "unknown")),
                 "schema": schema.__name__ if schema else None,
+                "template_version": PROMPT_VERSION,
+                "request": {
+                    "system_sha256": hashlib.sha256(SYSTEM.encode()).hexdigest(),
+                    "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                    "prompt_utf8_bytes": len(prompt.encode()),
+                    "max_output_tokens": max_output,
+                    "account": self.settings.providers[payload["account"]].public(),
+                    "story_revision": (context or {}).get("branch", {}).get("story_revision"),
+                    "target_version": {
+                        key: value
+                        for key, value in ((context or {}).get("chapter") or {}).items()
+                        if key in ("id", "revision")
+                    },
+                    "source_versions": {
+                        kind: [
+                            {
+                                key: row[key]
+                                for key in ("id", "revision", "source_revision", "chapter_id", "unit_id")
+                                if key in row
+                            }
+                            for row in (context or {}).get(kind, [])
+                        ]
+                        for kind in ("recent", "facts", "definitions", "selected_external_references")
+                    },
+                    "quoted_units": [
+                        {
+                            key: row[key]
+                            for key in ("source_id", "chapter_id", "revision", "start", "end")
+                            if key in row
+                        }
+                        for row in instruction.get("可引用原文", instruction.get("可替换原文", []))
+                    ],
+                },
             },
             self.attempt,
         )
@@ -606,6 +640,7 @@ class Worker:
                         "要求": "给出完整粗粒度章纲和结局；编号连续。当前章生成时再细化场景，不把未来计划当事实。",
                     },
                     Plan,
+                    self.context(branch_id),
                 )
             if [plot["number"] for plot in plan["chapters"]] != list(range(1, payload["chapters"] + 1)):
                 raise DomainError("plan_count", "规划章节编号或数量不完整。")

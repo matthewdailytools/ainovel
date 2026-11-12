@@ -24,6 +24,8 @@ if (-not (Test-Path ainovel.toml)) { Copy-Item ainovel.example.toml ainovel.toml
 
 **费用：两个 OpenAI Key 合计 USD 20，DeepSeek 单独 CNY 80。** 可在 `ainovel.toml` 降低额度，并为批次再设上限。换 Key、重启和恢复稿件不清零。配置为保守单价估算，未知调用保留费用预留；没有已配置单价的模型不会付费调用。当前用量与剩余额度在页面右上角查看。
 
+需要更多账户时，在 `ainovel.toml` 增加一组 `[accounts.账户名]`，填写 `kind = "openai"` 与新的 `key_env` 名称，再在 `.env` 配置对应 Key；所有 `kind = "openai"` 的账户仍共用同一美元上限。
+
 默认数据在固定用户目录 `%USERPROFILE%/.ainovel`，界面「账户与预算」显示实际路径；从 Codex 或桌面启动沿用同一位置。可在 `ainovel.toml` 的 `data_dir` 或环境变量 `AINOVEL_DATA_DIR` 指定仓库外的位置；迁移须连同 `usage.sqlite` 一起迁移，不得重建费用账本。稿件、资料原件、备份、真实评测输出均在仓库外，真实 `.env` 不提交。配置修改后重启服务与 Worker。
 
 四个入口：

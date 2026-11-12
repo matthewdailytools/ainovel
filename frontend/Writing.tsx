@@ -739,7 +739,7 @@ export function Writing({
             </fieldset>
           </details>
           <p className="small muted">发送当前章、有效前文与主动选入的资料；候选与正文分开保存。</p>
-          <button className="primary wide" disabled={busy || !modelReady || !!activeTask}>
+          <button className="primary wide" disabled={busy || loading || !modelReady || !!activeTask}>
             {!modelReady
               ? '请先配置模型账户和单价'
               : busy

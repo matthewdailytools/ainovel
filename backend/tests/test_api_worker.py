@@ -111,6 +111,7 @@ class FakeModel:
 
     def __init__(self):
         self.calls = 0
+        self.plan_context = None
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         self.calls += 1
@@ -119,6 +120,7 @@ class FakeModel:
         action = instruction.get("动作")
         text = "沈砚用旧尺测量潮水，留下可以回查的记录。" * 15
         if action == "全书滚动规划":
+            self.plan_context = data["上下文"]
             output = {
                 "chapters": [
                     {"number": n, "title": f"第{n}章", "plot": "量潮并记下证据", "fixed": []}
@@ -252,6 +254,15 @@ def test_explicit_redo_does_not_reuse_rejected_step(settings, domain, story):
     asyncio.run(worker.call(instruction))
     assert fake.calls == 2
     assert domain.task(task["id"])["status"] == "running"
+    dispatched = domain.db.all(
+        "SELECT payload FROM task_events WHERE task_id=? AND kind='step_dispatched'", (task["id"],)
+    )
+    assert len(dispatched) == 2
+    request = json.loads(dispatched[0]["payload"])
+    assert request["template_version"] == "0.1.0"
+    assert len(request["request"]["prompt_sha256"]) == 64
+    assert "prompt" not in request["request"] and "system" not in request["request"]
+    assert "test-not-real" not in dispatched[0]["payload"]
 
 
 def test_rejected_candidate_redo_is_reasoned_and_gets_new_epoch(client):
@@ -402,6 +413,38 @@ def test_definition_versions_and_workflow_inherit_only_selected_settings(client)
     inherited = client.get(f"/api/branches/{result['branch_id']}/context").json()
     assert [d["payload"]["text"] for d in inherited["definitions"]] == ["新世界"]
     assert client.get(f"/api/branches/{result['branch_id']}/chapters").json() == []
+
+
+def test_automatic_planning_reads_adopted_settings_without_other_prose(client, settings):
+    story, chapter = create(client)
+    client.put(
+        f"/api/chapters/{chapter['id']}",
+        json={"base_revision": 0, "content": "另一工作版本的正文，禁止复用。"},
+    )
+    revision = client.get(f"/api/branches/{story['branch_id']}/context").json()["branch"]["story_revision"]
+    client.post(
+        f"/api/branches/{story['branch_id']}/definitions",
+        json={"kind": "world", "text": "所有行动依靠潮尺与人工闸门", "base_story_revision": revision},
+    )
+    task = client.post(
+        "/api/workflows",
+        json={
+            "novel_id": story["id"],
+            "source_branch_id": story["branch_id"],
+            "mode": "automatic",
+            "brief": "独立原创故事",
+            "account": "openai_1",
+            "chapters": 1,
+            "min_chars": 200,
+            "max_chars": 600,
+            "adoption": "automatic",
+        },
+    ).json()
+    fake = FakeModel()
+    asyncio.run(Worker(settings, fake).run_once())
+    assert fake.plan_context["definitions"][0]["payload"]["text"] == "所有行动依靠潮尺与人工闸门"
+    assert fake.plan_context["recent"] == [] and fake.plan_context["chapter"] is None
+    assert client.get("/api/tasks/" + task["id"]).json()["status"] == "production_complete"
 
 
 def test_changed_queued_chapter_stops_before_paid_request(settings, domain, story):
