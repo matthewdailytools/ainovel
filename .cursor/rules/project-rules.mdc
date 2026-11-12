@@ -1,0 +1,13 @@
+---
+description: 本仓库的任务交付、GitHub 自动提交、设计、编码与 UI 交互规则入口
+alwaysApply: true
+---
+
+# 项目规则入口
+
+- 每次任务读取并遵循根目录 `AGENTS.md` 与 `TASK_RULES.md`。
+- 新增或修改界面时读取 `DESIGN_RULES.md` 与 `UI_RULES.md`。
+- 新增或修改代码时读取 `CODING_RULES.md`。
+- 每次完成有文件变更的任务后，按 `TASK_RULES.md` 验证、提交并推送到 GitHub，无需再次确认。
+- 默认文字交付使用 Markdown，不创建 Canvas；用户明确指定其他格式时遵从用户要求。
+- 规范正文以根目录上述 Markdown 文件为准，不在此重复维护。
