@@ -882,6 +882,117 @@ def test_wholebook_repair_patches_problem_and_rechecks_dependent_prose(settings,
     assert all(f["source_revision"] == 2 for f in domain.db.all("SELECT * FROM facts WHERE stale=0"))
 
 
+def test_account_continuation_preserves_checkpoint_and_separates_currency_ledgers(client, settings):
+    from dataclasses import replace
+    from decimal import Decimal
+    from ainovel.budget import Budget
+
+    novel, _ = create(client)
+    old = client.post(
+        "/api/workflows",
+        json={
+            "novel_id": novel["id"],
+            "mode": "automatic",
+            "brief": "独立原创简报",
+            "account": "openai_1",
+            "chapters": 2,
+        },
+    ).json()
+    domain = client.app.state.domain
+    chapter = domain.create_chapter(old["branch_id"], "已经保存")
+    domain.save(chapter["id"], 0, "工程稿件必须原样保留😀")
+    revision = domain.branch(old["branch_id"])["story_revision"]
+    progress = {
+        "next_chapter": 2,
+        "repair_round": 2,
+        "expected_story_revision": revision,
+        "plan": {
+            "chapters": [
+                {"number": 1, "title": "一", "plot": "一"},
+                {"number": 2, "title": "二", "plot": "二"},
+            ],
+            "ending": "工程样本",
+        },
+    }
+    with domain.db.connect(True) as tx:
+        tx.execute(
+            "UPDATE tasks SET status='blocked_runtime',result=? WHERE id=?", (dumps(progress), old["id"])
+        )
+    ledger = Budget(settings)
+    expensive = replace(settings.providers["openai_1"], input_rate=Decimal("10000000"))
+    call = ledger.reserve(expensive, old["id"], 1, 1)
+    ledger.settle(call, {"input": 1, "output": 0})
+    unknown = ledger.reserve(settings.providers["openai_1"], old["id"], 2, 1)
+    ledger.settle(unknown)
+    prior_money = ledger.report()[0]
+    data = {
+        "client_request_id": "continue-currency-case",
+        "account": "deepseek",
+        "budget_limit": 30,
+        "reason": "旧服务余额耗尽，明确换账户并保留历史",
+        "acknowledge_unknown": False,
+    }
+    path = f"/api/tasks/{old['id']}/continue"
+    assert client.post(path, json=data).status_code == 409
+    data["acknowledge_unknown"] = True
+    response = client.post(path, json=data)
+    assert response.status_code == 202, response.text
+    new = response.json()
+    assert new["id"] != old["id"] and new["branch_id"] == old["branch_id"]
+    assert new["payload"]["account"] == "deepseek" and new["payload"]["plots"] == []
+    assert new["result"]["plan"] == progress["plan"] and new["result"]["repair_round"] == 2
+    assert new["result"]["next_chapter"] == 2
+    assert domain.chapter(chapter["id"])["content"] == "工程稿件必须原样保留😀"
+    assert domain.branch(old["branch_id"])["story_revision"] == revision
+    assert domain.task(old["id"])["status"] == "continued"
+    assert client.post(path, json=data).json()["id"] == new["id"]
+    assert (
+        client.post(f"/api/tasks/{old['id']}/resume", json={"acknowledge_unknown": True}).status_code == 409
+    )
+    # A $10 old charge cannot consume a CNY1 new-task limit.
+    ds_call = ledger.reserve(settings.providers["deepseek"], new["id"], 2, 1, run_limit=1)
+    ledger.settle(ds_call, {"input": 2, "output": 1})
+    money = ledger.report()
+    assert (
+        money[0]["settled"] == prior_money["settled"]
+        and money[0]["reserved_unknown"] == prior_money["reserved_unknown"]
+    )
+    assert money[1]["currency"] == "CNY" and money[1]["settled"] > 0
+
+
+@pytest.mark.parametrize("failure", ["changed", "waiting", "running", "over_limit"])
+def test_continuation_rejects_unsafe_or_oversized_transition(client, failure):
+    novel, _ = create(client)
+    old = client.post(
+        "/api/workflows",
+        json={"novel_id": novel["id"], "mode": "automatic", "brief": "工程测试", "account": "openai_1"},
+    ).json()
+    domain = client.app.state.domain
+    progress = {"next_chapter": 1, "expected_story_revision": 0}
+    if failure == "changed":
+        domain.create_chapter(old["branch_id"], "作者新建")
+    if failure == "waiting":
+        progress["waiting_artifact"] = "unresolved-candidate"
+    with domain.db.connect(True) as tx:
+        tx.execute(
+            "UPDATE tasks SET status=?,result=? WHERE id=?",
+            ("running" if failure == "running" else "blocked_runtime", dumps(progress), old["id"]),
+        )
+    response = client.post(
+        f"/api/tasks/{old['id']}/continue",
+        json={
+            "client_request_id": "unsafe-continue-" + failure,
+            "account": "deepseek",
+            "budget_limit": 81 if failure == "over_limit" else 30,
+            "reason": "工程验证",
+            "acknowledge_unknown": True,
+        },
+    )
+    assert response.status_code == 409
+    assert len(domain.db.all("SELECT id FROM tasks")) == 1
+    assert domain.task(old["id"])["status"] != "continued"
+
+
 def test_resume_manual_adoption_does_not_skip_newly_stale_chapters(client):
     story, first = create(client)
     domain = client.app.state.domain

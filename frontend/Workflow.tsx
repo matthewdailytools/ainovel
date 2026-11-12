@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, label, type Artifact, type Novel, type Task, type WorkflowInput } from './api'
+import {
+  api,
+  label,
+  type Account,
+  type Artifact,
+  type ContinuationInput,
+  type Novel,
+  type Task,
+  type WorkflowInput,
+} from './api'
 import type { Notify } from './App'
 import story from '../fixtures/original-story.json'
 
 export function WorkflowPage({
   novel,
+  accounts,
   branchId,
   account,
   modelReady,
@@ -12,6 +22,7 @@ export function WorkflowPage({
   onStarted,
 }: {
   novel: Novel
+  accounts: Account[]
   branchId: string
   account: string
   modelReady: boolean
@@ -33,6 +44,7 @@ export function WorkflowPage({
   const [tasks, setTasks] = useState<Task[]>([])
   const [busy, setBusy] = useState(false)
   const pendingRequest = useRef<{ signature: string; key: string } | null>(null)
+  const pendingContinuation = useRef<{ signature: string; key: string } | null>(null)
   const [selectedTask, setSelectedTask] = useState('')
   const [loadedWaiting, setWaiting] = useState<Artifact>()
   const [incomingWaiting, setIncomingWaiting] = useState<Artifact>()
@@ -41,6 +53,9 @@ export function WorkflowPage({
   const [changes, setChanges] = useState(false)
   const [regenerate, setRegenerate] = useState(false)
   const [retryReason, setRetryReason] = useState('')
+  const [continueAccount, setContinueAccount] = useState('')
+  const [continueLimit, setContinueLimit] = useState('')
+  const [continueReason, setContinueReason] = useState('')
   const [status, setStatus] = useState('')
   async function refresh() {
     const rows = (await api<Task[]>('/tasks')).filter((t) => t.kind === 'workflow' && t.novel_id === novel.id)
@@ -77,6 +92,9 @@ export function WorkflowPage({
     setChanges(false)
     setRegenerate(false)
     setRetryReason('')
+    setContinueAccount('')
+    setContinueLimit('')
+    setContinueReason('')
   }, [task?.id, task?.status, task?.result.waiting_artifact])
   useEffect(() => {
     let active = true
@@ -354,6 +372,27 @@ export function WorkflowPage({
                     value={Math.min((task.result.next_chapter || 1) - 1, task.payload.chapters || 36)}
                   />
                   <p role="status">{task.error || '生成、审查、事实和采纳分别留有记录。'}</p>
+                  <p className="small muted">
+                    执行账户：{task.payload.account} · 本次预算上限：
+                    {task.payload.budget_limit ?? '服务商共享上限'}{' '}
+                    {accounts.find((a) => a.id === task.payload.account)?.currency}
+                  </p>
+                  {task.result.continued_from && (
+                    <p className="small muted">已承接上次检查点；原稿、费用历史与修订轮次保留。</p>
+                  )}
+                  {task.result.continued_to && (
+                    <button
+                      onClick={() =>
+                        void perform(async () => {
+                          const row = await api<Task>(`/tasks/${task.result.continued_to}`)
+                          setTasks((prior) => [row, ...prior.filter((t) => t.id !== row.id)])
+                          setSelectedTask(row.id)
+                        })
+                      }
+                    >
+                      打开续跑任务
+                    </button>
+                  )}
                   <div className="actions">
                     <button
                       disabled={!['queued', 'running'].includes(task.status)}
@@ -442,6 +481,87 @@ export function WorkflowPage({
                   >
                     从保存的检查点恢复
                   </button>
+                  {['paused', 'blocked_runtime', 'blocked_creative', 'cancelled'].includes(task.status) &&
+                    !task.result.waiting_artifact && (
+                      <details>
+                        <summary>换账户，从检查点续跑</summary>
+                        <p className="small">
+                          保留当前稿件和修订次数。原账户的未知费用继续占用预留；后续预算按新账户币种设置，仍受该服务商共享上限限制。
+                        </p>
+                        <label>
+                          后续执行账户
+                          <select
+                            value={continueAccount}
+                            onChange={(e) => setContinueAccount(e.target.value)}
+                          >
+                            <option value="">请选择其他账户</option>
+                            {accounts
+                              .filter((a) => a.id !== task.payload.account)
+                              .map((a) => (
+                                <option key={a.id} value={a.id} disabled={!a.configured || !a.priced}>
+                                  {a.id} · {a.model} · {a.currency}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                        <label>
+                          续跑预算上限（
+                          {accounts.find((a) => a.id === continueAccount)?.currency || '先选择账户'}）
+                          <input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={continueLimit}
+                            onChange={(e) => setContinueLimit(e.target.value)}
+                            placeholder="留空使用该服务商共享上限"
+                          />
+                        </label>
+                        <label>
+                          换账户原因
+                          <input
+                            value={continueReason}
+                            maxLength={2000}
+                            onChange={(e) => setContinueReason(e.target.value)}
+                            placeholder="如服务余额不足，保留进度换账户继续"
+                          />
+                        </label>
+                        <button
+                          disabled={
+                            busy ||
+                            !continueAccount ||
+                            !continueReason.trim() ||
+                            (['blocked_runtime', 'cancelled'].includes(task.status) && !unknown)
+                          }
+                          onClick={() =>
+                            void perform(async () => {
+                              const limit = continueLimit ? Number(continueLimit) : null
+                              if (limit !== null && (!Number.isFinite(limit) || limit <= 0))
+                                throw new Error('请输入正数预算，或留空使用共享上限。')
+                              const values = {
+                                account: continueAccount,
+                                budget_limit: limit,
+                                reason: continueReason,
+                                acknowledge_unknown: unknown,
+                              }
+                              const signature = JSON.stringify({ source: task.id, ...values })
+                              if (pendingContinuation.current?.signature !== signature)
+                                pendingContinuation.current = { signature, key: crypto.randomUUID() }
+                              const body: ContinuationInput = {
+                                ...values,
+                                client_request_id: pendingContinuation.current.key,
+                              }
+                              const row = await api<Task>(`/tasks/${task.id}/continue`, 'POST', body)
+                              setTasks((prior) => [row, ...prior.filter((t) => t.id !== row.id)])
+                              setSelectedTask(row.id)
+                              pendingContinuation.current = null
+                              setStatus('已换账户，从原检查点继续；旧记录保留。')
+                            })
+                          }
+                        >
+                          使用所选账户续跑
+                        </button>
+                      </details>
+                    )}
                   {waiting && (
                     <div className="notice">
                       <h3>待审章节候选</h3>

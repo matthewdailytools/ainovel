@@ -1,6 +1,7 @@
 import type { components } from './api-schema'
 export type ModuleInput = components['schemas']['ModuleInput']
 export type WorkflowInput = components['schemas']['WorkflowInput']
+export type ContinuationInput = components['schemas']['ContinuationInput']
 export type Novel = { id: string; title: string; brief: string }
 export type Branch = { id: string; novel_id: string; name: string; mode: string; story_revision: number }
 export type Chapter = {
@@ -42,6 +43,8 @@ export type Task = {
   result: {
     next_chapter?: number
     repair_round?: number
+    continued_to?: string
+    continued_from?: string
     waiting_artifact?: string
     latest_artifact?: string
     plan?: unknown
@@ -55,6 +58,7 @@ export type Task = {
     action?: ModuleInput['action']
     fixed?: string[]
     writing_profile?: string
+    budget_limit?: number | null
   }
 }
 export type Account = {
@@ -185,6 +189,7 @@ export const statuses: Record<string, string> = {
   succeeded: '候选已生成',
   cancelled: '已取消',
   paused: '已暂停',
+  continued: '已转入续跑任务',
   needs_review: '等待作者审阅',
   blocked_runtime: '运行已停止',
   blocked_creative: '创作检查未通过',

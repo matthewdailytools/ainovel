@@ -710,6 +710,38 @@
         }
       }
     },
+    "/api/tasks/{task_id}/continue": {
+      "post": {
+        "summary": "Continue With Account",
+        "operationId": "continue_with_account_api_tasks__task_id__continue_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ContinuationInput" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/artifacts": {
       "get": {
         "summary": "Artifacts",
@@ -1626,6 +1658,27 @@
         "type": "object",
         "required": ["title"],
         "title": "ChapterInput"
+      },
+      "ContinuationInput": {
+        "properties": {
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "account": { "type": "string", "title": "Account" },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" },
+          "acknowledge_unknown": { "type": "boolean", "title": "Acknowledge Unknown", "default": false }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["client_request_id", "account", "reason"],
+        "title": "ContinuationInput"
       },
       "DefinitionInput": {
         "properties": {

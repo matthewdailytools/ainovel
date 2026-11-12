@@ -396,6 +396,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/tasks/{task_id}/continue': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Continue With Account */
+    post: operations['continue_with_account_api_tasks__task_id__continue_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/artifacts': {
     parameters: {
       query?: never
@@ -955,6 +972,22 @@ export interface components {
     ChapterInput: {
       /** Title */
       title: string
+    }
+    /** ContinuationInput */
+    ContinuationInput: {
+      /** Client Request Id */
+      client_request_id: string
+      /** Account */
+      account: string
+      /** Budget Limit */
+      budget_limit?: number | null
+      /** Reason */
+      reason: string
+      /**
+       * Acknowledge Unknown
+       * @default false
+       */
+      acknowledge_unknown: boolean
     }
     /** DefinitionInput */
     DefinitionInput: {
@@ -2163,6 +2196,41 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  continue_with_account_api_tasks__task_id__continue_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ContinuationInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
         headers: {
           [name: string]: unknown
         }

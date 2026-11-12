@@ -378,6 +378,83 @@ class Domain:
                 db.execute("INSERT INTO task_requests VALUES(?,?)", (key, task_id))
         return self.task(task_id)
 
+    def continue_workflow(self, current, payload, request):
+        previous = self.find_request("workflow", payload)
+        if previous:
+            if (
+                previous["result"].get("continued_from") != current["id"]
+                or previous["result"].get("continuation_request") != request
+            ):
+                raise DomainError("idempotency", "该续跑标识已用于其他检查点或决定。", 409)
+            return previous
+        if current["kind"] != "workflow" or current["status"] not in (
+            "paused",
+            "blocked_runtime",
+            "blocked_creative",
+            "cancelled",
+        ):
+            raise DomainError("state", "请先停止当前执行，再选择其他账户续跑。", 409)
+        if current["status"] in ("blocked_runtime", "cancelled") and not request["acknowledge_unknown"]:
+            raise DomainError("unknown_result", "请核对原账户的费用预留，再明确继续。", 409)
+        if current["result"].get("waiting_artifact"):
+            raise DomainError("review_required", "请先处理待审候选并恢复到章节检查点，再换账户续跑。", 409)
+        if payload["account"] == current["payload"]["account"] or not request["reason"].strip():
+            raise DomainError("continuation", "换账户续跑需要另一个账户和明确原因。", 409)
+        new_id = uid()
+        progress = json.loads(dumps(current["result"]))
+        progress.update(continued_from=current["id"], continuation_request=request)
+        with self.db.connect(True) as db:
+            prior = db.execute(
+                "SELECT t.* FROM task_requests r JOIN tasks t ON t.id=r.task_id WHERE r.key=?",
+                (payload["client_request_id"],),
+            ).fetchone()
+            if prior:
+                saved = json.loads(prior["result"])
+                if (
+                    prior["kind"] != "workflow"
+                    or json.loads(prior["payload"]) != payload
+                    or saved.get("continued_from") != current["id"]
+                    or saved.get("continuation_request") != request
+                ):
+                    raise DomainError("idempotency", "该提交标识已用于不同的续跑决定。", 409)
+                new_id = prior["id"]
+            else:
+                latest = db.execute(
+                    "SELECT status,updated FROM tasks WHERE id=?", (current["id"],)
+                ).fetchone()
+                if latest["status"] != current["status"] or latest["updated"] != current["updated"]:
+                    raise DomainError("task_changed", "原任务状态已改变，请刷新后再决定。", 409)
+                story_revision = db.execute(
+                    "SELECT story_revision FROM branches WHERE id=?", (current["branch_id"],)
+                ).fetchone()[0]
+                if progress.get("expected_story_revision", story_revision) != story_revision:
+                    raise DomainError("story_changed", "前文已变化，请先在原任务核对影响并恢复检查点。", 409)
+                progress["expected_story_revision"] = story_revision
+                now = time()
+                db.execute(
+                    "INSERT INTO tasks(id,kind,novel_id,branch_id,status,payload,result,created,updated) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (
+                        new_id,
+                        "workflow",
+                        current["novel_id"],
+                        current["branch_id"],
+                        "queued",
+                        dumps(payload),
+                        dumps(progress),
+                        now,
+                        now,
+                    ),
+                )
+                db.execute("INSERT INTO task_requests VALUES(?,?)", (payload["client_request_id"], new_id))
+                db.execute(
+                    "UPDATE tasks SET status='continued',result=?,updated=? WHERE id=?",
+                    (dumps({**current["result"], "continued_to": new_id}), now, current["id"]),
+                )
+                details = {"previous_task": current["id"], "next_task": new_id, **request}
+                self.db.event(db, current["id"], "continued_with_account", details)
+                self.db.event(db, new_id, "continued_from", details)
+        return self.task(new_id)
+
     def task(self, task_id):
         task = self.db.one("SELECT * FROM tasks WHERE id=?", (task_id,))
         for field in ("payload", "result"):

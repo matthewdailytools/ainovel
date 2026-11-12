@@ -315,6 +315,7 @@ export function App() {
                 {page === 'workflow' && novel && (
                   <WorkflowPage
                     novel={novel}
+                    accounts={config?.accounts || []}
                     branchId={branchId}
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}

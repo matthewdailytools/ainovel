@@ -62,6 +62,14 @@ class ResumeInput(Input):
     candidate_revision: int = Field(default=0, ge=0)
 
 
+class ContinuationInput(Input):
+    client_request_id: str = Field(min_length=8, max_length=128)
+    account: str
+    budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    reason: str = Field(min_length=1, max_length=2000)
+    acknowledge_unknown: bool = False
+
+
 class DownloadInput(Input):
     title: str = Field(min_length=1, max_length=200)
     format: Literal["epub", "page_text"] = "epub"
@@ -564,6 +572,30 @@ def create_app(settings=None, schema_only=False):
             )
             db.event(tx, task_id, "resume_requested", data.model_dump())
         return domain.task(task_id)
+
+    @app.post("/api/tasks/{task_id}/continue", status_code=202)
+    def continue_with_account(task_id: str, data: ContinuationInput):
+        current = domain.task(task_id)
+        if current["kind"] != "workflow":
+            raise DomainError("state", "仅整书任务支持从检查点换账户续跑。", 409)
+        payload = WorkflowInput.model_validate(
+            {
+                **current["payload"],
+                "account": data.account,
+                "budget_limit": data.budget_limit,
+                "client_request_id": data.client_request_id,
+            }
+        ).model_dump()
+        previous = domain.find_request("workflow", payload)
+        if previous:
+            return domain.continue_workflow(current, payload, data.model_dump())
+        provider_ready(data.account)
+        if (
+            data.budget_limit is not None
+            and data.budget_limit > settings.limits[settings.providers[data.account].kind]
+        ):
+            raise DomainError("budget", "续跑子预算不能高于该服务商的共享上限。", 409)
+        return domain.continue_workflow(current, payload, data.model_dump())
 
     @app.get("/api/artifacts")
     def artifacts(branch_id: str, chapter_id: str | None = None):
