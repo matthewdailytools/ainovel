@@ -14,6 +14,9 @@ key_env = "OPENAI_API_KEY"
 [accounts.openai_2]
 kind = "openai"
 key_env = "OPENAI_API_KEY_2"
+# 可为该账户单独选模型与推理强度，例如：
+# model = "gpt-6.1-sol"
+# reasoning_effort = "low"
 
 [accounts.deepseek]
 kind = "deepseek"
@@ -27,6 +30,14 @@ currency = "USD"
 input_per_million = "0.20"
 output_per_million = "0.75"
 source = "https://developers.openai.com/api/docs/models/gpt-6-luna"
+
+# 可选 Sol：当前请求上限 120,000 UTF-8 字节，低于 272K 输入 Token 的加价边界。
+# 2026-11-13 核对 Standard 单价；不计缓存折扣，不使用 Fast/Ultrafast。
+[pricing."gpt-6.1-sol"]
+currency = "USD"
+input_per_million = "2"
+output_per_million = "10"
+source = "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
 
 [pricing."deepseek-flash"]
 currency = "CNY"

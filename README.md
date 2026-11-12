@@ -26,6 +26,8 @@ if (-not (Test-Path ainovel.toml)) { Copy-Item ainovel.example.toml ainovel.toml
 
 需要更多账户时，在 `ainovel.toml` 增加一组 `[accounts.账户名]`，填写 `kind = "openai"` 与新的 `key_env` 名称，再在 `.env` 配置对应 Key；所有 `kind = "openai"` 的账户仍共用同一美元上限。
 
+各账户可分别设置 `model` 和 `reasoning_effort`，例如第二账户使用 `gpt-6.1-sol`、`low`，第一账户继续使用 Luna。先配置对应 `[pricing."模型名"]` 单价，再重启本机程序；模板保留此可选配置。不同模型的推理参数须符合其接口要求，参考 [OpenAI 官方 Sol 说明](https://developers.openai.com/api/docs/models/gpt-6.1-sol)。
+
 默认数据在固定用户目录 `%USERPROFILE%/.ainovel`，界面「账户与预算」显示实际路径；从 Codex 或桌面启动沿用同一位置。可在 `ainovel.toml` 的 `data_dir` 或环境变量 `AINOVEL_DATA_DIR` 指定仓库外的位置；迁移须连同 `usage.sqlite` 一起迁移，不得重建费用账本。稿件、资料原件、备份、真实评测输出均在仓库外，真实 `.env` 不提交。配置修改后重启服务与 Worker。
 
 四个入口：

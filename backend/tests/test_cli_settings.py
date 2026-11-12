@@ -69,3 +69,19 @@ def test_worker_stops_when_owner_marker_exists(tmp_path):
     from ainovel.db import Database
 
     assert Database(tmp_path / "manuscripts.sqlite").all("SELECT * FROM processes") == []
+
+
+def test_accounts_can_select_reasoning_independently_without_changing_shared_cap(tmp_path, monkeypatch):
+    config = tmp_path / "accounts.toml"
+    config.write_text(
+        '[accounts.first]\nkind="openai"\nkey_env="FIRST_TEST_KEY"\n'
+        '[accounts.second]\nkind="openai"\nkey_env="SECOND_TEST_KEY"\n'
+        'model="gpt-6.1-sol"\nreasoning_effort="low"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AINOVEL_CONFIG", str(config))
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "none")
+    loaded = Settings.load(tmp_path)
+    assert loaded.providers["first"].reasoning == "none"
+    assert loaded.providers["second"].reasoning == "low"
+    assert str(loaded.limits["openai"]) == "20"

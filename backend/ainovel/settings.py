@@ -123,7 +123,7 @@ class Settings:
                 os.getenv(item["key_env"], ""),
                 *rates,
                 tariff.get("source", ""),
-                os.getenv(prefix + "_REASONING_EFFORT", "none"),
+                item.get("reasoning_effort", os.getenv(prefix + "_REASONING_EFFORT", "none")),
             )
         limits = {
             kind: min(cap, Decimal(str(config.get("budgets", {}).get(kind, cap))))
