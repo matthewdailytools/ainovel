@@ -1,0 +1,4 @@
+interface:
+  display_name: "凡人流原创写作"
+  short_description: "按场景组织凡人流原创仙侠的叙事、打斗、描写与精修，保持作者情节"
+  default_prompt: "使用 $fanren-inspired-writing，按我给定的情节写作，重点做好人物取舍、打斗因果和具体描写。"
