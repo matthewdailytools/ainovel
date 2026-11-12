@@ -5,8 +5,10 @@ alwaysApply: true
 
 # 项目规则入口
 
-- 每次任务读取并遵循根目录 `AGENTS.md`、`BUSINESS_RULES.md`、`ENGINEERING_RULES.md` 与 `TASK_RULES.md`。
-- 业务层定义创作流程与验收，工程层定义通用质量、实现与交付；`RULES_ROADMAP.md` 中的待决策建议保持待确定状态。
+- 每次任务必须读取根目录 `AGENTS.md`、`ENGINEERING_RULES.md` 与 `TASK_RULES.md`，工程基线默认生效。
+- 必须按工程入口中的适用表加载架构、编码、数据、安全、AI、设计、UI 与质量专题规范，完成适用的交付检查。
+- 涉及业务行为时读取 `BUSINESS_RULES.md`；业务规范根据实际使用和用户反馈逐步增加与迭代。
+- `ENGINEERING_STANDARDS.md` 记录依据与项目约定；`RULES_ROADMAP.md` 中待选型或待决策内容保持对应状态，不自动成为业务要求。
 - 新增或修改界面时读取 `DESIGN_RULES.md` 与 `UI_RULES.md`。
 - 新增或修改代码时读取 `CODING_RULES.md`。
 - 每次完成有文件变更的任务后，按 `TASK_RULES.md` 验证、提交并推送到 GitHub，无需再次确认。
