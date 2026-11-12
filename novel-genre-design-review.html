@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>小说设计全谱系 · 题材设计与审阅</title>
+<style>
+:root{--bg:#f5f5f0;--paper:#fff;--ink:#182d2d;--muted:#536764;--line:#d7dfda;--accent:#196257;--soft:#e8f2ee;--warn:#76501c;--warnbg:#fbf0dd;--radius:12px;--control:#71877e}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:120px}body{margin:0;background:var(--bg);color:var(--ink);font:1rem/1.75 "Microsoft YaHei","PingFang SC",system-ui,sans-serif}button,input,select,textarea{font:inherit;color:inherit}button,a,input,select,summary,textarea{-webkit-tap-highlight-color:transparent}button{cursor:pointer;border:1px solid var(--control);border-radius:8px;background:var(--paper);padding:8px 14px;min-height:44px}button:hover{background:var(--soft)}button[aria-pressed=true],.primary{background:var(--accent);color:white;border-color:var(--accent)}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid #977324;outline-offset:3px}a{color:var(--accent);text-underline-offset:3px}input,select,textarea{border:1px solid var(--control);border-radius:7px;padding:9px 11px;max-width:100%;background:white}textarea{width:100%;resize:vertical;min-height:86px}input[type=checkbox]{accent-color:var(--accent);width:18px;height:18px;margin-right:8px}h1,h2,h3,h4,p{margin:0}h1{font-size:clamp(1.5625rem,3vw,2.375rem);line-height:1.35;letter-spacing:-.02em}h2{font-size:1.5625rem;line-height:1.5}h3{font-size:1.1875rem}h4{font-size:1.0625rem}p+p{margin-top:10px}small,.small{font-size:0.8125rem}.muted{color:var(--muted)}.eyebrow{font-size:0.75rem;letter-spacing:.12em;color:var(--accent);font-weight:700}.skip{position:absolute;top:-80px;left:10px;z-index:100;background:white;padding:10px}.skip:focus{top:10px}.shell{max-width:1640px;margin:auto}.top{padding:28px 36px 0;background:var(--paper);border-bottom:1px solid var(--line)}.heading{display:flex;align-items:flex-start;justify-content:space-between;gap:24px}.heading p{margin-top:10px;max-width:880px}.top-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.tabs{display:flex;gap:5px;flex-wrap:wrap;margin-top:25px;padding-bottom:15px}.tabs button{border:0}.layout{display:grid;grid-template-columns:272px minmax(0,1fr);min-height:75vh}.sidebar{padding:24px 20px;border-right:1px solid var(--line)}.sidebar .search-label{display:block;font-size:0.875rem;margin-bottom:7px;font-weight:700}.sidebar input{width:100%}.sidebar select{width:100%;margin:10px 0}.genre-list{display:grid;gap:4px;margin-top:15px}.genre-button{display:flex;align-items:center;gap:10px;text-align:left;background:none;border-color:transparent;padding:9px 10px;min-height:44px;width:100%;font-size:0.875rem}.genre-button .number{font:0.75rem/1.5 ui-monospace,monospace;opacity:.8;min-width:20px}.genre-button span:last-child{margin-left:auto;font-size:0.75rem}.sidebar .small{margin-top:14px}.content{min-width:0;padding:32px 42px 70px}.lead{max-width:1000px;margin:10px 0 22px;color:var(--muted)}.meta{display:flex;gap:9px;flex-wrap:wrap;margin:12px 0 20px}.badge{display:inline-block;border-radius:4px;padding:3px 8px;background:var(--soft);color:var(--accent);font-size:0.75rem}.badge.neutral{background:#edf0ee;color:#485e57}.section{margin-top:28px}.panel{border:1px solid var(--line);border-radius:var(--radius);padding:22px;background:white;margin:18px 0}.intent-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.intent-grid label{display:block;font-weight:700;margin-bottom:6px}.intent-grid .hint{font-size:0.8125rem;color:var(--muted);margin:6px 0 0}.inline-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px}.flow{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0}.flow span{background:var(--soft);padding:8px 13px;border-radius:7px;font-size:0.875rem}.flow b{font-weight:400;color:var(--muted);align-self:center}.callout{border-left:4px solid var(--accent);padding:12px 18px;background:var(--soft);margin:18px 0}.warning{background:var(--warnbg);border-color:#94713c;color:var(--warn)}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px}.toolbar label{font-size:0.875rem}.toolbar select{margin-left:6px}.design-block{border-bottom:1px solid var(--line);padding:0;margin:0;scroll-margin-top:24px}.design-block summary{list-style:none;cursor:pointer;display:flex;gap:14px;padding:19px 2px;align-items:flex-start}.design-block summary::-webkit-details-marker{display:none}.design-block summary::before{content:'＋';color:var(--accent);font-size:1.25rem;line-height:1.4}.design-block[open] summary::before{content:'－'}.design-block summary h3{font-size:1.0625rem}.design-block summary .block-meta{margin-left:auto;flex-shrink:0;font-size:0.75rem;color:var(--muted);padding-top:3px}.block-body{padding:0 4px 22px 34px}.items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 28px;margin:0 0 18px;padding-left:20px}.items li{padding-left:2px;overflow-wrap:anywhere}.review-line{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px}.review-line label{font-size:0.8125rem;color:var(--muted)}.review-line select{font-size:0.8125rem;min-height:40px}.review-note{margin-top:10px;min-height:62px;font-size:0.875rem}.review-note-label{display:block;margin-top:9px;font-size:0.8125rem;color:var(--muted)}.review-status{font-size:0.75rem;color:var(--accent)}.empty{padding:35px 0;color:var(--muted)}.source-links{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:0.8125rem;margin-bottom:18px}.source-card{padding:16px 0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:74px minmax(0,1fr);gap:12px}.source-card p{font-size:0.875rem;margin-top:5px}.source-id{font:0.75rem/1.5 ui-monospace,monospace;color:var(--accent);padding-top:4px}.source-type{font-size:0.75rem;color:var(--muted)}.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 22px}.checks label{display:flex;align-items:center;font-size:0.875rem;min-height:44px}.stat-row{display:flex;gap:26px;flex-wrap:wrap;padding:18px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:22px 0}.stat-row strong{font-size:1.625rem;font-weight:600;display:block}.stat-row span{font-size:0.8125rem;color:var(--muted)}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:0.875rem}th,td{padding:13px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:var(--soft);font-weight:600}td{min-width:135px}.mapping-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 22px}.mapping-grid p{font-size:0.875rem;border-bottom:1px solid var(--line);padding-bottom:10px}.mapping-grid strong{display:block}.notes-card{border-bottom:1px solid var(--line);padding:16px 0}.notes-card p{white-space:pre-wrap;margin-top:7px}.footer{border-top:1px solid var(--line);padding:15px 36px;font-size:0.75rem;color:var(--muted);display:flex;justify-content:space-between;gap:15px;flex-wrap:wrap}.hidden,[hidden]{display:none!important}.nav-select{display:none}.mobile-search{display:none}.combo-group{margin-top:20px}.combo-output{margin-top:28px}.group-title{margin:30px 0 12px;border-top:2px solid var(--ink);padding-top:17px}.print-only{display:none}@media(max-width:1100px){.content{padding:26px}.layout{grid-template-columns:235px minmax(0,1fr)}.top{padding:24px 24px 0}.intent-grid{grid-template-columns:1fr}.heading{flex-direction:column}.top-actions{justify-content:flex-start}.checks{grid-template-columns:1fr}.items{grid-template-columns:1fr}}@media(max-width:700px){.layout{display:block}.sidebar{border-right:0;border-bottom:1px solid var(--line);padding:18px 20px}.genre-list{display:none}.nav-select{display:block}.content{padding:24px 20px 50px}.top{padding:22px 20px 0}.tabs{gap:3px}.tabs button{font-size:0.875rem;padding:7px 10px}.mapping-grid{grid-template-columns:1fr}.source-card{grid-template-columns:55px minmax(0,1fr)}.panel{padding:17px}.block-body{padding-left:25px}.design-block summary .block-meta{max-width:80px;text-align:right}.stat-row{gap:20px}.footer{padding:15px 20px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{body{background:white;font-size:11pt}.top-actions,.tabs,.sidebar,.toolbar,.review-line,.review-note,.review-note-label,.inline-actions,.footer,.skip{display:none!important}.layout{display:block}.content{padding:10px}.top{padding:10px;border:0}.print-only{display:block}.panel{break-inside:avoid}.design-block{break-inside:auto}.design-block summary{padding:12px 0}.items{grid-template-columns:1fr}.block-body{padding-left:10px}.hidden,[hidden]{display:none!important}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到设计内容</a>
+<div class="shell">
+<header class="top">
+<div class="heading"><div><div class="eyebrow">NOVEL DESIGN ATLAS / 审阅版 1.0</div><h1>按题材展开，一部小说的全部设计面</h1><p class="muted">创作者掌握情绪、钩子与方向。AI 与模块据此组合人物、世界、社会、情节和表达；这里审阅的是平台需要具备的设计知识。</p></div><div class="top-actions"><label class="small" for="textSize">阅读字号 <select id="textSize"><option value="16">100%</option><option value="20">125%</option><option value="24">150%</option><option value="32">200%</option></select></label><button id="export" class="primary">导出审阅意见</button><button id="print">打印当前清单</button></div></div>
+<nav class="tabs" aria-label="内容视图"><button data-view="catalog" aria-pressed="true">分题材设计库</button><button data-view="core" aria-pressed="false">通用设计底层</button><button data-view="plugins" aria-pressed="false">跨题材插件</button><button data-view="compose" aria-pressed="false">题材组合审查</button><button data-view="vision" aria-pressed="false">人机创作分工</button><button data-view="sources" aria-pressed="false">来源与覆盖</button><button data-view="notes" aria-pressed="false">我的审阅</button></nav>
+</header>
+<div class="layout">
+<aside class="sidebar" aria-label="题材导航"><label for="search" class="search-label">搜索题材与设计内容</label><input id="search" type="search" placeholder="如：灵气、功法、税收、线索" autocomplete="off"><label for="family" class="small">筛选题材范围</label><select id="family"><option value="all">全部题材</option><option value="fantasy">幻想与成长</option><option value="mystery">悬疑与危险</option><option value="society">历史与社会</option><option value="relationship">情感与生活</option><option value="competition">竞争与职业</option><option value="expression">受众与表达</option></select><label class="nav-select small" for="genreSelect">选择题材</label><select class="nav-select" id="genreSelect"></select><div id="genreList" class="genre-list"></div><p id="searchCount" class="small muted" aria-live="polite"></p><p class="small muted">分类是设计目录，不是互斥标签。一部作品可同时加载多个题材与插件。</p></aside>
+<main class="content" id="main"><div id="content"></div></main>
+</div>
+<footer class="footer"><span>检索与整理：2026-11-12 · 公开分类／作者创作谈／专业写作资料</span><span id="saveStatus" role="status" aria-live="polite">审阅意见保存在当前浏览器，可随时导出备份。</span></footer>
+</div>
+<script id="catalog-data">
+'use strict';
+const SOURCES = [
+['QD','起点中文网公开首页','平台分类','https://www.qidian.com/','核对玄幻、奇幻、武侠、仙侠、都市、现实、军事、历史、游戏、体育、科幻、诸天无限、悬疑灵异、轻小说等入口；未使用作品数量与榜单数据推断质量。'],
+['FQ','番茄小说公开首页','平台分类','https://fanqienovel.com/','核对都市脑洞、都市日常、都市修真、东方仙侠、玄幻脑洞、都市高武等公开类型名称；仅为可见页面快照。'],
+['FE','番茄编辑说：榜单与题材观察','官方编辑专题','https://fanqienovel.com/writer/zone/article/7616327014571573272','核对年代、种田、宫斗宅斗、青春甜宠等类型及组合方式；编辑的趋势判断不作为永久规律。'],
+['FC','番茄文启剧燃联合征文','官方编辑专题','https://fanqienovel.com/writer/zone/article/7595564497767514174','核对现言、古言、职场婚恋、宫斗、种田与玄幻言情的交叉关系；征文范围不等于平台全部分类。'],
+['FR','番茄规则怪谈作品公开详情','作品页样本','https://fanqienovel.com/page/7506735028403964990','只用于核对悬疑脑洞、无限流、规则怪谈等标签的组合实例，不用单本作品定义整个题材。'],
+['WR','Patricia C. Wrede：世界构建问题','作者方法','https://pcwrede.com/pcw-wp/fantasy-worldbuilding-%20questions/','支持世界设计应检查不同部分能否相互成立；作者说明问题可选且目录可继续扩展。本文未转载其问卷。'],
+['SA','Sanderson：魔法设计原则','作者方法','https://faq.brandonsanderson.com/knowledge-base/what-are-sandersons-laws-of-magic/','支持能力限制、已有规则的展开与读者理解的检查；属于作者个人准则，不是统一行业定律。'],
+['SF','SFWA：Writing the Science Right','专业作者文章','https://sfwa.org/2022/11/29/writing-the-science-right/','支持先核查决定情节能否成立的科学前提，并区分故事需要与技术说明。'],
+['SW','SFWA：Story as Worldbuilding','专业作者文章','https://sfwa.org/2019/10/16/the-art-of-story-as-worldbuilding/','支持设定通过人物、情节与具体叙事发挥作用。'],
+['RA','RWA：About the Romance Genre','类型机构定义','https://www.rwa.org/the-romance-genre','仅使用其对 romance 的爱情主线及积极情感结局定义；不把这个英文类型定义套到所有中文言情或悲剧爱情。'],
+['HI','Historical Novel Society：历史与事实','专业作者文章','https://historicalnovelsociety.org/writing-marlene-history-story-fact/','支持区分史料、虚构和故事需要；具体制度仍需另查专业资料。'],
+['CI','CIEP：小说统一记录表','编辑实践','https://www.ciep.uk/resource/fiction-style-sheets.html','支持维护人物、时间、术语与设定一致性；具体检查项由本文重新组织。'],
+['VP','Writing Excuses：视角与世界构建','作者讨论','https://writingexcuses.com/14-5-viewpoint-as-worldbuilding/','支持文化、人物声音与所见世界之间的联系。'],
+['WY','忘语：修仙创作访谈','作者直接访谈','https://www.chinawriter.com.cn/n1/2024/1202/c404024-40373325.html','支持从人物处境、选择和成长理解修仙；不把某部作品的具体设定作为本平台默认世界。'],
+['JY','金庸谈创作、修订与出版','作者直接访谈','https://www.chinawriter.com.cn/n1/2018/0306/c405057-29851901.html','参考武侠人物、情节差异与修订经验。'],
+['LH','林海听涛：体育竞技写作','作者创作谈','https://www.chinawriter.com.cn/n1/2022/0812/c404024-32501348.html','参考体育现实条件、过程与胜负的关系；不以单一作者代表全部体育小说。'],
+['HD','蝴蝶蓝：有趣，但不只是游戏','作者创作谈','https://image.chinawriter.com.cn/n1/2023/0308/c404027-32639528.html','参考比赛同时承担人物、关系与世界展示的功能。'],
+['MB','马伯庸：历史缝隙间的虚构','作者直接访谈','https://www.chinawriter.com.cn/n1/2018/0301/c405057-29840497.html','参考真实历史与虚构发展的关系。'],
+['ZJ','紫金陈：推理创作访谈','作者直接访谈','https://image.chinawriter.com.cn/n1/2024/0202/c404024-40171683.html','参考案件内在逻辑、故事完整性与社会问题。'],
+['QJ','祈祷君：《开端》创作访谈','作者直接访谈','https://www.chinawriter.com.cn/n1/2022/0130/c405057-32343641.html','参考循环机制与普通人物的联系；不把时间循环等同所有无限流。'],
+['WJ','伪戒：《第九特区》创作谈','作者创作谈','https://www.chinawriter.com.cn/n1/2023/0111/c404024-32604290.html','参考末世、社会秩序与群像人物的连接。'],
+['LL','六六：家庭、行业与采访','作者直接访谈','https://www.chinawriter.com.cn/n1/2020/0306/c403994-31619762.html','参考家庭生活与社会行业的经验性材料。'],
+['GX','关心则乱：创作访谈','作者直接访谈','https://www.chinawriter.com.cn/n1/2021/0812/c404024-32190336.html','参考古言作者的阅读、资料准备和创作经验。'],
+['CW','曹文轩：小说与儿童经验','作者直接访谈','https://www.chinawriter.com.cn/n1/2020/0923/c405057-31871400.html','参考儿童、家庭、社会与系列成长之间的关系。'],
+['ZG','朱琺：《安南怪谭》访谈','作者直接访谈','https://www.chinawriter.com.cn/n1/2020/0729/c405057-31802708.html','参考志怪、地方文献与异世界想象的关系。'],
+['PG','Penguin：编辑岗位与职责','出版社实践','https://www.penguin.co.uk/about/company-articles/job-roles-in-editorial','支持结构、文字编辑与校对的分层；不能由编辑流程直接证明题材清单已没有遗漏。']
+].map(([id,title,type,url,note])=>({id,title,type,url,note}));
+function blocks(prefix,text){return text.trim().split('\n').filter(Boolean).map((line,i)=>{const [title,...rest]=line.split('：');return{id:prefix+'-'+(i+1),title,items:rest.join('：').split('；').filter(Boolean)}})}
+function genre(id,title,family,tags,sources,description,text,audit){return{id,title,family,tags:tags.split('、'),sources:sources.split(' '),description,blocks:blocks(id,text),audit}}
+const CORE=blocks('core',`
+创作意图与方向：主要读者和阅读场景；核心故事命题；主线终点与允许的开放性；作者要坚持的价值取舍；不希望出现的剧情与关系
+情绪体验：读者想经历的情绪；角色自身的情绪与外显行为；情绪起点与终点；压抑和释放的间隔；短线情绪与全书余韵
+钩子与承诺：读者持续追问的具体问题；问题何时获得部分答案；角色或关系带来的牵挂；收益与风险的可感知性；兑现后的新期待
+人物与能动性：欲望和需求；恐惧底线与矛盾；能力及认知局限；过去经验与当下压力；行动方式和失败选择；成长或保持信念的路径
+关系与群像：利益依赖与情感纽带；权力差距和边界；关系开始改变的事件；配角独立目标；离场人物的后续生活；不同人物的声音
+世界时空与环境：时代地理和尺度；交通通信与距离；季节历法与时间跨度；自然条件和人口分布；日常生活的物质基础
+规则与能力：可实现与不可实现之事；谁能掌握和学习；使用条件及代价；可被对手利用的弱点；例外与前文依据；能力对社会的影响
+社会与制度：权力从何而来；组织如何运行与继承；规则由谁执行；群体与阶层如何流动；制度如何奖励和惩罚人物；边缘者如何生存
+经济与生产：资源来源与所有权；生产劳动及分工；分配交易与价格；税收债务与信用；成本损耗和基础设施；资源变化的后果
+文化与共同生活：信仰与价值分歧；语言称谓和礼仪；婚姻亲属与照护；教育职业和知识传播；服饰饮食居住与娱乐；不同群体的内部差异
+主线与支线：事件前提和因果；目标与阻力；角色选择及代价；支线的进入交叉和结束；阶段变化与结构起伏；结局如何回应开篇
+信息与视角：作者真相；人物已知误解与未知；读者已知与误判；叙述者可靠程度；视角切换的依据；线索证据与揭示次序
+场景与章节：本段的作用；人物意图和关注点；动作对白心理与环境；场面前后的变化；叙述与概述的比例；章末的问题或情绪落点
+语言与审美：叙述声音与距离；人物用词和句式；节奏密度及留白；意象母题和象征；喜剧悲剧或抒情方式；可读性与独特性
+结局与意义：主冲突的结果；关键人物和关系去向；选择的实际后果；重要承诺的回响；余韵与解释的比例；续作空间与本书完成感
+连续性与变化：故事实际时间线；地点身份与人物状态；资源物品能力的变动；谁在何时知道什么；旧内容修改的连带影响；设想和正文事实的区分
+呈现与交付：书名简介与实际内容一致；卷章命名与阅读分段；前言附录地图等是否需要；完整稿与连载稿的差异；文字编辑及最终校对
+资料与创作边界：哪些是现实事实；哪些是作者设定；资料是否支撑关键情节；人物意见是否被误当真相；采用何种真实文化参考；哪些事项保持未知
+`);
+const GENRES=[
+genre('xianxia','仙侠 · 修仙修真','fantasy','凡人流、宗门、长生、家族修仙、都市修真、仙侠情缘','QD FQ WY SA WR','从灵气如何存在，推到谁能修炼、谁控制传承，以及长生社会怎样运转。',`
+宇宙与世界层次：世界的形成与边界；人界灵界仙界是否存在；不同世界规则是否相同；跨界资格与成本；世界之外的未知；天道能干预到什么程度
+灵气与能量生态：灵气来源和补充；浓度品质与属性；环境中的流动和枯竭；生命吸收与排放；灵脉形成与迁移；污染失衡和枯竭会导致什么
+修炼资格与身体：灵根体质与神魂的含义；资格的检测和误差；先天后天改变的条件；人妖鬼等修炼差异；身体容纳能力与伤害；无资格者的生存和替代道路
+境界与突破：每阶段实际改变什么；进入境界的必要条件；突破所需时间资源与认知；失败的可恢复和永久后果；瓶颈和不同路线；境界名称与真实能力的差别
+功法体系：功法的目标和运行原理；入门条件和练习过程；层次与后续传承；相容冲突及转修损耗；缺陷隐患和禁忌；传承为何可被垄断
+术法与技能：术法解决什么具体问题；施展准备和触发；距离范围持续时间；消耗恢复与冷却是否存在；掌握程度的差异；打断反制与环境限制
+战力与对抗：境界功法经验装备如何共同作用；信息和地形影响；越级成立的具体条件；逃脱侦查和隐蔽；团队阵法及联手；胜利的损耗和后续责任
+寿命与时间：各阶段寿命范围；延寿手段和代价；闭关耗时与外界变化；伤势恢复和衰老；代际更替与长期关系；长生者的记忆情感和责任
+丹药与医疗：原料来源和采集周期；炼制条件及失败损耗；剂量药性与限制；疗伤和突破的差别；丹毒依赖与抗性是否存在；高阶丹药供需及掌控者
+法器与法宝：制造材料和工艺；使用资格与认主；储存容量和维护；损坏修复与夺取；器灵意志及约束；战力外的生活和生产用途
+阵法符箓与技艺：阵基和材料；布设绘制耗时；有效边界与供能；日常生产和防护用途；破阵识别与干扰；技术门槛及职业分工
+资源与灵石经济：灵石能量与货币属性；开采补充和损耗；基础物价的相对尺度；资源所有权与租用；兑换信用和假货；资源供给为何不足或过剩
+宗门与师承：宗门收入和公共支出；招生考核与培养；师徒权责与退出；贡献分配和阶层流动；掌门长老传承及监督；宗门为何需要低阶弟子
+家族与血缘：婚姻继承和成员资格；血脉天赋的表现；族产与个人资源；代际冲突及长生家长；旁支外姓和收养；家族扩大后的治理成本
+政权与凡人社会：国家与宗门权力边界；凡人生产和基本生活；税赋保护及征役；低阶修士和普通人的流动；强者受什么约束；超凡力量为何未摧毁全部秩序
+坊市与修士生活：城池选址和人口；住房洞府与灵地租用；交易担保和争端处理；就业服务及灰色产业；交通治安与公共设施；散修如何维持长期生活
+妖兽族群与生态：食物链与繁殖；灵智和社会；人族与异族边界；驯养契约和自主性；资源开发的生态后果；族群对同一世界的不同理解
+天劫因果与命运：天劫触发和判定；天道是事实还是解释；因果誓约的约束范围；占卜预言的信息限制；避劫转嫁的代价；命定与人物选择的关系
+神魂死亡与轮回：肉身神魂和身份关系；死亡是否可逆；夺舍转生的条件及损失；记忆继承和人格连续；复活为何不能解决所有失去；亡者对秩序和亲属的影响
+秘境遗迹与探索：来源和存在理由；开放周期和进入资格；内部供给与规则；前人探索记录与信息差；风险收益及退出机制；遗迹资源是否会耗尽
+历史传承与知识：功法术语的历史；失传和错误传授；典籍真伪及注释；知识复制成本；古今能力差异的原因；新方法怎样改变原有利益
+地理势力与跨卷：灵地分布与通行；各区域不同生存规则；势力联盟与战争；新地图与旧承诺的联系；主角成长后的旧关系；跨界后保留和变化的规则
+主角优势与代价：优势来源及边界；为什么只有主角或少数人拥有；能被察觉和争夺吗；优势无法解决的问题；使用后的代价与风险；后期怎样保持选择难度
+修仙之道与终局：人物为何追求长生；力量和自由是否冲突；得道飞升意味着什么；私人目标与社会后果；同道异道的价值分歧；终局解决哪些问题并留下什么
+`,'检查灵气、突破、寿命和社会是否彼此成立：若高阶修士长生且能大量复制资源，稀缺、组织和传承为何仍如此？答案可以不同，但要写出本世界的理由。'),
+genre('eastern','东方玄幻 · 高武','fantasy','异界大陆、武道、血脉、学院、御兽、全民觉醒','QD FQ SA','关注多种成长路线、力量规模和社会承载能力。',`
+世界底层：大陆位面与边界；能量来源；天地规则；世界秘密；灾变和历史断层
+成长路线：境界实质；血脉体质；觉醒和入门；训练与突破；分支职业和转职
+力量应用：武技技能；距离范围与消耗；装备和伙伴；克制与反制；力量破坏的社会代价
+资源体系：生产与采集；稀缺和再生；资源分配；知识和传承；成长成本
+教育与势力：学院宗派家族；招生选拔；培养和淘汰；国家组织；身份与阶层流动
+社会生活：普通人工作；城防治安；能源交通通信；高阶者职责；秩序为何稳定
+异族与敌手：种族生态；族群利益；敌手目标；对抗升级的原因；合作和共存空间
+成长叙事：初期劣势；能力展示与代价；不同阶段的目标；重复升级的变化；终局与世界问题
+`,'能力从破墙扩展到毁城以后，地理尺度、战争、基础设施和人物责任也应同步变化。'),
+genre('western','西方奇幻 · 异世界','fantasy','史诗奇幻、低魔、高魔、冒险、领主、魔法学院','QD WR SA SW','让魔法、文化与政治共同构成可生活的世界。',`
+超常规则：魔法来源；施法条件；限制和代价；知识的可传授性；不同体系兼容
+族群与生物：寿命感官差异；繁衍和饮食；语言文化；内部阶层；跨族群关系
+地理与历史：区域资源；迁徙和战争；王朝边界；失落文明；神话与真实过去
+神灵信仰：神是否真实；神迹的范围；宗教组织；教义冲突；信仰与世俗权力
+政治与经济：土地和税赋；生产贸易；军队和贵族；城市行会；魔法对劳动的改变
+冒险与组织：任务来源；队伍互补；交通补给；职业资格；战利品与责任
+文化与日常：称谓礼节；婚姻继承；节庆艺术；饮食建筑；普通人的世界观
+叙事与终局：个人愿望；群体历史负担；冒险代价；世界危机的具体影响；胜利后的秩序
+`,'如果魔法能够广泛治疗、传送或制造物资，医疗、贸易、战争与政治边界都会发生相应变化。'),
+genre('wuxia','武侠 · 江湖','fantasy','门派、侠义、复仇、朝堂江湖、浪子、武道','QD JY','武功提供行动条件，江湖伦理决定选择的代价。',`
+武学：内功外功；学习传承；招式与实战；伤势恢复；强弱边界
+江湖组织：门派家族帮会；生计与收入；弟子培养；掌门继承；叛门与退出
+伦理声誉：侠义标准；承诺与恩仇；名誉传播；正邪划分；个人道义与群体规矩
+国家社会：朝廷与地方；官府法律；镖路和贸易；普通人处境；武人受何种约束
+人物关系：师承与同门；知己和敌友；血缘秘密；爱情与义务；误解如何形成
+冲突结构：旧怨的来由；事件利益链；秘籍宝物争夺；阴谋证据；选择引发的连锁后果
+场面表达：兵器动作；空间距离；战斗心理；克制取胜；战后伤亡和关系变化
+结局：复仇后的人生；侠义的兑现；江湖和庙堂；隐退或承担；人物真正失去与获得
+`,'武功不等于组织能力和社会合法性；检查武林声誉、官府与实际暴力之间怎样互相制约。'),
+genre('myth','神话 · 洪荒 · 志怪','fantasy','神仙、妖怪、民间传说、封神、神格、地方志怪','QD FQ ZG WR','区分文化材料、作者重构与故事中的世界真相。',`
+宇宙与神系：创世结构；神职和神权；神的能力边界；不同神系关系；神与自然秩序
+民俗语境：地方生活；仪式节庆；口述与文献版本；禁忌的社会原因；不同群体解释
+异类存在：妖鬼精怪来源；存在条件；人格和欲望；人妖边界；相遇与共存方式
+仪式与契约：祭祀供奉；愿望交换；契约规则；失约后果；代价承担者
+命运与时间：劫数因果；预言限制；转世记忆；长生与凡人时间；改命的后果
+权力与社会：神庙香火；地方权威；人间政权；信众利益；祭祀资源与争夺
+叙事方式：见闻传说或亲历；真假和解释空间；异事与现实困境；意象与氛围；短故事和长线联系
+主题与结束：人欲与神意；报应与不公；异类的主体性；秩序改变；神秘感保留范围
+`,'神格、香火和因果应具有本世界的具体含义；民间传说的某一版本不自动代表全部传统。'),
+genre('science','科幻 · 星际 · 赛博','fantasy','硬科幻、太空歌剧、人工智能、时间旅行、赛博朋克、机甲','QD SF SW','明确现实科学、推测前提和完全虚构技术的边界。',`
+核心假设：关键科学或技术变化；现实依据；推测跨度；不允许改变的限制；假设带来的新问题
+空间与时间：航行速度；距离与通信延迟；能源和生存条件；时间旅行规则；多地事件同步
+技术链条：能源材料制造；维护与故障；谁有技术；成本规模化与供给；攻击防护和失效
+生命与智能：身体认知差异；人工智能目标；意识身份和复制；外星生命生态；人与非人关系
+社会与权力：国家企业殖民地；技术所有权；劳动和阶层；隐私与监控；权利责任与治理
+经济与生活：资源物流；货币与稀缺；医疗教育；城市和栖居；普通人如何使用技术
+冲突与探索：科学问题与证据；未知风险；行动决策；技术不能代替的选择；发现如何改变人物
+结局与后果：技术方案的实际代价；人类或文明变化；未解决的不确定性；主角选择；长期社会后果
+`,'决定情节成立的科学前提优先核查；技术不能只在需要解围时出现而不影响其他社会活动。'),
+genre('apocalypse','末世 · 灾难 · 废土','fantasy','丧尸、天灾、病毒、极寒、废土、灾后重建','QD FQ WJ SF','把灾难机制、资源与人群秩序共同设计。',`
+灾难本身：起因与影响范围；爆发阶段；传播扩散；可预测性；是否可逆
+生存需求：水食物空气；能源药品；庇护和温度；疾病与卫生；资源消耗和补充
+地理与迁徙：灾区变化；安全区依据；路线和车辆；季节风险；运输与撤离代价
+能力与装备：普通技能；异能来源和限制；工具耐久；维修制造；战斗和劳动分工
+社会秩序：权威形成；分配规则；公共劳动；治安和信任；脆弱群体与照护
+群体关系：旧家庭与新同伴；外来者加入；背叛与合作条件；敌对团体目标；群体内部差异
+灾后经济：仓储保质；农业与工业恢复；交换信用；技术知识保存；资源垄断和争夺
+发展与终局：即时逃生；稳定生存；社会重建；灾难真相或终止；幸存者的情感代价
+`,'物资不应只按背包格子存在：保质、供水、排污、疾病和持续生产决定长期生存是否成立。'),
+genre('infinite','诸天 · 无限流 · 副本','fantasy','生存副本、诸天穿梭、轮回空间、任务、团队、时间循环','QD FR QJ','每个副本有独立逻辑，跨副本也有持续的代价与方向。',`
+进入机制：选中或进入原因；退出资格；任务真实性；任务发布者；自主选择空间
+副本规则：场景前提；目标与失败条件；时限和重置；可见和隐藏规则；规则例外依据
+奖励与成长：资源结算；技能装备获得；带入带出限制；成长对难度的影响；死亡和复活代价
+信息与解谜：已知情报；实验验证；线索可信度；错误推理后果；读者可参与的理解
+团队与对手：配队原因；职业互补；利益冲突；合作和背叛；队友成长及损失
+跨世界连续：时间比例；身份延续；能力兼容；人物记忆；不同世界的社会影响
+主世界与真相：系统来源；组织权力；参与者生计；旁观者和管理者；长期谜底
+结构与结局：副本类型差异；难度和情绪变化；单元回报；贯穿全书的关系和目标；终局是否能真正退出
+`,'避免用新副本清空旧代价；每次通关都应影响后续资源、关系、认知或主线。'),
+genre('rules','规则怪谈 · 诡异求生','mystery','规则文本、真假规则、污染、身份、诡异空间','FQ FR SA','明确规则、认知误差与作者临时改规则之间的区别。',`
+规则来源：规则由谁制定；文本是否完整；规则真伪与条件；作者知道的真实边界；修改规则的条件
+诡异存在：存在方式和动机；行动范围；感知和认人；触发与停止；可被理解的弱点
+信息结构：线索出现位置；可靠和不可靠来源；真假验证成本；读者与角色信息差；答案的前文依据
+生存机制：违规判定；惩罚过程；资源和安全区；回合与时限；逃离和通关标准
+身份与认知：身份能力；记忆污染；伪装与替换；角色对自身的误判；身份变化的证据
+社会与组织：管理者与参与者；规则传播；外界反应；利益交换；群体对风险的解释
+情绪节奏：异常的小信号；不确定的扩大；安全感破裂；喘息和试探；揭示与恐惧余韵
+长期发展：场景机制差异；旧规则的迁移；能力边界；诡异起源；规则改变后的世界
+`,'若规则可随时任意变化，角色推理与读者参与就会失去依据；隐藏条件也需要可追溯的线索。'),
+genre('mystery','悬疑 · 推理 · 解谜','mystery','本格、社会派、密室、日常之谜、法庭、单元案件','QD FQ ZJ','区分事情真实如何发生、侦查者怎样理解、读者怎样知道。',`
+真相底稿：事件真实顺序；动机和关系；作案机会；事实证据；谁在掩盖什么
+谜面与问题：最初异常；核心待解问题；疑点层次；局部问题与总谜题；何时引入新的问题
+线索系统：线索的来源；物证人证和推断；出现时机；真实性与可误读性；最终答案是否有依据
+角色推理：各人知情范围；调查能力与限制；假设验证；错误判断的代价；改变看法的证据
+嫌疑人与关系：独立生活与动机；秘密是否等于罪行；不在场和行动时间；人物相互遮掩；证词的视角差异
+程序与现实：背景年代地区；调查权限；证据保存和转交；职业流程的真实性；需要另行考据的关键环节
+悬念与节奏：问题揭开顺序；危险和推理的比例；信息负荷；反转后的因果；答案后的情感影响
+收束与意义：解释覆盖哪些事实；仍保留哪些不确定性；人物承担的后果；社会关系变化；重读时的线索一致性
+`,'推理结论不能依赖读者和角色从未获得的新规则；故意保留信息也要符合叙述视角。'),
+genre('crime','刑侦 · 犯罪 · 惊悚','mystery','刑侦、犯罪心理、追捕、黑色、法庭惊悚','QD ZJ LL','以危险、人物处境和案件后果组织故事；专业程序另行核查。',`
+案件与冲突：事件背景；目标人物与利益；犯罪事实和人物自述；公开事件与隐藏事件；受害后果
+调查体系：办案主体；权限边界；协作与信息流；证据可信度；程序阻力
+人物心理：动机和压力；行为是否有生活依据；调查者偏见；受害者的主体性；精神状态描写的依据
+危险推进：追捕或被追踪；倒计时；对手主动行动；安全与暴露；失败引发的新局面
+社会网络：家庭职业社区；权力与资源；旁观和共谋；组织利益；信任及保护机制
+信息安排：多方视角；已知凶手或未知凶手；关键事实披露；误导依据；读者的紧张来源
+场面表达：行动空间；对话与盘问；危险后的身心影响；信息与动作的清晰度；叙述尺度和取舍
+结局：事件真相；司法与个人正义的区别；幸存者生活；制度留下的问题；人物是否付出相应代价
+`,'专业身份不是万能通行证；刑侦、医疗、法律等关键流程应按故事地点和时代专项求证。'),
+genre('horror','恐怖 · 灵异 · 民俗','mystery','心理恐怖、鬼怪、民俗恐怖、克苏鲁、诅咒、怪物','QD FQ ZG VP','设计恐惧从何而来，以及它怎样改变人的感知和行为。',`
+恐惧核心：未知和失控；身体或身份威胁；被替代或隔绝；熟悉事物的异常；价值和信念被动摇
+超常存在：真实存在或解释空间；触发条件；影响范围；限制和代价；与人的关系
+空间与氛围：地点的历史；感官线索；空间是否可靠；昼夜和时间；日常秩序的裂缝
+民俗与社群：仪式禁忌来源；传说不同版本；地方生计；信仰和权威；外来者与内部人的差异
+信息与不确定：叙述者可靠性；证据和误认；可以验证的部分；误导与回看；解释到什么程度
+人物与恐惧：弱点和过去经验；避险与冒险理由；群体关系；恐惧中的道德选择；创伤和变化
+节奏与表现：预兆；延迟和想象；威胁升级；安全和喘息；揭示后的新恐惧
+终局与余韵：逃生或承担；真相成本；诅咒是否结束；人间问题是否仍存在；保留的未知
+`,'恐怖效果不只来自更多怪物或更强刺激；检查人物为何在乎，以及暂时安全为何值得相信。'),
+genre('history','历史 · 架空 · 争霸','society','真实历史、架空王朝、历史脑洞、穿越改史、王朝兴衰','QD FE MB HI','同时维护时代条件、虚构空间和改变历史的连锁后果。',`
+历史底稿：时代节点；真实人物与大事；资料出处；史料分歧；明确的虚构和偏离
+制度与权力：中央地方；官僚选任；法律和土地；继承合法性；权力如何执行
+经济与人口：农业和税赋；财政与货币；运输和仓储；技术生产条件；灾荒和人口变化
+社会与文化：阶层与家族；婚姻继承；教育和身份；礼仪语言；时代观念与个人差异
+战争与外交：动员和补给；地形交通；盟约和利益；消息传播；战争如何改变治理
+人物与行动：当时人的可知信息；个人目标；现代观念带来的冲突；跨阶层关系；改变处境的路径
+改史与技术：历史分歧起点；知识能否落地；原料工具人才；技术扩散；其他势力的反应
+结构与终局：个人与历史大势；阶段成果；改革的受益和受损者；胜利后的制度；历史感和结局余韵
+`,'知道现代知识不等于能立即工业化；原料、工具、组织、运输与利益阻力都需要进入因果链。'),
+genre('war','军事 · 战争','society','古代战争、近现代军事、未来战争、战役、军旅','QD HI SF','专业战术细节需另证，设计框架先覆盖组织、物质条件与人物。',`
+战争背景：政治目标；双方利益；开战原因；胜利如何定义；战争边界和结束条件
+组织与指挥：编制和职责；命令传递；训练与纪律；决策权限；上下级和友邻协作
+物质条件：装备技术；弹药燃料；运输维修；医疗和补给；生产动员能力
+战场环境：地形天气；时间与距离；侦察情报；信息误差；环境对行动的限制
+行动逻辑：任务目标；敌我已知情况；风险和备选；对手反应；行动后的实际损耗
+军旅人物：入伍动机；技能与成长；集体关系；恐惧责任和创伤；个人与命令的冲突
+社会与平民：战争经济；家庭和后方；迁徙及基本生活；占领与秩序；战后照护和记忆
+结构与结果：单次行动和总体目标；胜败原因；人物代价；停战和秩序重建；战争意义的多种理解
+`,'胜利依赖任务、组织、信息和补给；不能让一位主角的战力自动解决所有层级问题。'),
+genre('spy','谍战 · 特工 · 政治惊险','mystery','潜伏、身份博弈、情报、反间、密码、组织忠诚','QD HI VP','以身份、信息可信度和关系风险为主要设计对象。',`
+时代与局势：政治力量；各方目标；组织边界；公开和秘密秩序；真实历史与虚构的区分
+身份体系：表层身份；真实履历；身份材料；熟人记忆；暴露会伤害谁
+情报逻辑：信息来源；可信度和验证；传递后的影响；假情报和误判；各方信息不对称
+组织关系：职责和权限；上下级信任；派系利益；任务与个人目标；组织更替的影响
+博弈推进：怀疑形成；对手的判断；试探与反试探；选择的代价；局部成功带来的新风险
+人物压力：信念与恐惧；角色扮演的心理影响；亲密关系的冲突；失去与牺牲；忠诚是否改变
+叙事悬念：读者知道哪些身份；人物以为对方知道什么；线索和解释；多线交织；逆转的前文基础
+终局：任务结果；身份和关系结算；组织政治的后果；幸存者生活；信念的最后选择
+`,'每个阵营都需要可理解的目标与判断；保密不能成为作者隐藏全部必要因果的理由。'),
+genre('urban','都市现实 · 行业职业','society','都市日常、现实主义、医生、律师、工程师、基层、职场','QD FQ LL','职业体系与社会关系应真正影响人物的行动条件。',`
+时代与地域：城市或乡村的具体条件；生活成本；家庭结构；代际经验；社会变化
+职业日常：任务和流程；资格与训练；工具和术语；职业边界；失误和责任
+组织与评价：岗位职责；晋升和收入；资源分配；团队合作；显性与隐性规则
+人物生活：住房通勤；家庭照护；健康和时间；情感支持；职业之外的愿望
+社会冲突：阶层和机会；权利与责任；公共利益和私人利益；群体偏见；制度与个体选择
+成长与关系：能力提升的证据；导师同事客户；竞争与合作；价值冲突；工作如何改变生活
+情节与真实感：具体事件；工作成果和代价；巧合使用边界；材料依据；不靠解释代替生活
+结局与意义：个人选择；职业去留；关系和生活变化；未解决的社会问题；可感知而有限的改善
+`,'不能只把职场当作身份标签；人物完成工作需要的能力、协作、时间和责任都应可见。'),
+genre('business','商战 · 创业 · 金融','competition','创业、企业经营、产业、投资、商业博弈、年代经商','QD FE LL','把商业成功还原为产品、组织、现金流和竞争的共同结果。',`
+商业命题：解决谁的需求；产品与服务；用户如何选择；市场和渠道；竞争优势依据
+产业条件：供应链；技术和人才；生产与交付；库存和物流；时代基础设施
+财务约束：收入与成本；现金流时间；资本和债务；利润与估值区别；失败的承受能力
+组织与治理：创始团队；分工和激励；股权与控制；扩张管理；内部信息和冲突
+竞争与博弈：竞争者目标；差异与替代；合作谈判；信息优势；对手会怎样学习和反击
+社会和制度：行业准入；劳动关系；公共影响；政策变化；商业权力与责任
+人物与情节：创业动机；关系代价；能力成长；挫败后的选择；成功改变人物的方式
+终局与后果：企业是否持续；利益如何分配；退出或转型；受损者的后续；事业与人生的结算
+`,'营业额、利润、现金与资产不能混用；胜负也不能只由主角知道一个秘密决定。'),
+genre('superpower','都市异能 · 脑洞','fantasy','都市高武、都市修真、觉醒、神豪、身份反差、超常职业','FQ FE SA','把超常能力放进现代社会，并推演组织和日常的反应。',`
+异常来源：超常现象前提；能力获取；是否公开；稀有程度；主角与他人差别
+能力规则：作用范围；消耗和限制；反制与失效；成长方式；不能解决的问题
+现实兼容：监控通信；货币金融；身份和行政；科技与超常关系；日常生活受何影响
+社会组织：管理机构；企业和公众；利益团体；保护和约束；能力者的职业生活
+资源和价值：能力收益如何实现；资源供给；信息变现的后果；成本与追索；优势能否被复制
+人物关系：原有家庭社交；身份隐藏；能力和自尊；普通人的能动性；信任如何变化
+情节推进：新能力的具体用途；事件和社会反应；敌手目标；收益与代价；身份揭示节奏
+终局方向：个人成功或社会改变；能力公开后的秩序；主角价值选择；关系兑现；无限扩张的停止条件
+`,'能力可以突破现实，但需要说明现实社会为何没有察觉、复制、利用或约束它。'),
+genre('romance','现代爱情 · 婚恋','relationship','现言、甜宠、豪门、职场婚恋、破镜重圆、爱情悲剧','FQ FE FC RA','分别设计两个人的独立生活，以及关系为什么会发展和改变。',`
+人物与生活：各自欲望；情感经验；生活和职业；依恋与边界；独立于恋爱的目标
+吸引与连接：相遇条件；互相看见的特质；共同经历；信任证据；情感不是只靠外貌和身份
+障碍与矛盾：价值差异；现实条件；信息误解；权力差距；不能轻易解决的选择
+关系推进：靠近和退让；承诺与行动；脆弱性的暴露；关系状态变化；转折的情感依据
+社会关系：家庭与朋友；工作和经济；公众评价；照护责任；两人的生活如何结合
+钩子与情绪：想知道对方什么；暧昧和确定性；甜与痛的安排；情绪回报；旧问题解决后的新阶段
+表达与尺度：人物视角；对话潜台词；身体与心理的表现；亲密界限；作者选择的叙述尺度
+结局与定位：关系结局；个人成长和去留；现实问题的处理；开放或悲剧的承诺；题材标签与实际体验一致
+`,'RWA 的 romance 定义要求积极的关系结局；中文言情范围更广，平台应明确本书承诺，允许作者选择悲剧或开放爱情。'),
+genre('ancient','古代爱情 · 仙侠情缘','relationship','古言、古风世情、玄幻言情、师徒情缘、神仙爱情','FQ FC GX RA','时代或超常规则既是情感环境，也会实质改变关系。',`
+背景制度：时代或架空边界；婚姻与继承；身份等级；女性和不同群体的行动空间；情感表达习惯
+人物与立场：独立目标；家族和门派归属；个人价值；情感经验；关系中的资源差异
+相遇与吸引：共同行动；互相理解的证据；才情与能力；身份秘密；吸引为何能持续
+障碍与选择：责任和自由；家族国家宗门；寿命与轮回；误解和真实分歧；代价承担者
+关系发展：情感阶段；承诺和背离；共同解决的问题；分离与重逢的变化；人物能否自主选择
+世界与情感：神魂记忆；契约和命定；修炼代价；跨界和时间；超常规则对关系的限制
+叙事与审美：礼仪称谓；对白和潜台词；意象风物；多视角的信息差；深情的具体行动
+终局：关系最终状态；个人目标是否被保留；责任与制度后果；轮回是否抹除代价；本书情感承诺
+`,'不能只用命定、契约或前世解释感情；本世人物仍需要可读的经历、行动和选择。'),
+genre('palace','宫斗 · 宅斗 · 权谋','society','宫廷、家族、后宅、主母、继承、权力博弈','FE FC GX HI','设计资源、身份、制度和关系如何使每次选择产生后果。',`
+权力结构：家族或宫廷层级；职位权利；继承秩序；资源分配；谁有最终执行力
+物质生活：财产和账目；嫁妆供给；仆役劳动；医疗生育和照护；院落空间与出入
+身份与规则：宗法礼制；嫡庶和收养；婚姻与退出；正式规则和惯例；规则对不同人的差异
+人物利益：生存和上升目标；家族牵连；盟友与对手；情感和责任；人物为何不能置身事外
+信息网络：消息传递；证据与名誉；公开和私下立场；信息泄漏；误判与反证
+博弈因果：行动目的；可用筹码；对方应对；成功和失败代价；局部得势后的新处境
+情绪与关系：尊严和安全；依赖与反抗；信任与利用；亲密和权力；爽点的具体兑现
+结局与制度：掌权或离开；财产身份变化；关系清算；无辜者后果；是否改变原有规则
+`,'谋略需要资源、证据、执行者和制度条件；所有对手都无理由失去判断力，会削弱博弈。'),
+genre('era','年代 · 乡土 · 家庭','relationship','年代文、乡村、家长里短、婚姻家庭、女性成长、代际','FE LL HI','把时代物质条件、制度变化和亲密关系写进同一生活。',`
+年代底稿：具体年份和地点；制度及政策；技术商品条件；重大变化；资料与记忆的分歧
+日常物质：住房和交通；收入与供给；劳动家务；饮食服饰；医疗教育可及性
+家庭结构：亲属和代际；婚姻分工；照护与育儿；财产继承；个体退出和支持
+社区与阶层：村落工厂单位；邻里评价；城乡流动；身份机会；公共资源分配
+个人目标：生计和发展；情感与尊严；学习职业；迁徙与留守；个人愿望和家庭期待
+情节推进：日常事件的累积；时代机会；家庭危机；成功和失去；关系长期变化
+叙述与情绪：生活细节；方言和称谓；代际视角；温暖与苦难；不靠标签替代具体经验
+结局：家庭的新平衡；代际传承或断裂；生活改善及代价；个人选择；时间经过后的余韵
+`,'年代不能只靠复古物件表现；制度、物价、劳动和家庭选择需要符合故事的具体时空。'),
+genre('farm','种田 · 经营 · 基建','competition','乡村经营、店铺、美食经营、领地、家族、文明建设','QD FE FC WR','核心是持续生产、组织和生活改善，不只是获得第一桶金。',`
+起始条件：土地和设施；人口劳动力；资金工具；知识技能；现有社会关系
+生产系统：种养或制造周期；原料和能源；工序与技能；损耗和失败；季节与生态
+经营循环：成本收入；库存运输；需求和渠道；现金流；扩张和停滞
+劳动与组织：分工培训；激励与分配；协作冲突；公共劳动；管理成本
+技术与建设：技术前提；工具和材料；基础设施；维修维护；扩散后的变化
+社会与权力：土地权属；税收和保护；市场规则；邻近组织；发展触及谁的利益
+情绪与人物：劳动成果的可感知性；人与土地物品的关系；共同生活；治愈与挫败；慢节奏中的变化
+规模与终局：家庭到城市的边界；资源承载；治理和福利；生态代价；作者希望抵达的生活
+`,'经营不能只累计成果；增长需要劳动力、维护、需求、组织与外部关系共同支撑。'),
+genre('game','游戏 · 网游 · 全息','competition','MMO、全息网游、游戏异界、玩家、虚拟世界','QD HD SA','分别设计游戏规则、玩家生活和虚拟世界的真实程度。',`
+游戏本体：核心玩法；胜负与目标；世界开放程度；版本和更新；规则由谁维护
+角色成长：职业和技能；数值或能力尺度；装备获得；资源消耗；重置和平衡
+经济系统：掉落和生产；交易与货币；付费与优势；稀缺及通胀；虚拟收益和现实关系
+玩家组织：公会和队伍；合作门槛；领导和分配；竞争冲突；社区声誉
+世界真实性：NPC主体性；死亡和复活；离线与时间；现实和虚拟边界；玩家行为的后果
+战斗与任务：操作和策略；情报准备；团队配合；规则克制；失败是否有真实影响
+人物与生活：游戏动机；现实压力；社交关系；能力成长；虚拟经历改变现实的方式
+长期结构：副本和任务差异；版本变迁；主角优势边界；现实虚拟双线；最终目标
+`,'游戏更新和玩家学习会改变旧优势；NPC若具备真实人格，世界伦理与资源系统也会变化。'),
+genre('esports','电竞 · 职业赛事','competition','职业战队、联赛、青训、退役、重返赛场','QD HD LH','职业竞争同时依赖游戏版本、团队和人的生涯。',`
+竞技项目：胜负规则；地图和角色；版本变化；技术与策略；观众如何理解关键局面
+赛事体系：赛制和赛程；晋级淘汰；积分与排名；备战间隔；胜负对下一阶段的影响
+职业生态：战队和俱乐部；青训选拔；合同转会；商业赞助；管理与舆论
+选手能力：训练方式；操作和决策；角色分工；状态伤病；年龄与生涯变化
+团队关系：沟通和默契；战术指挥；竞争与替补；信任冲突；共同失败后的调整
+对手设计：独立目标；不同风格；战术演变；研究和应对；不把对手写成固定障碍
+比赛叙述：赛前预期；关键选择；场上场下信息；局部胜负反转；赛后影响
+人物与终局：为何想赢；胜负的生活代价；荣誉与关系；退役或新阶段；冠军之外的完成感
+`,'胜负需要可理解的项目规则与团队作用；主角高光不应抹掉队友和对手的专业判断。'),
+genre('sports','体育 · 竞技','competition','足球、篮球、田径、围棋、赛车、教练、体育经营','QD LH','竞技过程、项目条件和生涯选择共同产生阅读回报。',`
+项目规则：胜负与计分；位置和分工；有效动作；违规与判罚；故事年代的规则版本
+身体与训练：训练周期；体能与技能；恢复营养；伤病和限制；年龄与潜力
+战术和心理：个人技术；集体配合；临场判断；压力和失误；对手应变
+赛事与赛历：资格和分级；赛制；赛程负荷；积分排名；关键比赛的意义
+职业与组织：青训选拔；教练团队；合同转会；经纪和商业；联盟与国家队
+人物与关系：竞争动机；队友家人；榜样和宿敌；自我评价；胜负如何改变关系
+比赛表达：空间位置；关键决策；过程信息；观众与解说；不懂项目的读者如何跟上
+生涯与终局：阶段目标；失败和伤病后选择；冠军的代价；退役后的生活；竞技价值与个人价值
+`,'现实项目的规则与赛历需按故事时代核对；比赛过程为什么这样发展，比直接宣布获胜更关键。'),
+genre('campus','校园 · 青春 · 成长','relationship','青春甜宠、友情、升学、社团、成长、毕业','FE CW VP','学校是具体制度环境，成长包括友情、家庭、自我与未来。',`
+学校环境：学制和日程；考试评价；教师和管理；资源差异；校园空间和社交
+人物阶段：年龄与认知；自我形象；情绪表达；技能和兴趣；成长不均衡
+家庭与社会：家长期待；经济条件；照护和压力；城乡与阶层；未来机会
+同伴关系：友情归属；竞争和比较；亲密关系；群体规则；排斥和支持
+事件与成长：日常积累；学业活动；第一次独立选择；失败与羞耻；被理解和改变
+信息与视角：少年知道什么；成人知道什么；误解形成；回忆叙述的距离；人物声音
+情绪与节奏：心动期待；不安失落；幽默和轻盈；时间流逝；普通时刻的分量
+终局：毕业或阶段结束；关系去向；自我理解变化；未来的不确定性；成长的所得与所失
+`,'不要把年龄标签当作统一人格；人物的家庭、经验和具体处境会产生不同成长路径。'),
+genre('entertain','娱乐圈 · 文艺 · 传媒','competition','影视、音乐、文学、导演、偶像、直播、创作者','QD FQ LL','作品创作、行业生产和公众形象是不同层面的竞争。',`
+艺术或内容：作品类型；创作目标；技能与训练；审美分歧；作品为什么打动人
+产业链：立项制作；资金和团队；发行传播；平台渠道；收益和结算
+职业生态：经纪和合约；选角录用；项目周期；合作竞争；职业声誉
+公众形象：人设与真实生活；粉丝群体；舆论和媒体；隐私边界；声誉变化
+行业博弈：资源配置；议价能力；组织利益；合作风险；对手的合理动机
+人物生活：创作动机；名利与关系；工作负荷；家庭与私人愿望；成长和自我耗损
+叙事表达：专业过程可读性；作品展示的方式；结果的证据；舞台和幕后；情绪回报
+终局：事业阶段；作品和人的关系；公众评价与自我判断；关系兑现；成名以后的生活
+`,'热度、收入、奖项和艺术评价并非同一个尺度；作品取得成果需要看得见的过程和条件。'),
+genre('daily','生活日常 · 美食 · 旅行','relationship','慢生活、美食、旅行、赶山、宠物、治愈、日常喜剧','FQ FE LL VP','低外部冲突也需要观察、关系、感受和生活变化。',`
+生活场域：地域与季节；居住和交通；物质条件；日常节律；地方与人物的关系
+生活技能：食物或技艺来源；学习与练习；材料工具；劳动时间；失败与成果
+人物需要：疲惫和失去；想要保住的东西；兴趣和自尊；与社会的连接；改变生活的选择
+关系网络：家人邻里；客人朋友；人与动物；互助与边界；关系的细微变化
+观察与感官：具体细节；味道声音触感；地方记忆；物品的意义；不同人物的感受
+小情节：日常目标；小阻力与意外；准备等待和结果；幽默或惊喜；积累性的变化
+节奏与情绪：安定与波动；期待和满足；留白；治愈是否有依据；重复中产生差异
+结束与余韵：生活的新秩序；关系的落点；人物学会什么；仍保留的缺憾；继续生活的感觉
+`,'日常可以慢，但需要具体生活的质地；治愈并不等于所有困难自动消失。'),
+genre('kids','儿童 · 童话 · 少年冒险','expression','童话、儿童小说、少年冒险、动物故事、系列成长','CW WR VP','受众维度可与任何世界背景组合，需要独立处理理解、表达和角色行动。',`
+读者与表达：具体年龄和阅读能力；独立阅读或亲子阅读；词汇和篇幅；幽默趣味；允许的复杂程度
+儿童视角：知道与不知道的事；具体感受；想象和现实；自我理解；成人目光的距离
+人物能动性：孩子自己的愿望；能采取的行动；朋友和成人的作用；试错与后果；解决问题的贡献
+世界与奇想：日常或幻想边界；拟人化规则；奇异事物的逻辑；可理解的限制；惊奇和发现
+关系与成长：家庭照护；同伴归属；差异和误解；勇气责任与同情；个体成长的多种形式
+冒险与结构：清楚的关注点；场景变化；悬念与喘息；失败后的支持；单本和系列的结束
+情绪与表现：害怕和安全；悲伤与希望；语言和意象；不靠说教替代事件；尊重儿童真实体验
+终局：人物的具体改变；关系回响；成长不等于成人化；奇想的余韵；读者可以带走的感受
+`,'儿童文学不是成人故事删减版；年龄、能动性、语言和情绪承载需要重新设计。'),
+genre('literary','文学 · 心理 · 实验叙事','expression','现实主义、心理、意识流、家族史、实验、寓言','PG VP LL','允许以意识、语言、形式和经验组织小说，也仍需要整体选择。',`
+核心经验：作者关注的生命问题；人物处境；时代和社会；矛盾和复杂性；不预先简化的部分
+心理与意识：感知和记忆；欲望与压抑；自我叙述；内在时间；行为和内心的裂缝
+形式与结构：顺序或碎片；循环和对照；多声部；文体嵌套；形式为何适合此经验
+叙述者与距离：可靠性；作者和人物的距离；同情与讽刺；视角边界；读者如何形成判断
+语言与声音：句法节律；词语质地；口语和书面；意象密度；语体变化的作用
+人物与社会：阶层劳动；家庭和历史；身份与权力；公共叙事和私人经验；细节的社会性
+母题与阅读：重复与变奏；留白歧义；象征和实物；读者参与；情绪和理解的推进
+终局与整体：经验如何汇聚；开放性的边界；语言与结构呼应；人物去向；作品留下的认识
+`,'可以弱化外部情节，但应明确小说凭什么组织注意力、情感和意义；不能用公式强行校验艺术选择。'),
+genre('light','轻小说 · 原创二次元','expression','原创轻小说、校园幻想、异世界、群像、角色喜剧','QD FQ VP SA','轻小说是跨题材的受众和表达取向；同人衍生另由插件处理。',`
+读者承诺：角色魅力；轻快或沉重的基调；幻想与日常比例；类型期待；长短篇系列安排
+角色组合：人物愿望；声音和互动；互补与冲突；独立于标签的细节；群像各自的发展
+世界规则：幻想前提；日常兼容；能力和限制；角色社会身份；规则能否制造有趣处境
+关系互动：搭档与团队；友情和爱情；误解的依据；亲密边界；关系持续变化
+喜剧与情绪：笑点来源；铺垫与回收；反差和节奏；严肃时刻；人物不被笑点掏空
+单元与长线：每卷中心事件；角色弧；新设定进入；旧线索回收；系列整体方向
+文字与呈现：对话比例；节奏和心理；人物视角；章节落点；插图依赖程度
+终局：本卷完成感；关系与角色回报；世界问题；系列收束；情绪和钩子的兑现
+`,'不能只组合人物标签；角色欲望、具体互动、事件后果和长线变化仍要成立。')
+];
+GENRES.push(
+genre('beasts','御兽 · 异兽 · 宠物成长','fantasy','御兽、进化、契约、异兽、培育、宠物','QD FQ SA WR','伙伴是具有需求和行为的生命，不只是可替换的技能装备。',`
+物种与生态：物种来源；食物与栖息；繁殖与种群；智慧和情感；生态位与竞争
+契约关系：如何建立；双方是否能拒绝；权利义务；解除与背叛；契约死亡的影响
+成长与进化：训练和成熟；进化条件；材料与时间；分支选择；失败和退化
+能力与协同：物种技能；消耗限制；属性与环境；人兽配合；多伙伴组合的成本
+培育与经济：食物医疗；培养职业；交易和所有权；资源供应；普通家庭能否养得起
+社会与制度：教育资格；竞技和劳动；公共安全；动物主体性；人兽关系的文化分歧
+人物与情感：选择伙伴的理由；相互理解；伙伴的独立愿望；成长不同步；失去和长期陪伴
+主线与终局：竞技探索或文明问题；伙伴队伍变化；培育成果的验证；生态和社会后果；共同去向
+`,'伙伴成长需要持续照护和资源；如果契约者有自我意志，交易、战斗和牺牲也需要相应叙事立场。'),
+genre('bureau','都市官场 · 公共治理','society','官场、基层、仕途、改革、公共服务、权力关系','FE QD LL','以虚构故事中的职责、制度、资源和公共后果构建冲突。',`
+时空与制度：故事年代地区；机构层级；任用和职责；程序与权限；真实制度需核对之处
+公共事务：具体治理问题；服务对象；资源预算；执行流程；目标与评价的差异
+组织运转：决策和执行；部门协作；信息上行；激励和问责；制度与非正式关系
+人物动机：职业抱负；价值底线；生活与家庭；能力短板；权力带来的变化
+利益网络：群众和企业；上级同事；地方历史关系；资源分配；不同群体合理诉求
+情节与博弈：政策如何落地；冲突的证据；决策成本；对手与盟友变化；结果的实际影响
+现实与表达：专业细节；人情和制度；信息视角；不把立场等同事实；具体生活的反应
+终局与责任：职务变化；问题改善程度；付出和代价；公共利益；仍未解决的结构问题
+`,'职位提升与公共事务解决是不同结果；关键制度、权责与时代背景应单独核实。'),
+genre('explore','探险 · 考古 · 盗墓想象','mystery','遗迹、地下空间、寻宝、考古想象、荒野、海洋探险','QD ZG HI SF','区分真实考古材料与虚构冒险规则，重点设计环境和探索因果。',`
+探索对象：地点与来历；人物为什么进入；已有资料；遗迹保护与社会语境；虚构的超常部分
+空间地理：地图和尺度；路线与出口；地质水文天气；空间变化；读者如何理解方位
+生存条件：照明空气；水食物和温度；装备损耗；伤病和救援；风险与退出条件
+知识与谜题：文字器物和历史；线索可靠性；知识来源；假说验证；解答的前文依据
+队伍与关系：专业分工；利益与信任；风险偏好；信息隐瞒；团体决策后果
+危险与超常：环境风险；机关与怪异；触发范围；规则边界；解决后的新代价
+历史与意义：过去发生什么；传说与事实；现代利益；文物与人的关系；发现改变谁的生活
+终局与后果：获得知识或物品；损失和责任；地点的最终状态；未解之谜；人物为何结束探索
+`,'谜题、危险和出口应有空间与历史依据；不能把真实考古等同于寻宝或破坏遗迹。'),
+genre('beastworld','兽世 · 异种文明 · 星际情缘','relationship','兽世、星际兽世、异种、跨物种关系、生存建设','FE FC WR RA','身体差异、繁衍、社会结构与亲密关系需要一起设计。',`
+生命与身体：物种结构；感官与寿命；环境适应；生殖或繁衍规则；身体自主性
+文明与生存：生态资源；技术和生产；迁徙与聚落；灾害防御；不同物种合作
+社会与身份：家族和群体；权力来源；婚姻亲属；教育与分工；性别和个体差异
+跨文化理解：语言与翻译；行为含义；礼仪与禁忌；误解和学习；避免物种等于单一人格
+关系与选择：吸引的具体依据；契约或配对制度；拒绝和退出；依赖与平等；关系中的成长
+能力与冲突：异能和变形；代价限制；阶层竞争；族群利益；强者与普通人的关系
+情节与情绪：陌生世界的适应；生存与亲密；共同建设；人物能动性；甜和危险的边界
+终局：关系结果；自主选择是否保留；族群秩序变化；生存问题；作者的情感承诺
+`,'物种设定不应自动取消人物的选择；生物机制、制度和个人意愿需要分开说明。')
+);
+const PLUGINS=blocks('plugin',`
+穿越：来源世界与目标世界；身体身份和记忆；带入物品知识的限制；时间是否双向同步；原世界关系如何处理
+重生：回到何时及原因；记忆准确性；历史改变后的信息失效；蝴蝶效应；重来一次的情感代价
+穿书：原书是否可靠；人物是否独立存在；剧情偏离机制；原角色与新身份；读者先验知识何时失效
+快穿：世界进入退出条件；任务由谁定义；身份和记忆保留；跨世界关系；长线目标与最终结束
+系统与任务：系统来源和目的；奖励与约束；信息是否可信；惩罚边界；系统不能替人物解决什么
+随身空间与两界：容量与供能；时间和生产条件；物品带入带出；跨界供需影响；空间暴露与失去的后果
+无敌与长生：无敌覆盖哪些方面；无法靠战力解决的问题；寿命和长期关系；读者期待来自哪里；优势是否仍有代价
+反派与复仇：人物行为立场；复仇对象及证据；对无辜者的影响；代价和底线；目标达成后还剩什么
+幕后与群像：多方独立目标；主角信息与控制边界；因果链和执行者；视角切换；不同人物的可读性与回报
+第四天灾与玩家群：玩家进入机制；本地世界是否真实；复活和资源供给；群体行为对社会的影响；管理员无法完全控制的部分
+领主与家族发展：领地或家族的收入；成员权利义务；继承和退出；规模扩张与治理成本；个体与集体目标的冲突
+直播与公众叙事：直播为什么存在；平台和观众；信息可见范围；内容生产和收益；名声改变现实行动的方式
+鉴宝与收藏：鉴定知识来源；真伪判断证据；物品历史与流通；价格和市场；所有权及人物利益
+医术与专业能力：技能训练来源；职业权限与责任；团队和流程；失败及不确定性；关键专业事实的核查清单
+工业基建与科技树：原料与能源；设备和测量；工艺与技能；维护运输及组织；技术扩散后的利益变化
+喜剧与反差：笑点具体来源；铺垫与回收；人物愿望不能被标签替代；严肃段落的切换；重复笑点如何变化
+治愈与慢节奏：人物真实的缺失；安定感来自何处；被理解的具体行动；不被抹掉的困难；情绪改善的长期依据
+甜宠与团宠：关爱怎样表现；被爱者的自主性；互相付出；冲突和边界；感情之外的独立生活
+虐恋与悲剧：痛苦源于何种选择；冲突是否可避免；人物并非只为受苦存在；牺牲的后果；结局与前文承诺一致
+关系组合与无CP：爱情是否主线；BG双男主双女主等关系约定；各方独立目标；亲密与同意边界；无CP时友情和其他关系的分量
+女性成长与主体性：人物自己的目标；资源和制度限制；技能与选择；关系能否支持自主；成长不能只有地位或婚恋结果
+同人衍生：所用原作版本；保留和改动的设定；原人物性格依据；新增人物及剧情的影响；跨作品规则兼容；拟使用素材的授权或适用条件待核实
+神话与文化改写：参考传统和具体版本；哪些是改写；宗教民俗与历史的差异；不同群体视角；新故事的独立命题
+宠物与动物视角：物种感知和需求；行为与训练；拟人化程度；照护资源；动物的独立作用
+短篇与中篇：中心体验和有限人物；信息压缩；有限场景的多重作用；转折与回响；结尾后读者理解的变化
+长篇连载与系列：阶段回报；新旧读者信息；人物和规则的长期记录；避免重复扩张；本书完成与续作空间
+多线与非线性：真实时间顺序；呈现顺序；每次跳转的阅读收益；人物知识状态；线索重组后的可理解性
+随机与概率能力：概率规则及可观察证据；随机结果的实际约束；角色如何决策；运气不能连续替代因果；读者能否理解风险
+`);
+const PLATFORM_MAP=[
+['起点 · 玄幻','东方玄幻、高武、御兽；按需要叠加成长或系统插件'],['起点 · 奇幻','西方奇幻、神话异世；可叠加领主、经营与冒险'],['起点 · 武侠／仙侠','武侠、修仙；可组合历史、情缘、家族与经营'],['起点 · 都市／现实','都市职业、商战、官场、脑洞、生活与文娱'],['起点 · 历史／军事','历史架空、战争、谍战；可叠加改史和基建'],['起点 · 游戏／体育','网游、电竞、体育；分别维护玩法和职业生态'],['起点 · 科幻／诸天无限','科幻、末世、诸天副本；时间循环等按机制扩展'],['起点 · 悬疑灵异／轻小说','推理、犯罪、恐怖、规则怪谈；轻小说作为表达取向'],['番茄 · 现言与青春','现代爱情、职场婚恋、校园青春、家庭成长'],['番茄 · 古言与宫宅','古代爱情、宫斗宅斗、年代和种田经营'],['番茄 · 脑洞与复合标签','都市脑洞、高武、修真、玄幻言情、星际兽世等组合'],['其他关系、机制与篇幅标签','双男主、无CP、穿越、重生、系统、短故事等进入跨题材插件']
+];
+</script>
+<script>
+(()=>{
+'use strict';
+const $=id=>document.getElementById(id);
+const escapeHTML=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sourceMap=new Map(SOURCES.map(s=>[s.id,s]));
+const allBlocks=[...CORE,...GENRES.flatMap(g=>g.blocks),...PLUGINS];
+const blockMap=new Map(allBlocks.map(b=>[b.id,b]));
+const statuses=['未审阅','保留','需补充','不适用'];
+const KEY='novel-design-review-v1';
+const state={view:'catalog',genre:'xianxia',query:'',family:'all',status:'all',reviews:{},intent:{emotion:'',hook:'',direction:''},composeGenres:new Set(['xianxia']),composePlugins:new Set(),includeCore:true};
+let canStore=true,composing=false;
+try{const saved=JSON.parse(localStorage.getItem(KEY)||'{}');if(saved&&saved.version===1){if(saved.intent&&typeof saved.intent==='object')for(const key of ['emotion','hook','direction'])if(typeof saved.intent[key]==='string')state.intent[key]=saved.intent[key].slice(0,5000);if(saved.reviews&&typeof saved.reviews==='object')for(const [id,r]of Object.entries(saved.reviews))if(blockMap.has(id)&&r&&typeof r==='object')state.reviews[id]={status:statuses.includes(r.status)?r.status:'未审阅',note:typeof r.note==='string'?r.note.slice(0,5000):''};}}catch{canStore=false;}
+const review=id=>state.reviews[id]||{status:'未审阅',note:''};
+const itemCount=list=>list.reduce((n,b)=>n+b.items.length,0);
+const normalized=value=>String(value).toLocaleLowerCase('zh-CN');
+const matches=(block,query=state.query)=>!query||normalized(block.title+' '+block.items.join(' ')).includes(normalized(query));
+function filteredBlocks(list){return list.filter(b=>matches(b)&&(state.status==='all'||review(b.id).status===state.status));}
+function save(){try{localStorage.setItem(KEY,JSON.stringify({version:1,reviews:state.reviews,intent:state.intent}));canStore=true;$('saveStatus').textContent='已保存在当前浏览器。批注不会自动发送到聊天；可导出审阅意见备份。';}catch{canStore=false;$('saveStatus').textContent='浏览器未能保存；本页仍保留本次批注，请及时导出审阅意见。';}}
+function sourceLinks(ids){return ids.map(id=>{const s=sourceMap.get(id);return s?`<a href="${escapeHTML(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(s.title)}</a>`:''}).join('');}
+function renderNav(){const available=GENRES.filter(g=>(state.family==='all'||g.family===state.family)&&(!state.query||normalized(g.title+' '+g.tags.join(' ')+' '+g.description).includes(normalized(state.query))||g.blocks.some(b=>matches(b))));$('genreList').innerHTML=available.map(g=>`<button class="genre-button" data-genre="${g.id}" aria-pressed="${g.id===state.genre}"><span class="number">${String(GENRES.indexOf(g)+1).padStart(2,'0')}</span>${escapeHTML(g.title)}<span>${g.blocks.length}</span></button>`).join('');$('genreSelect').innerHTML='<option value="">选择题材</option>'+available.map(g=>`<option value="${g.id}" ${g.id===state.genre?'selected':''}>${escapeHTML(g.title)}</option>`).join('');$('searchCount').textContent=`${available.length} / ${GENRES.length} 个题材族匹配；数字为题材专属设计主题数。`;}
+function blockHTML(b,index,open=false){const r=review(b.id);return `<details class="design-block" id="block-${b.id}" ${open?'open':''}><summary><h3>${String(index+1).padStart(2,'0')} · ${escapeHTML(b.title)}</h3><span class="block-meta"><span data-status-for="${b.id}">${escapeHTML(r.status)}</span> · ${b.items.length} 项</span></summary><div class="block-body"><ul class="items">${b.items.map(v=>`<li>${escapeHTML(v)}</li>`).join('')}</ul><div class="review-line"><label for="status-${b.id}">审阅判断</label><select id="status-${b.id}" data-review="${b.id}">${statuses.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select><span class="small muted">判断的是设计目录是否需要，不代表已生成设定。</span></div><label class="review-note-label" for="note-${b.id}">批注／遗漏补充</label><textarea class="review-note" id="note-${b.id}" data-note="${b.id}" maxlength="5000" placeholder="例如：这里还需要区分灵气的自然再生与人工转化。">${escapeHTML(r.note)}</textarea><p class="print-only" data-print-note="${b.id}">${escapeHTML(r.note)}</p></div></details>`;}
+function toolbar(){return `<div class="toolbar"><div><button data-expand="yes">展开全部</button> <button data-expand="no">收起全部</button></div><label>审阅状态<select id="reviewFilter"><option value="all" ${state.status==='all'?'selected':''}>全部状态</option>${statuses.map(s=>`<option ${state.status===s?'selected':''}>${s}</option>`).join('')}</select></label></div>`;}
+function emptyHTML(){return '<p class="empty">当前搜索或状态筛选没有匹配项。可清空左侧搜索，或切换为“全部状态”。</p>';}
+function renderCatalog(){const g=GENRES.find(g=>g.id===state.genre)||GENRES[0];let list=filteredBlocks(g.blocks);if(state.query&&normalized(g.title+' '+g.tags.join(' ')).includes(normalized(state.query)))list=g.blocks.filter(b=>state.status==='all'||review(b.id).status===state.status);return `<div class="eyebrow">题材专属设计目录</div><h2>${escapeHTML(g.title)}</h2><p class="lead">${escapeHTML(g.description)} 本题材有 ${g.blocks.length} 个专属主题、${itemCount(g.blocks)} 个设计检查项，组合时还应加载通用底层。</p><div class="meta">${g.tags.map(t=>`<span class="badge">${escapeHTML(t)}</span>`).join('')}<span class="badge neutral">AI 展开 · 作者按需介入</span></div><div class="callout"><strong>关联检查：</strong>${escapeHTML(g.audit)}</div><p class="small muted">下列设计问题为本次综合归纳。来源支持题材识别、作者经验或关键方法，并非每个字段都由来源逐项规定。</p><div class="source-links">${sourceLinks(g.sources)}</div>${toolbar()}${list.length?list.map((b,i)=>blockHTML(b,i,i<2)).join(''):emptyHTML()}<div class="section"><button data-view="compose">把此题材加入组合审查 →</button></div>`;}
+function renderCore(){const list=filteredBlocks(CORE);return `<div class="eyebrow">跨题材共同底层</div><h2>写任何题材，都要处理的设计面</h2><p class="lead">这里集中维护人物、世界、社会、叙事与表达的通用问题；题材专属模块负责进一步细化。目录是给 AI 的工作清单，创作者无需先逐项填表。</p><div class="meta"><span class="badge">${CORE.length} 个主题</span><span class="badge">${itemCount(CORE)} 个设计项</span></div>${toolbar()}${list.length?list.map((b,i)=>blockHTML(b,i,i===0)).join(''):emptyHTML()}`;}
+function renderPlugins(){const list=filteredBlocks(PLUGINS);return `<div class="eyebrow">机制 · 关系 · 风格 · 篇幅</div><h2>跨题材插件</h2><p class="lead">穿越、重生、系统、双男主、无 CP、甜宠和短篇等，不能全部当成互斥的世界题材。选择这些标签后，平台还需补上对应规则与检查。</p><div class="meta"><span class="badge">${PLUGINS.length} 个插件</span><span class="badge">可与任意兼容题材组合</span></div>${toolbar()}${list.length?list.map((b,i)=>blockHTML(b,i,i<2)).join(''):emptyHTML()}`;}
+function renderCompose(){return `<div class="eyebrow">组合后检查依赖，而不只拼接名称</div><h2>题材组合审查</h2><p class="lead">选择多个题材，整理它们的设计清单与冲突点。例如：修仙＋种田＋悬疑。此页整理设计需求，不会调用模型或自动生成小说。</p><div class="panel"><label><input type="checkbox" id="includeCore" ${state.includeCore?'checked':''}>包含通用设计底层</label><h3 class="combo-group">选择题材</h3><div class="checks">${GENRES.map(g=>`<label><input type="checkbox" data-combo-genre="${g.id}" ${state.composeGenres.has(g.id)?'checked':''}>${escapeHTML(g.title)}</label>`).join('')}</div><h3 class="combo-group">叠加插件</h3><div class="checks">${PLUGINS.map(b=>`<label><input type="checkbox" data-combo-plugin="${b.id}" ${state.composePlugins.has(b.id)?'checked':''}>${escapeHTML(b.title)}</label>`).join('')}</div><div class="inline-actions"><button id="buildCombo" class="primary">整理组合清单</button><button id="exportCombo">导出组合清单</button></div></div><div id="comboOutput" class="combo-output" aria-live="polite"></div>`;}
+function combinationChecks(){const ids=state.composeGenres;const hints=[];const hasAny=arr=>arr.some(id=>ids.has(id));if(ids.has('xianxia')&&hasAny(['farm','business','bureau','palace']))hints.push('修仙 × 社会经营：灵气与寿命会改变资源、继承、劳动和组织稳定性；先统一这些规则。');if(hasAny(['mystery','rules','spy'])&&hasAny(['xianxia','eastern','superpower','science','western','myth']))hints.push('解谜 × 超常能力：先确定能力边界，再安排线索。不能在揭晓时新增能读心、回溯或预言的万能能力。');if(ids.has('apocalypse')&&hasAny(['farm','business','daily']))hints.push('末世 × 经营生活：即时囤积和持续生产分别核算；稳定供水、卫生、维护及群体治理是后续依赖。');if(hasAny(['history','era','war','spy','palace','ancient'])&&state.composePlugins.has('plugin-1'))hints.push('历史背景 × 穿越：确定分歧点、知识落地条件，以及改变发生后哪些旧历史知识不再可靠。');if(hasAny(['romance','ancient','beastworld'])&&state.composePlugins.has('plugin-19'))hints.push('爱情 × 悲剧：明确中文爱情叙事的结局承诺；若标注英文 romance，则应另核对其类型定义，不能同时承诺相反结局。');if(hasAny(['game','esports','sports'])&&hasAny(['infinite','xianxia','superpower']))hints.push('竞技 × 超常成长：明确项目是否允许这些能力；玩家规则、现实身体和职业赛事三个层面分别判断。');if(state.composePlugins.has('plugin-20'))hints.push('关系组合：先确定是否有爱情主线。无 CP 是创作约定，不能在后续自动添加恋爱终局。');if(ids.size>1)hints.push('多题材共有字段需要统一：本页保留各题材命名空间供审阅；未来生成时应合并同一对象，而不是创建相互矛盾的多套规则。');hints.push('通用检查：作者的情绪、钩子和方向优先；模块若产生互相冲突的设定，应给出取舍方案，不能静默改变作者意图。');return hints;}
+function comboGroups(){const groups=[];if(state.includeCore)groups.push({title:'通用设计底层',blocks:CORE});for(const g of GENRES)if(state.composeGenres.has(g.id))groups.push({title:g.title,blocks:g.blocks});const plugins=PLUGINS.filter(b=>state.composePlugins.has(b.id));if(plugins.length)groups.push({title:'叠加插件',blocks:plugins});return groups;}
+function buildCombo(){const output=$('comboOutput');if(!output)return;const groups=comboGroups();if(!state.composeGenres.size){output.innerHTML='<p class="callout warning" role="alert">请至少选择一个题材。通用底层和插件可以随后叠加。</p>';return;}const total=groups.flatMap(g=>g.blocks);output.innerHTML=`<h3>组合结果：${state.composeGenres.size} 个题材 · ${total.length} 个设计主题 · ${itemCount(total)} 个设计项</h3><div class="callout"><strong>需要共同解决的依赖与冲突</strong><ul>${combinationChecks().map(t=>`<li>${escapeHTML(t)}</li>`).join('')}</ul></div>${groups.map(group=>`<h3 class="group-title">${escapeHTML(group.title)}</h3>${group.blocks.map((b,i)=>blockHTML(b,i,false)).join('')}`).join('')}`;}
+function renderVision(){const stats=`<div class="stat-row"><div><strong>${GENRES.length}</strong><span>题材族</span></div><div><strong>${allBlocks.length}</strong><span>设计主题</span></div><div><strong>${itemCount(allBlocks)}</strong><span>可展开的设计项</span></div><div><strong>${SOURCES.length}</strong><span>公开来源</span></div></div>`;return `<div class="eyebrow">创作者的控制面</div><h2>人确定三件事，AI 负责把它们写成一部小说</h2><p class="lead">这是依据你的愿景整理的目标分工，不是已实现的生成平台。情绪指希望读者经历什么，钩子指为什么继续读，方向指故事朝哪里发展及哪些选择不能改变。</p>${stats}<div class="intent-grid"><div><label for="emotion">情绪</label><textarea id="emotion" data-intent="emotion" maxlength="5000" placeholder="先替普通人憋屈，再看到他以聪明和代价赢回尊严。">${escapeHTML(state.intent.emotion)}</textarea><p class="hint">可描述全书基调，也可指定某卷、某章的情绪变化；角色心理由 AI 据此展开。</p></div><div><label for="hook">钩子</label><textarea id="hook" data-intent="hook" maxlength="5000" placeholder="被判为下品灵根的人，为什么出现在宗门封存的名册里？">${escapeHTML(state.intent.hook)}</textarea><p class="hint">包括谜题、人物牵挂、关系期待与成长回报；不要求每章都制造同类悬崖。</p></div><div><label for="direction">方向</label><textarea id="direction" data-intent="direction" maxlength="5000" placeholder="从个人求生写到改变传承垄断；保留谨慎性格，不自动转成称帝。">${escapeHTML(state.intent.direction)}</textarea><p class="hint">指定目标、结局取向、价值底线、关系约定，以及不想发生的事情。</p></div></div><div class="inline-actions"><button id="exampleIntent">填入修仙示例</button><span class="small muted">输入自动保存到当前浏览器，可随审阅意见导出。</span></div><div class="flow"><span>作者意图</span><b>→</b><span>题材与插件</span><b>→</b><span>设定和社会推演</span><b>→</b><span>人物与事件</span><b>→</b><span>场景与正文</span><b>→</b><span>意图与一致性复核</span></div><div class="section table-wrap"><table><thead><tr><th>作者保留的决定</th><th>AI 可自主展开</th><th>何时返回作者</th></tr></thead><tbody><tr><td>情绪目标和阅读体验</td><td>人物反应、压力、转折、对白、节奏与表达</td><td>方案要改变基调或主要情绪回报时</td></tr><tr><td>核心钩子与兑现取向</td><td>线索、误解、局部答案、揭示顺序及章间期待</td><td>核心钩子无法成立，或必须换成另一个核心问题时</td></tr><tr><td>故事方向和明确边界</td><td>世界规则、能力、社会、配角、支线和具体事件</td><td>需要改变主目标、终局、关系约定或已锁定规则时</td></tr><tr><td>按需介入任何细节</td><td>未指定内容先生成可用方案，沿用已采纳版本</td><td>出现真实冲突或关键选择，不逐项追问所有空白字段</td></tr></tbody></table></div><div class="section"><h3>模块怎样真正组合</h3><p class="lead">每个模块接收：作者意图、题材组合、相关已采纳内容和任务范围；输出：候选内容、依据、依赖、冲突及需更新的事实。题材决定需要哪些能力，不要求把每个主题常驻为一个独立 Agent。</p><div class="mapping-grid"><p><strong>世界与规则 → 社会</strong>能力的可获得性、成本和稀缺性，决定谁能控制资源与知识。</p><p><strong>社会 → 人物</strong>制度决定人物拥有的机会、义务、风险与可行选择。</p><p><strong>人物 → 情节</strong>欲望、认知与关系让人物作决定，再产生真实后果。</p><p><strong>情节 → 情绪与钩子</strong>事件改变读者理解与期待，而不是只增加字数。</p><p><strong>正文 → 记忆与后续</strong>从已采纳正文更新状态，计划、猜测与事实分开。</p><p><strong>审查 → 返工范围</strong>规则冲突退回设定，动机问题退回人物，表达问题局部修订。</p></div></div>`;}
+function renderSources(){return `<div class="eyebrow">覆盖范围与证据</div><h2>从平台名称，映射到可组合的设计内容</h2><p class="lead">本版覆盖 ${GENRES.length} 个题材族、${PLUGINS.length} 个跨题材插件。以起点、番茄的公开入口和编辑专题核对范围，再用作者创作谈与专业方法补充设计维度。</p><div class="callout"><strong>“穷尽”的审阅口径：</strong>对已经列入的题材，检查世界、能力、社会、人物、情节、叙述、情绪、钩子与终局是否有相应设计面；允许继续添加新题材、子类型与遗漏项。没有把有限公开样本称作全站数据库，也没有做全量正文统计。</div><h3 class="section">平台入口覆盖映射</h3><div class="mapping-grid section">${PLATFORM_MAP.map(([a,b])=>`<p><strong>${escapeHTML(a)}</strong>${escapeHTML(b)}</p>`).join('')}</div><h3 class="section">来源如何使用</h3><p class="lead">平台分类用于确认“有哪些方向”；编辑专题是特定场景的建议；作者访谈是个人经验；本页的字段、模块边界和组合检查是综合设计推导。军事、法律、医疗、历史和体育等具体事实，在真正创作相关情节时仍需专项考据。部分动态书库仅返回脚本提示，本次采用可访问的首页、编辑文章及作品详情，不声称已读取其全部分类数据。</p>${SOURCES.map(s=>`<article class="source-card"><span class="source-id">${s.id}</span><div><a href="${escapeHTML(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(s.title)}</a><div class="source-type">${escapeHTML(s.type)}</div><p>${escapeHTML(s.note)}</p></div></article>`).join('')}<div class="section"><h3>覆盖自查</h3><p class="lead">覆盖项数量只表示目录规模，不是质量分数。本页不声称这些题材互不重叠，也不强制所有小说使用所有字段。修仙的具体境界、灵气和功法由作品决定；爱情、文学和儿童作品也不套同一套胜负与升级公式。</p></div>`;}
+function renderNotes(){const entries=allBlocks.filter(b=>review(b.id).status!=='未审阅'||review(b.id).note);return `<div class="eyebrow">本地审阅记录</div><h2>我的审阅 · ${entries.length} 个主题</h2><p class="lead">可把需要保留、补充或不适用的设计主题标记下来。导出后可在下一轮提供给我继续修改；批注不会自动回传到聊天。</p>${entries.length?entries.map(b=>{const r=review(b.id);return `<article class="notes-card"><h3>${escapeHTML(b.title)} <span class="badge">${escapeHTML(r.status)}</span></h3><span class="small muted">${b.id}</span><p>${escapeHTML(r.note||'未填写文字批注')}</p></article>`}).join(''):'<p class="empty">还没有审阅记录。展开任意设计主题，选择审阅判断并填写批注。</p>'}`;}
+function render(){renderNav();document.querySelectorAll('.tabs [data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===state.view)));const renderers={catalog:renderCatalog,core:renderCore,plugins:renderPlugins,compose:renderCompose,vision:renderVision,sources:renderSources,notes:renderNotes};$('content').innerHTML=renderers[state.view]();if(state.view==='compose')buildCombo();}
+function download(name,content,type){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function exportReviews(){const records=allBlocks.filter(b=>review(b.id).status!=='未审阅'||review(b.id).note).map(b=>({id:b.id,title:b.title,...review(b.id)}));download('novel-design-review-notes.json',JSON.stringify({schema:'novel-design-review/1',catalogVersion:'2026-11-12',exportedAt:new Date().toISOString(),intent:state.intent,selectedGenres:[...state.composeGenres],selectedPlugins:[...state.composePlugins],reviews:records},null,2),'application/json;charset=utf-8');$('saveStatus').textContent='已生成审阅意见下载；请确认浏览器下载结果。';}
+document.addEventListener('click',event=>{const button=event.target.closest('button');if(!button)return;if(button.dataset.genre){state.genre=button.dataset.genre;state.view='catalog';state.status='all';render();}else if(button.dataset.view){if(button.dataset.view==='compose')state.composeGenres.add(state.genre);state.view=button.dataset.view;render();}else if(button.dataset.expand){$('content').querySelectorAll('details').forEach(d=>d.open=button.dataset.expand==='yes');}else if(button.id==='buildCombo'){buildCombo();}else if(button.id==='export'){exportReviews();}else if(button.id==='exportCombo'){if(!state.composeGenres.size){buildCombo();return;}const groups=comboGroups();const text=['# 小说题材组合设计清单','',...Object.entries(state.intent).map(([key,value])=>`${{emotion:'情绪',hook:'钩子',direction:'方向'}[key]}：${value||'未指定'}`),'','## 组合依赖',...combinationChecks().map(t=>'- '+t),...groups.flatMap(g=>['','## '+g.title,...g.blocks.flatMap(b=>['','### '+b.title,...b.items.map(t=>'- '+t)])])].join('\n');download('novel-design-combination.md',text,'text/markdown;charset=utf-8');}else if(button.id==='exampleIntent'){state.intent={emotion:'先替普通人憋屈，再看到他通过聪明选择和真实代价赢回尊严。',hook:'被判为下品灵根的人，为什么出现在宗门封存的名册里？',direction:'从个人求生写到改变传承垄断；保持谨慎性格，不自动转成称帝。'};save();render();}else if(button.id==='print'){const details=[...$('content').querySelectorAll('details')];const previous=details.map(d=>d.open);details.forEach(d=>d.open=true);window.addEventListener('afterprint',()=>details.forEach((d,i)=>d.open=previous[i]),{once:true});window.print();}});
+document.addEventListener('change',event=>{const el=event.target;if(el.id==='textSize'&&['16','20','24','32'].includes(el.value)){document.documentElement.style.fontSize=el.value+'px';}else if(el.id==='family'){state.family=el.value;renderNav();}else if(el.id==='genreSelect'&&el.value){state.genre=el.value;state.view='catalog';state.status='all';render();}else if(el.id==='reviewFilter'){state.status=el.value;render();}else if(el.dataset.review){const id=el.dataset.review;state.reviews[id]={...review(id),status:statuses.includes(el.value)?el.value:'未审阅'};save();document.querySelectorAll(`[data-status-for="${id}"]`).forEach(n=>n.textContent=el.value);}else if(el.dataset.comboGenre){el.checked?state.composeGenres.add(el.dataset.comboGenre):state.composeGenres.delete(el.dataset.comboGenre);}else if(el.dataset.comboPlugin){el.checked?state.composePlugins.add(el.dataset.comboPlugin):state.composePlugins.delete(el.dataset.comboPlugin);}else if(el.id==='includeCore'){state.includeCore=el.checked;}});
+document.addEventListener('input',event=>{const el=event.target;if(el.dataset.note){const id=el.dataset.note;state.reviews[id]={...review(id),note:el.value.slice(0,5000)};save();const printed=document.querySelector(`[data-print-note="${id}"]`);if(printed)printed.textContent=el.value;}else if(el.dataset.intent){state.intent[el.dataset.intent]=el.value.slice(0,5000);save();}});
+$('search').addEventListener('compositionstart',()=>composing=true);$('search').addEventListener('compositionend',event=>{composing=false;state.query=event.target.value.trim();render();});$('search').addEventListener('input',event=>{if(composing||event.isComposing)return;state.query=event.target.value.trim();render();});
+render();if(!canStore)$('saveStatus').textContent='未能读取浏览器历史记录；可继续审阅，并导出备份。';
+})();
+</script>
+</body>
+</html>
