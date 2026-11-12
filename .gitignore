@@ -1,0 +1,5 @@
+# 本地凭据与个人配置，仅提交无真实值的示例。
+.env
+.env.*
+!.env.example
+node_modules/
