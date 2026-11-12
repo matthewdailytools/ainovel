@@ -201,3 +201,59 @@ def test_book_evidence_includes_related_manual_module_usage(settings, domain, st
     assert len(entry["related_tasks"]) == 2
     assert entry["calls"][0]["task_id"] == manual["id"]
     assert entry["cost_by_currency"]["USD"]["settled"] == 0.000012
+
+
+def test_readable_report_keeps_stale_review_and_unaccepted_candidate_separate(settings, domain, story):
+    from pathlib import Path
+    from ainovel.db import dumps
+    from ainovel.evidence_export import export_evidence
+
+    domain.save(story["chapter_id"], 0, "当前正文保留。")
+    task = domain.queue(
+        "module", {"novel_id": story["id"], "branch_id": story["branch_id"], "account": "openai_1"}
+    )
+    review = {
+        "summary": "缺少交叉核对。",
+        "checks": [],
+        "findings": [
+            {
+                "chapter": 1,
+                "severity": "blocker",
+                "quote": "候选仍待查。",
+                "reason": "情节未落实。",
+                "repair": "补齐核对过程。",
+            }
+        ],
+    }
+    candidate = domain.stage(
+        {
+            "novel_id": story["id"],
+            "branch_id": story["branch_id"],
+            "chapter_id": story["chapter_id"],
+            "base_revision": 1,
+        },
+        "chapter",
+        {"text": "候选仍待查。", "review": review},
+        {},
+        task["id"],
+    )
+    state = {
+        "waiting_artifact": candidate["id"],
+        "completion": {
+            "closed": True,
+            "summary": "这是旧版本的结论。",
+            "findings": [],
+            "promises": [{"condition": "核对完成", "result": "pass", "evidence": "旧稿"}],
+            "source_versions": [{"id": story["chapter_id"], "revision": 0}],
+        },
+    }
+    with domain.db.connect(True) as tx:
+        tx.execute("UPDATE tasks SET result=?,status='needs_review' WHERE id=?", (dumps(state), task["id"]))
+    folder = Path(export_evidence(settings, [task["id"]])["folder"])
+    manuscript = (folder / (task["id"] + ".md")).read_text("utf-8")
+    report = (folder / (task["id"] + "-修订报告.md")).read_text("utf-8")
+    pending = (folder / (task["id"] + "-待审候选.md")).read_text("utf-8")
+    assert "当前正文保留。" in manuscript and "候选仍待查。" not in manuscript
+    assert "历史来源" in report and "三层正式验收：False" in report
+    assert "尚未采纳" in pending and "候选仍待查。" in pending
+    assert "情节未落实。" in report and "补齐核对过程。" in report
