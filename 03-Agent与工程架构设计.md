@@ -57,7 +57,7 @@ flowchart TB
 module_id / module_version
 actions                       支持哪些作者动作
 input_schema / output_schemas  输入和产物类型
-required_context              执行必需的最小资料
+required_context_by_mode      按创作分工确定必需的最小资料
 optional_context              可补充资料
 roles                         内部使用的模型角色
 acceptance_rules              程序校验、审查与采纳条件
@@ -78,6 +78,8 @@ side_effects                  允许产生的候选类型
 | `completion.check_book` | 全书选定版本、承诺账本 | 完结问题清单 | 修订或整书完成 |
 
 独立调用可缺少全书规划，但要返回 `context_completeness`，说明本次检查覆盖了哪些范围。全自动流程对必需输入使用更严格前置校验，不能把独立模块的宽松输入误当成无人值守条件。
+
+模式约束引用[创作模式与写作设置](06-创作模式与写作设置.md)：建议模式的手写入口不要求规划产物，AI 辅助只按本次动作检查最小输入；半自动需要本次情节约束与有效写作设置；全自动需要采用的设定、大纲和整书目标。未有逐章计划时，全自动可先调用规划模块生成，而不是要求作者手工填齐。
 
 跨模块错误统一包含 `code / category / message / retryable / run_id`，必要时附可公开的来源版本与恢复动作。至少区分输入无效、缺少前置资料、依据过期、业务规则阻断、供应商认证失败、临时服务失败和外部调用结果未知。未知错误不能包装为成功，也不能默认可重试。可空字段分别定义含义，例如未知故事时间不等于时间为零；未设置预算只允许明确的手动任务策略，不能作为整书自动运行的无限额度。
 
@@ -128,6 +130,7 @@ side_effects                  允许产生的候选类型
 - `story_commits`：一次正文与事实的原子采纳、父提交和历史位置。
 - `facts / knowledge_records / promises`：时态事实、角色与读者所知、伏笔和承诺。
 - `artifact_dependencies`：计划、正文、摘要、事实之间的版本依赖。
+- 情节和人物扩展：`plot_threads / story_events / event_relations / presentations / character_state_deltas`；能力定义和人物掌握记录按实际需求从产物中独立。它们是后续逻辑对象，不要求首版同时建全。
 - `workflow_runs / run_steps / run_events`：流程步骤、尝试、可重连事件。
 - `budget_reservations`：调用前费用预留及未知结果占用。
 - `branches`：自动批次、历史修订或替代剧情分支；模块阶段只保留默认工作版本。
@@ -188,6 +191,14 @@ Writer 读取明确分区：本次任务、硬约束、当前章卡、当前事�
 
 首版无需向量库即可使用精确实体、别名、章节位置和手工选择。加入中文全文检索时显式分词或构建词项索引，不假设英文默认分词适用于中文。Embedding 作为可选独立能力；未核验前不假定 DeepSeek 有可直接调用的 Embedding 接口。不同模型、维度和切分版本的向量不可混用。
 
+### 6.4 多线事件与人物状态的连接
+
+拟采用[多线模型](07-多线叙事与伏笔建模分析.md)：事件拥有统一身份、故事时间、所属或影响的情节线，正文呈现位置另行记录。实线推进、虚线伏笔属于视图语义，不能替代底层关系类型、事件状态和披露资格。
+
+[人物状态模型](08-人物认知与能力状态设计.md)基于档案与已确认事件变化重建目标时点。角色认知记录接触途径和相信/怀疑状态，命题真相与读者披露单列；能力记录掌握来源、当前限制和使用条件。事件状态和人物状态共用采纳与来源版本，不再生成一套独立的“人物事实”。
+
+状态查询绑定分支、目标事件及前/后边界，读者信息另绑定叙述位置。回忆、补叙和历史修订不能直接读取全书最新人物状态；同一事件在多线或多视角呈现时只应用一次状态变化。
+
 ## 7. 单章生产与采纳事务
 
 ```mermaid
@@ -243,20 +254,38 @@ Engine 的输入是持久事实，输出是一个类型化的下一步命令。�
 
 ### 8.2 初始自动化政策
 
+创作分工、情节约束、写作偏好与执行政策分别保存。半自动的关键不是审核次数，而是保持作者指定情节。以下为字段结构示例，尚非已采用的运行 Schema：
+
 ```yaml
-mode: assisted
-scope: chapter
-stop_after_chapter: null
-max_revision_rounds: 2
-max_transient_retries: 3
-max_calls_per_step: 8
-auto_accept_new_facts: false
-allow_locked_rule_changes: false
-budget_currency: USD
-budget_limit: null
+creation_mode: assisted
+plot_contract:
+  fixed_events: [到渡口交易, 发现身份试探, 脱身]
+  fixed_outcomes: [交易失败, 获得下处交易的消息]
+  forbidden_events: [正面战斗]
+  allowed_detail_types: [对白, 动作, 心理, 环境, 衔接]
+  unknown_plot_handling: suggest_options
+writing_profile:
+  inherit: novel_default
+  overrides:
+    viewpoint: third_person_limited
+    pace: balanced
+execution_policy:
+  scope: chapter
+  review_checkpoint: after_chapter
+  adoption: manual
+  stop_after_chapter: null
+  max_revision_rounds: 2
+  max_transient_retries: 3
+  max_calls_per_step: 8
+  auto_accept_new_facts: false
+  allow_locked_rule_changes: false
+  budget_currency: USD
+  budget_limit: null
 ```
 
-这是产品配置示例，不是模型请求格式。进入全自动时要求明确预算、范围、模型及采纳政策。新的非冲突事实可以在授权范围内自动采纳；修改锁定设定、扩大作品范围、改变根本结局等超出政策的动作暂停。
+这是产品配置示例，不是模型请求格式；示例中的次数、审核点和采纳方式不是半自动的固定默认值。写作设置从作品、卷弧、章节、场景到任务逐层继承，锁定规则与正式事实独立校验；有效设置连同来源版本在任务启动时冻结。
+
+建议模式只执行作者请求的辅助动作，半自动按情节契约完成细节与表达，全自动自行细化采用的大纲并推进至整书完成。Review 必须检查固定事件和结果是否保持，不能只评判语言流畅。进入全自动时明确预算、范围、模型及采纳政策；新的非冲突事实可以在授权范围内自动采纳，修改锁定设定、扩大范围、改变根本结局等超出政策的动作暂停。
 
 “写到第 N 章停”“改完让我看”“本卷结束暂停”转成持久条件，不能只存在聊天文本中。修改在途模式时，默认在下一个任务边界生效。
 
