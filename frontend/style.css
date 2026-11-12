@@ -1168,11 +1168,12 @@ summary {
   }
   .sidebar-bottom {
     display: flex;
+    flex-wrap: wrap;
     gap: 12px;
     align-items: flex-start;
   }
   .sidebar-bottom > label {
-    flex: 1;
+    flex: 1 0 100%;
     margin: 0;
   }
   .sidebar-bottom details {

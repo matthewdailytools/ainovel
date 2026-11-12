@@ -41,6 +41,7 @@ export type Task = {
   error: string
   result: {
     next_chapter?: number
+    repair_round?: number
     waiting_artifact?: string
     latest_artifact?: string
     plan?: unknown

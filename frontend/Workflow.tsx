@@ -34,7 +34,9 @@ export function WorkflowPage({
   const [busy, setBusy] = useState(false)
   const pendingRequest = useRef<{ signature: string; key: string } | null>(null)
   const [selectedTask, setSelectedTask] = useState('')
-  const [waiting, setWaiting] = useState<Artifact>()
+  const [loadedWaiting, setWaiting] = useState<Artifact>()
+  const [incomingWaiting, setIncomingWaiting] = useState<Artifact>()
+  const waitingRef = useRef<Artifact | undefined>(undefined)
   const [unknown, setUnknown] = useState(false)
   const [changes, setChanges] = useState(false)
   const [regenerate, setRegenerate] = useState(false)
@@ -63,17 +65,40 @@ export function WorkflowPage({
       clearInterval(timer)
     }
   }, [novel.id, notify])
+  const visibleTasks = tasks.filter((t) => t.novel_id === novel.id)
   const task =
-    tasks.find((t) => t.id === selectedTask) || tasks.find((t) => t.branch_id === branchId) || tasks[0]
+    visibleTasks.find((t) => t.id === selectedTask) ||
+    visibleTasks.find((t) => t.branch_id === branchId) ||
+    visibleTasks[0]
+  const waiting = loadedWaiting?.id === task?.result.waiting_artifact ? loadedWaiting : undefined
+  const candidateChanged = !!waiting && incomingWaiting?.id === waiting.id
+  useEffect(() => {
+    setUnknown(false)
+    setChanges(false)
+    setRegenerate(false)
+    setRetryReason('')
+  }, [task?.id, task?.status, task?.result.waiting_artifact])
   useEffect(() => {
     let active = true
     setWaiting(undefined)
+    setIncomingWaiting(undefined)
+    waitingRef.current = undefined
     const id = task?.result.waiting_artifact
     const poll = () => {
       if (!id) return
       void api<Artifact>(`/artifacts/${id}`)
         .then((a) => {
-          if (active) setWaiting(a)
+          if (!active) return
+          const viewed = waitingRef.current
+          if (viewed?.id === a.id && a.candidate_revision < viewed.candidate_revision) return
+          if (viewed?.id === a.id && a.candidate_revision !== viewed.candidate_revision) {
+            setIncomingWaiting((prior) =>
+              prior?.id === a.id && prior.candidate_revision > a.candidate_revision ? prior : a,
+            )
+            return
+          }
+          waitingRef.current = a
+          setWaiting(a)
         })
         .catch((e) => {
           if (active) notify(e)
@@ -299,12 +324,12 @@ export function WorkflowPage({
             <h2>任务与检查点</h2>
             <span className="badge">持久执行</span>
           </div>
-          {tasks.length ? (
+          {visibleTasks.length ? (
             <>
               <label>
                 本作品批次
                 <select value={task?.id || ''} onChange={(e) => setSelectedTask(e.target.value)}>
-                  {tasks.map((t) => (
+                  {visibleTasks.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.payload.mode === 'assisted' ? '半自动' : '全自动'} · {t.payload.account} ·{' '}
                       {label(t.status)} · {new Date(t.created * 1000).toLocaleString('zh-CN')}
@@ -317,7 +342,10 @@ export function WorkflowPage({
                   <div className="run-status">
                     <strong>{label(task.status)}</strong>
                     <span>
-                      当前进度：{Math.min((task.result.next_chapter || 1) - 1, task.payload.chapters || 36)} /{' '}
+                      {task.result.repair_round
+                        ? `整书复检第 ${task.result.repair_round} 轮 · 已推进`
+                        : '初稿阶段 · 已推进'}
+                      ： {Math.min((task.result.next_chapter || 1) - 1, task.payload.chapters || 36)} /{' '}
                       {task.payload.chapters} 章
                     </span>
                   </div>
@@ -362,7 +390,7 @@ export function WorkflowPage({
                   )}
                   <label className="check">
                     <input type="checkbox" checked={changes} onChange={(e) => setChanges(e.target.checked)} />
-                    前文已修改时，从最早失效章重新生成
+                    前文已修改时，从最早失效章重新检查并按需修订
                   </label>
                   {task.status === 'needs_review' && waiting?.status === 'candidate' && (
                     <>
@@ -390,6 +418,7 @@ export function WorkflowPage({
                   <button
                     disabled={
                       busy ||
+                      (task.status === 'needs_review' && (!waiting || candidateChanged)) ||
                       ![
                         'paused',
                         'blocked_runtime',
@@ -416,6 +445,23 @@ export function WorkflowPage({
                   {waiting && (
                     <div className="notice">
                       <h3>待审章节候选</h3>
+                      <p>候选修订 {waiting.candidate_revision}</p>
+                      {candidateChanged && incomingWaiting && (
+                        <div role="status">
+                          <p>候选已在其他窗口更新。当前比较版本仍保留，请载入最新候选后重新决定。</p>
+                          <button
+                            onClick={() => {
+                              waitingRef.current = incomingWaiting
+                              setWaiting(incomingWaiting)
+                              setIncomingWaiting(undefined)
+                              setRegenerate(false)
+                              setRetryReason('')
+                            }}
+                          >
+                            载入最新待审候选
+                          </button>
+                        </div>
+                      )}
                       <pre className="stream">{waiting.payload.text}</pre>
                       <details>
                         <summary>本章检查</summary>
@@ -423,7 +469,7 @@ export function WorkflowPage({
                       </details>
                       <button
                         className="primary"
-                        disabled={busy || waiting.status !== 'candidate'}
+                        disabled={busy || candidateChanged || waiting.status !== 'candidate'}
                         onClick={() =>
                           void perform(async () => {
                             await api(`/artifacts/${waiting.id}/accept`, 'POST', {
