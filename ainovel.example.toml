@@ -1,0 +1,35 @@
+# 复制为 ainovel.toml。这里只保存密钥环境变量名称，真实密钥填写到 .env。
+# 预算是两组 OpenAI Key 合计 USD 20；DeepSeek 单独 CNY 80。
+# 可以降低上限；程序同时保留用户本轮授权的硬上限，换 Key 不重置账本。
+data_dir = "~/.ainovel"
+
+[budgets]
+openai = 20
+deepseek = 80
+
+[accounts.openai_1]
+kind = "openai"
+key_env = "OPENAI_API_KEY"
+
+[accounts.openai_2]
+kind = "openai"
+key_env = "OPENAI_API_KEY_2"
+
+[accounts.deepseek]
+kind = "deepseek"
+key_env = "DEEPSEEK_API_KEY"
+
+# 2026-11-12 核对的保守计价；不计缓存折扣，OpenAI 使用长上下文上界，
+# DeepSeek 使用高峰上界。界面显示配置单价估算，不冒充服务商账单。
+# 更改模型时需增加该模型的明确单价；没有价格的模型不会发起付费请求。
+[pricing."gpt-6-luna"]
+currency = "USD"
+input_per_million = "0.20"
+output_per_million = "0.75"
+source = "https://developers.openai.com/api/docs/models/gpt-6-luna"
+
+[pricing."deepseek-flash"]
+currency = "CNY"
+input_per_million = "2"
+output_per_million = "8"
+source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"

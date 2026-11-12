@@ -5,7 +5,72 @@ ai写小说，自用，根据使用进行迭代
 
 面向中文长篇网文，支持 DeepSeek、OpenAI API，以及建议、半自动、全自动创作模式。先按作者需求实现可独立自用的模块，再串联为能够完成一整部小说的工程。首个能力对标为《凡人修仙传》原著。
 
-当前处于调研与架构设计阶段，尚未实现应用或验证生成质量。设计基线日期：2026-11-12。
+当前已提供本机网页工作台：手写与版本保护、局部辅助、资料书库、故事记录，以及半自动／全自动整书运行。工程验证与实际创作验收分别记录，生成质量和使用收益不因应用可运行而自动通过。实现与验收基线：2026-11-13。
+
+## 启动本机工作台
+
+需要 PowerShell 7、npm 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。项目使用独立 Python 3.14.7 环境和 Node.js 24.22.3 构建，不改动全局 Node 版本。
+
+```powershell
+# 首次配置；已有 .env / ainovel.toml 时保留现有文件，只补必要字段。
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+if (-not (Test-Path ainovel.toml)) { Copy-Item ainovel.example.toml ainovel.toml }
+# 在 .env 填写 OPENAI_API_KEY、OPENAI_API_KEY_2、DEEPSEEK_API_KEY。
+# 可以不配置模型，先手写、查本地资料。
+./scripts/run-workbench.ps1 -Install
+```
+
+已有配置和依赖时双击 [启动工作台.cmd](启动工作台.cmd)，或运行 `./scripts/run-workbench.ps1`。打开 [本机工作台](http://127.0.0.1:8765)，保持启动窗口运行；关闭浏览器不会取消 Worker。端口占用时用 `./scripts/run-workbench.ps1 -Port 8766`，访问对应端口。
+
+**费用：两个 OpenAI Key 合计 USD 20，DeepSeek 单独 CNY 80。** 可在 `ainovel.toml` 降低额度，并为批次再设上限。换 Key、重启和恢复稿件不清零。配置为保守单价估算，未知调用保留费用预留；没有已配置单价的模型不会付费调用。当前用量与剩余额度在页面右上角查看。
+
+默认数据在固定用户目录 `%USERPROFILE%/.ainovel`，界面「账户与预算」显示实际路径；从 Codex 或桌面启动沿用同一位置。可在 `ainovel.toml` 的 `data_dir` 或环境变量 `AINOVEL_DATA_DIR` 指定仓库外的位置；迁移须连同 `usage.sqlite` 一起迁移，不得重建费用账本。稿件、资料原件、备份、真实评测输出均在仓库外，真实 `.env` 不提交。配置修改后重启服务与 Worker。
+
+四个入口：
+
+- **写作**：新建作品与章节，直接手写；保存、选区改写、情节补写、候选差异、拒绝、采纳与历史恢复。目录可重排、归档并恢复；TXT／Markdown 导入为新章。
+- **资料书库**：本地 TXT／Markdown／无 DRM EPUB；维基文库书目、官方 EPUB 导出与明确标注范围的单页面获取；阅读、短词搜索、回源、摘录与主动选择资料包。官方通道失败会如实显示，单页面可能只是目录，需确认实际正文。
+- **整书创作**：半自动接收作者批量情节；全自动从简报粗纲细化章纲。每次启动创建独立版本。分工与采纳政策分别设置，默认不静默采纳；可暂停、取消、恢复，遇到有限修订失败时停止。再次重做待审章需明确选择并记录原因。
+- **故事与审阅**：已采用意图、读者题材、世界人物与粗纲；按章与时点查事实、回到来源修订、标记更正、录入反馈；整书三层验收、导出与实际备份恢复演练。
+
+生成发送范围在界面说明；外部资料仅在主动勾选后发送。整书检查当前使用章纲及各章开头／结尾摘录，作者仍需通读最终稿。模型检查通过不等于文学质量或使用收益已经通过。
+
+### 手动开发与检查
+
+```powershell
+uv sync --locked --python 3.14.7
+npm ci                   # 使用 Node.js 24
+npm run generate:api     # OpenAPI → TypeScript 请求类型
+uv run ruff check backend
+uv run ruff format --check backend
+uv run pytest -q
+npm run format:check
+npm run typecheck
+npm test
+npm run test:legacy
+npm run build
+uv run python -m ainovel
+```
+
+开发模式分别启动 `uv run uvicorn ainovel.api:create_app --factory --host 127.0.0.1 --port 8765 --no-access-log`、`uv run python -m ainovel.worker` 与 `npm run dev`。Vite 默认代理到 8765；若修改后端端口，同步代理配置。
+
+### 备份、恢复与付费验收
+
+```powershell
+uv run python -m ainovel backup
+uv run python -m ainovel verify --file '备份文件.zip'
+# 正式替换前停止 API 与 Worker；程序先保存现状，费用账本始终保留。
+uv run python -m ainovel restore --file '备份文件.zip'
+
+# 以下命令显式调用真实模型，所有尝试共同受总预算约束。
+uv run python -m ainovel.evaluate --execute --stage samples --run-limit 1
+uv run python -m ainovel.evaluate --execute --stage books --accounts openai_1,openai_2 --chapters 36 --run-limit 5
+
+# 不调用模型：从同一备份恢复后导出指定任务的正文、状态、修订与费用证据。
+uv run python -m ainovel.evidence_export --task '半自动任务标识' --task '全自动任务标识'
+```
+
+评测输出位于实际数据目录的 `acceptance` 文件夹。三种账户的固定原创样例每项重复 3 次；两种整书模式共享原创简报但不共享生成正文。失败、干预和用量不删除。验收目标、完整 N/U/F 矩阵与模板见 [15 产品验收与技术实施路径](15-产品验收与技术实施路径.md)，本轮结果见 [实施验收记录](docs/acceptance/实施验收记录.md)。
 
 ## 设计文档
 
@@ -24,6 +89,8 @@ ai写小说，自用，根据使用进行迭代
 | [11 凡人流写作 Skill 方案与使用](11-凡人流写作Skill方案与使用.md) | 不做全书蒸馏的规则写作路线、打斗与描写指南、项目 Skill 调用方式 |
 | [12 电子书下载阅读与资料检索设计](12-电子书下载阅读与资料检索设计.md) | M10 资料书库：找书、下载与导入、阅读、中文全文搜索、摘录引用及实施验收 |
 | [13 产品使用场景与功能设计](13-产品使用场景与功能设计.md) | 综合 7 个历史对话，整理 13 个使用场景、16 组功能、页面入口、模块映射、分期与验收 |
+| [14 小说创作者痛点与需求调研](14-小说创作者痛点与需求调研.md) | N01—N12、证据边界、作者状态与自用验证任务 |
+| [15 产品验收与技术实施路径](15-产品验收与技术实施路径.md) | 全追踪矩阵、三层验收、实际技术方案、阶段出口与记录模板 |
 
 建议先读 13 了解产品场景与功能，再读 02 与 06 查看作者模块和模式设置；架构复用看 01 与 03，开发顺序看 04，核对来源看 05。13 为设计建议，已确认行为仍以业务规范为准。
 
@@ -39,11 +106,11 @@ node --test tests/product-review.test.mjs
 
 2026-11-12 验证记录：Node.js v25.1.0 下 13 项定向检查通过，覆盖设计稿同步、全部入口渲染、步骤与功能关联、中文组合输入、转义、笔记保存失败、多窗口冲突、导出和主要配色对比度。浏览器实测了主要导航、步骤切换、中文搜索、功能关系、320／768 像素及桌面布局、键盘焦点、笔记刷新恢复和 Markdown 下载；实际 200% 文字放大与屏幕阅读器未完成实测，不声明完整 WCAG 符合性。小说业务能力和模型生成效果不属于本次验证范围。
 
-资料取材入口见 12；[AI 模块审阅页](novel-ai-modules-review.html) 已补充 S07 电子书获取、阅读与检索，并与 M03 资料考据衔接。当前仍是设计契约，尚无可运行的下载器、阅读器和搜索服务。
+资料取材设计见 12；[AI 模块审阅页](novel-ai-modules-review.html) 保留 S07 与 M03 的设计关系。可运行能力从上面的本机工作台进入，实际覆盖与限制见验收记录；静态审阅页本身不调用模型或下载资料。
 
 ## 架构原则（本轮方案）
 
-以下为本轮设计建议；技术选型和实现细节尚未升级为正式项目规范。
+以下创作原则延续已有设计；本轮运行技术方案与边界见 15，后续仍按真实使用调整。
 
 - 产品按作者任务划分，Agent 是模块内部实现。
 - 同一部小说共享资料、版本、因果、状态与终局目标。
@@ -51,7 +118,7 @@ node --test tests/product-review.test.mjs
 - 候选与正式稿分开；采纳后再向下游传播故事事实。
 - 阶段性以有完整结局的原创小说验收，再扩大连载规模。
 
-首个开发切片建议为“正文选区建议与改写”，同时保留作品、版本、运行记录和候选采纳契约。
+已实现的首个切片为正文编辑与候选采纳闭环；后续阶段工程结果与业务验收分别记录。
 
 ## 项目规范
 

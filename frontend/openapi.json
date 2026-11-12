@@ -1,0 +1,1930 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "ainovel 本机工作台", "version": "0.1.0" },
+  "paths": {
+    "/api/session": {
+      "get": {
+        "summary": "Session",
+        "operationId": "session_api_session_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/api/config": {
+      "get": {
+        "summary": "Configuration",
+        "operationId": "configuration_api_config_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/api/novels": {
+      "get": {
+        "summary": "Novels",
+        "operationId": "novels_api_novels_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      },
+      "post": {
+        "summary": "Create Novel",
+        "operationId": "create_novel_api_novels_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NovelInput" } } },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/novels/{novel_id}": {
+      "patch": {
+        "summary": "Rename Novel",
+        "operationId": "rename_novel_api_novels__novel_id__patch",
+        "parameters": [
+          {
+            "name": "novel_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Novel Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenameInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/novels/{novel_id}/branches": {
+      "get": {
+        "summary": "Branches",
+        "operationId": "branches_api_novels__novel_id__branches_get",
+        "parameters": [
+          {
+            "name": "novel_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Novel Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/chapters": {
+      "get": {
+        "summary": "Chapters",
+        "operationId": "chapters_api_branches__branch_id__chapters_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Chapter",
+        "operationId": "create_chapter_api_branches__branch_id__chapters_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChapterInput" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapters/{chapter_id}": {
+      "get": {
+        "summary": "Chapter",
+        "operationId": "chapter_api_chapters__chapter_id__get",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save",
+        "operationId": "save_api_chapters__chapter_id__put",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaveInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Rename Chapter",
+        "operationId": "rename_chapter_api_chapters__chapter_id__patch",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenameInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapters/{chapter_id}/history": {
+      "get": {
+        "summary": "History",
+        "operationId": "history_api_chapters__chapter_id__history_get",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/archived": {
+      "get": {
+        "summary": "Archived Chapters",
+        "operationId": "archived_chapters_api_branches__branch_id__archived_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapters/{chapter_id}/archive": {
+      "post": {
+        "summary": "Archive Chapter",
+        "operationId": "archive_chapter_api_chapters__chapter_id__archive_post",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ArchiveInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapters/{chapter_id}/move": {
+      "post": {
+        "summary": "Move Chapter",
+        "operationId": "move_chapter_api_chapters__chapter_id__move_post",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MoveInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapters/{chapter_id}/restore": {
+      "post": {
+        "summary": "Restore",
+        "operationId": "restore_api_chapters__chapter_id__restore_post",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestoreInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/reading-state": {
+      "get": {
+        "summary": "Reading State",
+        "operationId": "reading_state_api_branches__branch_id__reading_state_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save Reading State",
+        "operationId": "save_reading_state_api_branches__branch_id__reading_state_put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReadingInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/modules": {
+      "get": {
+        "summary": "Module Specs",
+        "operationId": "module_specs_api_modules_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      },
+      "post": {
+        "summary": "Run Module",
+        "operationId": "run_module_api_modules_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModuleInput" } } },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/workflows": {
+      "post": {
+        "summary": "Start Workflow",
+        "operationId": "start_workflow_api_workflows_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WorkflowInput" } } },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/definitions": {
+      "post": {
+        "summary": "Save Definition",
+        "operationId": "save_definition_api_branches__branch_id__definitions_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DefinitionInput" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "summary": "Tasks",
+        "operationId": "tasks_api_tasks_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}": {
+      "get": {
+        "summary": "Task",
+        "operationId": "task_api_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/transcript": {
+      "get": {
+        "summary": "Transcript",
+        "operationId": "transcript_api_tasks__task_id__transcript_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/events": {
+      "get": {
+        "summary": "Events",
+        "operationId": "events_api_tasks__task_id__events_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 0, "title": "After" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/cancel": {
+      "post": {
+        "summary": "Cancel",
+        "operationId": "cancel_api_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/pause": {
+      "post": {
+        "summary": "Pause",
+        "operationId": "pause_api_tasks__task_id__pause_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/resume": {
+      "post": {
+        "summary": "Resume",
+        "operationId": "resume_api_tasks__task_id__resume_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResumeInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts": {
+      "get": {
+        "summary": "Artifacts",
+        "operationId": "artifacts_api_artifacts_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Chapter Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}": {
+      "get": {
+        "summary": "Artifact",
+        "operationId": "artifact_api_artifacts__artifact_id__get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Edit Candidate",
+        "operationId": "edit_candidate_api_artifacts__artifact_id__patch",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CandidateEdit" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}/accept": {
+      "post": {
+        "summary": "Accept Candidate",
+        "operationId": "accept_candidate_api_artifacts__artifact_id__accept_post",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}/reject": {
+      "post": {
+        "summary": "Reject",
+        "operationId": "reject_api_artifacts__artifact_id__reject_post",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/context": {
+      "get": {
+        "summary": "Context",
+        "operationId": "context_api_branches__branch_id__context_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Chapter Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/facts": {
+      "get": {
+        "summary": "Facts",
+        "operationId": "facts_api_branches__branch_id__facts_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/search": {
+      "get": {
+        "summary": "Search Manuscript",
+        "operationId": "search_manuscript_api_branches__branch_id__search_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          { "name": "q", "in": "query", "required": true, "schema": { "type": "string", "title": "Q" } },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 101, "title": "Before" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/facts": {
+      "post": {
+        "summary": "Add Fact",
+        "operationId": "add_fact_api_facts_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FactInput" } } },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/facts/{fact_id}": {
+      "delete": {
+        "summary": "Invalidate Fact",
+        "operationId": "invalidate_fact_api_facts__fact_id__delete",
+        "parameters": [
+          {
+            "name": "fact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Fact Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/feedback": {
+      "get": {
+        "summary": "Feedback",
+        "operationId": "feedback_api_branches__branch_id__feedback_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/feedback": {
+      "post": {
+        "summary": "Add Feedback",
+        "operationId": "add_feedback_api_feedback_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FeedbackInput" } } },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/completion": {
+      "get": {
+        "summary": "Completion",
+        "operationId": "completion_api_branches__branch_id__completion_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/assessments": {
+      "post": {
+        "summary": "Assess",
+        "operationId": "assess_api_assessments_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AssessmentInput" } } },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/export": {
+      "get": {
+        "summary": "Export",
+        "operationId": "export_api_branches__branch_id__export_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "default": "md", "title": "Format" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/import": {
+      "post": {
+        "summary": "Import Chapter",
+        "operationId": "import_chapter_api_branches__branch_id__import_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_chapter_api_branches__branch_id__import_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/books": {
+      "get": {
+        "summary": "Books",
+        "operationId": "books_api_library_books_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/api/library/import": {
+      "post": {
+        "summary": "Import Book",
+        "operationId": "import_book_api_library_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/Body_import_book_api_library_import_post" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/search": {
+      "get": {
+        "summary": "Search",
+        "operationId": "search_api_library_search_get",
+        "parameters": [
+          { "name": "q", "in": "query", "required": true, "schema": { "type": "string", "title": "Q" } },
+          {
+            "name": "book_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Book Id" }
+          },
+          {
+            "name": "novel_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Novel Id" }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 0, "title": "Offset" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/books/{book_id}/units": {
+      "get": {
+        "summary": "Units",
+        "operationId": "units_api_library_books__book_id__units_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Book Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/units/{unit_id}": {
+      "get": {
+        "summary": "Unit",
+        "operationId": "unit_api_library_units__unit_id__get",
+        "parameters": [
+          {
+            "name": "unit_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Unit Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/excerpts": {
+      "post": {
+        "summary": "Excerpt",
+        "operationId": "excerpt_api_library_excerpts_post",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExcerptInput" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Excerpts",
+        "operationId": "excerpts_api_library_excerpts_get",
+        "parameters": [
+          {
+            "name": "novel_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Novel Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/catalog": {
+      "get": {
+        "summary": "Catalog",
+        "operationId": "catalog_api_library_catalog_get",
+        "parameters": [
+          { "name": "q", "in": "query", "required": true, "schema": { "type": "string", "title": "Q" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/jobs": {
+      "get": {
+        "summary": "Download Jobs",
+        "operationId": "download_jobs_api_library_jobs_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/api/library/download": {
+      "post": {
+        "summary": "Download",
+        "operationId": "download_api_library_download_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DownloadInput" } } },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/jobs/{job_id}/cancel": {
+      "post": {
+        "summary": "Cancel Download",
+        "operationId": "cancel_download_api_library_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Job Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/books/{book_id}/progress": {
+      "get": {
+        "summary": "Book Progress",
+        "operationId": "book_progress_api_library_books__book_id__progress_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Book Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save Book Progress",
+        "operationId": "save_book_progress_api_library_books__book_id__progress_put",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Book Id" }
+          },
+          {
+            "name": "unit_id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "title": "Unit Id" }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 0, "title": "Offset" }
+          },
+          {
+            "name": "base_revision",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer", "title": "Base Revision" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/backups": {
+      "get": {
+        "summary": "Backups",
+        "operationId": "backups_api_backups_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      },
+      "post": {
+        "summary": "Backup",
+        "operationId": "backup_api_backups_post",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/api/backups/{backup_id}/verify": {
+      "post": {
+        "summary": "Verify Backup",
+        "operationId": "verify_backup_api_backups__backup_id__verify_post",
+        "parameters": [
+          {
+            "name": "backup_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Backup Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AcceptInput": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["idempotency_key"],
+        "title": "AcceptInput"
+      },
+      "ArchiveInput": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "archived": { "type": "boolean", "title": "Archived" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "archived"],
+        "title": "ArchiveInput"
+      },
+      "AssessmentInput": {
+        "properties": {
+          "branch_id": { "type": "string", "title": "Branch Id" },
+          "category": {
+            "type": "string",
+            "enum": ["engineering", "creative", "benefit"],
+            "title": "Category"
+          },
+          "result": { "type": "string", "enum": ["passed", "failed", "unverified"], "title": "Result" },
+          "note": { "type": "string", "maxLength": 15000, "minLength": 1, "title": "Note" },
+          "minutes": { "additionalProperties": { "type": "number" }, "type": "object", "title": "Minutes" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["branch_id", "category", "result", "note"],
+        "title": "AssessmentInput"
+      },
+      "Body_import_book_api_library_import_post": {
+        "properties": {
+          "file": { "type": "string", "contentMediaType": "application/octet-stream", "title": "File" },
+          "encoding": { "type": "string", "title": "Encoding", "default": "utf-8-sig" }
+        },
+        "type": "object",
+        "required": ["file"],
+        "title": "Body_import_book_api_library_import_post"
+      },
+      "Body_import_chapter_api_branches__branch_id__import_post": {
+        "properties": {
+          "file": { "type": "string", "contentMediaType": "application/octet-stream", "title": "File" }
+        },
+        "type": "object",
+        "required": ["file"],
+        "title": "Body_import_chapter_api_branches__branch_id__import_post"
+      },
+      "CandidateEdit": {
+        "properties": { "text": { "type": "string", "maxLength": 250000, "title": "Text" } },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["text"],
+        "title": "CandidateEdit"
+      },
+      "ChapterInput": {
+        "properties": { "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" } },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title"],
+        "title": "ChapterInput"
+      },
+      "DefinitionInput": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["intent", "reader", "world", "characters", "outline"],
+            "title": "Kind"
+          },
+          "text": { "type": "string", "maxLength": 20000, "minLength": 1, "title": "Text" },
+          "audience": {
+            "type": "string",
+            "enum": ["不限", "男频", "女频"],
+            "title": "Audience",
+            "default": "不限"
+          },
+          "genres": { "items": { "type": "string" }, "type": "array", "maxItems": 10, "title": "Genres" },
+          "mechanisms": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Mechanisms"
+          },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "text", "base_story_revision"],
+        "title": "DefinitionInput"
+      },
+      "DownloadInput": {
+        "properties": {
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "format": { "type": "string", "enum": ["epub", "page_text"], "title": "Format", "default": "epub" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title"],
+        "title": "DownloadInput"
+      },
+      "ExcerptInput": {
+        "properties": {
+          "unit_id": { "type": "string", "title": "Unit Id" },
+          "start": { "type": "integer", "minimum": 0, "title": "Start" },
+          "end": { "type": "integer", "minimum": 0, "title": "End" },
+          "quote": { "type": "string", "maxLength": 10000, "minLength": 1, "title": "Quote" },
+          "note": { "type": "string", "maxLength": 10000, "title": "Note", "default": "" },
+          "novel_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Novel Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["unit_id", "start", "end", "quote"],
+        "title": "ExcerptInput"
+      },
+      "FactInput": {
+        "properties": {
+          "subject": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Subject" },
+          "kind": {
+            "type": "string",
+            "enum": ["event", "knowledge", "capability", "resource", "relationship", "promise", "world"],
+            "title": "Kind"
+          },
+          "statement": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Statement" },
+          "truth": {
+            "type": "string",
+            "enum": ["fact", "belief", "uncertain", "plan"],
+            "title": "Truth",
+            "default": "fact"
+          },
+          "story_time": { "type": "string", "maxLength": 200, "title": "Story Time", "default": "未知" },
+          "evidence": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Evidence",
+            "description": "有可引用原文列表时只填source_id编号，由后端回填固定版本原文；否则填连续逐字原文。"
+          },
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "source_revision": { "type": "integer", "title": "Source Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["subject", "kind", "statement", "evidence", "chapter_id", "source_revision"],
+        "title": "FactInput"
+      },
+      "FeedbackInput": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "category": {
+            "type": "string",
+            "enum": ["事实错误", "理解问题", "审美偏好", "待判断"],
+            "title": "Category"
+          },
+          "text": { "type": "string", "maxLength": 10000, "minLength": 1, "title": "Text" },
+          "source_quote": { "type": "string", "maxLength": 2000, "title": "Source Quote", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "category", "text"],
+        "title": "FeedbackInput"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": { "$ref": "#/components/schemas/ValidationError" },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ModuleInput": {
+        "properties": {
+          "client_request_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 8 }, { "type": "null" }],
+            "title": "Client Request Id"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "writing.advise",
+              "writing.rewrite_selection",
+              "writing.expand_plot",
+              "review.chapter",
+              "memory.extract",
+              "outline.plan",
+              "character.generate",
+              "world.generate",
+              "ideation.explore"
+            ],
+            "title": "Action"
+          },
+          "novel_id": { "type": "string", "title": "Novel Id" },
+          "branch_id": { "type": "string", "title": "Branch Id" },
+          "chapter_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Chapter Id" },
+          "base_revision": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Base Revision" },
+          "instruction": { "type": "string", "maxLength": 20000, "minLength": 1, "title": "Instruction" },
+          "selection_start": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Selection Start"
+          },
+          "selection_end": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Selection End"
+          },
+          "selection_text": {
+            "anyOf": [{ "type": "string", "maxLength": 250000 }, { "type": "null" }],
+            "title": "Selection Text"
+          },
+          "fixed": { "items": { "type": "string" }, "type": "array", "maxItems": 30, "title": "Fixed" },
+          "writing_profile": {
+            "type": "string",
+            "maxLength": 5000,
+            "title": "Writing Profile",
+            "default": "第三人称限定视角，现代白话，动作有因果，避免重复解释。"
+          },
+          "reference_ids": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Reference Ids"
+          },
+          "account": { "type": "string", "title": "Account" },
+          "max_output_tokens": {
+            "type": "integer",
+            "maximum": 16384,
+            "minimum": 64,
+            "title": "Max Output Tokens",
+            "default": 8192
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["action", "novel_id", "branch_id", "instruction", "account"],
+        "title": "ModuleInput"
+      },
+      "MoveInput": {
+        "properties": {
+          "direction": { "type": "string", "enum": ["up", "down"], "title": "Direction" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["direction", "base_story_revision"],
+        "title": "MoveInput"
+      },
+      "NovelInput": {
+        "properties": {
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "brief": { "type": "string", "maxLength": 30000, "title": "Brief", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title"],
+        "title": "NovelInput"
+      },
+      "Plot": {
+        "properties": {
+          "number": { "type": "integer", "maximum": 100, "minimum": 1, "title": "Number" },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "plot": { "type": "string", "maxLength": 5000, "minLength": 1, "title": "Plot" },
+          "fixed": { "items": { "type": "string" }, "type": "array", "maxItems": 20, "title": "Fixed" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["number", "title", "plot"],
+        "title": "Plot"
+      },
+      "ReadingInput": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "cursor": { "type": "integer", "minimum": 0, "title": "Cursor" },
+          "note": { "type": "string", "maxLength": 5000, "title": "Note", "default": "" },
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "cursor", "base_revision"],
+        "title": "ReadingInput"
+      },
+      "RenameInput": {
+        "properties": { "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" } },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title"],
+        "title": "RenameInput"
+      },
+      "RestoreInput": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "revision_id": { "type": "string", "title": "Revision Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "revision_id"],
+        "title": "RestoreInput"
+      },
+      "ResumeInput": {
+        "properties": {
+          "acknowledge_unknown": { "type": "boolean", "title": "Acknowledge Unknown", "default": false },
+          "acknowledge_changes": { "type": "boolean", "title": "Acknowledge Changes", "default": false },
+          "regenerate_pending": { "type": "boolean", "title": "Regenerate Pending", "default": false },
+          "reason": { "type": "string", "maxLength": 2000, "title": "Reason", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ResumeInput"
+      },
+      "SaveInput": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "content": { "type": "string", "maxLength": 250000, "title": "Content" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "content"],
+        "title": "SaveInput"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": { "anyOf": [{ "type": "string" }, { "type": "integer" }] },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": { "type": "string", "title": "Message" },
+          "type": { "type": "string", "title": "Error Type" },
+          "input": { "title": "Input" },
+          "ctx": { "type": "object", "title": "Context" }
+        },
+        "type": "object",
+        "required": ["loc", "msg", "type"],
+        "title": "ValidationError"
+      },
+      "WorkflowInput": {
+        "properties": {
+          "client_request_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 8 }, { "type": "null" }],
+            "title": "Client Request Id"
+          },
+          "novel_id": { "type": "string", "title": "Novel Id" },
+          "source_branch_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Source Branch Id"
+          },
+          "mode": { "type": "string", "enum": ["assisted", "automatic"], "title": "Mode" },
+          "brief": { "type": "string", "maxLength": 30000, "minLength": 1, "title": "Brief" },
+          "fixed": { "items": { "type": "string" }, "type": "array", "maxItems": 30, "title": "Fixed" },
+          "plots": {
+            "items": { "$ref": "#/components/schemas/Plot" },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Plots"
+          },
+          "chapters": { "type": "integer", "maximum": 100, "minimum": 1, "title": "Chapters", "default": 36 },
+          "min_chars": {
+            "type": "integer",
+            "maximum": 10000,
+            "minimum": 200,
+            "title": "Min Chars",
+            "default": 2500
+          },
+          "max_chars": {
+            "type": "integer",
+            "maximum": 15000,
+            "minimum": 200,
+            "title": "Max Chars",
+            "default": 3500
+          },
+          "account": { "type": "string", "title": "Account" },
+          "adoption": {
+            "type": "string",
+            "enum": ["manual", "automatic"],
+            "title": "Adoption",
+            "default": "manual"
+          },
+          "writing_profile": {
+            "type": "string",
+            "maxLength": 5000,
+            "title": "Writing Profile",
+            "default": "第三人称限定视角，克制白话，人物选择有依据，遵守能力和信息边界。"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["novel_id", "mode", "brief", "account"],
+        "title": "WorkflowInput"
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+name: Workbench checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.22.3'
+          cache: npm
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: '0.12.7'
+      - run: uv sync --locked --python 3.14.7
+      - run: npm ci
+      - run: uv run ruff check backend
+      - run: uv run ruff format --check backend
+      - run: uv run pytest -q
+      - run: npm run generate:api
+      - run: git diff --exit-code -- frontend/api-schema.ts frontend/openapi.json
+      - run: npm run typecheck
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run test:legacy
+      - run: npm run build
+      - run: node scripts/build-product-review.mjs --check
