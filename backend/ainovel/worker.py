@@ -21,7 +21,7 @@ SYSTEM = """你是中文原创小说工作台的执行模块。区分作者指�
 允许角色有依据地误判。叙述应具体，动作有因果，人物声音有区别，避免重复解释与为凑字数重复段落。
 没有证据保留未知。按请求只输出正文、建议或符合指定结构的 JSON，不加 Markdown 代码围栏。
 """
-PROMPT_VERSION = "0.1.0"
+PROMPT_VERSION = "0.1.1"
 
 
 def parse_json(text):
@@ -120,10 +120,11 @@ class Worker:
         contract=None,
     ):
         payload = self.task["payload"]
+        provider = self.settings.providers[payload["account"]]
         if self.cancelled():
             raise DomainError("cancelled", "已取消。", 409)
         prompt = dumps({"任务": instruction, "上下文": context or {}})
-        if schema:
+        if schema and self.settings.providers[payload["account"]].kind != "openai":
             prompt += "\n只返回符合以下 JSON Schema 的对象：\n" + dumps(
                 contract or schema.model_json_schema()
             )
@@ -159,7 +160,18 @@ class Worker:
                     "invalid_structure", "结构化产物在两轮格式修正后仍未通过契约，未采纳。"
                 ) from error
 
-        cache_basis = [payload["account"], SYSTEM, prompt, max_output]
+        cache_basis = [
+            provider.id,
+            provider.kind,
+            provider.model,
+            provider.base_url,
+            provider.reasoning,
+            SYSTEM,
+            prompt,
+            max_output,
+        ]
+        if schema and self.settings.providers[payload["account"]].kind == "openai":
+            cache_basis.append(contract or schema.model_json_schema())
         # Recovery reuses completed steps; an explicit rejected-candidate redo must be fresh.
         if epoch := self.task["result"].get("generation_epoch"):
             cache_basis.append(epoch)
@@ -186,6 +198,9 @@ class Worker:
                     "prompt_utf8_bytes": len(prompt.encode()),
                     "max_output_tokens": max_output,
                     "account": self.settings.providers[payload["account"]].public(),
+                    "reasoning_effort": provider.reasoning,
+                    "timeout_seconds": self.settings.timeout,
+                    "idle_timeout_seconds": self.settings.idle_timeout,
                     "story_revision": (context or {}).get("branch", {}).get("story_revision"),
                     "target_version": {
                         key: value
@@ -298,9 +313,24 @@ class Worker:
     def context(self, branch_id, chapter_id=None, references=()):
         context = self.domain.context(branch_id, chapter_id)
         context["facts"] = [
-            {key: value for key, value in fact.items() if key != "evidence"} for fact in context["facts"]
+            {
+                key: fact[key]
+                for key in (
+                    "id",
+                    "subject",
+                    "kind",
+                    "statement",
+                    "truth",
+                    "story_time",
+                    "position",
+                    "source_revision",
+                )
+            }
+            for fact in context["facts"]
         ]
-        context["coverage"] += "模型事实上下文含陈述及来源定位，完整引文留本机可回源查询。"
+        context["coverage"] += (
+            "模型事实上下文含完整陈述、类型、时点、原记录标识及来源修订；冗余数据库字段和逐字引文留本机可回源查询。"
+        )
         excerpts = []
         for excerpt_id in references:
             excerpt = self.db.one(
@@ -356,7 +386,18 @@ class Worker:
             output = await self.call(
                 instruction, context=context, max_output=request["max_output_tokens"], stream=True
             )
-            payload, kind = {"text": output}, "chapter_draft"
+            review = await self.review(
+                output, request["fixed"], context, chapter["position"], request["instruction"]
+            )
+            payload, kind = (
+                {
+                    "text": output,
+                    "review": review,
+                    "review_passed": all(check["result"] == "pass" for check in review["checks"])
+                    and not any(f["severity"] == "blocker" for f in review["findings"]),
+                },
+                "chapter_draft",
+            )
         elif action == "review.chapter":
             if not chapter:
                 raise DomainError("chapter_required", "请选择审稿章节。")
@@ -416,7 +457,7 @@ class Worker:
             }
         raise DomainError("evidence", "两轮引用修正后仍无法回到原文，未采纳或自动推进。")
 
-    async def review(self, text, fixed, context, number):
+    async def review(self, text, fixed, context, number, instructions=None):
         units = source_units(text, f"C{number:03}P")
         sources = {unit["source_id"]: unit for unit in units}
 
@@ -440,6 +481,7 @@ class Worker:
                 "正文": text,
                 "可引用原文": units,
                 "固定条件": fixed,
+                "作者写作要求": instructions or {},
                 "要求": "checks对每条固定条件逐字列出且仅列一次。evidence和findings.quote优先只填「可引用原文」中的source_id编号，后端自动回填该版本原文；不要重写或概括引文。否定条件可选体现克制收场的段落。findings.chapter必须为本次章节号。解释放summary/reason，区分阻断与偏好。未知不冒充pass。",
                 "章节号": number,
             },
@@ -706,7 +748,7 @@ class Worker:
                 text = await self.call(instructions, context=context, stream=True)
                 review = None
                 for repair in range(3):
-                    review = await self.review(text, fixed, context, number)
+                    review = await self.review(text, fixed, context, number, instructions)
                     length_ok = payload["min_chars"] <= char_count(text) <= payload["max_chars"]
                     passed = (
                         length_ok

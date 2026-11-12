@@ -259,10 +259,60 @@ def test_explicit_redo_does_not_reuse_rejected_step(settings, domain, story):
     )
     assert len(dispatched) == 2
     request = json.loads(dispatched[0]["payload"])
-    assert request["template_version"] == "0.1.0"
+    assert request["template_version"] == "0.1.1"
     assert len(request["request"]["prompt_sha256"]) == 64
     assert "prompt" not in request["request"] and "system" not in request["request"]
     assert "test-not-real" not in dispatched[0]["payload"]
+
+
+def test_native_output_contract_changes_invalidate_completed_step_cache(settings, domain, story):
+    from ainovel.models import Memory
+
+    domain.queue(
+        "module",
+        {
+            "novel_id": story["id"],
+            "branch_id": story["branch_id"],
+            "account": "openai_1",
+            "action": "memory.extract",
+        },
+    )
+    fake = FakeModel()
+    worker = Worker(settings, fake)
+    worker.task = worker.claim()
+    worker.attempt = worker.task["attempt"]
+    instruction = {"动作": "从正文提取事实候选与章节摘要"}
+    asyncio.run(worker.call(instruction, Memory))
+    asyncio.run(worker.call(instruction, Memory))
+    assert fake.calls == 1
+    contract = Memory.model_json_schema()
+    contract["properties"]["summary"]["maxLength"] = 350
+    asyncio.run(worker.call(instruction, Memory, contract=contract))
+    assert fake.calls == 2
+
+
+def test_changed_model_profile_cannot_reuse_previous_model_output(settings, domain, story):
+    from dataclasses import replace
+
+    domain.queue(
+        "module",
+        {
+            "novel_id": story["id"],
+            "branch_id": story["branch_id"],
+            "account": "openai_1",
+            "action": "writing.advise",
+        },
+    )
+    fake = FakeModel()
+    worker = Worker(settings, fake)
+    worker.task = worker.claim()
+    worker.attempt = worker.task["attempt"]
+    asyncio.run(worker.call({"动作": "相同写作输入"}))
+    settings.providers["openai_1"] = replace(
+        settings.providers["openai_1"], model="different-model", reasoning="low"
+    )
+    asyncio.run(worker.call({"动作": "相同写作输入"}))
+    assert fake.calls == 2
 
 
 def test_rejected_candidate_redo_is_reasoned_and_gets_new_epoch(client):
@@ -447,6 +497,24 @@ def test_automatic_planning_reads_adopted_settings_without_other_prose(client, s
     assert client.get("/api/tasks/" + task["id"]).json()["status"] == "production_complete"
 
 
+def test_model_context_keeps_facts_and_versions_without_redundant_database_fields(settings, domain, story):
+    domain.save(story["chapter_id"], 0, "沈砚只有一枚铜钱。")
+    with domain.db.connect(True) as tx:
+        domain.add_fact_tx(
+            tx,
+            story["branch_id"],
+            story["chapter_id"],
+            1,
+            {"subject": "沈砚", "kind": "resource", "statement": "只有一枚铜钱", "evidence": "只有一枚铜钱"},
+            "沈砚只有一枚铜钱。",
+        )
+    raw = domain.context(story["branch_id"])["facts"][0]
+    compact = Worker(settings).context(story["branch_id"])["facts"][0]
+    assert compact["statement"] == raw["statement"] and compact["id"] == raw["id"]
+    assert compact["source_revision"] == 1 and compact["position"] == 1
+    assert "evidence" not in compact and "branch_id" not in compact and "chapter_id" not in compact
+
+
 def test_changed_queued_chapter_stops_before_paid_request(settings, domain, story):
     task = domain.queue(
         "module",
@@ -463,6 +531,29 @@ def test_changed_queued_chapter_stops_before_paid_request(settings, domain, stor
     fake = FakeModel()
     asyncio.run(Worker(settings, fake).run_once())
     assert domain.task(task["id"])["status"] == "blocked_runtime" and fake.calls == 0
+
+
+def test_single_plot_expansion_checks_candidate_before_author_adoption(settings, domain, story):
+    from ainovel.models import ModuleInput
+
+    spec = ModuleInput(
+        novel_id=story["id"],
+        branch_id=story["branch_id"],
+        chapter_id=story["chapter_id"],
+        base_revision=0,
+        action="writing.expand_plot",
+        instruction="测量并留下记录",
+        fixed=["留下记录"],
+        account="openai_1",
+    ).model_dump()
+    task = domain.queue("module", spec)
+    fake = FakeModel()
+    asyncio.run(Worker(settings, fake).run_once())
+    result = domain.task(task["id"])
+    artifact = domain.artifact(result["result"]["artifact_id"])
+    assert artifact["payload"]["review_passed"] and fake.calls == 2
+    assert [c["condition"] for c in artifact["payload"]["review"]["checks"]] == ["留下记录"]
+    assert artifact["status"] == "candidate" and domain.chapter(story["chapter_id"])["content"] == ""
 
 
 def test_manual_adoption_waits_and_resume_does_not_use_other_prose(settings, domain, story):

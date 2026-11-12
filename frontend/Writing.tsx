@@ -914,6 +914,7 @@ function Candidate({
               readOnly={artifact.status !== 'candidate'}
             />
           </label>
+          <p className="small muted">候选正文：{[...edit].filter((c) => !/\s/u.test(c)).length} 非空白字符</p>
           {artifact.status === 'candidate' && edit !== artifact.payload.text && (
             <button
               disabled={busy}

@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:legacy": "node --test tests/api-test.test.mjs tests/product-review.test.mjs",
     "generate:api": "node scripts/generate-api-types.mjs",
-    "format:check": "prettier --check frontend vite.config.ts vitest.config.ts scripts/generate-api-types.mjs package.json tsconfig.json fixtures/original-story.json"
+    "format:check": "prettier --check frontend vite.config.ts vitest.config.ts scripts/generate-api-types.mjs package.json tsconfig.json fixtures"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",

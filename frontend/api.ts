@@ -31,6 +31,7 @@ export type Artifact = {
 }
 export type Task = {
   id: string
+  created: number
   novel_id: string
   branch_id: string
   kind: string
@@ -45,6 +46,7 @@ export type Task = {
     completion?: unknown
   }
   payload: {
+    mode?: 'assisted' | 'automatic'
     chapters?: number
     account: string
     instruction?: string

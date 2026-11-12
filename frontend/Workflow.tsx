@@ -299,7 +299,8 @@ export function WorkflowPage({
                 <select value={task?.id || ''} onChange={(e) => setSelectedTask(e.target.value)}>
                   {tasks.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.branch_id.slice(0, 6)} · {label(t.status)}
+                      {t.payload.mode === 'assisted' ? '半自动' : '全自动'} · {t.payload.account} ·{' '}
+                      {label(t.status)} · {new Date(t.created * 1000).toLocaleString('zh-CN')}
                     </option>
                   ))}
                 </select>
