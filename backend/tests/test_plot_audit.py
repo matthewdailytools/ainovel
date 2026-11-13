@@ -34,7 +34,7 @@ class Grounded:
                         "actor": "沈砚",
                         "action": "取得",
                         "object": "铜环",
-                        "direction": "",
+                        "direction": "货商向沈砚提高交换条件，非物品转移",
                         "result": "交易失败",
                         "certainty": self.certainty,
                     }

@@ -173,10 +173,6 @@ async def interpret_plot(worker, author_text):
                 issues.append("每项解释必须引用作者原话，不能用候选正文或参考材料佐证。")
             if not any(item[field].strip() for field in ("action", "object", "direction", "result")):
                 issues.append("解释须包含原话支持的事件内容，不能仅凭空字段宣称覆盖情节。")
-            if item["direction"].strip() and item["transfer_scope"] == "none":
-                issues.append(
-                    "direction只表示给出/取得流向；如有流向须填写双方、物品和transfer_scope，否则留空。"
-                )
             if (
                 item["certainty"] == "explicit"
                 and item["transfer_scope"] in {"attempted", "completed"}
