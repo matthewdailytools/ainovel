@@ -5,7 +5,7 @@ import json
 import pytest
 
 from ainovel.db import DomainError
-from ainovel.plot_audit import audit_plot
+from ainovel.plot_audit import audit_plot, independent_flows
 from test_reference_flow import Model, SOURCE, reference as reference, run, update
 
 AUTHOR = "沈砚从货商手中取得铜环，但最终交易失败。"
@@ -34,7 +34,7 @@ class Grounded:
                         "actor": "沈砚",
                         "action": "取得",
                         "object": "铜环",
-                        "direction": "货商向沈砚交付铜环",
+                        "direction": "",
                         "result": "交易失败",
                         "certainty": self.certainty,
                     }
@@ -116,6 +116,10 @@ class Integrated(Model):
                         "action": "取得",
                         "object": "铜环",
                         "direction": "货商交付铜环给沈砚",
+                        "supplier": "货商",
+                        "recipient": "沈砚",
+                        "transfer_object": "铜环",
+                        "transfer_scope": "attempted",
                         "result": "交易失败",
                         "certainty": "explicit",
                     }
@@ -128,7 +132,7 @@ class Integrated(Model):
                 "checks": [
                     {
                         "item_id": "P01",
-                        "result": "fail",
+                        "result": "pass",
                         "observed": "沈砚带铜环换铜料",
                         "evidence": "PLOT001P0001",
                         "reason": "对象及流向反转",
@@ -136,6 +140,22 @@ class Integrated(Model):
                     }
                 ],
                 "summary": "发现情节不符",
+            }
+        elif action == "只从本次正文独立提取物品与信息流向":
+            self.audits.append(value)
+            output = {
+                "flows": [
+                    {
+                        "object_id": "O01",
+                        "supplier_id": "E01",
+                        "recipient_id": "E02",
+                        "stage": "offered",
+                        "certainty": "explicit",
+                        "evidence": "FLOW0001",
+                        "note": "沈砚提供铜环",
+                    }
+                ],
+                "note": "仅看正文，未见作者预期",
             }
         else:
             return await super().generate(account, task_id, system, prompt, max_output, **kwargs)
@@ -169,12 +189,15 @@ def test_optional_audit_is_frozen_in_task_and_does_not_adopt(
     assert not domain.db.all("SELECT * FROM facts")
     assert candidate["payload"]["review_passed"] is not enabled
     if enabled:
-        assert len(model.audits) == 2
+        assert len(model.audits) == 3
         assert TEXT not in str(model.audits[0]) and SOURCE not in str(model.audits[0])
         assert set(model.audits[0]["上下文"]) == {"scope"}
         assert set(model.audits[1]["上下文"]) == {"scope"}
+        assert AUTHOR not in str(model.audits[2]) and SOURCE not in str(model.audits[2])
+        assert set(model.audits[2]["上下文"]) == {"scope"}
         audit = candidate["payload"]["reference_comparison"]["plot_audit"]
         assert audit["status"] == "failed"
+        assert audit["checks"][0]["guard_override"]["code"] == "reverse_transfer"
         assert candidate["payload"]["review"]["findings"][0]["quote"] == TEXT
     else:
         assert not model.audits
@@ -215,3 +238,66 @@ def test_change_after_author_parse_does_not_dispatch_comparison(
     assert len(model.audits) == 1
     assert domain.chapter(story["chapter_id"]) == before
     assert not domain.db.all("SELECT * FROM artifacts WHERE kind='chapter_draft'")
+
+
+@pytest.mark.parametrize(
+    "scenario,expected",
+    [
+        ("reverse", "fail"),
+        ("forward", "pass"),
+        ("none", "unknown"),
+        ("planned", "unknown"),
+        ("both", "pass"),
+        ("other_object", "unknown"),
+    ],
+)
+def test_direction_guard_compares_roles_not_model_pass_claim(scenario, expected):
+    reverse = {
+        "object_id": "O01",
+        "supplier_id": "E01",
+        "recipient_id": "E02",
+        "stage": "offered",
+        "certainty": "explicit",
+        "evidence": "FLOW0001",
+        "note": "独立观察",
+    }
+    forward = {**reverse, "supplier_id": "E02", "recipient_id": "E01"}
+    flows = {
+        "reverse": [reverse],
+        "forward": [forward],
+        "none": [],
+        "planned": [{**reverse, "stage": "planned"}],
+        "both": [reverse, forward],
+        "other_object": [{**reverse, "object_id": "other"}],
+    }[scenario]
+
+    class Observations:
+        async def grounded(self, instruction, schema, context, validate, **kwargs):
+            assert AUTHOR not in str(instruction)
+            assert "作者预期" not in instruction
+            value = schema.model_validate({"flows": flows, "note": "独立流向"}).model_dump()
+            assert not validate(value)
+            return value
+
+    checks = [
+        {
+            "item_id": "P01",
+            "result": "pass",
+            "evidence": TEXT,
+            "observed": "模型声称一致",
+            "reason": "模型声称一致",
+            "repair": "",
+        }
+    ]
+    items = [
+        {
+            "id": "P01",
+            "certainty": "explicit",
+            "transfer_scope": "attempted",
+            "transfer_object": "铜环",
+            "supplier": "货商",
+            "recipient": "沈砚",
+        }
+    ]
+    asyncio.run(independent_flows(Observations(), items, TEXT, checks))
+    assert checks[0]["result"] == expected

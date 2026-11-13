@@ -405,5 +405,16 @@
     "result": "passed",
     "record": "2026-11-13-plot-fidelity.md",
     "fix_of": "plot-audit-narrow-001"
+  },
+  {
+    "id": "plot-fidelity-v12",
+    "date": "2026-11-13",
+    "commit": "3be1d87",
+    "module": "情节忠实性",
+    "scenario": "两步核对仍漏掉方向矛盾，保留原报告与未验证状态",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-13-plot-fidelity.md",
+    "fix_of": "plot-fidelity-v11"
   }
 ]

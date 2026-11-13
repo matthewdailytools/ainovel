@@ -221,6 +221,15 @@ async def compare(worker, text, fixed, context, snapshot, number):
         plot_audit = await audit_plot(worker, p["plot"], text, number)
         review["findings"].extend(plot_audit["findings"])
         review["plot_audit"] = plot_audit
+        review["summary_before_plot_audit"] = review["summary"]
+        review["summary"] += (
+            "\n补充情节逐项核对："
+            + {
+                "failed": "发现不符，请核对附加原文依据。",
+                "unverified": "仍有待核对项，不据此判通过。",
+                "model_pass": "模型标通过，仍待作者判断。",
+            }[plot_audit["status"]]
+        )
     return {
         **value,
         "condition_review": review,
@@ -283,6 +292,11 @@ async def run_reference(worker, request, context):
     if action == "reference.draft":
         write_context = deepcopy(context)
         write_context["selected_external_references"] = []
+        interpreted = None
+        if request.get("plot_contract_check"):
+            from .plot_audit import interpret_plot
+
+            interpreted = await interpret_plot(worker, p["plot"])
         text = await worker.call(
             {
                 "动作": "按确认参考应用方案原创试写",
@@ -290,6 +304,7 @@ async def run_reference(worker, request, context):
                 "固定条件": p["fixed"],
                 "采用方案": p["application_plan"],
                 "选定写法": writing_rules,
+                **({"作者情节解释提案": interpreted} if interpreted is not None else {}),
                 "要求": "只输出本章原创正文，保持作者情节和锁定结果。行动者、动作对象、给出与取得的方向、前提和结果均须保持；方案不能覆盖作者原情节。人物已知和确证事项不得无因变成未知。仅运用写法，不复制参考表达、专名或独特事件安排。",
             },
             context=write_context,

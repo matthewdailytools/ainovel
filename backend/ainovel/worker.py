@@ -35,7 +35,7 @@ longform.plans单独列出作者维护的未来计划，包含各信息视角的
 作者契约中的author_text是作者原话，provenance区分作者确认与AI提案。情绪目标和核心钩子是体验方向，不自行升级成硬性剧情。
 作者已确认的固定结果、禁止项和终局不得被预设或本次模糊指令覆盖。本次明确指令若与作品锁定冲突，应指出冲突并等待作者明确改约，不静默替换锁定。全书结果和终局在全书检查核对，单章只核对禁止项及当前时点明确应发生的结果。
 """
-PROMPT_VERSION = "0.12.0"
+PROMPT_VERSION = "0.13.0"
 
 
 def parse_json(text):
@@ -242,7 +242,11 @@ class Worker:
             and "chapter_scenes" not in context
         ):
             context = self.whole_chapter_context(context)
-        if action in {"仅依据作者原话整理本场景情节", "逐项对照作者情节解释与本次正文"}:
+        if action in {
+            "仅依据作者原话整理本场景情节",
+            "逐项对照作者情节解释与本次正文",
+            "只从本次正文独立提取物品与信息流向",
+        }:
             # These source-isolated stages must not reinterpret chapter intent
             # through other adopted settings, genre preferences or old prose.
             context = deepcopy(context or {})

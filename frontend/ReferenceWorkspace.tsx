@@ -38,6 +38,7 @@ export type ReferenceSession = { id: string; revision: number; payload: Referenc
 type Comparison = {
   plot_audit?: {
     status: string
+    summary: string
     policy: string
     interpretation_note: string
     items: {
@@ -84,6 +85,7 @@ export function ReferenceComparison({ value }: { value: unknown }) {
             )[data.plot_audit.status] || '待核对'}
           </summary>
           <p>{data.plot_audit.policy}</p>
+          <p>{data.plot_audit.summary}</p>
           <p>{data.plot_audit.interpretation_note}</p>
           {data.plot_audit.items.map((item) => {
             const check = data.plot_audit?.checks.find((row) => row.item_id === item.id)
@@ -641,7 +643,7 @@ export function ReferenceWorkspace({
             onChange={(e) => setPlotContractCheck(e.target.checked)}
             disabled={busy || running}
           />
-          试写／对照时额外核对情节角色、对象与方向（增加两步模型调用，仍受预算保护）
+          试写／对照时额外核对情节角色、对象与方向（增加解析与核对调用，仍受预算保护）
         </label>
         <button
           disabled={!canRun || !draft.chapter_id || !draft.selected_ids.length || !draft.plot.trim()}
