@@ -18,14 +18,49 @@ from ainovel.worker import Worker
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend/tests"))
 from test_reference_flow import Model as ReferenceModel  # noqa: E402
 from test_story_extraction import ExtractionModel, UpdateModel  # noqa: E402
+from test_api_worker import FakeModel as BookModel  # noqa: E402
 
 
 class Model(ReferenceModel):
+    def __init__(self):
+        super().__init__()
+        self.book_tasks = set()
+        self.book_model = BookModel()
+
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
         while "原始任务" in instruction:
             instruction = instruction["原始任务"]
+        if instruction.get("动作") in {
+            "全书滚动规划",
+            "按章纲写完整正文",
+            "从正文提取事实候选与章节摘要",
+            "整书完结检查",
+        }:
+            self.book_tasks.add(task_id)
+        if task_id in self.book_tasks:
+            if instruction.get("动作") == "按保存稿反向整理长篇结构候选":
+                unit = instruction["可引用原文"][0]
+                source = {k: unit[k] for k in ("chapter_id", "revision", "start", "end")}
+                source["quote"] = unit["source_id"]
+                records = (
+                    []
+                    if instruction["已有记录索引"]
+                    else [
+                        {
+                            "local_id": "shen",
+                            "record": {"kind": "character", "title": "沈砚", "sources": [source]},
+                            "reasoning": "只提取当前章已出现的人物",
+                        }
+                    ]
+                )
+                return {
+                    "text": json.dumps({"records": records, "unknowns": [], "coverage": "当前章"}),
+                    "usage": {"input": 1, "output": 1},
+                    "call_id": "offline-book-structure",
+                }
+            return await self.book_model.generate(account, task_id, system, prompt, max_output, **kwargs)
         if instruction.get("动作") == "按保存稿反向整理长篇结构候选":
             fixture = (
                 UpdateModel()

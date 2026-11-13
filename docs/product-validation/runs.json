@@ -119,5 +119,49 @@
     "result": "passed",
     "record": "2026-11-13-scene-bundle-record-update.md",
     "fix_of": ""
+  },
+  {
+    "id": "workflow-structure-browser-failed",
+    "date": "2026-11-13",
+    "commit": "25096be+working-tree",
+    "module": "自动化结构维护",
+    "scenario": "两种模式的选择框文本标签定位超时",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-workflow-structure.md",
+    "fix_of": ""
+  },
+  {
+    "id": "workflow-structure-browser-retest",
+    "date": "2026-11-13",
+    "commit": "25096be+working-tree",
+    "module": "自动化结构维护",
+    "scenario": "改用控件角色定位后8条无头流程及维护检查点",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-workflow-structure.md",
+    "fix_of": "workflow-structure-browser-failed"
+  },
+  {
+    "id": "workflow-structure-manual-resume-failed",
+    "date": "2026-11-13",
+    "commit": "25096be+working-tree",
+    "module": "自动化结构维护",
+    "scenario": "人工采用结构后恢复按钮仍禁用",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-workflow-structure.md",
+    "fix_of": ""
+  },
+  {
+    "id": "workflow-structure-manual-resume-retest",
+    "date": "2026-11-13",
+    "commit": "25096be+working-tree",
+    "module": "自动化结构维护",
+    "scenario": "采用结构后界面续跑、键盘、320px及200%字体",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-workflow-structure.md",
+    "fix_of": "workflow-structure-manual-resume-failed"
   }
 ]

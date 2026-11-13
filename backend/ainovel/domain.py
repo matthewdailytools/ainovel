@@ -26,6 +26,7 @@ def same_task_payload(left, right):
                 (k in optional and v is None)
                 or (k in {"finding_indices", "story_chapter_ids"} and v == [])
                 or (k == "context_position" and v == 0)
+                or (k == "structured_maintenance" and v is False)
             )
         }
 
@@ -398,6 +399,14 @@ class Domain:
                         "SELECT story_revision FROM branches WHERE id=?", (artifact["branch_id"],)
                     ).fetchone()[0],
                 }
+                task_payload = json.loads(
+                    db.execute("SELECT payload FROM tasks WHERE id=?", (artifact["task_id"],)).fetchone()[0]
+                )
+                if task_payload.get("structured_maintenance"):
+                    progress["pending_structure"] = {
+                        "chapter_id": chapter["id"],
+                        "revision": result["revision"],
+                    }
                 self.db.check_attempt(db, artifact["task_id"], attempt)
                 db.execute(
                     "UPDATE tasks SET result=?,updated=? WHERE id=? AND attempt=?",

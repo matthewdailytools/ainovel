@@ -42,6 +42,7 @@ export function WorkflowPage({
   const [minChars, setMinChars] = useState(2500)
   const [maxChars, setMaxChars] = useState(3500)
   const [adoption, setAdoption] = useState<'manual' | 'automatic'>('manual')
+  const [structuredMaintenance, setStructuredMaintenance] = useState(true)
   const [profile, setProfile] = useState(
     '第三人称限定视角，克制白话，动作有因果，人物选择遵循当时掌握的信息与资源。',
   )
@@ -92,7 +93,9 @@ export function WorkflowPage({
     visibleTasks.find((t) => t.id === selectedTask) ||
     visibleTasks.find((t) => t.branch_id === branchId) ||
     visibleTasks[0]
-  const waiting = loadedWaiting?.id === task?.result.waiting_artifact ? loadedWaiting : undefined
+  const waitingId = task?.result.waiting_structure || task?.result.waiting_artifact
+  const waiting = loadedWaiting?.id === waitingId ? loadedWaiting : undefined
+  const structureWaiting = !!task?.result.waiting_structure
   const candidateChanged = !!waiting && incomingWaiting?.id === waiting.id
   useEffect(() => {
     setUnknown(false)
@@ -102,13 +105,13 @@ export function WorkflowPage({
     setContinueAccount('')
     setContinueLimit('')
     setContinueReason('')
-  }, [task?.id, task?.status, task?.result.waiting_artifact])
+  }, [task?.id, task?.status, waitingId])
   useEffect(() => {
     let active = true
     setWaiting(undefined)
     setIncomingWaiting(undefined)
     waitingRef.current = undefined
-    const id = task?.result.waiting_artifact
+    const id = waitingId
     const poll = () => {
       if (!id) return
       void api<Artifact>(`/artifacts/${id}`)
@@ -135,7 +138,7 @@ export function WorkflowPage({
       active = false
       if (timer) clearInterval(timer)
     }
-  }, [task?.result.waiting_artifact, task?.status, notify])
+  }, [waitingId, task?.status, notify])
   async function perform(fn: () => Promise<unknown>) {
     if (busy) return
     setBusy(true)
@@ -187,6 +190,7 @@ export function WorkflowPage({
         max_chars: maxChars,
         account,
         adoption,
+        structured_maintenance: structuredMaintenance,
         writing_profile: profile,
         author_contract_basis: {
           source_artifact_id: seenContract.source_artifact_id,
@@ -348,6 +352,19 @@ export function WorkflowPage({
               </select>
             </label>
             <label>
+              <span className="check">
+                <input
+                  type="checkbox"
+                  checked={structuredMaintenance}
+                  onChange={(e) => setStructuredMaintenance(e.target.checked)}
+                />
+                每章采用后整理人物、时点、事件和伏笔
+              </span>
+              <span className="small">
+                增加模型调用，计入同一批次及共享预算；人工政策需确认结构，旧事实纠错会停下等待核对。
+              </span>
+            </label>
+            <label>
               本批次预算（可低于共享总上限）
               <input
                 type="number"
@@ -495,33 +512,39 @@ export function WorkflowPage({
                     <input type="checkbox" checked={changes} onChange={(e) => setChanges(e.target.checked)} />
                     前文已修改时，从最早失效章重新检查并按需修订
                   </label>
-                  {task.status === 'needs_review' && waiting?.status === 'candidate' && (
-                    <>
-                      <label className="check">
-                        <input
-                          type="checkbox"
-                          checked={regenerate}
-                          onChange={(e) => setRegenerate(e.target.checked)}
-                        />
-                        明确重做当前待审章（拒绝旧候选，追加一次有记录的修订尝试）
-                      </label>
-                      {regenerate && (
-                        <label>
-                          重做原因
+                  {task.status === 'needs_review' &&
+                    (waiting?.status === 'candidate' ||
+                      (structureWaiting && waiting?.status === 'rejected')) && (
+                      <>
+                        <label className="check">
                           <input
-                            value={retryReason}
-                            onChange={(e) => setRetryReason(e.target.value)}
-                            placeholder="说明本次调整或重新尝试的原因"
-                            maxLength={2000}
+                            type="checkbox"
+                            checked={regenerate}
+                            onChange={(e) => setRegenerate(e.target.checked)}
                           />
+                          {structureWaiting
+                            ? '明确重做当前结构整理（保留旧候选与原因记录）'
+                            : '明确重做当前待审章（拒绝旧候选，追加一次有记录的修订尝试）'}
                         </label>
-                      )}
-                    </>
-                  )}
+                        {regenerate && (
+                          <label>
+                            重做原因
+                            <input
+                              value={retryReason}
+                              onChange={(e) => setRetryReason(e.target.value)}
+                              placeholder="说明本次调整或重新尝试的原因"
+                              maxLength={2000}
+                            />
+                          </label>
+                        )}
+                      </>
+                    )}
                   <button
                     disabled={
                       busy ||
-                      (task.status === 'needs_review' && (!waiting || candidateChanged)) ||
+                      (task.status === 'needs_review' &&
+                        !!waitingId &&
+                        (!waiting || candidateChanged || (structureWaiting && !regenerate))) ||
                       ![
                         'paused',
                         'blocked_runtime',
@@ -546,7 +569,7 @@ export function WorkflowPage({
                     从保存的检查点恢复
                   </button>
                   {['paused', 'blocked_runtime', 'blocked_creative', 'cancelled'].includes(task.status) &&
-                    !task.result.waiting_artifact && (
+                    !waitingId && (
                       <details>
                         <summary>换账户，从检查点续跑</summary>
                         <p className="small">
@@ -626,7 +649,34 @@ export function WorkflowPage({
                         </button>
                       </details>
                     )}
-                  {waiting && (
+                  {structureWaiting && (
+                    <div className="notice" role="status">
+                      <h3>正文已采用，结构整理等待核对</h3>
+                      <p>
+                        当前不会推进下一章。请切换到此批次的工作版本，在「故事与审阅 →
+                        结构整理」核对候选并采用；完成后回到这里恢复。也可填写原因重做整理。
+                      </p>
+                      <p className="small">候选标识：{task.result.waiting_structure}</p>
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          void perform(async () => {
+                            await onStarted(task.branch_id)
+                            onGenreSettings()
+                          })
+                        }
+                      >
+                        打开此批次的结构审阅
+                      </button>
+                    </div>
+                  )}
+                  {!!task.result.structure_history?.length && (
+                    <p>
+                      已完成 {task.result.structure_history.length}{' '}
+                      次章节结构维护；完整采用回执保留在检查点报告中。
+                    </p>
+                  )}
+                  {waiting && !structureWaiting && (
                     <div className="notice">
                       <h3>待审章节候选</h3>
                       <p>候选修订 {waiting.candidate_revision}</p>

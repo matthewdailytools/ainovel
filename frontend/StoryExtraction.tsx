@@ -368,7 +368,12 @@ export function StoryExtraction({
             </details>
             <button
               className="primary"
-              disabled={busy || !!stale || artifact.status !== 'candidate' || !selected.length}
+              disabled={
+                busy ||
+                !!stale ||
+                artifact.status !== 'candidate' ||
+                (!selected.length && !!artifact.payload.records.length)
+              }
               onClick={() =>
                 void perform(async () => {
                   const body = {

@@ -137,6 +137,26 @@ def sources(payload):
     return result
 
 
+def metadata_extension(before, after):
+    """Added evidence/aliases keep the same identity and assertions, never historical corrections."""
+    if before["kind"] != after["kind"]:
+        return False
+    ignored = {"sources"}
+    if before["kind"] == "character":
+        ignored.add("aliases")
+        if not set(before["aliases"]).issubset(after["aliases"]):
+            return False
+    if {k: v for k, v in before.items() if k not in ignored} != {
+        k: v for k, v in after.items() if k not in ignored
+    }:
+        return False
+
+    def key(s):
+        return (s["chapter_id"], s["revision"], s["start"], s["end"], s["quote"])
+
+    return {key(s) for s in before["sources"]}.issubset({key(s) for s in after["sources"]})
+
+
 def graph(domain, branch_id):
     with domain.db.connect() as conn:
         conn.execute("BEGIN")
@@ -174,7 +194,29 @@ def graph_snapshot(conn, branch_id):
     for dep in dependencies:
         parent = indexed.get(dep["parent_id"])
         if not parent or parent["revision"] != dep["parent_revision"]:
-            indexed[dep["record_id"]]["invalid_reasons"].append("关联记录版本已改变，需重新确认")
+            compatible = False
+            if parent and not parent["archived"]:
+                chain = [
+                    RECORD.validate_json(r["payload"]).model_dump()
+                    for r in conn.execute(
+                        "SELECT payload FROM story_record_history WHERE record_id=? AND revision>=? AND revision<=? ORDER BY revision",
+                        (parent["id"], dep["parent_revision"], parent["revision"]),
+                    )
+                ]
+                compatible = len(chain) == parent["revision"] - dep["parent_revision"] + 1 and all(
+                    metadata_extension(a, b) for a, b in zip(chain, chain[1:])
+                )
+            if compatible:
+                indexed[dep["record_id"]].setdefault("compatible_dependency_updates", []).append(
+                    {
+                        "parent_id": parent["id"],
+                        "from_revision": dep["parent_revision"],
+                        "to_revision": parent["revision"],
+                        "reason": "仅追加来源或人物别名，原身份及断言保持。",
+                    }
+                )
+            else:
+                indexed[dep["record_id"]]["invalid_reasons"].append("关联记录版本已改变，需重新确认")
     # Propagate invalid dependencies without discarding historical records.
     for _ in rows:
         changed = False

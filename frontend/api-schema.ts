@@ -2301,6 +2301,11 @@ export interface components {
     }
     /** WorkflowInput */
     WorkflowInput: {
+      /**
+       * Structured Maintenance
+       * @default false
+       */
+      structured_maintenance: boolean
       /** Client Request Id */
       client_request_id?: string | null
       /** Novel Id */

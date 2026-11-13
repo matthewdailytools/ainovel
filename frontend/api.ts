@@ -115,6 +115,9 @@ export type Task = {
     continued_to?: string
     continued_from?: string
     waiting_artifact?: string
+    waiting_structure?: string
+    pending_structure?: { chapter_id: string; revision: number; artifact_id?: string }
+    structure_history?: { artifact_id: string; policy: string; created: number }[]
     artifact_id?: string
     latest_artifact?: string
     plan?: unknown
@@ -131,6 +134,7 @@ export type Task = {
     fixed?: string[]
     writing_profile?: string
     budget_limit?: number | null
+    structured_maintenance?: boolean
   }
 }
 export type Account = {

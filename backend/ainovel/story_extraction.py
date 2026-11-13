@@ -37,7 +37,7 @@ class StartExtraction(Strict):
 class AdoptExtraction(Strict):
     base_story_revision: int = Field(ge=0)
     candidate_revision: int = Field(ge=0)
-    selected_ids: list[str] = Field(min_length=1, max_length=60)
+    selected_ids: list[str] = Field(max_length=60)
     idempotency_key: str = Field(min_length=8, max_length=128)
 
 
@@ -78,8 +78,8 @@ def rewrite_references(record, mapping):
     return p
 
 
-async def run_extraction(worker, request, context):
-    snapshot = worker.task["result"]["story_extraction_snapshot"]
+async def run_extraction(worker, request, context, snapshot=None):
+    snapshot = snapshot or worker.task["result"]["story_extraction_snapshot"]
     if worker.domain.branch(request["branch_id"])["story_revision"] != snapshot["story_revision"]:
         raise DomainError("story_changed", "源稿排队后改变，未发送整理请求。", 409)
     units = []
@@ -211,7 +211,7 @@ async def run_extraction(worker, request, context):
     return "story_extraction", result
 
 
-def adopt(domain, branch_id, artifact_id, data):
+def adopt(domain, branch_id, artifact_id, data, attempt=None):
     request_signature = data.model_dump()
     with domain.db.connect(True) as tx:
         artifact = tx.execute(
@@ -220,6 +220,8 @@ def adopt(domain, branch_id, artifact_id, data):
         ).fetchone()
         if not artifact:
             raise DomainError("not_found", "结构候选不存在或不属于当前版本。", 404)
+        if attempt:
+            domain.db.check_attempt(tx, artifact["task_id"], attempt)
         prior = tx.execute("SELECT * FROM receipts WHERE key=?", (data.idempotency_key,)).fetchone()
         if prior:
             result = json.loads(prior["result"])
@@ -235,6 +237,8 @@ def adopt(domain, branch_id, artifact_id, data):
         if revision != data.base_story_revision or revision != basis.get("story_revision"):
             raise DomainError("story_changed", "故事或源稿已改变，请重新整理。", 409)
         indexed = {item["id"]: item for item in payload["records"]}
+        if indexed and not data.selected_ids:
+            raise DomainError("story_selection", "请选择至少一项，空选择不能确认非空候选。")
         chosen = set(data.selected_ids)
         if len(chosen) != len(data.selected_ids) or not chosen.issubset(indexed):
             raise DomainError("story_selection", "候选选择重复或不存在。")
@@ -285,17 +289,47 @@ def adopt(domain, branch_id, artifact_id, data):
                     "INSERT INTO story_record_dependencies VALUES(?,?,?)",
                     (identifier, parent, parent_revision),
                 )
-        tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
+        increment = 1 if chosen else 0
+        tx.execute("UPDATE branches SET story_revision=story_revision+? WHERE id=?", (increment, branch_id))
         tx.execute("UPDATE artifacts SET status='accepted' WHERE id=?", (artifact_id,))
         result = {
             "artifact_id": artifact_id,
             "record_ids": data.selected_ids,
             "record_revisions": record_revisions,
             "request": request_signature,
-            "story_revision": revision + 1,
+            "story_revision": revision + increment,
             "note": "仅所选结构候选已确认；未选项保留在原产物，不影响正文。",
         }
         tx.execute("INSERT INTO receipts VALUES(?,?,?)", (data.idempotency_key, artifact_id, dumps(result)))
+        if artifact["task_id"]:
+            owner = tx.execute(
+                "SELECT kind,status,result FROM tasks WHERE id=?", (artifact["task_id"],)
+            ).fetchone()
+            progress = json.loads(owner["result"]) if owner else {}
+            if (
+                owner
+                and owner["kind"] == "workflow"
+                and progress.get("pending_structure", {}).get("artifact_id") == artifact_id
+            ):
+                source = progress.pop("pending_structure")
+                progress.pop("waiting_structure", None)
+                progress["expected_story_revision"] = result["story_revision"]
+                progress.setdefault("structure_history", []).append(
+                    {
+                        **source,
+                        "record_ids": data.selected_ids,
+                        "record_revisions": record_revisions,
+                        "policy": "worker_automatic" if attempt else "author_confirmed",
+                        "created": time(),
+                    }
+                )
+                tx.execute(
+                    "UPDATE tasks SET result=?,updated=? WHERE id=?",
+                    (dumps(progress), time(), artifact["task_id"]),
+                )
+                domain.db.event(
+                    tx, artifact["task_id"], "structure_maintained", progress["structure_history"][-1]
+                )
         return result
 
 

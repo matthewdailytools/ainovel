@@ -124,6 +124,7 @@ class Plot(Input):
 
 
 class WorkflowInput(Input):
+    structured_maintenance: bool = False
     client_request_id: str | None = Field(default=None, min_length=8, max_length=128)
     novel_id: str
     source_branch_id: str | None = None

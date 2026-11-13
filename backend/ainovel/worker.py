@@ -116,6 +116,23 @@ class Worker:
             ).fetchone()
             if current["attempt"] != self.attempt or current["cancel"] or current["lease_until"] < time():
                 raise DomainError("cancelled", "任务已停止。", 409)
+            if status == "production_complete":
+                from .story_graph import graph_snapshot, promise_status
+
+                revision = db.execute(
+                    "SELECT story_revision FROM branches WHERE id=?", (self.task["branch_id"],)
+                ).fetchone()[0]
+                if revision != result.get("expected_story_revision"):
+                    raise DomainError("story_changed", "完成检查后故事已改变，不能记录为制作完成。", 409)
+                if result.get("pending_structure") or result.get("waiting_structure"):
+                    raise DomainError("workflow_progress", "章节结构维护尚未完成，不能结束批次。", 409)
+                promises = promise_status(graph_snapshot(db, self.task["branch_id"]))
+                result["maintained_promises"] = promises
+                if not promises["closed"]:
+                    status, error = (
+                        "blocked_creative",
+                        "已维护的伏笔仍有未闭合或失效记录，请先在故事与审阅中核对。",
+                    )
             db.execute(
                 "UPDATE tasks SET result=?,status=?,error=?,updated=? WHERE id=? AND attempt=?",
                 (dumps(result), status, error, time(), self.task["id"], self.attempt),
@@ -976,7 +993,17 @@ class Worker:
                 self.checkpoint(result, "needs_review")
                 return
             result["next_chapter"] += 1
+            if payload.get("structured_maintenance"):
+                current_chapter = self.domain.chapter(artifact["chapter_id"], branch_id)
+                result["pending_structure"] = {
+                    "chapter_id": current_chapter["id"],
+                    "revision": current_chapter["revision"],
+                }
             self.checkpoint(result)
+        from .workflow_structure import maintain
+
+        if not await maintain(self, result):
+            return
         for round_number in range(result.get("repair_round", 0), 3):
             result["repair_round"] = round_number
             for plot in result["plan"]["chapters"]:
@@ -1115,6 +1142,8 @@ class Worker:
                 self.domain.accept(
                     artifact["id"], "workflow-" + artifact["id"], True, self.attempt, workflow_result=result
                 )
+                if not await maintain(self, result):
+                    return
                 if self.db.all(
                     "SELECT id FROM tasks WHERE status='queued' AND cancel=0 AND id!=? LIMIT 1",
                     (self.task["id"],),

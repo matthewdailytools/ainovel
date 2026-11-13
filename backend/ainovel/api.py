@@ -654,8 +654,33 @@ def create_app(settings=None, schema_only=False):
         reject_pending = None
         branch_snapshot = None
         if current["kind"] == "workflow":
+            structure = result.get("waiting_structure")
+            if structure:
+                candidate = domain.artifact(structure)
+                if not data.regenerate_pending:
+                    raise DomainError(
+                        "structure_review_required",
+                        "请先在结构整理中确认采用待审记录，或填写原因后重做。",
+                        409,
+                    )
+                if candidate["status"] not in ("candidate", "rejected") or not data.reason.strip():
+                    raise DomainError("retry_reason", "结构重做需要未采用或已拒绝候选及明确原因。", 409)
+                if candidate["candidate_revision"] != data.candidate_revision:
+                    raise DomainError("candidate_conflict", "结构候选已更新，请重新核对。", 409)
+                reject_pending = structure if candidate["status"] == "candidate" else None
+                result["pending_structure"] = {**result["pending_structure"], "epoch": uid()}
+                result["pending_structure"].pop("artifact_id", None)
+                result.pop("waiting_structure")
+                result.setdefault("interventions", []).append(
+                    {
+                        "action": "regenerate_structure",
+                        "artifact_id": structure,
+                        "reason": data.reason,
+                        "time": time(),
+                    }
+                )
             waiting = result.get("waiting_artifact")
-            if data.regenerate_pending:
+            if data.regenerate_pending and not structure:
                 if (
                     not waiting
                     or domain.artifact(waiting)["status"] != "candidate"
@@ -695,6 +720,27 @@ def create_app(settings=None, schema_only=False):
                     result.pop("waiting_artifact", None)
                     waiting = None
                     result["next_chapter"] = min(result.get("next_chapter", 1), stale[0]["position"])
+                pending_structure = result.get("pending_structure")
+                if pending_structure:
+                    source = domain.chapter(pending_structure["chapter_id"], current["branch_id"])
+                    if stale and stale[0]["position"] <= source["position"]:
+                        result.pop("pending_structure")
+                        result.pop("waiting_structure", None)
+                    elif source["revision"] != pending_structure["revision"]:
+                        result["pending_structure"] = {
+                            "chapter_id": source["id"],
+                            "revision": source["revision"],
+                            "epoch": uid(),
+                        }
+                        result.pop("waiting_structure", None)
+                    result.setdefault("interventions", []).append(
+                        {
+                            "action": "recheck_structure_after_author_changes",
+                            "chapter_id": source["id"],
+                            "revision": source["revision"],
+                            "time": time(),
+                        }
+                    )
                 result["expected_story_revision"] = branch["story_revision"]
         with db.connect(True) as tx:
             latest = tx.execute("SELECT status,updated FROM tasks WHERE id=?", (task_id,)).fetchone()
@@ -709,6 +755,15 @@ def create_app(settings=None, schema_only=False):
             ):
                 raise DomainError("story_changed", "恢复检查期间故事已改变，请重新核对。", 409)
             if reject_pending:
+                pending_row = tx.execute(
+                    "SELECT payload FROM artifacts WHERE id=?", (reject_pending,)
+                ).fetchone()
+                if (
+                    not pending_row
+                    or json.loads(pending_row["payload"]).get("_candidate_revision", 0)
+                    != data.candidate_revision
+                ):
+                    raise DomainError("candidate_conflict", "恢复检查期间候选已更新，请重新比较。", 409)
                 changed = tx.execute(
                     "UPDATE artifacts SET status='rejected' WHERE id=? AND status='candidate'",
                     (reject_pending,),

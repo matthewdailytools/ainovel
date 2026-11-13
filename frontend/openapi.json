@@ -2596,7 +2596,6 @@
             "items": { "type": "string" },
             "type": "array",
             "maxItems": 60,
-            "minItems": 1,
             "title": "Selected Ids"
           },
           "idempotency_key": {
@@ -3676,6 +3675,11 @@
       },
       "WorkflowInput": {
         "properties": {
+          "structured_maintenance": {
+            "type": "boolean",
+            "title": "Structured Maintenance",
+            "default": false
+          },
           "client_request_id": {
             "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 8 }, { "type": "null" }],
             "title": "Client Request Id"

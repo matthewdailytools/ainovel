@@ -128,6 +128,18 @@ def test_upstream_edits_invalidate_records_and_keep_history(records, domain, sto
     )
 
 
+def test_alias_extension_preserves_dependents_but_correction_and_revert_do_not(records, domain, story):
+    save, character, event, _, _ = records
+    extended = save({**character["payload"], "aliases": ["小宁", "宁姑娘"]}, character)
+    rows = {r["id"]: r for r in graph(domain, story["branch_id"])["records"]}
+    assert not rows[event["id"]]["invalid_reasons"]
+    assert rows[event["id"]]["compatible_dependency_updates"]
+    corrected = save({**extended["payload"], "profile": "更正身份"}, extended)
+    save(extended["payload"], corrected)
+    rows = {r["id"]: r for r in graph(domain, story["branch_id"])["records"]}
+    assert rows[event["id"]]["invalid_reasons"]
+
+
 def test_conflicting_states_remain_visible_and_events_do_not_accumulate(records, domain, story):
     save, character, event, source, next_chapter = records
     base = {

@@ -173,6 +173,102 @@ class FakeModel:
         }
 
 
+@pytest.mark.parametrize("mode", ["assisted", "automatic"])
+@pytest.mark.parametrize("adoption", ["manual", "automatic"])
+def test_book_structure_maintenance_is_durable_before_next_chapter(
+    settings, domain, story, client, mode, adoption
+):
+    class StructuredModel(FakeModel):
+        def __init__(self):
+            super().__init__()
+            self.maintained = 0
+
+        async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+            value = json.loads(prompt.split("\n只返回")[0])
+            instruction = value["任务"]
+            if instruction.get("动作") == "按保存稿反向整理长篇结构候选":
+                self.maintained += 1
+                unit = instruction["可引用原文"][0]
+                source = {k: unit[k] for k in ("chapter_id", "revision", "start", "end")}
+                source["quote"] = unit["source_id"]
+                records = (
+                    []
+                    if self.maintained > 1
+                    else [
+                        {
+                            "local_id": "shen",
+                            "reasoning": "正文出现的人物",
+                            "record": {"kind": "character", "title": "沈砚", "sources": [source]},
+                        }
+                    ]
+                )
+                return {
+                    "text": dumps({"records": records, "unknowns": [], "coverage": "当前章"}),
+                    "usage": {"input": 1, "output": 1},
+                    "call_id": "structure",
+                    "model": "offline",
+                }
+            if instruction.get("动作") == "按章纲写完整正文" and self.maintained:
+                progress = domain.task(task_id)["result"]
+                assert len(progress["structure_history"]) == self.maintained
+                assert not progress.get("pending_structure")
+            return await super().generate(account, task_id, system, prompt, max_output, **kwargs)
+
+    payload = WorkflowInput(
+        novel_id=story["id"],
+        mode=mode,
+        brief="独立结构维护验证",
+        chapters=2,
+        plots=[{"number": n, "title": f"第{n}章", "plot": "量潮并核查证据", "fixed": []} for n in (1, 2)]
+        if mode == "assisted"
+        else [],
+        min_chars=200,
+        max_chars=600,
+        account="openai_1",
+        adoption=adoption,
+        structured_maintenance=True,
+    ).model_dump()
+    task = domain.queue("workflow", payload, story["branch_id"])
+    model = StructuredModel()
+    asyncio.run(Worker(settings, model).run_once())
+    if adoption == "manual":
+        for _ in range(5):
+            pending = domain.task(task["id"])
+            if pending["status"] == "production_complete":
+                break
+            assert pending["status"] == "needs_review", pending["error"]
+            structure_id = pending["result"].get("waiting_structure")
+            if structure_id:
+                assert client.post(f"/api/tasks/{task['id']}/resume", json={}).status_code == 409
+                artifact = domain.artifact(structure_id)
+                response = client.post(
+                    f"/api/branches/{story['branch_id']}/story-extractions/{structure_id}/adopt",
+                    json={
+                        "base_story_revision": domain.branch(story["branch_id"])["story_revision"],
+                        "candidate_revision": artifact["candidate_revision"],
+                        "selected_ids": [r["id"] for r in artifact["payload"]["records"]],
+                        "idempotency_key": "manual-structure-" + structure_id,
+                    },
+                )
+                assert response.status_code == 200, response.text
+                assert not domain.task(task["id"])["result"].get("pending_structure")
+            else:
+                domain.accept(
+                    pending["result"]["waiting_artifact"],
+                    "manual-" + pending["id"] + str(pending["result"]["next_chapter"]),
+                )
+            resumed = client.post(f"/api/tasks/{task['id']}/resume", json={})
+            assert resumed.status_code == 200, resumed.text
+            asyncio.run(Worker(settings, model).run_once())
+    finished = domain.task(task["id"])
+    assert finished["status"] == "production_complete", finished["error"]
+    assert model.maintained == 2
+    assert len(finished["result"]["structure_history"]) == 2
+    assert not finished["result"].get("pending_structure")
+    records = domain.db.all("SELECT * FROM story_records WHERE branch_id=?", (story["branch_id"],))
+    assert len(records) == 1
+
+
 def test_repeated_creation_returns_same_task_even_after_source_changes(client):
     story, chapter = create(client)
     payload = {
@@ -711,8 +807,15 @@ def test_manual_adoption_waits_and_resume_does_not_use_other_prose(settings, dom
     assert domain.task(task["id"])["status"] == "production_complete"
 
 
-def test_accepted_chapter_and_next_checkpoint_survive_worker_loss_together(settings, domain, story):
-    task = domain.queue("workflow", {"novel_id": story["id"], "account": "openai_1"}, story["branch_id"])
+@pytest.mark.parametrize("maintenance", [False, True])
+def test_accepted_chapter_and_next_checkpoint_survive_worker_loss_together(
+    settings, domain, story, maintenance
+):
+    task = domain.queue(
+        "workflow",
+        {"novel_id": story["id"], "account": "openai_1", "structured_maintenance": maintenance},
+        story["branch_id"],
+    )
     worker = Worker(settings, FakeModel())
     claimed = worker.claim()
     progress = {
@@ -740,6 +843,13 @@ def test_accepted_chapter_and_next_checkpoint_survive_worker_loss_together(setti
     recovered = domain.task(task["id"])
     assert recovered["status"] == "blocked_runtime"
     assert recovered["result"]["next_chapter"] == 2
+    if maintenance:
+        assert recovered["result"]["pending_structure"] == {
+            "chapter_id": story["chapter_id"],
+            "revision": domain.chapter(story["chapter_id"])["revision"],
+        }
+    else:
+        assert "pending_structure" not in recovered["result"]
     assert (
         recovered["result"]["expected_story_revision"] == domain.branch(story["branch_id"])["story_revision"]
     )
