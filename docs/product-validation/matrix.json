@@ -1,0 +1,110 @@
+[
+  {
+    "id": "PV01",
+    "module": "writing",
+    "name": "作品与手写",
+    "pain": "起笔困难、保存与定位负担",
+    "scenarios": "新建、编辑、保存、目录、恢复、导出",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV02",
+    "module": "library",
+    "name": "资料书库",
+    "pain": "查找与搬运资料困难",
+    "scenarios": "获取、解析覆盖、阅读、短词搜索、摘录、回源",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV03",
+    "module": "reference",
+    "name": "参考仿写",
+    "pain": "看懂写法但难以用于自己的故事",
+    "scenarios": "选段、拆解、规则选择、应用方案、试写、对照采纳",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV04",
+    "module": "intent",
+    "name": "创作约定与题材",
+    "pain": "方向漂移、预设压过作者安排",
+    "scenarios": "原话、AI提案、确认、频道题材、锁定项继承",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV05",
+    "module": "state",
+    "name": "人物与时点",
+    "pain": "忘记人物知道什么及能做什么",
+    "scenarios": "身份、别名、获知、能力、资源、伤势、时点与视角",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV06",
+    "module": "threads",
+    "name": "多线与承诺",
+    "pain": "同期事件混乱、伏笔遗忘",
+    "scenarios": "事件、因果、泳道、关系图、跨卷、伏笔生命周期",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV07",
+    "module": "import",
+    "name": "长篇导入",
+    "pain": "已有稿件难以恢复工作",
+    "scenarios": "编码、章界、映射、重复、回执、反向整理",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV08",
+    "module": "revision",
+    "name": "候选与修订",
+    "pain": "反馈搬运、误采纳和返修负担",
+    "scenarios": "差异、编辑、拒绝、采纳、反馈修订、版本失效",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV09",
+    "module": "assisted",
+    "name": "半自动整书",
+    "pain": "有情节但写作投入过高",
+    "scenarios": "批量情节、补写、审查、状态更新、交付",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV10",
+    "module": "automatic",
+    "name": "全自动整书",
+    "pain": "不想逐章规划和维护资料",
+    "scenarios": "规划、生成、有限返修、检查点、完结",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV11",
+    "module": "reliability",
+    "name": "运行与费用",
+    "pain": "失败重跑、费用不明及数据丢失",
+    "scenarios": "取消、暂停、恢复、未知超时、多账户预算、备份",
+    "stability": "not_run",
+    "quality": "not_run"
+  },
+  {
+    "id": "PV12",
+    "module": "accessibility",
+    "name": "中文与界面",
+    "pain": "输入被打断、窄屏和长文难用",
+    "scenarios": "组合输入、UTF-16、焦点、键盘、200%文字、响应",
+    "stability": "not_run",
+    "quality": "not_run"
+  }
+]
