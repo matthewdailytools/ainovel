@@ -48,19 +48,17 @@ test('长章写作：二十万字符定位末尾、修改保存和重开完整�
   expect(current.content).toBe(text + '末尾补记😀𠮷')
   const tasks = await (await page.request.get('/api/tasks')).json()
   expect(tasks.filter((row: { novel_id: string }) => row.novel_id === novel.id)).toEqual([])
-  await test
-    .info()
-    .attach('long-manuscript-response', {
-      contentType: 'application/json',
-      body: JSON.stringify({
-        chars: text.length,
-        utf16: text.length,
-        openedMs,
-        editMs,
-        saveMs,
-        revision: current.revision,
-        synthetic: true,
-        modelCalls: 0,
-      }),
-    })
+  await test.info().attach('long-manuscript-response', {
+    contentType: 'application/json',
+    body: JSON.stringify({
+      chars: text.length,
+      utf16: text.length,
+      openedMs,
+      editMs,
+      saveMs,
+      revision: current.revision,
+      synthetic: true,
+      modelCalls: 0,
+    }),
+  })
 })
