@@ -449,5 +449,104 @@
     "result": "unverified",
     "record": "2026-11-13-plot-fidelity.md",
     "fix_of": "plot-fidelity-v12"
+  },
+  {
+    "id": "feedback-connection-001",
+    "date": "2026-11-13",
+    "commit": "423447c",
+    "module": "人工反馈",
+    "scenario": "旧修订确认、主动选区、候选采纳与原稿历史",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-feedback-and-minimal-revision.md",
+    "fix_of": ""
+  },
+  {
+    "id": "minimal-opening-001",
+    "date": "2026-11-13",
+    "commit": "423447c",
+    "module": "最小修订",
+    "scenario": "结尾一句局部候选及模型复检；作者待评",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-13-feedback-and-minimal-revision.md",
+    "fix_of": ""
+  },
+  {
+    "id": "worker-process-restart-001",
+    "date": "2026-11-13",
+    "commit": "c626c4f",
+    "module": "运行恢复",
+    "scenario": "实际Worker进程终止、自然租约与明确恢复",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-worker-restart-and-longform-runner.md",
+    "fix_of": ""
+  },
+  {
+    "id": "longform-real-ten-001",
+    "date": "2026-11-13",
+    "commit": "c626c4f",
+    "module": "十章真实质量",
+    "scenario": "已启动并维护状态，整体验收尚在进行",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-13-worker-restart-and-longform-runner.md",
+    "fix_of": ""
+  },
+  {
+    "id": "input-max-001",
+    "date": "2026-11-13",
+    "commit": "c626c4f+working-tree",
+    "module": "大稿与中文",
+    "scenario": "20MiB边界、UTF16及25万字符服务端保存",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-input-size-boundaries.md",
+    "fix_of": ""
+  },
+  {
+    "id": "stability-round2-001",
+    "date": "2026-11-13",
+    "commit": "ac30ee3+working-tree",
+    "module": "全项目稳定性",
+    "scenario": "369后端、19无头、追加长章编辑和中文故障路径",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-stability-round2.md",
+    "fix_of": ""
+  },
+  {
+    "id": "reference-repeat-001",
+    "date": "2026-11-13",
+    "commit": "ac30ee3+working-tree",
+    "module": "三类三次真实对照",
+    "scenario": "9对18稿完成，匿名稿与费用核对，作者质量待评",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-13-reference-repeats.md",
+    "fix_of": ""
+  },
+  {
+    "id": "longform-context-001",
+    "date": "2026-11-13",
+    "commit": "ac30ee3+working-tree",
+    "module": "十章上下文",
+    "scenario": "第四章完整上下文重复超限，保留现场",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-longform-context-recovery.md",
+    "fix_of": ""
+  },
+  {
+    "id": "longform-context-002",
+    "date": "2026-11-13",
+    "commit": "ac30ee3+working-tree",
+    "module": "十章上下文",
+    "scenario": "可逆引用、逐字还原及实际恢复，继续修订",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-longform-context-recovery.md",
+    "fix_of": "longform-context-001"
   }
 ]

@@ -78,7 +78,7 @@ def write_json(path, value):
 def blind_pack(folder, results):
     """Keep the decoding key separate from anonymous author-facing texts."""
     reviews = folder / "blind-review"
-    reviews.mkdir(exist_ok=True)
+    reviews.mkdir(parents=True, exist_ok=True)
     randomizer = random.Random(hashlib.sha256(folder.name.encode()).hexdigest())
     answers = []
     for index, row in enumerate(results, 1):

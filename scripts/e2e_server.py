@@ -12,6 +12,7 @@ from tempfile import TemporaryDirectory
 import uvicorn
 
 from ainovel.api import create_app
+from ainovel.db import DomainError
 from ainovel.settings import Provider, Settings
 from ainovel.worker import Worker
 
@@ -31,6 +32,16 @@ class Model(ReferenceModel):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
         if instruction.get("action") == "writing.rewrite_selection":
+            if "后台故障演练：慢速可取消" in instruction.get("作者要求", ""):
+                partial = "等待核查的未采纳片段。" * 15
+                if kwargs.get("on_text"):
+                    await kwargs["on_text"](partial)
+                for _ in range(150):
+                    await asyncio.sleep(0.1)
+                    if kwargs.get("cancelled") and kwargs["cancelled"]():
+                        error = DomainError("cancelled", "工程替身收到取消，后续结果不发布。", 409)
+                        error.partial_text = partial
+                        raise error
             return {
                 "text": "她先核对刻度，再记录读数。",
                 "usage": {"input": 1, "output": 1},
