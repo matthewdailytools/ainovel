@@ -1,6 +1,8 @@
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
+from .author_contract import AuthorIntentFields
+
 
 class Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -30,6 +32,11 @@ class GenreProfileBasis(Input):
     catalog_version: str = Field(min_length=1, max_length=100)
 
 
+class AuthorContractBasis(Input):
+    source_artifact_id: str | None = Field(min_length=1, max_length=128)
+    contract_version: str = Field(min_length=1, max_length=100)
+
+
 class ModuleInput(Input):
     client_request_id: str | None = Field(default=None, min_length=8, max_length=128)
     action: Literal[
@@ -42,6 +49,8 @@ class ModuleInput(Input):
         "character.generate",
         "world.generate",
         "ideation.explore",
+        "intent.compile",
+        "revision.targeted",
     ]
     novel_id: str
     branch_id: str
@@ -60,6 +69,9 @@ class ModuleInput(Input):
     max_output_tokens: int = Field(default=8192, ge=64, le=16_384)
     budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     genre_profile_basis: GenreProfileBasis | None = None
+    author_contract_basis: AuthorContractBasis | None = None
+    source_review_id: str | None = Field(default=None, min_length=1, max_length=128)
+    finding_indices: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list, max_length=20)
 
 
 class CandidateEdit(Input):
@@ -119,6 +131,7 @@ class WorkflowInput(Input):
     )
     budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     genre_profile_basis: GenreProfileBasis | None = None
+    author_contract_basis: AuthorContractBasis | None = None
 
 
 class FeedbackInput(Input):
@@ -208,4 +221,6 @@ class DefinitionInput(Input):
     author_exceptions: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(
         default_factory=list, max_length=30
     )
+    intent_contract: AuthorIntentFields | None = None
+    intent_source_candidate_id: str | None = Field(default=None, min_length=1, max_length=128)
     base_story_revision: int = Field(ge=0)

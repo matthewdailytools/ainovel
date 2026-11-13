@@ -207,7 +207,18 @@ export function GenreSettings({
     setBusy(true)
     setError('')
     try {
-      const values = readerDefinition(draft, adopted?.story_revision)
+      let baseline = adopted
+      if (save) {
+        const current = await api<GenreProfile>(`/branches/${branchId}/genre-profile`)
+        if (
+          !adopted ||
+          current.source_artifact_id !== adopted.source_artifact_id ||
+          current.catalog_version !== adopted.catalog_version
+        )
+          throw new Error('题材配置已改变，表单保留；请先复制需要的内容，再重新载入当前采用配置。')
+        baseline = current
+      }
+      const values = readerDefinition(draft, baseline?.story_revision)
       if (save) {
         await api(`/branches/${branchId}/definitions`, 'POST', values)
         if (alive.current) setStatus('配置已写入，正在读取采用结果…')

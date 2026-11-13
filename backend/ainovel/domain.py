@@ -4,6 +4,7 @@ from time import time
 
 from .db import DomainError, dumps, uid
 from .genre_catalog import assemble_profile
+from .author_contract import assemble_contract
 from .models import Fact
 
 
@@ -11,7 +12,12 @@ def same_task_payload(left, right):
     # Added in 0.2: omitted and null both mean an older caller supplied no seen basis.
     # A supplied basis object (including its explicit null reader ID) remains distinct.
     def normalized(value):
-        return {k: v for k, v in value.items() if k != "genre_profile_basis" or v is not None}
+        optional = {"genre_profile_basis", "author_contract_basis", "source_review_id"}
+        return {
+            k: v
+            for k, v in value.items()
+            if not ((k in optional and v is None) or (k == "finding_indices" and v == []))
+        }
 
     return normalized(left) == normalized(right)
 
@@ -135,6 +141,34 @@ class Domain:
         with self.db.connect(True) as db:
             if attempt:
                 self.db.check_attempt(db, task_id, attempt)
+            # A setting may change while the last model call is in flight. Validate
+            # inside the artifact transaction, as well as before dispatching calls.
+            if task_id:
+                if basis.get("targeted_revision"):
+                    self.check_targeted_source_tx(db, basis["targeted_revision"])
+                for field, definition_kind, code in (
+                    ("author_contract", "intent", "author_contract_changed"),
+                    ("genre_profile", "reader", "genre_profile_changed"),
+                ):
+                    snapshot = basis.get(field)
+                    if not snapshot or snapshot.get("legacy_unconfigured"):
+                        continue
+                    source = db.execute(
+                        "SELECT id FROM artifacts WHERE branch_id=? AND kind=? "
+                        "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",
+                        (request["branch_id"], definition_kind),
+                    ).fetchone()
+                    if (source[0] if source else None) != snapshot.get("source_artifact_id"):
+                        raise DomainError(
+                            code, "生成期间采用配置改变，旧步骤结果已保留但不作为当前候选。", 409
+                        )
+                revision = db.execute(
+                    "SELECT story_revision FROM branches WHERE id=?", (request["branch_id"],)
+                ).fetchone()[0]
+                if "story_revision" in basis and revision != basis["story_revision"]:
+                    raise DomainError(
+                        "story_changed", "生成期间故事版本改变，旧步骤结果保留但不作为当前候选。", 409
+                    )
             db.execute(
                 "INSERT INTO artifacts(id,novel_id,branch_id,chapter_id,kind,base_revision,payload,basis,task_id,created) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (
@@ -151,6 +185,19 @@ class Domain:
                 ),
             )
         return self.artifact(artifact_id)
+
+    @staticmethod
+    def check_targeted_source_tx(db, snapshot):
+        source = db.execute(
+            "SELECT status,payload FROM artifacts WHERE id=?", (snapshot["source_review_id"],)
+        ).fetchone()
+        if not source or source["status"] == "rejected":
+            raise DomainError("review_stale", "来源审稿报告已拒绝或不存在，停止修订。", 409)
+        fingerprint = hashlib.sha256(
+            json.dumps(json.loads(source["payload"]), sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
+        if fingerprint != snapshot["source_review_sha256"]:
+            raise DomainError("review_stale", "来源审稿报告已改变，请重新选择问题。", 409)
 
     def artifact(self, artifact_id):
         artifact = self.db.one("SELECT * FROM artifacts WHERE id=?", (artifact_id,))
@@ -224,6 +271,15 @@ class Domain:
                 ).fetchone()[0]
                 if story_revision != artifact["basis"]["story_revision"]:
                     raise DomainError("story_changed", "生成所依据的故事版本已改变，需重新审阅生成。", 409)
+            if (
+                artifact["kind"] == "intent"
+                and payload.get("provenance", {}).get("origin") == "ai_compilation_candidate"
+            ):
+                raise DomainError(
+                    "author_confirmation_required",
+                    "请先将契约提案载入作者表单，核对原话与AI推导后确认采用。",
+                    409,
+                )
             if require_review and not payload.get("review_passed"):
                 raise DomainError("review_required", "候选尚未通过本轮检查，不能自动采纳。", 409)
             result = {"artifact_id": artifact_id, "chapter_id": artifact["chapter_id"]}
@@ -334,6 +390,48 @@ class Domain:
             "source_story_revision": branch["story_revision"],
         }
 
+    def author_contract(self, branch_id, definitions=None):
+        branch = self.branch(branch_id)
+        if definitions is None:
+            rows = self.db.all(
+                "SELECT id,kind,payload FROM artifacts WHERE branch_id=? AND kind='intent' "
+                "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",
+                (branch_id,),
+            )
+            definitions = [{**row, "payload": json.loads(row["payload"])} for row in rows]
+        intent = next((row for row in definitions if row["kind"] == "intent"), None)
+        return {
+            **assemble_contract(intent["payload"] if intent else None),
+            "branch_id": branch_id,
+            "source_artifact_id": intent["id"] if intent else None,
+            "source_story_revision": branch["story_revision"],
+        }
+
+    def check_author_contract_snapshot(self, branch_id, snapshot):
+        if not snapshot or snapshot.get("legacy_unconfigured"):
+            return
+        rows = self.db.all(
+            "SELECT id FROM artifacts WHERE branch_id=? AND kind='intent' "
+            "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",
+            (branch_id,),
+        )
+        if (rows[0]["id"] if rows else None) != snapshot.get("source_artifact_id"):
+            raise DomainError(
+                "author_contract_changed",
+                "本任务依据的作者契约已改变，原快照保留；请按新契约创建任务，不混用两套方向。",
+                409,
+            )
+
+    @staticmethod
+    def check_author_contract_basis(contract, basis):
+        if basis is not None and (
+            basis["source_artifact_id"] != contract["source_artifact_id"]
+            or basis["contract_version"] != contract["contract_version"]
+        ):
+            raise DomainError(
+                "author_contract_changed", "作者契约已在其他窗口改变，请刷新并确认后再生成。", 409
+            )
+
     def check_genre_snapshot(self, branch_id, snapshot):
         if not snapshot or snapshot.get("legacy_unconfigured"):
             return
@@ -388,6 +486,7 @@ class Domain:
             "recent": list(reversed(previous)),
             "definitions": definitions,
             "genre_profile": self.genre_profile(branch_id, definitions),
+            "author_contract": self.author_contract(branch_id, definitions),
             "coverage": "每类最新采用设定、目标章节之前最近100条有效事实及最近两章；更早原文需主动查询，未知故事时间保留未知。",
         }
 
@@ -414,7 +513,14 @@ class Domain:
                 raise DomainError("revision_conflict", "请先保存当前正文并重新选择目标版本。", 409)
         task_id = uid()
         profile = self.genre_profile(branch_id)
-        initial = {"genre_profile_snapshot": profile}
+        contract = self.author_contract(branch_id)
+        initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
+        if kind == "module" and payload.get("action") == "revision.targeted":
+            from .targeted_revision import validate_targeted_revision
+
+            initial["targeted_revision_snapshot"] = validate_targeted_revision(
+                self, payload, self.context(branch_id, payload.get("chapter_id"))
+            )
         if kind == "workflow":
             initial["expected_story_revision"] = profile["source_story_revision"]
         with self.db.connect(True) as db:
@@ -438,8 +544,21 @@ class Domain:
                 raise DomainError("genre_profile_changed", "频道题材配置在提交时改变，请刷新后重试。", 409)
             if kind == "module":
                 self.check_genre_basis(profile, payload.get("genre_profile_basis"))
-            if revision != profile["source_story_revision"]:
+            intent = db.execute(
+                "SELECT id FROM artifacts WHERE branch_id=? AND kind='intent' "
+                "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",
+                (branch_id,),
+            ).fetchone()
+            if (intent[0] if intent else None) != contract["source_artifact_id"]:
+                raise DomainError("author_contract_changed", "作者契约在提交时改变，请刷新后重试。", 409)
+            if kind == "module":
+                self.check_author_contract_basis(contract, payload.get("author_contract_basis"))
+            if revision != profile["source_story_revision"] or revision != contract["source_story_revision"]:
                 raise DomainError("story_changed", "创作配置在提交时改变，请刷新后重试。", 409)
+            if selection := initial.get("targeted_revision_snapshot"):
+                self.check_targeted_source_tx(db, selection)
+                if selection["story_revision"] != revision:
+                    raise DomainError("story_changed", "选择问题的故事版本已改变，请重新审查。", 409)
             db.execute(
                 "INSERT INTO tasks(id,kind,novel_id,branch_id,status,payload,result,created,updated) VALUES(?,?,?,?,?,?,?,?,?)",
                 (
@@ -465,6 +584,16 @@ class Domain:
                     "story_revision": revision,
                 },
             )
+            self.db.event(
+                db,
+                task_id,
+                "author_contract_frozen",
+                {
+                    "contract_version": contract["contract_version"],
+                    "source_artifact_id": contract["source_artifact_id"],
+                    "story_revision": revision,
+                },
+            )
             if key:
                 db.execute("INSERT INTO task_requests VALUES(?,?)", (key, task_id))
         return self.task(task_id)
@@ -479,6 +608,9 @@ class Domain:
                 raise DomainError("idempotency", "该续跑标识已用于其他检查点或决定。", 409)
             return previous
         self.check_genre_snapshot(current["branch_id"], current["result"].get("genre_profile_snapshot"))
+        self.check_author_contract_snapshot(
+            current["branch_id"], current["result"].get("author_contract_snapshot")
+        )
         if current["kind"] != "workflow" or current["status"] not in (
             "paused",
             "blocked_runtime",
@@ -554,13 +686,16 @@ class Domain:
         return task
 
     def completion(self, branch_id):
+        from .manual_finalization import finalization_status
+
         branch = self.branch(branch_id)
         chapters = self.db.all(
             "SELECT id,title,position,revision,content,stale FROM chapters WHERE branch_id=? AND archived=0 ORDER BY position",
             (branch_id,),
         )
         checks = self.db.all(
-            "SELECT * FROM assessments WHERE branch_id=? AND story_revision=? ORDER BY created",
+            "SELECT * FROM assessments WHERE branch_id=? AND story_revision=? "
+            "AND category IN ('engineering','creative','benefit') ORDER BY created",
             (branch_id, branch["story_revision"]),
         )
         latest = {row["category"]: row for row in checks}
@@ -592,6 +727,7 @@ class Domain:
             latest.get(category, {}).get("result") == "passed"
             for category in ("engineering", "creative", "benefit")
         )
+        finalized = finalization_status(self.db, branch_id, branch["story_revision"], chapters)
         return {
             "branch": branch,
             "chapter_count": len(chapters),
@@ -601,6 +737,8 @@ class Domain:
             "length_failures": length_failures,
             "production_complete": complete,
             "accepted": passed,
+            "author_finalized": finalized["author_finalized"],
+            "author_finalization": finalized,
             "assessments": list(latest.values()),
             "model_report": production.get("completion"),
             "note": "模型报告与作者验收分别记录；章数完成不等于全书通过。",

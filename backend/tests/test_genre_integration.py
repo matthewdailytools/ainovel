@@ -222,7 +222,14 @@ def test_changed_catalog_basis_stops_before_queuing(client, domain, story):
     assert not domain.db.all("SELECT id FROM tasks")
 
 
-@pytest.mark.parametrize("action", list(ModuleInput.model_fields["action"].annotation.__args__))
+@pytest.mark.parametrize(
+    "action",
+    [
+        value
+        for value in ModuleInput.model_fields["action"].annotation.__args__
+        if value not in {"intent.compile", "revision.targeted"}  # Dedicated source-aware tests cover these.
+    ],
+)
 def test_all_auxiliary_actions_send_frozen_reader_profile(settings, domain, story, action):
     chapter = domain.save(story["chapter_id"], 0, TEXT)
     source = adopt_reader(domain, story)

@@ -15,6 +15,9 @@ import type { Notify } from './App'
 import { Difference, Editor, type Selection } from './Editor'
 import { readDraft, writeDraft, type Draft } from './drafts'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
+import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
+import { ChapterContext } from './ChapterContext'
+import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 
 const actions = [
   ['writing.advise', '卡点诊断与方向'],
@@ -70,6 +73,7 @@ export function Writing({
   const [instruction, setInstruction] = useState('')
   const [fixed, setFixed] = useState('')
   const [profile, setProfile] = useState(presets[0])
+  const [seenContract, setSeenContract] = useState<AuthorContract>()
   const [seenGenre, setSeenGenre] = useState<GenreProfile>()
   const [references, setReferences] = useState<Excerpt[]>([])
   const [selectedRefs, setSelectedRefs] = useState<string[]>([])
@@ -297,6 +301,7 @@ export function Writing({
     await doAction(async () => {
       const row = current.current ? await save() : undefined
       if (seenGenre?.branch_id !== branch.id) throw new Error('正在读取本版本题材配置，请稍后再生成。')
+      if (seenContract?.branch_id !== branch.id) throw new Error('正在读取本版本创作约定，请稍后再生成。')
       if (action === 'writing.rewrite_selection' && !selection.text)
         throw new Error('请在正文中选择要改写的文字。')
       const data: ModuleInput = {
@@ -314,6 +319,10 @@ export function Writing({
         genre_profile_basis: {
           source_artifact_id: seenGenre.source_artifact_id ?? null,
           catalog_version: seenGenre.catalog_version,
+        },
+        author_contract_basis: {
+          source_artifact_id: seenContract.source_artifact_id,
+          contract_version: seenContract.contract_version,
         },
         reference_ids: selectedRefs,
         account,
@@ -662,9 +671,25 @@ export function Writing({
           <h2>创作辅助</h2>
           <span className="badge">作者决定采纳</span>
         </div>
+        <AuthorContractNotice
+          branchId={branch.id}
+          onSettings={onGenreSettings}
+          onResolved={setSeenContract}
+        />
+        <ChapterContext
+          branchId={branch.id}
+          chapter={chapter}
+          artifacts={artifacts}
+          onExtract={() => {
+            setAction('memory.extract')
+            setInstruction(
+              '提取当前正文中有逐字依据的事件、人物认知、能力资源和伏笔；未知保留未知，候选先供作者核对。',
+            )
+          }}
+        />
         <GenreProfileNotice branchId={branch.id} onSettings={onGenreSettings} onResolved={setSeenGenre} />
         <form onSubmit={generate}>
-          {tasks[0]?.payload.instruction && (
+          {tasks[0]?.payload.instruction && actions.some(([id]) => id === tasks[0].payload.action) && (
             <button
               type="button"
               onClick={() => {
@@ -752,7 +777,14 @@ export function Writing({
           <p className="small muted">发送当前章、有效前文与主动选入的资料；候选与正文分开保存。</p>
           <button
             className="primary wide"
-            disabled={busy || loading || !modelReady || !!activeTask || seenGenre?.branch_id !== branch.id}
+            disabled={
+              busy ||
+              loading ||
+              !modelReady ||
+              !!activeTask ||
+              seenGenre?.branch_id !== branch.id ||
+              seenContract?.branch_id !== branch.id
+            }
           >
             {!modelReady
               ? '请先配置模型账户和单价'
@@ -760,8 +792,8 @@ export function Writing({
                 ? '正在提交…'
                 : activeTask
                   ? '本版本有任务执行中'
-                  : seenGenre?.branch_id !== branch.id
-                    ? '正在读取题材配置…'
+                  : seenGenre?.branch_id !== branch.id || seenContract?.branch_id !== branch.id
+                    ? '正在读取本书约定…'
                     : '生成候选 →'}
           </button>
         </form>
@@ -769,6 +801,12 @@ export function Writing({
           <div className="notice" role="status">
             <strong>{label(activeTask.status)}</strong>
             <p>关闭浏览器不取消本机任务。</p>
+            {activeTask.result.author_contract_snapshot && (
+              <details>
+                <summary>本次任务冻结的创作约定</summary>
+                <AuthorContractDetails contract={activeTask.result.author_contract_snapshot} />
+              </details>
+            )}
             {activeTask.result.genre_profile_snapshot &&
               !activeTask.result.genre_profile_snapshot.legacy_unconfigured && (
                 <details>
@@ -857,6 +895,18 @@ export function Writing({
                 <Candidate
                   key={candidate.id}
                   artifact={candidate}
+                  onIntentSettings={onGenreSettings}
+                  novelId={novel.id}
+                  chapter={chapter}
+                  account={account}
+                  modelReady={modelReady}
+                  revisionDisabled={!!activeTask || busy}
+                  notify={notify}
+                  beforeRun={save}
+                  onStarted={(task) => {
+                    setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])
+                    setCandidateId('')
+                  }}
                   busy={busy}
                   perform={doAction}
                   onAccept={async () => {
@@ -884,12 +934,30 @@ export function Writing({
 
 function Candidate({
   artifact,
+  onIntentSettings,
+  revisionDisabled,
+  novelId,
+  chapter,
+  account,
+  modelReady,
+  notify,
+  beforeRun,
+  onStarted,
   busy,
   perform,
   onAccept,
   onUpdate,
 }: {
   artifact: Artifact
+  onIntentSettings: () => void
+  revisionDisabled: boolean
+  novelId: string
+  chapter?: Chapter
+  account: string
+  modelReady: boolean
+  notify: Notify
+  beforeRun: () => Promise<Chapter | undefined>
+  onStarted: (task: Task) => void
   busy: boolean
   perform: (fn: () => Promise<unknown>) => Promise<void>
   onAccept: () => Promise<void>
@@ -995,13 +1063,44 @@ function Candidate({
             </details>
           )}
         </>
+      ) : artifact.kind === 'review' ? (
+        <details>
+          <summary>审稿原始记录</summary>
+          <pre className="report">{JSON.stringify(artifact.payload, null, 2)}</pre>
+        </details>
       ) : (
         <pre className="report">{JSON.stringify(artifact.payload, null, 2)}</pre>
+      )}
+      {(artifact.kind === 'review' || !!artifact.payload.review) && (
+        <RevisionPanel
+          review={artifact}
+          novelId={novelId}
+          chapter={chapter}
+          account={account}
+          modelReady={modelReady}
+          disabled={revisionDisabled}
+          notify={notify}
+          beforeRun={beforeRun}
+          onStarted={onStarted}
+        />
       )}
       {!!artifact.payload.review && (
         <details>
           <summary>查看本章检查依据</summary>
           <pre className="report">{JSON.stringify(artifact.payload.review, null, 2)}</pre>
+        </details>
+      )}
+      {!!artifact.payload.previous_revision_trace && (
+        <details>
+          <summary>编辑前的原问题复检（已失效）</summary>
+          <p className="small muted">候选已被编辑，以下是历史依据，不能作为当前候选通过的结论。</p>
+          <RevisionTraceDetails trace={artifact.payload.previous_revision_trace} />
+        </details>
+      )}
+      {!!artifact.basis.author_contract && (
+        <details>
+          <summary>候选生成时的创作约定</summary>
+          <AuthorContractDetails contract={artifact.basis.author_contract as AuthorContract} />
         </details>
       )}
       {artifact.basis.genre_profile && !artifact.basis.genre_profile.legacy_unconfigured && (
@@ -1010,10 +1109,19 @@ function Candidate({
           <GenreProfileDetails profile={artifact.basis.genre_profile} />
         </details>
       )}
+      {artifact.kind === 'intent' && !!artifact.payload.author_text && (
+        <div className="notice">
+          <p>此结果是AI整理提案。请在创作约定表单中核对原话、推导和锁定项后确认。</p>
+          <button type="button" onClick={onIntentSettings}>
+            前往创作约定核对提案
+          </button>
+        </div>
+      )}
       <div className="actions">
         <button
           className="primary"
           disabled={
+            (artifact.kind === 'intent' && !!artifact.payload.author_text) ||
             busy ||
             candidateChanged ||
             artifact.status !== 'candidate' ||
@@ -1025,7 +1133,9 @@ function Candidate({
             ? '采纳到正文'
             : artifact.kind === 'memory'
               ? '采纳到故事记录'
-              : '采用此结果'}
+              : artifact.kind === 'advice'
+                ? '保存建议供参考'
+                : '采用此结果'}
         </button>
         <button
           disabled={busy || artifact.status !== 'candidate'}
@@ -1040,6 +1150,9 @@ function Candidate({
         </button>
       </div>
       <p className="small muted">正文采纳后，可在版本历史中恢复采纳前稿件。</p>
+      {artifact.kind === 'advice' && (
+        <p className="small muted">保存建议只记录本结果，不会自动改动本书约定、正文或故事事实。</p>
+      )}
     </div>
   )
 }

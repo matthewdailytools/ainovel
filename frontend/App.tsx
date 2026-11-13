@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, startSession, type Account, type Branch, type Config, type Novel } from './api'
 import { Writing } from './Writing'
 import { LibraryPage } from './Library'
@@ -14,6 +14,10 @@ export function App() {
   const [novelId, setNovelId] = useState('')
   const [branches, setBranches] = useState<Branch[]>([])
   const [branchId, setBranchId] = useState('')
+  const selection = useRef({ novelId, branchId, generation: 0 })
+  if (selection.current.novelId !== novelId || selection.current.branchId !== branchId)
+    selection.current = { novelId, branchId, generation: selection.current.generation + 1 }
+  const selectionGeneration = selection.current.generation
   const [page, setPage] = useState('writing')
   const [account, setAccount] = useState('openai_1')
   const [title, setTitle] = useState('')
@@ -22,8 +26,13 @@ export function App() {
   const [dataDir, setDataDir] = useState('')
   const notify: Notify = useCallback((e) => setError(e instanceof Error ? e.message : String(e)), [])
   const refreshConfig = useCallback(async () => setConfig(await api<Config>('/config')), [])
-  const refreshBranches = useCallback(async (id: string, select?: string) => {
+  const refreshBranches = useCallback(async (id: string, select?: string, generation?: number) => {
     const rows = await api<Branch[]>(`/novels/${id}/branches`)
+    if (
+      selection.current.novelId !== id ||
+      (generation !== undefined && selection.current.generation !== generation)
+    )
+      return
     setBranches(rows)
     setBranchId((current) => select || (rows.some((b) => b.id === current) ? current : rows[0]?.id || ''))
   }, [])
@@ -83,6 +92,7 @@ export function App() {
       setBranches([])
       setBranchId('')
       setNovelId(result.id)
+      setPage('writing')
       setTitle('')
     } catch (e) {
       notify(e)
@@ -315,6 +325,7 @@ export function App() {
                 {page === 'library' && <LibraryPage novelId={novelId} notify={notify} />}
                 {page === 'workflow' && novel && (
                   <WorkflowPage
+                    key={novel.id}
                     novel={novel}
                     accounts={config?.accounts || []}
                     branchId={branchId}
@@ -322,12 +333,20 @@ export function App() {
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
                     onStarted={async (id) => {
-                      await refreshBranches(novel.id, id)
+                      await refreshBranches(novel.id, id, selectionGeneration)
                     }}
                     onGenreSettings={() => setPage('records')}
                   />
                 )}
-                {page === 'records' && branch && <Records key={branch.id} branch={branch} notify={notify} />}
+                {page === 'records' && branch && (
+                  <Records
+                    key={branch.id}
+                    branch={branch}
+                    account={account}
+                    modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
+                    notify={notify}
+                  />
+                )}
               </>
             )}
           </main>

@@ -1,4 +1,22 @@
 export interface paths {
+  '/api/branches/{branch_id}/finalization': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Author Finalization */
+    get: operations['author_finalization_api_branches__branch_id__finalization_get']
+    put?: never
+    /** Confirm Author Finalization */
+    post: operations['confirm_author_finalization_api_branches__branch_id__finalization_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/session': {
     parameters: {
       query?: never
@@ -288,6 +306,40 @@ export interface paths {
     put?: never
     /** Preview Genre Profile */
     post: operations['preview_genre_profile_api_genre_profile_preview_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/author-contract': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Author Contract */
+    get: operations['author_contract_api_branches__branch_id__author_contract_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/author-contract/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Preview Author Contract */
+    post: operations['preview_author_contract_api_author_contract_preview_post']
     delete?: never
     options?: never
     head?: never
@@ -986,6 +1038,42 @@ export interface components {
         [key: string]: number
       }
     }
+    /** AuthorContractBasis */
+    AuthorContractBasis: {
+      /** Source Artifact Id */
+      source_artifact_id: string | null
+      /** Contract Version */
+      contract_version: string
+    }
+    /** AuthorIntentFields */
+    AuthorIntentFields: {
+      /**
+       * Emotion Target
+       * @default
+       */
+      emotion_target: string
+      /**
+       * Core Hook
+       * @default
+       */
+      core_hook: string
+      /**
+       * Direction
+       * @default
+       */
+      direction: string
+      /** Fixed Results */
+      fixed_results?: string[]
+      /** Prohibitions */
+      prohibitions?: string[]
+      /** Open Details */
+      open_details?: string[]
+      /**
+       * Ending
+       * @default
+       */
+      ending: string
+    }
     /** Body_import_book_api_library_import_post */
     Body_import_book_api_library_import_post: {
       /** File */
@@ -1061,6 +1149,9 @@ export interface components {
       mechanisms?: string[]
       /** Author Exceptions */
       author_exceptions?: string[]
+      intent_contract?: components['schemas']['AuthorIntentFields'] | null
+      /** Intent Source Candidate Id */
+      intent_source_candidate_id?: string | null
       /** Base Story Revision */
       base_story_revision: number
     }
@@ -1142,6 +1233,29 @@ export interface components {
        */
       source_quote: string
     }
+    /** FinalizationChecklist */
+    FinalizationChecklist: {
+      /** Manuscript Read */
+      manuscript_read: boolean
+      /** Main Conflict Closed */
+      main_conflict_closed: boolean
+      /** Character Outcomes Reviewed */
+      character_outcomes_reviewed: boolean
+      /** Promises Addressed */
+      promises_addressed: boolean
+    }
+    /** FinalizationDisposition */
+    FinalizationDisposition: {
+      /** Issue Id */
+      issue_id: string
+      /**
+       * Decision
+       * @enum {string}
+       */
+      decision: 'not_an_error' | 'intentional_choice'
+      /** Reason */
+      reason: string
+    }
     /** GenreProfileBasis */
     GenreProfileBasis: {
       /** Source Artifact Id */
@@ -1153,6 +1267,20 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components['schemas']['ValidationError'][]
+    }
+    /** ManualFinalizationInput */
+    ManualFinalizationInput: {
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Base Manifest Sha256 */
+      base_manifest_sha256: string
+      /** Idempotency Key */
+      idempotency_key: string
+      checklist: components['schemas']['FinalizationChecklist']
+      /** Note */
+      note: string
+      /** Dispositions */
+      dispositions?: components['schemas']['FinalizationDisposition'][]
     }
     /** ModuleInput */
     ModuleInput: {
@@ -1172,6 +1300,8 @@ export interface components {
         | 'character.generate'
         | 'world.generate'
         | 'ideation.explore'
+        | 'intent.compile'
+        | 'revision.targeted'
       /** Novel Id */
       novel_id: string
       /** Branch Id */
@@ -1207,6 +1337,11 @@ export interface components {
       /** Budget Limit */
       budget_limit?: number | null
       genre_profile_basis?: components['schemas']['GenreProfileBasis'] | null
+      author_contract_basis?: components['schemas']['AuthorContractBasis'] | null
+      /** Source Review Id */
+      source_review_id?: string | null
+      /** Finding Indices */
+      finding_indices?: number[]
     }
     /** MoveInput */
     MoveInput: {
@@ -1363,6 +1498,7 @@ export interface components {
       /** Budget Limit */
       budget_limit?: number | null
       genre_profile_basis?: components['schemas']['GenreProfileBasis'] | null
+      author_contract_basis?: components['schemas']['AuthorContractBasis'] | null
     }
   }
   responses: never
@@ -1373,6 +1509,72 @@ export interface components {
 }
 export type $defs = Record<string, never>
 export interface operations {
+  author_finalization_api_branches__branch_id__finalization_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_author_finalization_api_branches__branch_id__finalization_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ManualFinalizationInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   session_api_session_get: {
     parameters: {
       query?: never
@@ -2037,6 +2239,70 @@ export interface operations {
     }
   }
   preview_genre_profile_api_genre_profile_preview_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DefinitionInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  author_contract_api_branches__branch_id__author_contract_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_author_contract_api_author_contract_preview_post: {
     parameters: {
       query?: never
       header?: never

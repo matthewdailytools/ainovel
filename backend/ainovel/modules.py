@@ -21,6 +21,8 @@ MODULES = {
         ModuleSpec("review.chapter", "本章审稿", "review", True),
         ModuleSpec("memory.extract", "提取故事事实", "memory", True),
         ModuleSpec("ideation.explore", "创意与定位", "intent"),
+        ModuleSpec("intent.compile", "整理作者情绪、钩子与方向", "intent"),
+        ModuleSpec("revision.targeted", "按审稿问题定向修订", "chapter_draft", True),
         ModuleSpec("outline.plan", "大纲规划", "outline"),
         ModuleSpec("character.generate", "人物设计", "characters"),
         ModuleSpec("world.generate", "世界设定", "world"),

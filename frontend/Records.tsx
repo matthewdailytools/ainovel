@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { api, type Branch, type Chapter, type Fact } from './api'
 import type { Notify } from './App'
 import { GenreSettings } from './GenreProfile'
+import { AuthorIntentPanel } from './AuthorIntent'
+import { FinalizationPanel } from './FinalizationPanel'
 
 type Completion = {
   chapter_count: number
@@ -9,6 +11,7 @@ type Completion = {
   chars: number
   missing_or_stale: number[]
   length_failures: number[]
+  author_finalized: boolean
   production_complete: boolean
   accepted: boolean
   assessments: { category: string; result: string; note: string; minutes: string }[]
@@ -23,7 +26,17 @@ type Feedback = {
   text: string
   source_quote: string
 }
-export function Records({ branch, notify }: { branch: Branch; notify: Notify }) {
+export function Records({
+  branch,
+  account,
+  modelReady,
+  notify,
+}: {
+  branch: Branch
+  account: string
+  modelReady: boolean
+  notify: Notify
+}) {
   const [facts, setFacts] = useState<Fact[]>([])
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [chapterId, setChapterId] = useState('')
@@ -52,7 +65,7 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
     evidence: '',
   })
   const [definition, setDefinition] = useState({
-    kind: 'intent',
+    kind: 'world',
     text: '',
   })
   const [definitions, setDefinitions] = useState<
@@ -111,13 +124,21 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
           刷新当前版本
         </button>
       </div>
+      <AuthorIntentPanel
+        branchId={branch.id}
+        novelId={branch.novel_id}
+        account={account}
+        modelReady={modelReady}
+        notify={notify}
+        onSaved={refresh}
+      />
       <GenreSettings key={branch.id} branchId={branch.id} notify={notify} onSaved={refresh} />
       <div className="records-grid">
         <section className="card">
           <h2>故事状态与影响</h2>
           <div className="form-grid">
             <label>
-              人物、事项或故事时点
+              人物、事项或时点关键词
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -136,7 +157,7 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
             </label>
           </div>
           <p className="small muted">
-            未来章记录不会出现在较早时点中。未知时点保持未知；失效记录保留出处，但不进入后续生成上下文。
+            按章序与文字关键词筛选，不按真实故事时间推算状态。未知时点保持未知；失效记录保留出处，不进入后续生成上下文。
           </p>
           <button
             disabled={!query || busy}
@@ -411,9 +432,9 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
         </section>
       </div>
       <section className="card">
-        <h2>采用设定与阅读承诺</h2>
+        <h2>其他已采用设定</h2>
         <p>
-          按需维护创作意图、读者题材、人物、世界与粗纲。新整书版本可继承当前已采用设定，已有正文与已发生事实不会被复制为另一版本的生成结果。
+          按需维护人物、世界与粗纲。创作约定和题材在上方独立维护。新整书版本可继承当前已采用设定，已有正文与已发生事实不会被复制为另一版本的生成结果。
         </p>
         <details>
           <summary>手动编写或调整设定</summary>
@@ -438,7 +459,6 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
                   onChange={(e) => setDefinition({ ...definition, kind: e.target.value })}
                 >
                   {[
-                    ['intent', '创作意图与锁定方向'],
                     ['world', '世界与社会规则'],
                     ['characters', '人物档案与关系'],
                     ['outline', '粗纲、多线与伏笔安排'],
@@ -492,15 +512,23 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
           <pre>{source}</pre>
         </section>
       )}
+      <FinalizationPanel
+        branchId={branch.id}
+        refreshVersion={storyRevision}
+        notify={notify}
+        onFinalized={refresh}
+      />
       <section className="card acceptance">
         <div className="section-title">
           <h2>整书验收</h2>
           <span className="badge">
             {completion?.accepted
               ? '作者验收已通过'
-              : completion?.production_complete
-                ? '生成完成，待作者验收'
-                : '尚未满足整书完成条件'}
+              : completion?.author_finalized
+                ? '作者已确认定稿，工具验收另行记录'
+                : completion?.production_complete
+                  ? '生成完成，待作者验收'
+                  : '尚未满足整书完成条件'}
           </span>
         </div>
         {completion && (
@@ -516,24 +544,26 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
               <pre>{JSON.stringify(completion.model_report, null, 2)}</pre>
             </details>
             <div className="assessment-list">
-              {completion.assessments.map((a) => (
-                <div className="notice" key={a.category}>
-                  <strong>
-                    {
-                      (
-                        {
-                          engineering: '工程可靠性',
-                          creative: '创作质量',
-                          benefit: '实际使用收益',
-                        } as Record<string, string>
-                      )[a.category]
-                    }{' '}
-                    · {a.result}
-                  </strong>
-                  <p>{a.note}</p>
-                  <small>{a.minutes}</small>
-                </div>
-              ))}
+              {completion.assessments
+                .filter((a) => ['engineering', 'creative', 'benefit'].includes(a.category))
+                .map((a) => (
+                  <div className="notice" key={a.category}>
+                    <strong>
+                      {
+                        (
+                          {
+                            engineering: '工程可靠性',
+                            creative: '创作质量',
+                            benefit: '实际使用收益',
+                          } as Record<string, string>
+                        )[a.category]
+                      }{' '}
+                      · {a.result}
+                    </strong>
+                    <p>{a.note}</p>
+                    <small>{a.minutes}</small>
+                  </div>
+                ))}
             </div>
           </>
         )}

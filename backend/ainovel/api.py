@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 
 from .budget import Budget
+from .author_contract import assemble_contract, authored_payload
 from .db import Database, DomainError, dumps, uid
 from .domain import Domain, utf16_slice
 from .genre_catalog import assemble_profile, get_catalog
@@ -37,6 +38,8 @@ from .models import (
 )
 from .settings import ROOT, Settings
 from .modules import MODULES, public_modules
+from .manual_finalization import register_routes as register_finalization_routes
+from .targeted_revision import validate_targeted_revision
 
 
 class ReadingInput(Input):
@@ -119,6 +122,7 @@ def create_app(settings=None, schema_only=False):
     app = FastAPI(title="ainovel 本机工作台", version="0.1.0", lifespan=lifespan)
     app.state.settings, app.state.db, app.state.domain = settings, db, domain
     app.state.budget, app.state.library = budget, library
+    register_finalization_routes(app, domain)
     csrf, cookie = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     jobs = set()
     origins = {
@@ -172,7 +176,7 @@ def create_app(settings=None, schema_only=False):
         return {
             "accounts": [account.public() for account in settings.providers.values()],
             "budget": budget.report(),
-            "sending_scope": "模型仅收到本次指令、目标章、已采用设定、所选频道题材按动作展开的冻结配置、前文有效事实、最近两章和主动勾选的摘录；整书任务另含简报与章纲。作者要求优先于预设，密钥仅在后端。",
+            "sending_scope": "模型仅收到本次指令、目标章、已采用作者原话与情绪钩子方向契约、已采用设定、所选频道题材按动作展开的冻结配置、前文有效事实、最近两章和主动勾选的摘录；整书任务另含简报与章纲。作者要求优先于预设，密钥仅在后端。",
         }
 
     @app.get("/api/novels")
@@ -333,13 +337,24 @@ def create_app(settings=None, schema_only=False):
         provider_ready(data.account)
         if (
             data.action
-            in ("writing.rewrite_selection", "writing.expand_plot", "review.chapter", "memory.extract")
+            in (
+                "writing.rewrite_selection",
+                "writing.expand_plot",
+                "review.chapter",
+                "memory.extract",
+                "revision.targeted",
+            )
             and not data.chapter_id
         ):
             raise DomainError("chapter_required", "该操作需要章节。")
         payload = data.model_dump()
-        if data.genre_profile_basis is None:
-            payload.pop("genre_profile_basis")
+        for key in ("genre_profile_basis", "author_contract_basis", "source_review_id"):
+            if payload[key] is None:
+                payload.pop(key)
+        if not payload["finding_indices"]:
+            payload.pop("finding_indices")
+        if data.action == "revision.targeted":
+            validate_targeted_revision(domain, payload, domain.context(data.branch_id, data.chapter_id))
         return domain.queue("module", {**payload, "module_version": MODULES[data.action].version})
 
     @app.get("/api/modules")
@@ -373,6 +388,29 @@ def create_app(settings=None, schema_only=False):
             "preview": True,
         }
 
+    @app.get("/api/branches/{branch_id}/author-contract")
+    def author_contract(branch_id: str):
+        contract = domain.author_contract(branch_id)
+        source_id = contract["source_artifact_id"]
+        return {
+            **contract,
+            "story_revision": contract["source_story_revision"],
+            "raw_definition": domain.artifact(source_id)["payload"] if source_id else None,
+            "source_revision_note": "本次装配时的故事版本；保存使用 story_revision，生成使用来源标识和契约版本。",
+        }
+
+    @app.post("/api/author-contract/preview")
+    def preview_author_contract(data: DefinitionInput):
+        if data.kind != "intent":
+            raise DomainError("author_contract", "作者契约预览仅用于创作意图。")
+        return {
+            **assemble_contract(authored_payload(data)),
+            "branch_id": None,
+            "source_artifact_id": None,
+            "source_story_revision": None,
+            "preview": True,
+        }
+
     def provider_ready(account):
         provider = settings.providers.get(account)
         if not provider or not provider.key or provider.input_rate is None or provider.output_rate is None:
@@ -381,8 +419,9 @@ def create_app(settings=None, schema_only=False):
     @app.post("/api/workflows", status_code=202)
     def start_workflow(data: WorkflowInput):
         payload = data.model_dump()
-        if data.genre_profile_basis is None:
-            payload.pop("genre_profile_basis")
+        for key in ("genre_profile_basis", "author_contract_basis"):
+            if payload[key] is None:
+                payload.pop(key)
         previous = domain.find_request("workflow", payload)
         if previous:
             return previous
@@ -406,6 +445,17 @@ def create_app(settings=None, schema_only=False):
         )
         domain.check_genre_basis(
             profile, data.genre_profile_basis.model_dump() if data.genre_profile_basis else None
+        )
+        contract = (
+            domain.author_contract(source["id"], definitions)
+            if source
+            else {
+                **assemble_contract(None),
+                "source_artifact_id": None,
+            }
+        )
+        domain.check_author_contract_basis(
+            contract, data.author_contract_basis.model_dump() if data.author_contract_basis else None
         )
         branch_id = uid()
         with db.connect(True) as tx:
@@ -450,10 +500,32 @@ def create_app(settings=None, schema_only=False):
     @app.post("/api/branches/{branch_id}/definitions", status_code=201)
     def save_definition(branch_id: str, data: DefinitionInput):
         branch = domain.branch(branch_id)
+        if data.kind != "intent" and (data.intent_contract is not None or data.intent_source_candidate_id):
+            raise DomainError("author_contract", "创作契约字段只能保存到创作意图。")
+        source_candidate = None
+        if data.intent_source_candidate_id:
+            source_candidate = domain.artifact(data.intent_source_candidate_id)
+            if (
+                source_candidate["branch_id"] != branch_id
+                or source_candidate["kind"] != "intent"
+                or not source_candidate["payload"].get("intent_contract")
+                or source_candidate["payload"].get("provenance", {}).get("origin")
+                != "ai_compilation_candidate"
+            ):
+                raise DomainError("author_contract", "提案来源不是本版本的作者契约候选。", 409)
+            if source_candidate["basis"].get("story_revision") != branch["story_revision"]:
+                raise DomainError("story_changed", "契约提案所依据的故事版本已改变，请重新整理后核对。", 409)
+        payload = (
+            authored_payload(data, source_candidate)
+            if data.kind == "intent"
+            else data.model_dump(
+                exclude={"kind", "base_story_revision", "intent_contract", "intent_source_candidate_id"}
+            )
+        )
         artifact = domain.stage(
             {"novel_id": branch["novel_id"], "branch_id": branch_id},
             data.kind,
-            data.model_dump(exclude={"kind", "base_story_revision"}),
+            payload,
             {"story_revision": data.base_story_revision},
         )
         domain.accept(artifact["id"], "author-definition-" + artifact["id"])
@@ -556,6 +628,7 @@ def create_app(settings=None, schema_only=False):
             raise DomainError("unknown_result", "上次调用可能已计费；确认账本后可明确重新派发。", 409)
         result = current["result"]
         domain.check_genre_snapshot(current["branch_id"], result.get("genre_profile_snapshot"))
+        domain.check_author_contract_snapshot(current["branch_id"], result.get("author_contract_snapshot"))
         reject_pending = None
         branch_snapshot = None
         if current["kind"] == "workflow":
@@ -679,6 +752,8 @@ def create_app(settings=None, schema_only=False):
                 raise DomainError("candidate_conflict", "候选已在其他窗口更新，本地编辑请保留并比较。", 409)
             if "review" in payload:
                 payload["previous_review"] = payload.pop("review")
+            if "revision_trace" in payload:
+                payload["previous_revision_trace"] = payload.pop("revision_trace")
             payload.update(text=data.text, review_passed=False, memory={})
             payload["_candidate_revision"] = current_revision + 1
             tx.execute("UPDATE artifacts SET payload=? WHERE id=?", (dumps(payload), artifact_id))

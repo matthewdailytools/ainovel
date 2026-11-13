@@ -1,4 +1,25 @@
 import type { components } from './api-schema'
+export type IntentFields = {
+  emotion_target: string
+  core_hook: string
+  direction: string
+  ending: string
+  fixed_results: string[]
+  prohibitions: string[]
+  open_details: string[]
+}
+export type AuthorContract = {
+  branch_id?: string
+  contract_version: string
+  configured: boolean
+  author_text: string
+  intent_contract: IntentFields | null
+  provenance: unknown
+  source_artifact_id: string | null
+  source_story_revision: number | null
+  story_revision?: number
+  legacy_unconfigured?: boolean
+}
 export type ModuleInput = components['schemas']['ModuleInput']
 export type WorkflowInput = components['schemas']['WorkflowInput']
 export type ContinuationInput = components['schemas']['ContinuationInput']
@@ -94,9 +115,11 @@ export type Task = {
     continued_to?: string
     continued_from?: string
     waiting_artifact?: string
+    artifact_id?: string
     latest_artifact?: string
     plan?: unknown
     completion?: unknown
+    author_contract_snapshot?: AuthorContract
     genre_profile_snapshot?: GenreProfile
   }
   payload: {

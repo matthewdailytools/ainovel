@@ -2,6 +2,62 @@
   "openapi": "3.1.0",
   "info": { "title": "ainovel 本机工作台", "version": "0.1.0" },
   "paths": {
+    "/api/branches/{branch_id}/finalization": {
+      "get": {
+        "summary": "Author Finalization",
+        "operationId": "author_finalization_api_branches__branch_id__finalization_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Confirm Author Finalization",
+        "operationId": "confirm_author_finalization_api_branches__branch_id__finalization_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ManualFinalizationInput" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/session": {
       "get": {
         "summary": "Session",
@@ -505,6 +561,54 @@
       "post": {
         "summary": "Preview Genre Profile",
         "operationId": "preview_genre_profile_api_genre_profile_preview_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DefinitionInput" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/author-contract": {
+      "get": {
+        "summary": "Author Contract",
+        "operationId": "author_contract_api_branches__branch_id__author_contract_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/author-contract/preview": {
+      "post": {
+        "summary": "Preview Author Contract",
+        "operationId": "preview_author_contract_api_author_contract_preview_post",
         "requestBody": {
           "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DefinitionInput" } } },
           "required": true
@@ -1664,6 +1768,53 @@
         "required": ["branch_id", "category", "result", "note"],
         "title": "AssessmentInput"
       },
+      "AuthorContractBasis": {
+        "properties": {
+          "source_artifact_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Source Artifact Id"
+          },
+          "contract_version": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Contract Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["source_artifact_id", "contract_version"],
+        "title": "AuthorContractBasis"
+      },
+      "AuthorIntentFields": {
+        "properties": {
+          "emotion_target": { "type": "string", "maxLength": 4000, "title": "Emotion Target", "default": "" },
+          "core_hook": { "type": "string", "maxLength": 4000, "title": "Core Hook", "default": "" },
+          "direction": { "type": "string", "maxLength": 6000, "title": "Direction", "default": "" },
+          "fixed_results": {
+            "items": { "type": "string", "maxLength": 2000, "minLength": 1 },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Fixed Results"
+          },
+          "prohibitions": {
+            "items": { "type": "string", "maxLength": 2000, "minLength": 1 },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Prohibitions"
+          },
+          "open_details": {
+            "items": { "type": "string", "maxLength": 2000, "minLength": 1 },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Open Details"
+          },
+          "ending": { "type": "string", "maxLength": 4000, "title": "Ending", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "AuthorIntentFields"
+      },
       "Body_import_book_api_library_import_post": {
         "properties": {
           "file": { "type": "string", "contentMediaType": "application/octet-stream", "title": "File" },
@@ -1769,6 +1920,13 @@
             "maxItems": 30,
             "title": "Author Exceptions"
           },
+          "intent_contract": {
+            "anyOf": [{ "$ref": "#/components/schemas/AuthorIntentFields" }, { "type": "null" }]
+          },
+          "intent_source_candidate_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Intent Source Candidate Id"
+          },
           "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" }
         },
         "additionalProperties": false,
@@ -1847,6 +2005,44 @@
         "required": ["chapter_id", "category", "text"],
         "title": "FeedbackInput"
       },
+      "FinalizationChecklist": {
+        "properties": {
+          "manuscript_read": { "type": "boolean", "title": "Manuscript Read" },
+          "main_conflict_closed": { "type": "boolean", "title": "Main Conflict Closed" },
+          "character_outcomes_reviewed": { "type": "boolean", "title": "Character Outcomes Reviewed" },
+          "promises_addressed": { "type": "boolean", "title": "Promises Addressed" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "manuscript_read",
+          "main_conflict_closed",
+          "character_outcomes_reviewed",
+          "promises_addressed"
+        ],
+        "title": "FinalizationChecklist"
+      },
+      "FinalizationDisposition": {
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "maxLength": 24,
+            "minLength": 24,
+            "pattern": "^[0-9a-f]+$",
+            "title": "Issue Id"
+          },
+          "decision": {
+            "type": "string",
+            "enum": ["not_an_error", "intentional_choice"],
+            "title": "Decision"
+          },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 10, "title": "Reason" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["issue_id", "decision", "reason"],
+        "title": "FinalizationDisposition"
+      },
       "GenreProfileBasis": {
         "properties": {
           "source_artifact_id": {
@@ -1876,6 +2072,36 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "ManualFinalizationInput": {
+        "properties": {
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "base_manifest_sha256": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]+$",
+            "title": "Base Manifest Sha256"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          },
+          "checklist": { "$ref": "#/components/schemas/FinalizationChecklist" },
+          "note": { "type": "string", "maxLength": 10000, "minLength": 10, "title": "Note" },
+          "dispositions": {
+            "items": { "$ref": "#/components/schemas/FinalizationDisposition" },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Dispositions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_story_revision", "base_manifest_sha256", "idempotency_key", "checklist", "note"],
+        "title": "ManualFinalizationInput"
+      },
       "ModuleInput": {
         "properties": {
           "client_request_id": {
@@ -1893,7 +2119,9 @@
               "outline.plan",
               "character.generate",
               "world.generate",
-              "ideation.explore"
+              "ideation.explore",
+              "intent.compile",
+              "revision.targeted"
             ],
             "title": "Action"
           },
@@ -1941,6 +2169,19 @@
           },
           "genre_profile_basis": {
             "anyOf": [{ "$ref": "#/components/schemas/GenreProfileBasis" }, { "type": "null" }]
+          },
+          "author_contract_basis": {
+            "anyOf": [{ "$ref": "#/components/schemas/AuthorContractBasis" }, { "type": "null" }]
+          },
+          "source_review_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Source Review Id"
+          },
+          "finding_indices": {
+            "items": { "type": "integer", "minimum": 0 },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Finding Indices"
           }
         },
         "additionalProperties": false,
@@ -2106,6 +2347,9 @@
           },
           "genre_profile_basis": {
             "anyOf": [{ "$ref": "#/components/schemas/GenreProfileBasis" }, { "type": "null" }]
+          },
+          "author_contract_basis": {
+            "anyOf": [{ "$ref": "#/components/schemas/AuthorContractBasis" }, { "type": "null" }]
           }
         },
         "additionalProperties": false,

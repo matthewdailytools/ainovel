@@ -13,6 +13,7 @@ import {
 import type { Notify } from './App'
 import story from '../fixtures/original-story.json'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
+import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
 
 export function WorkflowPage({
   novel,
@@ -45,6 +46,7 @@ export function WorkflowPage({
     '第三人称限定视角，克制白话，动作有因果，人物选择遵循当时掌握的信息与资源。',
   )
   const [runLimit, setRunLimit] = useState('')
+  const [seenContract, setSeenContract] = useState<AuthorContract>()
   const [seenGenre, setSeenGenre] = useState<GenreProfile>()
   const [tasks, setTasks] = useState<Task[]>([])
   const [busy, setBusy] = useState(false)
@@ -149,6 +151,7 @@ export function WorkflowPage({
     event.preventDefault()
     await perform(async () => {
       if (seenGenre?.branch_id !== branchId) throw new Error('正在读取来源版本的题材配置，请稍后再启动。')
+      if (seenContract?.branch_id !== branchId) throw new Error('正在读取本书创作约定，请稍后再启动。')
       const parsed =
         mode === 'assisted'
           ? plots
@@ -185,6 +188,10 @@ export function WorkflowPage({
         account,
         adoption,
         writing_profile: profile,
+        author_contract_basis: {
+          source_artifact_id: seenContract.source_artifact_id,
+          contract_version: seenContract.contract_version,
+        },
         genre_profile_basis: {
           source_artifact_id: seenGenre.source_artifact_id ?? null,
           catalog_version: seenGenre.catalog_version,
@@ -228,6 +235,11 @@ export function WorkflowPage({
       <div className="workflow-grid">
         <section className="card">
           <form onSubmit={start}>
+            <AuthorContractNotice
+              branchId={branchId}
+              onSettings={onGenreSettings}
+              onResolved={setSeenContract}
+            />
             <GenreProfileNotice
               branchId={branchId}
               onSettings={onGenreSettings}
@@ -261,6 +273,11 @@ export function WorkflowPage({
                 maxLength={30_000}
               />
             </label>
+            {seenContract?.branch_id === branchId && seenContract.author_text && (
+              <button type="button" disabled={busy} onClick={() => setBrief(seenContract.author_text)}>
+                沿用当前创作约定作为简报
+              </button>
+            )}
             <label>
               全书固定条件（每行一条）
               <textarea rows={3} value={fixed} onChange={(e) => setFixed(e.target.value)} />
@@ -350,13 +367,18 @@ export function WorkflowPage({
             </div>
             <button
               className="primary wide"
-              disabled={busy || !modelReady || seenGenre?.branch_id !== branchId}
+              disabled={
+                busy ||
+                !modelReady ||
+                seenGenre?.branch_id !== branchId ||
+                seenContract?.branch_id !== branchId
+              }
             >
               {busy
                 ? '提交中…'
                 : !modelReady
                   ? '请先配置模型账户和单价'
-                  : seenGenre?.branch_id !== branchId
+                  : seenGenre?.branch_id !== branchId || seenContract?.branch_id !== branchId
                     ? '正在读取来源题材配置…'
                     : '创建独立版本并启动'}
             </button>
@@ -407,6 +429,12 @@ export function WorkflowPage({
                   )}
                   <details>
                     <summary>本批次冻结的频道与题材</summary>
+                    {task.result.author_contract_snapshot && (
+                      <details>
+                        <summary>本次任务冻结的创作约定</summary>
+                        <AuthorContractDetails contract={task.result.author_contract_snapshot} />
+                      </details>
+                    )}
                     {task.result.genre_profile_snapshot &&
                     !task.result.genre_profile_snapshot.legacy_unconfigured ? (
                       <GenreProfileDetails profile={task.result.genre_profile_snapshot} />
