@@ -8,8 +8,10 @@ from pydantic import Field
 
 from .db import DomainError, dumps, uid
 from .evidence import source_units
-from .story_graph import RECORD, Record, Strict, graph, references, sources, validate_record
+from .story_graph import RECORD, Record, Strict, graph, references, validate_record
 from .extraction_scenes import SceneProposal, adopt_scenes, freeze_scenes, normalize_scenes, scene_issues
+
+PROMISE_STAGE_GROUNDING_VERSION = "promise-stage-grounding/1"
 
 
 class ProposedRecord(Strict):
@@ -91,6 +93,30 @@ def rewrite_references(record, mapping):
     return p
 
 
+def promise_stage_issues(record, path, records, source_hint):
+    """Match the promise checks in validate_record before a candidate can stage."""
+    issues = []
+    event_ids = [identifier for identifier, item in records.items() if item["kind"] == "event"]
+    for index, stage in enumerate(record["stages"]):
+        location = f"{path}.stages[{index}]({stage['status']})"
+        if stage["status"] in {"planted", "reinforced", "resolved"} and not stage["sources"]:
+            issues.append(
+                f"{location}.sources 缺少本阶段独立原文依据；{source_hint}"
+                "主record.sources不能代替阶段证据，不自动挪用；同段确实支持时可明确选择同一source_id，"
+                "确无依据应列unknowns。"
+            )
+        if stage["status"] in {"retained", "abandoned"} and not stage["note"].strip():
+            issues.append(f"{location}.note 缺少保留或放弃的作者理由，不得编造决定。")
+        if stage["event_id"] and (
+            stage["event_id"] not in records or records[stage["event_id"]]["kind"] != "event"
+        ):
+            issues.append(
+                f"{location}.event_id 只能关联事件，不能引用人物或其他类型；"
+                f"可用事件id示例：{'、'.join(event_ids[:12]) or '本批无事件'}。"
+            )
+    return issues
+
+
 async def run_extraction(worker, request, context, snapshot=None):
     snapshot = snapshot or worker.task["result"]["story_extraction_snapshot"]
     if worker.domain.branch(request["branch_id"])["story_revision"] != snapshot["story_revision"]:
@@ -108,6 +134,10 @@ async def run_extraction(worker, request, context, snapshot=None):
     existing = [r for r in graph(worker.domain, request["branch_id"])["records"] if not r["archived"]]
     known = {r["id"] for r in existing}
     by_id = {r["id"]: r for r in existing}
+    source_hint = (
+        f"quote须经原文核实后选择合法source_id，如{'、'.join(list(indexed)[:12])}"
+        "（完整编号见可引用原文，示例不表示支持本阶段）。"
+    )
 
     def validate(value):
         issues = []
@@ -117,8 +147,10 @@ async def run_extraction(worker, request, context, snapshot=None):
             issues.append("同一正式记录在本批只能有一个更新提案。")
         if len(set(local)) != len(local) or set(local) & known:
             issues.append("候选local_id必须独立、唯一，不得与正式标识相同。")
-        for proposal in value["records"]:
+        reference_index = {**by_id, **{r["local_id"]: r["record"] for r in value["records"]}}
+        for proposal_index, proposal in enumerate(value["records"]):
             record = proposal["record"]
+            path = f"records[{proposal_index}](local_id={proposal['local_id']}).record"
             target = by_id.get(proposal["target_id"])
             if proposal["target_id"]:
                 if (
@@ -133,10 +165,19 @@ async def run_extraction(worker, request, context, snapshot=None):
                     issues.append("更新须明确update_fields，仅能修改该记录已定义字段，kind不可变。")
             elif proposal["update_fields"] or proposal["target_revision"] is not None:
                 issues.append("新记录不能指定更新字段或目标修订。")
-            quoted = sources(record)
+            source_fields = [(f"{path}.sources", record["sources"])]
+            if record["kind"] == "promise":
+                source_fields += [
+                    (f"{path}.stages[{i}]({stage['status']}).sources", stage["sources"])
+                    for i, stage in enumerate(record["stages"])
+                ]
+                # Unlisted update fields retain the existing formal stages.
+                if not target or "stages" in proposal["update_fields"]:
+                    issues.extend(promise_stage_issues(record, path, reference_index, source_hint))
+            quoted = [(f"{field}[{i}]", s) for field, entries in source_fields for i, s in enumerate(entries)]
             if not quoted:
-                issues.append("每项候选都需本批原文依据；不能从作者计划推断发生。")
-            for source in quoted:
+                issues.append(f"{path} 每项候选都需本批原文依据；不能从作者计划推断发生。{source_hint}")
+            for source_path, source in quoted:
                 unit = indexed.get(source["quote"])
                 if not unit:
                     # Earlier repair rounds already restored successful source IDs.
@@ -150,7 +191,7 @@ async def run_extraction(worker, request, context, snapshot=None):
                         None,
                     )
                 if not unit:
-                    issues.append("来源quote必须使用提供的source_id。")
+                    issues.append(f"{source_path}.quote 无法回到本批原文；{source_hint}")
                 else:
                     source.update({k: unit[k] for k in ("chapter_id", "revision", "start", "end")})
                     source["quote"] = unit["text"]
@@ -167,6 +208,7 @@ async def run_extraction(worker, request, context, snapshot=None):
     result = await worker.grounded(
         {
             "动作": "按保存稿反向整理长篇结构候选",
+            "阶段证据契约版本": PROMISE_STAGE_GROUNDING_VERSION,
             **(
                 {
                     "场景范围要求": "同时输出scenes，按每章原文source_id连续分组，完整覆盖且每段仅一次。不输出自己计算的位置，服务根据冻结原文计算UTF-16范围。人物视角明确character_id，可用本批人物local_id。story_order只采用所覆盖原文中实际事件的已知故事顺序；缺依据使用null和未知说明，不能按章号推断。不将未来计划当实际时点，插叙、倒叙及信息视角分别表达。"
@@ -220,6 +262,7 @@ async def run_extraction(worker, request, context, snapshot=None):
                 for r in existing
             ],
             "计划兑现边界": "source_free_plan只表示尚无原文依据的计划，绝不表示实际。仅本批正文明确兑现同一事件、状态或关系且其他断言不变时，才可提案只更新status或truth为actual并提供本批原文。计划值不同或已有历史来源时，不做自动兑现；新建有依据的实际记录或保留为待作者核对的提案。实际状态须关联实际事件，必要时在同批明确提出事件兑现。不改写已发生历史，也不把计划引用当成实际证据。",
+            "伏笔阶段要求": "planted、reinforced、resolved每个阶段都须在自身stages[i].sources独立选择有依据的source_id，主record.sources不能代替，不自动挪用主来源。同段确实支持多个阶段时可显式选择同一source_id，但各阶段仍须分别填写。retained、abandoned须在note记录明确作者理由，不编造决定；event_id仅能关联本批或已有的event，缺证据保留unknowns。",
             "要求": "仅提取所给正文有依据的人物、事件、状态、关系及伏笔。已有身份用正式id关联，避免重建同一人物；新项使用本批local_id。更新已有项必须指定target_id、target_revision和非空update_fields，只列本批确有新依据的变化字段，未列字段保持原值，不猜测未提供的旧档案。sources默认追加证据；明确需替换时才列sources。状态在更晚事件中变化时新建事件与状态，不把新变化回写成旧事件当时的状态；修改旧状态只作为有明确依据的纠错提案。quote填source_id，其余来源位置由服务复原。档案、作者知识、角色知识及读者知识分开；计划不冒充实际，未知故事时间和冲突保持可见。不确定伏笔只列unknowns。每项解释推导边界，不能改稿或自动采用。",
         },
         ExtractionWithScenes if with_scenes else Extraction,
