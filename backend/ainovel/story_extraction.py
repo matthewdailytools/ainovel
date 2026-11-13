@@ -220,8 +220,17 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None):
         ).fetchone()
         if not artifact:
             raise DomainError("not_found", "结构候选不存在或不属于当前版本。", 404)
+        owners = tx.execute(
+            "SELECT id,kind,status,result FROM tasks WHERE branch_id=? AND kind='workflow' AND status!='continued' AND json_extract(result,'$.pending_structure.artifact_id')=?",
+            (branch_id, artifact_id),
+        ).fetchall()
+        if len(owners) > 1:
+            raise DomainError("workflow_progress", "多个批次指向同一待维护结果，请先核对检查点。", 409)
+        maintenance_owner = owners[0] if owners else None
         if attempt:
-            domain.db.check_attempt(tx, artifact["task_id"], attempt)
+            domain.db.check_attempt(
+                tx, maintenance_owner["id"] if maintenance_owner else artifact["task_id"], attempt
+            )
         prior = tx.execute("SELECT * FROM receipts WHERE key=?", (data.idempotency_key,)).fetchone()
         if prior:
             result = json.loads(prior["result"])
@@ -301,10 +310,8 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None):
             "note": "仅所选结构候选已确认；未选项保留在原产物，不影响正文。",
         }
         tx.execute("INSERT INTO receipts VALUES(?,?,?)", (data.idempotency_key, artifact_id, dumps(result)))
-        if artifact["task_id"]:
-            owner = tx.execute(
-                "SELECT kind,status,result FROM tasks WHERE id=?", (artifact["task_id"],)
-            ).fetchone()
+        if maintenance_owner:
+            owner = maintenance_owner
             progress = json.loads(owner["result"]) if owner else {}
             if (
                 owner
@@ -325,11 +332,9 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None):
                 )
                 tx.execute(
                     "UPDATE tasks SET result=?,updated=? WHERE id=?",
-                    (dumps(progress), time(), artifact["task_id"]),
+                    (dumps(progress), time(), owner["id"]),
                 )
-                domain.db.event(
-                    tx, artifact["task_id"], "structure_maintained", progress["structure_history"][-1]
-                )
+                domain.db.event(tx, owner["id"], "structure_maintained", progress["structure_history"][-1])
         return result
 
 

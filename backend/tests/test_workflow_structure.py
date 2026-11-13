@@ -156,3 +156,37 @@ def test_completion_cannot_bypass_pending_maintenance_or_unresolved_promises(pen
     stored = worker.domain.task(task["id"])
     assert stored["status"] == "blocked_creative"
     assert stored["result"]["maintained_promises"]["unresolved"][0]["payload"]["title"] == "未解释的暗号"
+
+
+@pytest.mark.parametrize("saved_pointer", [False, True])
+def test_account_continuation_recovers_prior_structure_without_rebilling(pending, monkeypatch, saved_pointer):
+    worker, result, task = pending
+    artifact = stage_empty(worker, result)
+    if saved_pointer:
+        result["pending_structure"]["artifact_id"] = artifact["id"]
+    worker.checkpoint(result, "paused")
+    current = worker.domain.task(task["id"])
+    continued = worker.domain.continue_workflow(
+        current,
+        {
+            **current["payload"],
+            "account": "deepseek",
+            "client_request_id": "continue-structure-account",
+        },
+        {"acknowledge_unknown": True, "reason": "原账户预算不足，保留已生成结果"},
+    )
+    worker.task = worker.claim()
+    worker.attempt = worker.task["attempt"]
+    assert worker.task["id"] == continued["id"]
+
+    async def unexpected_call(*args, **kwargs):
+        pytest.fail("换账户后已有结果不应再次计费")
+
+    monkeypatch.setattr(worker, "call", unexpected_call)
+    progress = worker.task["result"]
+    assert asyncio.run(maintain(worker, progress))
+    stored = worker.domain.task(continued["id"])
+    assert "pending_structure" not in stored["result"]
+    assert stored["result"]["structure_history"][0]["artifact_id"] == artifact["id"]
+    assert worker.domain.artifact(artifact["id"])["task_id"] == task["id"]
+    assert worker.domain.task(task["id"])["status"] == "continued"

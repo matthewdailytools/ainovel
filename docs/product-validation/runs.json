@@ -134,7 +134,7 @@
   {
     "id": "workflow-structure-browser-retest",
     "date": "2026-11-13",
-    "commit": "25096be+working-tree",
+    "commit": "6fc552a",
     "module": "自动化结构维护",
     "scenario": "改用控件角色定位后8条无头流程及维护检查点",
     "phase": "stability",
@@ -156,12 +156,23 @@
   {
     "id": "workflow-structure-manual-resume-retest",
     "date": "2026-11-13",
-    "commit": "25096be+working-tree",
+    "commit": "6fc552a",
     "module": "自动化结构维护",
     "scenario": "采用结构后界面续跑、键盘、320px及200%字体",
     "phase": "stability",
     "result": "passed",
     "record": "2026-11-13-workflow-structure.md",
     "fix_of": "workflow-structure-manual-resume-failed"
+  },
+  {
+    "id": "workflow-structure-live-rollout",
+    "date": "2026-11-13",
+    "commit": "6fc552a",
+    "module": "本机更新",
+    "scenario": "无活动任务、实际恢复、原记录不变及5条后台用例",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-workflow-structure.md",
+    "fix_of": ""
   }
 ]

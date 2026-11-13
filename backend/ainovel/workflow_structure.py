@@ -45,9 +45,18 @@ async def maintain(worker, result):
     epoch = pending.get("epoch", "initial")
     if not identifier:
         # Recover a staged result even if the process stopped before its checkpoint.
+        lineage = [worker.task["id"]]
+        ancestor = worker.task["result"].get("continued_from")
+        while ancestor and ancestor not in lineage:
+            previous = worker.domain.task(ancestor)
+            if previous["branch_id"] != worker.task["branch_id"] or previous["kind"] != "workflow":
+                raise DomainError("workflow_progress", "续跑检查点的来源版本不一致。", 409)
+            lineage.append(ancestor)
+            ancestor = previous["result"].get("continued_from")
+        placeholders = ",".join("?" for _ in lineage)
         found = worker.db.all(
-            "SELECT id FROM artifacts WHERE task_id=? AND kind='story_extraction' AND json_extract(basis,'$.maintenance_chapter.id')=? AND json_extract(basis,'$.maintenance_chapter.revision')=? AND json_extract(basis,'$.maintenance_epoch')=? ORDER BY created DESC LIMIT 1",
-            (worker.task["id"], chapter["id"], chapter["revision"], epoch),
+            f"SELECT id FROM artifacts WHERE task_id IN ({placeholders}) AND kind='story_extraction' AND json_extract(basis,'$.maintenance_chapter.id')=? AND json_extract(basis,'$.maintenance_chapter.revision')=? AND json_extract(basis,'$.maintenance_epoch')=? ORDER BY created DESC LIMIT 1",
+            (*lineage, chapter["id"], chapter["revision"], epoch),
         )
         if found:
             identifier = found[0]["id"]
