@@ -376,7 +376,6 @@ def create_app(settings=None, schema_only=False):
     register_import_routes(app, domain)
     from .story_extraction import register_routes as register_extraction_routes
 
-
     @app.get("/api/modules")
     def module_specs():
         return public_modules()
