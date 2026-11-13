@@ -4,8 +4,16 @@ const SOURCE = '😀渡口掌柜先问用途，又把水路图收回袖中。他
 
 test('书库选段到拆解、方案、试写、对照采纳和历史恢复', async ({ page }) => {
   await page.goto('/')
-  await page.getByLabel('第一部作品的名字').fill('后台验证 · 修城器师')
-  await page.getByRole('button', { name: '打开写作台 →', exact: true }).click()
+  const initial = await (await page.request.get('/api/session')).json()
+  const novel = await (
+    await page.request.post('/api/novels', {
+      headers: { 'X-Ainovel-CSRF': initial.csrf },
+      data: { title: '后台验证 · 修城器师' },
+    })
+  ).json()
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+  await expect(page.getByRole('combobox', { name: '工作版本', exact: true })).not.toHaveValue('')
   await page.getByRole('button', { name: '新建第一章', exact: true }).click()
   await page
     .getByRole('textbox', { name: '章节正文', exact: true })

@@ -371,6 +371,9 @@ def create_app(settings=None, schema_only=False):
     from .story_graph import register_routes as register_story_routes
 
     register_story_routes(app, domain)
+    from .manuscript_import import register_routes as register_import_routes
+
+    register_import_routes(app, domain)
 
     @app.get("/api/modules")
     def module_specs():

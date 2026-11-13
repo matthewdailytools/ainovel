@@ -42,5 +42,16 @@
     "result": "passed",
     "record": "2026-11-13-longform-records.md",
     "fix_of": "longform-001-failed"
+  },
+  {
+    "id": "import-001-pass",
+    "date": "2026-11-13",
+    "commit": "8472869+working-tree",
+    "module": "长篇拆章导入",
+    "scenario": "编码章界、映射恢复、事务与日常导入回执",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-manuscript-import.md",
+    "fix_of": ""
   }
 ]

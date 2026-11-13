@@ -346,6 +346,92 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/import-previews/{identifier}/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    /** Save Draft */
+    patch: operations['save_draft_api_branches__branch_id__import_previews__identifier__draft_patch']
+    trace?: never
+  }
+  '/api/branches/{branch_id}/import-previews': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Previews */
+    get: operations['previews_api_branches__branch_id__import_previews_get']
+    put?: never
+    /** Preview */
+    post: operations['preview_api_branches__branch_id__import_previews_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/import-previews/{identifier}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Preview */
+    get: operations['get_preview_api_branches__branch_id__import_previews__identifier__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/import-previews/{identifier}/read': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Read Segment */
+    post: operations['read_segment_api_branches__branch_id__import_previews__identifier__read_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/import-previews/{identifier}/confirm': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Confirm */
+    post: operations['confirm_api_branches__branch_id__import_previews__identifier__confirm_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/genre-catalog': {
     parameters: {
       query?: never
@@ -1261,6 +1347,16 @@ export interface components {
       /** File */
       file: string
     }
+    /** Body_preview_api_branches__branch_id__import_previews_post */
+    Body_preview_api_branches__branch_id__import_previews_post: {
+      /** File */
+      file: string
+      /**
+       * Encoding
+       * @default utf-8-sig
+       */
+      encoding: string
+    }
     /** CandidateEdit */
     CandidateEdit: {
       /** Text */
@@ -1314,6 +1410,17 @@ export interface components {
        * @default
        */
       profile: string
+    }
+    /** Confirm */
+    Confirm: {
+      /** Draft Revision */
+      draft_revision?: number | null
+      /** Client Request Id */
+      client_request_id: string
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Mappings */
+      mappings: components['schemas']['Mapping'][]
     }
     /** ContinuationInput */
     ContinuationInput: {
@@ -1385,6 +1492,13 @@ export interface components {
        * @enum {string}
        */
       format: 'epub' | 'page_text'
+    }
+    /** EditDraft */
+    EditDraft: {
+      /** Base Revision */
+      base_revision: number
+      /** Mappings */
+      mappings: components['schemas']['Mapping'][]
     }
     /** EditReference */
     EditReference: {
@@ -1574,6 +1688,30 @@ export interface components {
       note: string
       /** Dispositions */
       dispositions?: components['schemas']['FinalizationDisposition'][]
+    }
+    /** Mapping */
+    Mapping: {
+      /** Title */
+      title: string
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /**
+       * Action
+       * @default append
+       * @enum {string}
+       */
+      action: 'append' | 'replace' | 'skip'
+      /** Chapter Id */
+      chapter_id?: string | null
+      /** Base Revision */
+      base_revision?: number | null
+      /**
+       * Allow Duplicate
+       * @default false
+       */
+      allow_duplicate: boolean
     }
     /** ModuleInput */
     ModuleInput: {
@@ -1895,6 +2033,15 @@ export interface components {
        * @default false
        */
       archived: boolean
+    }
+    /** Segment */
+    Segment: {
+      /** Title */
+      title: string
+      /** Start */
+      start: number
+      /** End */
+      end: number
     }
     /** Source */
     Source: {
@@ -2861,6 +3008,212 @@ export interface operations {
       cookie?: never
     }
     requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_draft_api_branches__branch_id__import_previews__identifier__draft_patch: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['EditDraft']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  previews_api_branches__branch_id__import_previews_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_api_branches__branch_id__import_previews_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['Body_preview_api_branches__branch_id__import_previews_post']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_preview_api_branches__branch_id__import_previews__identifier__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_segment_api_branches__branch_id__import_previews__identifier__read_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['Segment']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_api_branches__branch_id__import_previews__identifier__confirm_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['Confirm']
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {

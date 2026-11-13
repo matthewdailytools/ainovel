@@ -19,6 +19,7 @@ import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from
 import { ChapterContext } from './ChapterContext'
 import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 import { ReferenceComparison } from './ReferenceWorkspace'
+import { ManuscriptImport } from './ManuscriptImport'
 
 const actions = [
   ['writing.advise', '卡点诊断与方向'],
@@ -56,6 +57,7 @@ export function Writing({
   notify: Notify
   onGenreSettings: () => void
 }) {
+  const [importOpen, setImportOpen] = useState(false)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [loading, setLoading] = useState(true)
   const [archived, setArchived] = useState<Chapter[]>([])
@@ -494,6 +496,7 @@ export function Writing({
           </details>
           <details>
             <summary>导入与导出</summary>
+            <button onClick={() => setImportOpen(true)}>长篇拆章预览与导入</button>
             <label className="file-control">
               导入为新章节
               <input
@@ -523,6 +526,15 @@ export function Writing({
         </div>
       </aside>
       <section className="manuscript" aria-label="正文写作">
+        {importOpen && (
+          <ManuscriptImport
+            key={branch.id}
+            branchId={branch.id}
+            notify={notify}
+            onImported={refresh}
+            onClose={() => setImportOpen(false)}
+          />
+        )}
         <div className="manuscript-toolbar">
           <span className="eyebrow">作者工作稿</span>
           <span className="save-status" role="status">
