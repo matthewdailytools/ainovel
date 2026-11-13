@@ -328,5 +328,16 @@
     "result": "passed",
     "record": "2026-11-13-longform-scale.md",
     "fix_of": "longform-scale-001"
+  },
+  {
+    "id": "reference-quality-001",
+    "date": "2026-11-13",
+    "commit": "7d67d7c+working-tree",
+    "module": "七类真实模型参考对照",
+    "scenario": "首轮已启动、开篇配对完成、独立核对待判断问题",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-13-reference-quality.md",
+    "fix_of": ""
   }
 ]
