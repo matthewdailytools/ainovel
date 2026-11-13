@@ -16,6 +16,7 @@ from .domain import Domain, char_count, utf16_slice
 from .genre_catalog import profile_for_action
 from .evidence import source_units, resolve_field, source_schema, completion_sources
 from .models import Completion, Memory, Plan, Review, RevisionPatch, SegmentCompletion
+from .memory_evidence import MEMORY_EVIDENCE_VERSION, memory_evidence_issues
 from .providers import ModelClient
 from .prompt_encoding import encode_prompt
 from .settings import ROOT, Settings
@@ -422,6 +423,12 @@ class Worker:
                     "semantic_prompt_sha256": hashlib.sha256(semantic_prompt.encode()).hexdigest(),
                     "prompt_utf8_bytes": len(prompt.encode()),
                     "max_output_tokens": max_output,
+                    **(
+                        {"memory_evidence_version": source_instruction["事实证据契约版本"]}
+                        if action == "从正文提取事实候选与章节摘要"
+                        and "事实证据契约版本" in source_instruction
+                        else {}
+                    ),
                     "account": self.settings.providers[payload["account"]].public(),
                     "reasoning_effort": provider.reasoning,
                     "service_tier": "default" if provider.kind == "openai" else None,
@@ -836,13 +843,7 @@ class Worker:
         sources = {unit["source_id"]: unit for unit in units}
 
         def validate(result):
-            for fact in result["facts"]:
-                resolve_field(fact, "evidence", sources)
-            issues = [
-                f"facts[{index}].evidence 不在本章正文中"
-                for index, fact in enumerate(result["facts"])
-                if fact["evidence"] not in text
-            ]
+            issues = memory_evidence_issues(result, text, sources)
             if not any(c.isalnum() for c in result["summary"]):
                 issues.append("摘要不能只由空白或标点填充")
             return issues
@@ -850,8 +851,10 @@ class Worker:
         result = await self.grounded(
             {
                 "动作": "从正文提取事实候选与章节摘要",
+                "事实证据契约版本": MEMORY_EVIDENCE_VERSION,
                 "正文": text,
                 "可引用原文": units,
+                "证据字段规则": "evidence只填写一个合法source_id，不得填写逗号列表、多个编号、编号范围或拼接段落。后端仍兼容一段连续逐字原文，但不接受概括、改写或其他章节引文。来源只来自本次正文及MEM单元，旧facts/近期章节/图状态不是本章证据。复合陈述需要模型回到原文核实支持范围或合理拆分，不能盲选第一编号、拼非连续引文或仅为通过删除事实。最多6条与最多两轮引用修正边界保持。",
                 "要求": "最多6条有后续作用的事实，statement尽量80字内，evidence优先只填可引用原文的source_id编号，后端按冻结版本回填原文，不要改写引文。kind只能选event/knowledge/capability/resource/relationship/promise/world；未来计划填truth=plan，不能填kind=plan。真相、误信、未来计划分开，保留未知。",
             },
             Memory,
