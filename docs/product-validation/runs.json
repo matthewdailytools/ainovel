@@ -200,9 +200,20 @@
   {
     "id": "plan-realization-001",
     "date": "2026-11-13",
-    "commit": "d336eab+working-tree",
+    "commit": "ff28b2b",
     "module": "计划兑现",
     "scenario": "原文支持的受限兑现、前文认知隔离及实际关系约束",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-plan-realization.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-realization-live-001",
+    "date": "2026-11-13",
+    "commit": "ff28b2b",
+    "module": "计划兑现",
+    "scenario": "备份恢复、更新前后数据一致及3条日常只读路径",
     "phase": "stability",
     "result": "passed",
     "record": "2026-11-13-plan-realization.md",
