@@ -306,5 +306,27 @@
     "result": "passed",
     "record": "2026-11-13-project-stability-baseline.md",
     "fix_of": ""
+  },
+  {
+    "id": "longform-scale-001",
+    "date": "2026-11-13",
+    "commit": "cc94662+working-tree",
+    "module": "长篇规模与费用边界",
+    "scenario": "首次早章改稿后上下文断言",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-longform-scale.md",
+    "fix_of": ""
+  },
+  {
+    "id": "longform-scale-002",
+    "date": "2026-11-13",
+    "commit": "cc94662+working-tree",
+    "module": "长篇规模与费用边界",
+    "scenario": "36/100章导入及跨卷100事件、三个账户超长输入",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-longform-scale.md",
+    "fix_of": "longform-scale-001"
   }
 ]

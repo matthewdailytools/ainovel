@@ -47,6 +47,28 @@ def test_per_task_limit_unknown_price_and_settlement(settings):
     assert first == budget.report()[0]["settled"] > 0
 
 
+@pytest.mark.parametrize("account", ["openai_1", "openai_2", "deepseek"])
+def test_oversized_chinese_context_stops_before_network_or_fee_reservation(settings, account):
+    budget = Budget(settings)
+    before = budget.report()
+    attempted = []
+
+    def transport(request):
+        attempted.append(request)
+        raise AssertionError("Oversized input must not reach the provider")
+
+    model = ModelClient(settings, budget, httpx.MockTransport(transport))
+    # Count UTF-8 bytes, including non-BMP characters, rather than Python characters.
+    prompt = "渡船😀𠮷" * 12_000
+    assert len(prompt) < settings.providers[account].max_input_bytes
+    assert len(prompt.encode()) > settings.providers[account].max_input_bytes
+    with pytest.raises(DomainError) as error:
+        asyncio.run(model.generate(account, "scale-input-limit", "仅处理给定原创正文", prompt))
+    assert error.value.code == "context_limit"
+    assert not attempted
+    assert budget.report() == before
+
+
 def stream(events, deepseek=False):
     return "".join("data: " + json.dumps(event, ensure_ascii=False) + "\n\n" for event in events).encode() + (
         b"data: [DONE]\n\n" if deepseek else b""
