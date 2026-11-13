@@ -18,6 +18,7 @@ from .evidence import source_units, resolve_field, source_schema, completion_sou
 from .models import Completion, Memory, Plan, Review, RevisionPatch, SegmentCompletion
 from .memory_evidence import MEMORY_EVIDENCE_VERSION, memory_evidence_issues
 from .providers import ModelClient
+from .request_trace import failure_trace
 from .prompt_encoding import encode_prompt
 from .settings import ROOT, Settings
 from .targeted_revision import run_targeted_revision, validate_targeted_revision
@@ -536,18 +537,20 @@ class Worker:
             )
         except BaseException as error:
             partial = getattr(error, "partial_text", "")
-            if partial:
+            trace = failure_trace(error, self.settings, self.budget, self.task)
+            if partial or trace:
                 # This is a recoverable output transcript, never an accepted story update.
                 with self.db.connect(True) as tx:
-                    current = tx.execute(
-                        "SELECT attempt FROM tasks WHERE id=?", (self.task["id"],)
-                    ).fetchone()
-                    if current and current[0] == self.attempt:
+                    try:
+                        self.db.check_attempt(tx, self.task["id"], self.attempt)
+                    except DomainError:
+                        pass  # Preserve the original failure; stopped attempts cannot append trace events.
+                    else:
                         self.db.event(
                             tx,
                             self.task["id"],
-                            "partial_retained",
-                            {"text": partial, "fingerprint": fingerprint},
+                            "partial_retained" if partial else "request_failed",
+                            {**({"text": partial} if partial else {}), "fingerprint": fingerprint, **trace},
                         )
             if (
                 isinstance(error, Exception)

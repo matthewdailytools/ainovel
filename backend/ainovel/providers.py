@@ -327,6 +327,8 @@ class ModelClient:
                 error.provider_details = {
                     **getattr(error, "provider_details", {}),
                     "request_metadata": request_metadata,
+                    "call_id": reservation,
+                    "sent": sent,
                 }
             if isinstance(error, (httpx.TimeoutException, TimeoutError)):
                 unknown = DomainError(
