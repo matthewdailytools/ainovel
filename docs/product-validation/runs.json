@@ -625,5 +625,203 @@
     "result": "failed",
     "record": "2026-11-13-longform-independent-review.md",
     "fix_of": ""
+  },
+  {
+    "id": "longform-context-003",
+    "date": "2026-11-13",
+    "commit": "6f2d9cd",
+    "module": "十章上下文",
+    "scenario": "必要有效记录增长，第六章仍触及应用120000字节默认限额",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-account-context-limits.md",
+    "fix_of": ""
+  },
+  {
+    "id": "longform-context-004",
+    "date": "2026-11-13",
+    "commit": "cac0016",
+    "module": "账户模型窗口",
+    "scenario": "明确官方窗口和请求/输出/余量边界，126回归且已保存第六章正文",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-account-context-limits.md",
+    "fix_of": "longform-context-003"
+  },
+  {
+    "id": "storage-migration-001",
+    "date": "2026-11-13",
+    "commit": "a57efc6",
+    "module": "迁移与恢复故障",
+    "scenario": "原子迁移，DDL/标记/数据/快照失败回滚，致命FTS异常不吞；59相关回归",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-fault-acceptance.md",
+    "fix_of": ""
+  },
+  {
+    "id": "direction-handoff-001",
+    "date": "2026-11-13",
+    "commit": "049999a",
+    "module": "手写与方向选择",
+    "scenario": "作者选定并编辑方向→本章补写→拒绝/采纳恢复；1+5无头路径",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-direction-handoff.md",
+    "fix_of": ""
+  },
+  {
+    "id": "longform-minimal-candidates-001",
+    "date": "2026-11-13",
+    "commit": "a8131b4",
+    "module": "长篇局部修订",
+    "scenario": "三份候选6任务18调用CNY0.530446；独立复核仍有阻断，全部未采用",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-longform-independent-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "live-readonly-001",
+    "date": "2026-11-13",
+    "commit": "049999a",
+    "module": "日常实例后台验证",
+    "scenario": "4项独立作品只读路径，模型任务0；仅自身位置维护1次",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-live-readonly-concurrent-cost.md",
+    "fix_of": ""
+  },
+  {
+    "id": "promise-stage-001",
+    "date": "2026-11-13",
+    "commit": "0693e5e",
+    "module": "伏笔阶段证据",
+    "scenario": "真实维护缺阶段来源，前置逐项定位及51项回归",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-promise-stage-grounding.md",
+    "fix_of": ""
+  },
+  {
+    "id": "promise-append-001",
+    "date": "2026-11-13",
+    "commit": "45da49a",
+    "module": "伏笔历史追加",
+    "scenario": "明确追加同身份新阶段，旧证据/历史保留；63相关回归",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-promise-append-stages.md",
+    "fix_of": ""
+  },
+  {
+    "id": "workflow-scope-001",
+    "date": "2026-11-13",
+    "commit": "ea1cb95",
+    "module": "阶段与整书范围",
+    "scenario": "区分终态并绑定章节/UTF16证据，61项及后续14项精确定位回归",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-workflow-completion-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "intent-design-001",
+    "date": "2026-11-13",
+    "commit": "ea1cb95",
+    "module": "一句想法到正文",
+    "scenario": "采用章级设计后未进入全书创作上下文，首次无头失败保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-intent-to-writing.md",
+    "fix_of": ""
+  },
+  {
+    "id": "intent-design-002",
+    "date": "2026-11-13",
+    "commit": "28e9a01",
+    "module": "一句想法到正文",
+    "scenario": "明确本书/本章设计，U02三项及U01回归通过，实际来源装配核对",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-intent-to-writing.md",
+    "fix_of": "intent-design-001"
+  },
+  {
+    "id": "segment-real-001",
+    "date": "2026-11-13",
+    "commit": "ea1cb95",
+    "module": "独立阶段十章",
+    "scenario": "明确segment新运行已保存4章；测量推理仍有阻断，不合并旧六章",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-segment-quality-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "openai-focused-review-001",
+    "date": "2026-11-13",
+    "commit": "ea1cb95",
+    "module": "跨模型独立审稿",
+    "scenario": "两份审稿和最小候选USD0.194098，候选未通过、18处差异未采纳",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-segment-quality-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "workflow-intervention-001",
+    "date": "2026-11-13",
+    "commit": "ea1cb95",
+    "module": "恢复与混合干预",
+    "scenario": "维护干预无artifact_id导致第5章派发前KeyError，原检查点保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-workflow-interventions.md",
+    "fix_of": ""
+  },
+  {
+    "id": "workflow-intervention-002",
+    "date": "2026-11-13",
+    "commit": "ea7a2ec",
+    "module": "恢复与混合干预",
+    "scenario": "按类型筛选正文并保存安全源码帧，38项回归；现场恢复另记",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-workflow-interventions.md",
+    "fix_of": "workflow-intervention-001"
+  },
+  {
+    "id": "stability-round3-001",
+    "date": "2026-11-13",
+    "commit": "ea7a2ec",
+    "module": "全项目自动化稳定性",
+    "scenario": "554后端/26无头/11前端/48既有，类型构建格式及远端CI通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-stability-round3.md",
+    "fix_of": ""
+  },
+  {
+    "id": "workflow-intervention-003",
+    "date": "2026-11-13",
+    "commit": "ea7a2ec",
+    "module": "本机恢复检查点",
+    "scenario": "备份实际恢复，六表与完整费用账本哈希一致；同任务恢复第5章前检查点",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-stability-round3.md",
+    "fix_of": "workflow-intervention-001"
+  },
+  {
+    "id": "live-readonly-002",
+    "date": "2026-11-13",
+    "commit": "ea7a2ec",
+    "module": "更新后的日常实例",
+    "scenario": "4项独立无头6.1秒通过，fixture模型任务0，正文不变，非位置写入0",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-stability-round3.md",
+    "fix_of": ""
   }
 ]

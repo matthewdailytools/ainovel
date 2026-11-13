@@ -26,3 +26,10 @@
 126项账户配置、精确边界、预算、CLI、API/Worker及维护回归通过。覆盖实际UTF-8字节差1、窗口差1、schema开销、长请求全文发送、未知/任务预算保护、非法配置及相同模型多账户隔离。Ruff、格式、模板TOML解析及diff通过。HTTPX以content=已检验字节并明确application/json发送，精确比对非ASCII、换行和引号。
 
 独立只读审阅未发现本轮DeepSeek路径的计数、预算或transport阻断。以后提高OpenAI边界仍需单独核对阶梯单价，窗口来源不能替代价格依据。
+
+
+## 现场更新
+
+源码049999a统一更新到端口8766。更新前无活动模型/获取任务，备份66b927b7fe7346c8b1bb909303c104a9实际隔离恢复ok；chapters/revisions/facts/artifacts/story_records/scene_times六张保护表和完整费用账本所有业务表的逐表SHA前后一致。只为DeepSeek加入512000/1000000及官方来源，预算、费率、模型和其他账户配置保持；实际配置仍在仓库忽略的ainovel.toml，原配置私有备份保留。
+
+原评测selected_account冻结快照不改写，新增runtime_limit_changes记录这次工程参数变化。明确恢复同一任务并以只读observe跟踪，第六章正文已保存，第七章前的结构维护因伏笔阶段缺源停止；实际派发事件保留每步上限、窗口及来源。未据此追认旧稿或整书通过。私有更新证据context-direction-rollout-20261113.json。
