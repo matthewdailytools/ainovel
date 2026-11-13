@@ -6,6 +6,7 @@ import json
 import httpx
 
 from .db import DomainError
+from .settings import CONTEXT_SAFETY_TOKENS
 
 
 def strict_schema(value):
@@ -40,9 +41,8 @@ class ModelClient:
         provider = self.settings.providers.get(account)
         if not provider or not provider.key:
             raise DomainError("configuration", "所选模型账户未配置密钥。")
-        byte_count = len((system + prompt).encode("utf-8"))
-        if byte_count > provider.max_input_bytes:
-            raise DomainError("context_limit", "本次必要上下文超过限制，请缩小范围；未静默截断。")
+        if type(max_output) is not int or max_output <= 0:
+            raise DomainError("configuration", "单次输出上限必须为正整数。")
         output, usage, completed = "", None, False
         received_terminal = False
         input_tokens = output_tokens = None
@@ -95,9 +95,23 @@ class ModelClient:
             endpoint = provider.base_url + "/chat/completions"
             if schema:
                 body["response_format"] = {"type": "json_object"}
-        request_bytes = len(json.dumps(body, ensure_ascii=False).encode("utf-8"))
+        # Serialize once so both gates inspect the exact UTF-8 body sent below,
+        # including schema, JSON escaping and provider-specific request fields.
+        request_body = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode(
+            "utf-8"
+        )
+        request_bytes = len(request_body)
         if request_bytes > provider.max_input_bytes:
-            raise DomainError("context_limit", "包括结构契约的请求超过输入上限，未截断或付费调用。")
+            raise DomainError("context_limit", "包括结构契约的请求超过账户字节上限，未截断或付费调用。")
+        # Bytes are deliberately a conservative token upper bound, not a model
+        # tokenizer estimate. A window is only taken from explicit configuration.
+        if (
+            provider.context_window_tokens is not None
+            and request_bytes + max_output + CONTEXT_SAFETY_TOKENS > provider.context_window_tokens
+        ):
+            raise DomainError(
+                "context_limit", "请求字节数、预留输出与安全余量超过已配置模型窗口，未截断或付费调用。"
+            )
         reservation = self.budget.reserve(provider, task_id, request_bytes + 2048, max_output, run_limit)
         sent = False
         try:
@@ -118,7 +132,7 @@ class ModelClient:
                             "Authorization": "Bearer " + provider.key,
                             "Content-Type": "application/json",
                         },
-                        json=body,
+                        content=request_body,
                     ) as response:
                         request_id = identifier(response.headers.get("x-request-id", ""))
                         if response.status_code != 200:

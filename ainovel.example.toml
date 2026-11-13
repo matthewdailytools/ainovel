@@ -10,6 +10,10 @@ deepseek = 80
 [accounts.openai_1]
 kind = "openai"
 key_env = "OPENAI_API_KEY"
+# 每个账户独立配置工程字节上限，缺省为完整 JSON 请求体的 120,000 UTF-8 字节。
+# max_input_bytes = 120000
+# 可选 context_window_tokens 必须是明确的正整数，不按模型名推断窗口。
+# 超过默认字节上限时，必须同时填写该模型已核实的窗口与 context_source。
 
 [accounts.openai_2]
 kind = "openai"
@@ -21,6 +25,13 @@ key_env = "OPENAI_API_KEY_2"
 [accounts.deepseek]
 kind = "deepseek"
 key_env = "DEEPSEEK_API_KEY"
+# 可选长篇配置：2026-11-13 官方页列 deepseek-flash 为
+# DeepSeek-V4.1-Flash-1017，窗口 1M tokens。仅核实窗口，不自动改变本例单价。
+# model = "deepseek-flash"
+# max_input_bytes = 512000
+# context_window_tokens = 1000000
+# context_source = "https://api-docs.deepseek.com/quick_start/pricing/"
+# 发送前同时核对字节上限与：实际请求体字节数 + max_output + 4096 <= 窗口。
 
 # 2026-11-12 核对的保守计价；不计缓存折扣，OpenAI 使用长上下文上界，
 # DeepSeek 使用高峰上界。界面显示配置单价估算，不冒充服务商账单。
@@ -31,7 +42,8 @@ input_per_million = "0.20"
 output_per_million = "0.75"
 source = "https://developers.openai.com/api/docs/models/gpt-6-luna"
 
-# 可选 Sol：当前请求上限 120,000 UTF-8 字节，低于 272K 输入 Token 的加价边界。
+# 可选 Sol：缺省请求上限 120,000 UTF-8 字节，低于 272K 输入 Token 的加价边界。
+# 调高输入边界前需重新核对该模型计价档位；窗口设置不会自动改变单价。
 # 2026-11-13 核对 Standard 单价；不计缓存折扣，不使用 Fast/Ultrafast。
 [pricing."gpt-6.1-sol"]
 currency = "USD"

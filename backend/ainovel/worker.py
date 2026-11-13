@@ -385,6 +385,7 @@ class Worker:
                     "account": self.settings.providers[payload["account"]].public(),
                     "reasoning_effort": provider.reasoning,
                     "service_tier": "default" if provider.kind == "openai" else None,
+                    "input_limits": provider.limits(),
                     "timeout_seconds": self.settings.timeout,
                     "idle_timeout_seconds": self.settings.idle_timeout,
                     "story_revision": (context or {}).get("branch", {}).get("story_revision"),

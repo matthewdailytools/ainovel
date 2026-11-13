@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
 CAPS = {"openai": ("USD", Decimal("20")), "deepseek": ("CNY", Decimal("80"))}
+DEFAULT_MAX_INPUT_BYTES = 120_000
+CONTEXT_SAFETY_TOKENS = 4096
 
 
 @dataclass(frozen=True)
@@ -23,7 +25,31 @@ class Provider:
     output_rate: Decimal | None = None
     price_source: str = ""
     reasoning: str = "none"
-    max_input_bytes: int = 120_000
+    max_input_bytes: int = DEFAULT_MAX_INPUT_BYTES
+    context_window_tokens: int | None = None
+    context_source: str = ""
+
+    def __post_init__(self):
+        if type(self.max_input_bytes) is not int or self.max_input_bytes <= 0:
+            raise ValueError("max_input_bytes 必须为正整数。")
+        if self.context_window_tokens is not None and (
+            type(self.context_window_tokens) is not int or self.context_window_tokens <= 0
+        ):
+            raise ValueError("context_window_tokens 必须为正整数。")
+        if not isinstance(self.context_source, str):
+            raise ValueError("context_source 必须为来源说明文本。")
+        if self.max_input_bytes > DEFAULT_MAX_INPUT_BYTES and (
+            self.context_window_tokens is None or not self.context_source.strip()
+        ):
+            raise ValueError("提高 max_input_bytes 必须明确配置 context_window_tokens 和 context_source。")
+
+    def limits(self):
+        return {
+            "max_input_bytes": self.max_input_bytes,
+            "context_window_tokens": self.context_window_tokens,
+            "context_source": self.context_source,
+            "context_safety_tokens": CONTEXT_SAFETY_TOKENS,
+        }
 
     def public(self):
         return {
@@ -37,6 +63,7 @@ class Provider:
             "input_rate": str(self.input_rate),
             "output_rate": str(self.output_rate),
             "price_source": self.price_source,
+            "limits": self.limits(),
         }
 
 
@@ -124,6 +151,9 @@ class Settings:
                 *rates,
                 tariff.get("source", ""),
                 item.get("reasoning_effort", os.getenv(prefix + "_REASONING_EFFORT", "none")),
+                max_input_bytes=item.get("max_input_bytes", DEFAULT_MAX_INPUT_BYTES),
+                context_window_tokens=item.get("context_window_tokens"),
+                context_source=item.get("context_source", ""),
             )
         limits = {
             kind: min(cap, Decimal(str(config.get("budgets", {}).get(kind, cap))))
