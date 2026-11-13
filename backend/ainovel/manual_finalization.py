@@ -172,6 +172,9 @@ def _known_issues(conn, branch_id, story_revision, chapters):
 
 
 def _state(conn, branch_id, story_revision):
+    from .story_graph import graph_snapshot, promise_status
+
+    promises = promise_status(graph_snapshot(conn, branch_id))
     chapters = _rows(
         conn, "SELECT * FROM chapters WHERE branch_id=? AND archived=0 ORDER BY position,id", (branch_id,)
     )
@@ -184,6 +187,14 @@ def _state(conn, branch_id, story_revision):
     expected = spec.get("chapters", max((c["position"] for c in chapters), default=0))
     positions = [c["position"] for c in chapters]
     blockers = []
+    if not promises["closed"]:
+        blockers.append(
+            {
+                "id": "structured_promises",
+                "message": "已维护的伏笔／承诺存在未处理或失效项："
+                + "、".join(r["payload"]["title"] for r in promises["unresolved"]),
+            }
+        )
     if not chapters:
         blockers.append({"id": "no_chapters", "message": "尚无正文章节，不能确认定稿。"})
     if positions != list(range(1, expected + 1)):
@@ -259,6 +270,7 @@ def _state(conn, branch_id, story_revision):
         "chapter_count": len(chapters),
         "expected_chapters": expected,
         "deterministic_blockers": blockers,
+        "structured_promises": promises,
         "known_issues": issues,
         "unresolved_issue_ids": unresolved,
         "historical_reports_not_current": historical,

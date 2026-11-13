@@ -13,7 +13,7 @@
   {
     "id": "reference-002-retest",
     "date": "2026-11-13",
-    "commit": "3597cc6+working-tree",
+    "commit": "77f797e",
     "module": "参考仿写",
     "scenario": "选段至采纳、刷新恢复及原稿历史",
     "phase": "stability",
@@ -35,7 +35,7 @@
   {
     "id": "longform-002-retest",
     "date": "2026-11-13",
-    "commit": "09db2d4+working-tree",
+    "commit": "8472869",
     "module": "长篇人物时点与多线",
     "scenario": "原文事件、时点状态、图形及日常只读",
     "phase": "stability",
@@ -46,7 +46,7 @@
   {
     "id": "import-001-pass",
     "date": "2026-11-13",
-    "commit": "8472869+working-tree",
+    "commit": "5730bd1",
     "module": "长篇拆章导入",
     "scenario": "编码章界、映射恢复、事务与日常导入回执",
     "phase": "stability",
@@ -57,12 +57,34 @@
   {
     "id": "story-extraction-001",
     "date": "2026-11-13",
-    "commit": "5730bd1+working-tree",
+    "commit": "71fc44d",
     "module": "反向结构整理",
     "scenario": "原文提取、依赖提示、作者确认、回滚与日常只读",
     "phase": "stability",
     "result": "passed",
     "record": "2026-11-13-story-extraction.md",
+    "fix_of": ""
+  },
+  {
+    "id": "story-extraction-ci-failed",
+    "date": "2026-11-13",
+    "commit": "e6fb5a5",
+    "module": "持续集成",
+    "scenario": "Ruff格式检查",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-promise-finalization.md",
+    "fix_of": ""
+  },
+  {
+    "id": "promise-finalization-001",
+    "date": "2026-11-13",
+    "commit": "71fc44d+working-tree",
+    "module": "作者定稿",
+    "scenario": "维护伏笔未闭合、保留理由及来源失效",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-promise-finalization.md",
     "fix_of": ""
   }
 ]

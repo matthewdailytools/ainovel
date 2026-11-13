@@ -37,6 +37,51 @@ def state(domain, story):
     return finalization_status(domain.db, branch["id"], branch["story_revision"])
 
 
+def test_maintained_promises_block_finalization_until_explicit_decision(domain, story):
+    from ainovel.story_graph import SaveRecord, save_record
+
+    chapter = domain.save(story["chapter_id"], 0, TEXT)
+    source = {"chapter_id": chapter["id"], "revision": 1, "start": 0, "end": len(TEXT), "quote": TEXT}
+    result = save_record(
+        domain,
+        story["branch_id"],
+        SaveRecord(
+            base_story_revision=domain.branch(story["branch_id"])["story_revision"],
+            record={
+                "kind": "promise",
+                "title": "读数的来源",
+                "sources": [source],
+                "stages": [{"status": "planned"}],
+            },
+        ),
+    )
+    promise = result["records"][0]
+    status = state(domain, story)
+    assert any(b["id"] == "structured_promises" for b in status["deterministic_blockers"])
+    with pytest.raises(DomainError, match="确定性问题"):
+        confirm_finalization(domain, story["branch_id"], request(domain, story))
+    save_record(
+        domain,
+        story["branch_id"],
+        SaveRecord(
+            base_story_revision=result["story_revision"],
+            base_revision=0,
+            record={
+                **promise["payload"],
+                "stages": [{"status": "retained", "note": "本卷线索保留到下一卷，作者已在交付说明明确。"}],
+            },
+        ),
+        promise["id"],
+    )
+    assert state(domain, story)["structured_promises"]["closed"]
+    confirm_finalization(domain, story["branch_id"], request(domain, story))
+    assert state(domain, story)["author_finalized"]
+    domain.save(chapter["id"], 1, TEXT + "原文后续改动。")
+    current = state(domain, story)
+    assert not current["author_finalized"]
+    assert any(b["id"] == "structured_promises" for b in current["deterministic_blockers"])
+
+
 def report(domain, story, chapter=None, **finding):
     chapter = chapter or domain.chapter(story["chapter_id"])
     return domain.stage(

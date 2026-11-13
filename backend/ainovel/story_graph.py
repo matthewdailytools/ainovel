@@ -138,21 +138,29 @@ def sources(payload):
 
 
 def graph(domain, branch_id):
-    branch = domain.branch(branch_id)
+    with domain.db.connect() as conn:
+        conn.execute("BEGIN")
+        return graph_snapshot(conn, branch_id)
+
+
+def graph_snapshot(conn, branch_id):
+    branch = conn.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
+    if not branch:
+        raise DomainError("not_found", "工作版本不存在。", 404)
     rows = [
         decode(r)
-        for r in domain.db.all(
+        for r in conn.execute(
             "SELECT * FROM story_records WHERE branch_id=? ORDER BY created,id", (branch_id,)
         )
     ]
     chapters = {
-        c["id"]: c
-        for c in domain.db.all(
+        c["id"]: dict(c)
+        for c in conn.execute(
             "SELECT id,revision,archived,position,title,stale FROM chapters WHERE branch_id=?", (branch_id,)
         )
     }
     indexed = {r["id"]: r for r in rows}
-    dependencies = domain.db.all(
+    dependencies = conn.execute(
         "SELECT d.* FROM story_record_dependencies d JOIN story_records r ON r.id=d.record_id WHERE r.branch_id=?",
         (branch_id,),
     )
@@ -466,7 +474,11 @@ def query_context(
 
 
 def completion_promises(domain, branch_id):
-    rows = [r for r in graph(domain, branch_id)["records"] if r["kind"] == "promise" and not r["archived"]]
+    return promise_status(graph(domain, branch_id))
+
+
+def promise_status(snapshot):
+    rows = [r for r in snapshot["records"] if r["kind"] == "promise" and not r["archived"]]
     unresolved = [
         r
         for r in rows
