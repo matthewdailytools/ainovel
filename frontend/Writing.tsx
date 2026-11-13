@@ -131,6 +131,8 @@ export function Writing({
     [],
   )
   const [showHistory, setShowHistory] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const historyRequest = useRef(0)
   const [rename, setRename] = useState('')
   const current = useRef<Chapter | undefined>(undefined)
   const draftText = useRef('')
@@ -147,6 +149,8 @@ export function Writing({
   async function loadChapter(id: string, at = 0, authoritative = false) {
     if (current.current && current.current.id !== id && !confirmLeave()) return
     const token = ++loadSequence.current
+    ++historyRequest.current
+    setHistoryLoading(false)
     setOpening(true)
     try {
       const row = await api<Chapter>(`/chapters/${id}`)
@@ -346,6 +350,35 @@ export function Writing({
       notify(e)
     } finally {
       setBusy(false)
+    }
+  }
+  async function toggleHistory() {
+    if (busy || opening || historyLoading || !current.current) return
+    const chapterId = current.current.id
+    const sequence = loadSequence.current
+    const request = ++historyRequest.current
+    setHistoryLoading(true)
+    const saved: { chapter?: Chapter } = {}
+    try {
+      await doAction(async () => {
+        saved.chapter = await save()
+      })
+      const row = saved.chapter
+      const matchesTarget = () =>
+        alive.current &&
+        historyRequest.current === request &&
+        loadSequence.current === sequence &&
+        current.current?.id === chapterId &&
+        current.current.revision === row?.revision
+      if (!row || !matchesTarget()) return
+      const versions = await api<typeof history>(`/chapters/${chapterId}/history`)
+      if (!matchesTarget()) return
+      setHistory(versions)
+      setShowHistory((shown) => !shown)
+    } catch (error) {
+      if (alive.current && historyRequest.current === request) notify(error)
+    } finally {
+      if (alive.current && historyRequest.current === request) setHistoryLoading(false)
     }
   }
   async function createChapter() {
@@ -676,18 +709,13 @@ export function Writing({
             保存
           </button>
           <button
-            onClick={() =>
-              void doAction(async () => {
-                if (!chapter) return
-                await save()
-                setHistory(await api(`/chapters/${chapter.id}/history`))
-                setShowHistory(!showHistory)
-              })
-            }
-            disabled={!chapter}
+            onClick={() => void toggleHistory()}
+            disabled={!chapter || busy || opening || historyLoading}
+            aria-busy={historyLoading}
           >
             版本历史
           </button>
+          {historyLoading && <span role="status">正在读取当前章版本历史…</span>}
         </div>
         {chapter ? (
           <>
