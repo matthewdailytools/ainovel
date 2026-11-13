@@ -1136,6 +1136,7 @@ function Candidate({
           className="primary"
           disabled={
             artifact.kind.startsWith('reference_') ||
+            artifact.kind === 'story_extraction' ||
             (artifact.kind === 'intent' && !!artifact.payload.author_text) ||
             busy ||
             candidateChanged ||

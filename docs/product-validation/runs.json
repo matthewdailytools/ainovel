@@ -53,5 +53,16 @@
     "result": "passed",
     "record": "2026-11-13-manuscript-import.md",
     "fix_of": ""
+  },
+  {
+    "id": "story-extraction-001",
+    "date": "2026-11-13",
+    "commit": "5730bd1+working-tree",
+    "module": "反向结构整理",
+    "scenario": "原文提取、依赖提示、作者确认、回滚与日常只读",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-story-extraction.md",
+    "fix_of": ""
   }
 ]

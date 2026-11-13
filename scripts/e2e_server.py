@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -15,7 +16,19 @@ from ainovel.settings import Provider, Settings
 from ainovel.worker import Worker
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend/tests"))
-from test_reference_flow import Model  # noqa: E402
+from test_reference_flow import Model as ReferenceModel  # noqa: E402
+from test_story_extraction import ExtractionModel  # noqa: E402
+
+
+class Model(ReferenceModel):
+    async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+        value = json.loads(prompt.split("\n只返回")[0])
+        instruction = value["任务"]
+        while "原始任务" in instruction:
+            instruction = instruction["原始任务"]
+        if instruction.get("动作") == "按保存稿反向整理长篇结构候选":
+            return await ExtractionModel().generate(account, task_id, system, prompt, max_output, **kwargs)
+        return await super().generate(account, task_id, system, prompt, max_output, **kwargs)
 
 
 def main():

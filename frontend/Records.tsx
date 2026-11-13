@@ -134,7 +134,14 @@ export function Records({
         onSaved={refresh}
       />
       <GenreSettings key={branch.id} branchId={branch.id} notify={notify} onSaved={refresh} />
-      <StoryGraph key={'story-' + branch.id} branchId={branch.id} notify={notify} onSaved={refresh} />
+      <StoryGraph
+        key={'story-' + branch.id}
+        branchId={branch.id}
+        notify={notify}
+        onSaved={refresh}
+        account={account}
+        modelReady={modelReady}
+      />
       <div className="records-grid">
         <section className="card">
           <h2>故事状态与影响</h2>

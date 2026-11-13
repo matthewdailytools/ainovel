@@ -374,6 +374,8 @@ def create_app(settings=None, schema_only=False):
     from .manuscript_import import register_routes as register_import_routes
 
     register_import_routes(app, domain)
+    from .story_extraction import register_routes as register_extraction_routes
+
 
     @app.get("/api/modules")
     def module_specs():
@@ -1069,6 +1071,7 @@ def create_app(settings=None, schema_only=False):
         return verify_backup(settings.data_dir / "backups" / (backup_id + ".zip"))
 
     register_reference_routes(app, domain, provider_ready)
+    register_extraction_routes(app, domain, provider_ready)
 
     dist = ROOT / "dist"
     if dist.is_dir():

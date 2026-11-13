@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, type Chapter } from './api'
 import type { components } from './api-schema'
 import type { Notify } from './App'
+import { StoryExtraction } from './StoryExtraction'
 
 type Schemas = components['schemas']
 type Payload =
@@ -76,10 +77,14 @@ export function StoryGraph({
   branchId,
   notify,
   onSaved,
+  account,
+  modelReady,
 }: {
   branchId: string
   notify: Notify
   onSaved: () => Promise<void>
+  account: string
+  modelReady: boolean
 }) {
   const [graph, setGraph] = useState<Graph>()
   const [draft, setDraft] = useState<Payload>(fresh('character'))
@@ -271,6 +276,21 @@ export function StoryGraph({
   return (
     <section className="card" aria-label="长篇人物时点与多线工作台">
       <h2>长篇人物、时点与多线</h2>
+      <StoryExtraction
+        branchId={branchId}
+        storyRevision={graph.story_revision}
+        chapters={graph.chapters}
+        recordNames={Object.fromEntries(graph.records.map((r) => [r.id, r.payload.title]))}
+        account={account}
+        modelReady={modelReady}
+        notify={notify}
+        onAdopted={async () => {
+          const next = await api<Graph>(`/branches/${branchId}/story-graph`)
+          setGraph(next)
+          if (!dirty) setBase(next.story_revision)
+          await onSaved()
+        }}
+      />
       <p>{graph.coverage}</p>
       <p role="status">{message}</p>
       <button

@@ -32,7 +32,7 @@ SYSTEM = """你是中文原创小说工作台的执行模块。区分作者指�
 作者契约中的author_text是作者原话，provenance区分作者确认与AI提案。情绪目标和核心钩子是体验方向，不自行升级成硬性剧情。
 作者已确认的固定结果、禁止项和终局不得被预设或本次模糊指令覆盖。本次明确指令若与作品锁定冲突，应指出冲突并等待作者明确改约，不静默替换锁定。全书结果和终局在全书检查核对，单章只核对禁止项及当前时点明确应发生的结果。
 """
-PROMPT_VERSION = "0.5.0"
+PROMPT_VERSION = "0.6.0"
 
 
 def parse_json(text):
@@ -498,7 +498,11 @@ class Worker:
             "表达预设": request["writing_profile"],
         }
         kind = "advice"
-        if action.startswith("reference."):
+        if action == "story.extract":
+            from .story_extraction import run_extraction
+
+            kind, payload = await run_extraction(self, request, context)
+        elif action.startswith("reference."):
             from .reference import run_reference
 
             kind, payload = await run_reference(self, request, context)

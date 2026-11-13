@@ -45,6 +45,7 @@ class ModuleInput(Input):
         "writing.expand_plot",
         "review.chapter",
         "memory.extract",
+        "story.extract",
         "outline.plan",
         "character.generate",
         "world.generate",
@@ -79,6 +80,7 @@ class ModuleInput(Input):
 
     reference_session_id: str | None = None
     reference_revision: int | None = Field(default=None, ge=0)
+    story_chapter_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
 class CandidateEdit(Input):

@@ -1,0 +1,345 @@
+import { useEffect, useRef, useState } from 'react'
+import { api, label, type Artifact, type Chapter } from './api'
+import type { components } from './api-schema'
+import type { Notify } from './App'
+
+type Schemas = components['schemas']
+type RecordPayload =
+  Schemas['Character'] | Schemas['Event'] | Schemas['State'] | Schemas['Promise'] | Schemas['Relationship']
+type Proposal = { id: string; local_id: string; record: RecordPayload; reasoning: string }
+type ExtractionPayload = {
+  records: Proposal[]
+  unknowns: string[]
+  coverage: string
+  source_story_revision: number
+  source_manifest: { id: string; title: string; revision: number }[]
+}
+type ExtractionArtifact = Artifact & { payload: Artifact['payload'] & ExtractionPayload }
+type History = {
+  tasks: { id: string; status: string; error: string; created: number }[]
+  artifacts: { id: string; status: string; created: number }[]
+}
+const kinds = { character: '人物', event: '事件', state: '时点状态', promise: '伏笔', relationship: '关系' }
+
+export function StoryExtraction({
+  branchId,
+  storyRevision,
+  chapters,
+  account,
+  modelReady,
+  notify,
+  onAdopted,
+  recordNames,
+}: {
+  branchId: string
+  storyRevision: number
+  chapters: Chapter[]
+  account: string
+  modelReady: boolean
+  notify: Notify
+  onAdopted: () => Promise<void>
+  recordNames: Record<string, string>
+}) {
+  const [chosenChapters, setChosenChapters] = useState<string[]>([])
+  const [history, setHistory] = useState<History>({ tasks: [], artifacts: [] })
+  const [artifactId, setArtifactId] = useState('')
+  const [artifact, setArtifact] = useState<ExtractionArtifact>()
+  const [selected, setSelected] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const pending = useRef<{ signature: string; key: string } | null>(null)
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    let active = true
+    const load = async () => {
+      try {
+        const h = await api<History>(`/branches/${branchId}/story-extractions`)
+        if (active) {
+          setHistory(h)
+          setArtifactId((id) => id || h.artifacts[0]?.id || '')
+        }
+      } catch (e) {
+        if (active) notify(e)
+      }
+    }
+    void load()
+    const timer = setInterval(() => void load(), 2000)
+    return () => {
+      active = false
+      alive.current = false
+      clearInterval(timer)
+    }
+  }, [branchId, notify])
+  useEffect(() => {
+    let active = true
+    setArtifact(undefined)
+    setSelected([])
+    if (artifactId)
+      void api<ExtractionArtifact>(`/artifacts/${artifactId}`)
+        .then((a) => {
+          if (active) setArtifact(a)
+        })
+        .catch(notify)
+    return () => {
+      active = false
+    }
+  }, [artifactId, notify])
+  async function perform(fn: () => Promise<void>) {
+    if (busy) return
+    setBusy(true)
+    try {
+      await fn()
+    } catch (e) {
+      notify(e)
+      if (alive.current) setMessage(e instanceof Error ? e.message : '操作失败，选择保留。')
+    } finally {
+      if (alive.current) setBusy(false)
+    }
+  }
+  const running = history.tasks.filter((t) => ['queued', 'running'].includes(t.status))
+  const stale = artifact && artifact.payload.source_story_revision !== storyRevision
+  const nameFor = (id: string | null | undefined) =>
+    id
+      ? artifact?.payload.records.find((r) => r.id === id)?.record.title || recordNames[id] || id
+      : '未知／未指定'
+  const translated: Record<string, string> = {
+    actual: '实际',
+    planned: '计划',
+    unknown: '未知',
+    conflict: '冲突',
+    character: '人物掌握',
+    author: '作者掌握',
+    reader: '读者已知',
+    knowledge: '认知',
+    capability: '能力',
+    resource: '资源',
+    injury: '伤势',
+    other: '其他',
+    planted: '埋设',
+    reinforced: '强化',
+    resolved: '回收',
+    retained: '保留',
+    abandoned: '放弃',
+  }
+  return (
+    <details>
+      <summary>按保存稿整理人物、事件、状态和伏笔候选</summary>
+      <section aria-label="结构化整理与确认">
+        <p>
+          只发送本批所选保存稿及当前记录索引；模型推导保留为候选。请选择原文范围，完成后逐项核对来源与未知，再明确采用。单批最多20章、5万字符，超过时分批整理。
+        </p>
+        <p role="status">{message}</p>
+        <fieldset>
+          <legend>本次整理的保存稿</legend>
+          {chapters.map((c) => (
+            <label className="check" key={c.id}>
+              <input
+                type="checkbox"
+                disabled={busy}
+                checked={chosenChapters.includes(c.id)}
+                onChange={(e) =>
+                  setChosenChapters((old) =>
+                    e.target.checked ? [...old, c.id] : old.filter((id) => id !== c.id),
+                  )
+                }
+              />
+              {c.position} · {c.title}
+              {c.stale ? '（待复检）' : ''}
+            </label>
+          ))}
+        </fieldset>
+        <button
+          disabled={
+            busy || !modelReady || !chosenChapters.length || chosenChapters.length > 20 || running.length > 0
+          }
+          onClick={() =>
+            void perform(async () => {
+              const body = { base_story_revision: storyRevision, chapter_ids: chosenChapters, account }
+              const signature = JSON.stringify(body)
+              if (pending.current?.signature !== signature)
+                pending.current = { signature, key: crypto.randomUUID() }
+              await api(`/branches/${branchId}/story-extractions`, 'POST', {
+                ...body,
+                client_request_id: pending.current.key,
+              })
+              pending.current = null
+              setHistory(await api(`/branches/${branchId}/story-extractions`))
+              setMessage('整理任务已提交，正文和正式故事记录尚未改变。')
+            })
+          }
+        >
+          从所选保存稿生成结构候选
+        </button>
+        {!modelReady && <p>未配置可用模型时仍可手工维护长篇记录。</p>}
+        {running.map((t) => (
+          <div className="notice" key={t.id}>
+            <p>{label(t.status)} · 关闭页面不取消任务，重新打开可查看。</p>
+            <button
+              disabled={busy}
+              onClick={() =>
+                void perform(async () => {
+                  await api(`/tasks/${t.id}/cancel`, 'POST')
+                  setHistory(await api(`/branches/${branchId}/story-extractions`))
+                })
+              }
+            >
+              取消本次结构整理
+            </button>
+          </div>
+        ))}
+        <label>
+          保存的结构候选
+          <select value={artifactId} onChange={(e) => setArtifactId(e.target.value)}>
+            <option value="">请选择</option>
+            {history.artifacts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {new Date(a.created * 1000).toLocaleString()} · {label(a.status)} · {a.id.slice(0, 8)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {artifact && (
+          <>
+            <p>
+              {artifact.payload.coverage} · {label(artifact.status)}
+            </p>
+            <p>
+              来源故事修订{artifact.payload.source_story_revision}；当前{storyRevision}。
+              {stale ? '源稿或故事已变更，不能直接采用旧候选。' : ''}
+            </p>
+            <details>
+              <summary>来源章节与修订</summary>
+              {artifact.payload.source_manifest.map((c) => (
+                <p key={c.id}>
+                  {c.title} · 修订{c.revision}
+                </p>
+              ))}
+            </details>
+            {artifact.payload.records.map((p) => (
+              <article className="fact" key={p.id}>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    disabled={artifact.status !== 'candidate' || !!stale}
+                    checked={selected.includes(p.id)}
+                    onChange={(e) =>
+                      setSelected((old) =>
+                        e.target.checked ? [...old, p.id] : old.filter((id) => id !== p.id),
+                      )
+                    }
+                  />
+                  采用{kinds[p.record.kind]}：{p.record.title}
+                </label>
+                <p>模型推导：{p.reasoning}</p>
+                <details>
+                  <summary>核对具体内容、关联和原文</summary>
+                  <p>{p.record.notes}</p>
+                  {p.record.kind === 'character' && (
+                    <p>
+                      别名：{p.record.aliases?.join('、')}；档案：{p.record.profile}
+                    </p>
+                  )}
+                  {p.record.kind === 'event' && (
+                    <p>
+                      故事序：{p.record.story_order ?? '未知'}；时间：{p.record.story_time}；性质：
+                      {translated[p.record.status || 'unknown']}；人物：
+                      {p.record.participants?.map(nameFor).join('、')}
+                    </p>
+                  )}
+                  {p.record.kind === 'state' && (
+                    <p>
+                      人物：{nameFor(p.record.character_id)}；变化事件：{nameFor(p.record.event_id)}； 事项：
+                      {p.record.key}；值：{p.record.value}；类别：{translated[p.record.category]}；信息视角：
+                      {translated[p.record.audience]}；性质：{translated[p.record.truth || 'unknown']}
+                      ；失效事件：{nameFor(p.record.until_event_id)}
+                    </p>
+                  )}
+                  {p.record.kind === 'relationship' && (
+                    <p>
+                      {nameFor(p.record.from_id)} → {nameFor(p.record.to_id)}：{p.record.relation}；
+                      {translated[p.record.truth || 'unknown']}；形成事件：{nameFor(p.record.event_id)}
+                    </p>
+                  )}
+                  {p.record.kind === 'promise' &&
+                    p.record.stages.map((s, i) => (
+                      <div key={i}>
+                        <p>
+                          阶段：{translated[s.status]}；事件：{nameFor(s.event_id)}；{s.note}
+                        </p>
+                        {s.sources?.map((source, j) => (
+                          <blockquote key={j}>{source.quote}</blockquote>
+                        ))}
+                      </div>
+                    ))}
+                  {p.record.sources?.map((source, i) => (
+                    <div key={i}>
+                      <blockquote>{source.quote}</blockquote>
+                      <small>
+                        修订{source.revision} · 位置{source.start}—{source.end}
+                      </small>
+                    </div>
+                  ))}
+                </details>
+              </article>
+            ))}
+            <details>
+              <summary>未知与未覆盖问题</summary>
+              {artifact.payload.unknowns.map((u, i) => (
+                <p key={i}>{u}</p>
+              ))}
+            </details>
+            <button
+              className="primary"
+              disabled={busy || !!stale || artifact.status !== 'candidate' || !selected.length}
+              onClick={() =>
+                void perform(async () => {
+                  const body = {
+                    base_story_revision: storyRevision,
+                    candidate_revision: artifact.candidate_revision,
+                    selected_ids: selected,
+                  }
+                  const signature = JSON.stringify({ artifactId, ...body })
+                  if (pending.current?.signature !== signature)
+                    pending.current = { signature, key: crypto.randomUUID() }
+                  await api(`/branches/${branchId}/story-extractions/${artifact.id}/adopt`, 'POST', {
+                    ...body,
+                    idempotency_key: pending.current.key,
+                  })
+                  pending.current = null
+                  setArtifact({ ...artifact, status: 'accepted' })
+                  setMessage('所选结构已采用，未选项保留在原产物，正文未改变。')
+                  await onAdopted()
+                })
+              }
+            >
+              确认采用所选结构（不修改正文）
+            </button>
+            <button
+              disabled={busy || artifact.status !== 'candidate'}
+              onClick={() =>
+                void perform(async () => {
+                  await api(`/artifacts/${artifact.id}/reject`, 'POST', {
+                    candidate_revision: artifact.candidate_revision,
+                  })
+                  setArtifact({ ...artifact, status: 'rejected' })
+                  setMessage('已拒绝整批候选，正式记录和原稿保持。')
+                })
+              }
+            >
+              拒绝整批结构候选
+            </button>
+          </>
+        )}
+        <details>
+          <summary>阶段任务历史</summary>
+          {history.tasks.map((t) => (
+            <p key={t.id}>
+              {label(t.status)} · {t.error || t.id}
+            </p>
+          ))}
+        </details>
+      </section>
+    </details>
+  )
+}

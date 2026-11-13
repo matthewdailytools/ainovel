@@ -1254,6 +1254,41 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/story-extractions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** History */
+    get: operations['history_api_branches__branch_id__story_extractions_get']
+    put?: never
+    /** Start */
+    post: operations['start_api_branches__branch_id__story_extractions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/story-extractions/{artifact_id}/adopt': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Confirm */
+    post: operations['confirm_api_branches__branch_id__story_extractions__artifact_id__adopt_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1267,6 +1302,17 @@ export interface components {
        * @default 0
        */
       candidate_revision: number
+    }
+    /** AdoptExtraction */
+    AdoptExtraction: {
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Candidate Revision */
+      candidate_revision: number
+      /** Selected Ids */
+      selected_ids: string[]
+      /** Idempotency Key */
+      idempotency_key: string
     }
     /** ArchiveInput */
     ArchiveInput: {
@@ -1727,6 +1773,7 @@ export interface components {
         | 'writing.expand_plot'
         | 'review.chapter'
         | 'memory.extract'
+        | 'story.extract'
         | 'outline.plan'
         | 'character.generate'
         | 'world.generate'
@@ -1781,6 +1828,8 @@ export interface components {
       reference_session_id?: string | null
       /** Reference Revision */
       reference_revision?: number | null
+      /** Story Chapter Ids */
+      story_chapter_ids?: string[]
     }
     /** MoveInput */
     MoveInput: {
@@ -2055,6 +2104,19 @@ export interface components {
       end: number
       /** Quote */
       quote: string
+    }
+    /** StartExtraction */
+    StartExtraction: {
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Chapter Ids */
+      chapter_ids: string[]
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
     }
     /** State */
     State: {
@@ -4908,6 +4970,108 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['ReferenceFeedback']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  history_api_branches__branch_id__story_extractions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  start_api_branches__branch_id__story_extractions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StartExtraction']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_api_branches__branch_id__story_extractions__artifact_id__adopt_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        artifact_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AdoptExtraction']
       }
     }
     responses: {

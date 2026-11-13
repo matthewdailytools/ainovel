@@ -20,6 +20,7 @@ MODULES = {
         ModuleSpec("writing.expand_plot", "按情节补写整章", "chapter_draft", True),
         ModuleSpec("review.chapter", "本章审稿", "review", True),
         ModuleSpec("memory.extract", "提取故事事实", "memory", True),
+        ModuleSpec("story.extract", "按正文整理长篇结构候选", "story_extraction"),
         ModuleSpec("ideation.explore", "创意与定位", "intent"),
         ModuleSpec("intent.compile", "整理作者情绪、钩子与方向", "intent"),
         ModuleSpec("revision.targeted", "按审稿问题定向修订", "chapter_draft", True),

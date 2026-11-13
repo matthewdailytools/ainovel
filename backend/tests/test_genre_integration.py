@@ -227,7 +227,7 @@ def test_changed_catalog_basis_stops_before_queuing(client, domain, story):
     [
         value
         for value in ModuleInput.model_fields["action"].annotation.__args__
-        if value not in {"intent.compile", "revision.targeted"}
+        if value not in {"intent.compile", "revision.targeted", "story.extract"}
         and not value.startswith("reference.")  # Dedicated source-aware tests cover these.
     ],
 )

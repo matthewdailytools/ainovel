@@ -22,7 +22,9 @@ def same_task_payload(left, right):
         return {
             k: v
             for k, v in value.items()
-            if not ((k in optional and v is None) or (k == "finding_indices" and v == []))
+            if not (
+                (k in optional and v is None) or (k in {"finding_indices", "story_chapter_ids"} and v == [])
+            )
         }
 
     return normalized(left) == normalized(right)
@@ -283,6 +285,10 @@ class Domain:
             if attempt:
                 self.db.check_attempt(db, artifact["task_id"], attempt)
             payload = artifact["payload"]
+            if artifact["kind"] == "story_extraction":
+                raise DomainError(
+                    "story_confirmation_required", "请到长篇工作台逐项选择结构候选后确认，不能通用采纳。", 409
+                )
             if candidate_revision is not None and candidate_revision != payload.get("_candidate_revision", 0):
                 raise DomainError("candidate_conflict", "候选已有新修订，请重新比较后采纳；正文未改动。", 409)
             if "story_revision" in artifact["basis"]:
@@ -548,6 +554,10 @@ class Domain:
         profile = self.genre_profile(branch_id)
         contract = self.author_contract(branch_id)
         initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
+        if kind == "module" and payload.get("action") == "story.extract":
+            from .story_extraction import freeze_sources
+
+            initial["story_extraction_snapshot"] = freeze_sources(self, payload)
         if kind == "module" and payload.get("action") == "revision.targeted":
             from .targeted_revision import validate_targeted_revision
 
@@ -592,6 +602,9 @@ class Domain:
                 self.check_author_contract_basis(contract, payload.get("author_contract_basis"))
             if revision != profile["source_story_revision"] or revision != contract["source_story_revision"]:
                 raise DomainError("story_changed", "创作配置在提交时改变，请刷新后重试。", 409)
+            if selection := initial.get("story_extraction_snapshot"):
+                if selection["story_revision"] != revision:
+                    raise DomainError("story_changed", "整理范围在排队时改变，请重新选择。", 409)
             if selection := initial.get("targeted_revision_snapshot"):
                 self.check_targeted_source_tx(db, selection)
                 if selection["story_revision"] != revision:

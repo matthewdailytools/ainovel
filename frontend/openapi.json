@@ -2290,6 +2290,96 @@
           }
         }
       }
+    },
+    "/api/branches/{branch_id}/story-extractions": {
+      "get": {
+        "summary": "History",
+        "operationId": "history_api_branches__branch_id__story_extractions_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Start",
+        "operationId": "start_api_branches__branch_id__story_extractions_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StartExtraction" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/story-extractions/{artifact_id}/adopt": {
+      "post": {
+        "summary": "Confirm",
+        "operationId": "confirm_api_branches__branch_id__story_extractions__artifact_id__adopt_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdoptExtraction" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2313,6 +2403,29 @@
         "type": "object",
         "required": ["idempotency_key"],
         "title": "AcceptInput"
+      },
+      "AdoptExtraction": {
+        "properties": {
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "candidate_revision": { "type": "integer", "minimum": 0, "title": "Candidate Revision" },
+          "selected_ids": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 60,
+            "minItems": 1,
+            "title": "Selected Ids"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_story_revision", "candidate_revision", "selected_ids", "idempotency_key"],
+        "title": "AdoptExtraction"
       },
       "ArchiveInput": {
         "properties": {
@@ -2876,6 +2989,7 @@
               "writing.expand_plot",
               "review.chapter",
               "memory.extract",
+              "story.extract",
               "outline.plan",
               "character.generate",
               "world.generate",
@@ -2954,6 +3068,12 @@
           "reference_revision": {
             "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
             "title": "Reference Revision"
+          },
+          "story_chapter_ids": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Story Chapter Ids"
           }
         },
         "additionalProperties": false,
@@ -3247,6 +3367,33 @@
         "type": "object",
         "required": ["chapter_id", "revision", "start", "end", "quote"],
         "title": "Source"
+      },
+      "StartExtraction": {
+        "properties": {
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "chapter_ids": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Chapter Ids"
+          },
+          "account": { "type": "string", "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_story_revision", "chapter_ids", "account", "client_request_id"],
+        "title": "StartExtraction"
       },
       "State": {
         "properties": {
