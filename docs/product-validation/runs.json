@@ -1131,5 +1131,115 @@
     "result": "failed",
     "record": "2026-11-13-shared-plot-live.md",
     "fix_of": ""
+  },
+  {
+    "id": "plot-ci-first-001",
+    "date": "2026-11-13",
+    "commit": "187b893",
+    "module": "远端切章用例首败",
+    "scenario": "CI30过1败；未等待新章挂载，无当次trace附件；原失败日志保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-recipient-scope-guard.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-ci-fixed-001",
+    "date": "2026-11-13",
+    "commit": "fe7f3d4",
+    "module": "远端切章等待与证据",
+    "scenario": "保留取消/保存/隔离断言；CI43447558069成功，后续失败上传合成测试附件",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-recipient-scope-guard.md",
+    "fix_of": "plot-ci-first-001"
+  },
+  {
+    "id": "plot-recipient-v2-stability-001",
+    "date": "2026-11-13",
+    "commit": "4fcbadf",
+    "module": "限定接收者新旧契约",
+    "scenario": "718后端/97前端/32全项目无头及CI43448848958通过；旧schema/缓存/nonce不升级",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-recipient-scope-guard.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-recipient-v2-live-001",
+    "date": "2026-11-13",
+    "commit": "4fcbadf",
+    "module": "DeepSeek三次同稿复检",
+    "scenario": "unverified/model_pass/unverified，14calls/CNY0.252722；没有真实命中新范围guard，边界待作者确认",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-13-plot-model-comparison.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-openai-live-001",
+    "date": "2026-11-13",
+    "commit": "4fcbadf",
+    "module": "OpenAI三次同稿对照",
+    "scenario": "三次原比较P03fail，12calls/USD0.281202；无改稿/默认模型切换，不作盲测准确率",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-13-plot-model-comparison.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-summary-first-001",
+    "date": "2026-11-13",
+    "commit": "4fcbadf",
+    "module": "最终结论与原摘要矛盾",
+    "scenario": "真实报告逐项unknown但模型摘要称全过；歧义也须保持未验证，原报告保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-plot-final-summary.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-summary-fixed-001",
+    "date": "2026-11-13",
+    "commit": "c61cf5d",
+    "module": "最终摘要及原模型历史",
+    "scenario": "按最终结果/歧义计数；原check/摘要保留，明确反向fail优先，12个V1整报告SHA不变",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-plot-final-summary.md",
+    "fix_of": "plot-summary-first-001"
+  },
+  {
+    "id": "plot-summary-full-001",
+    "date": "2026-11-13",
+    "commit": "c61cf5d",
+    "module": "全项目摘要修复回归",
+    "scenario": "742后端215.472秒/32无头150.853秒全过；源码清单不变，前端沿用4fc97项及构建",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-plot-final-summary.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-summary-rollout-001",
+    "date": "2026-11-13",
+    "commit": "c61cf5d",
+    "module": "本机一致性更新",
+    "scenario": "无活动任务，备份实际隔离恢复ok，六保护表及全部费用哈希相等；单Worker/同UI产物",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-plot-final-summary.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-live-readonly-001",
+    "date": "2026-11-13",
+    "commit": "c61cf5d",
+    "module": "真实报告后台只读展示",
+    "scenario": "显式选择V1/V2已完成报告，含320px和200%文字及焦点；更新后1过，正文/报告/任务不变",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-plot-final-summary.md",
+    "fix_of": ""
   }
 ]

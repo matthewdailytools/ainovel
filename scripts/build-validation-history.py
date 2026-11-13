@@ -46,14 +46,15 @@ def render(records):
 <title>ainovel 全项目验证历史</title><style>
 body{font:16px/1.7 system-ui;background:#f6f7f4;color:#233a33;margin:24px}main{max-width:1400px;margin:auto}
 input,select{font:inherit;padding:8px;border:1px solid #73867a;border-radius:6px}label{display:inline-block;margin:8px}
-.scroll{overflow:auto}table{border-collapse:collapse;width:100%;background:#fffefa}td,th{border:1px solid #c8d1c9;padding:10px;text-align:left;overflow-wrap:anywhere}
-td:nth-child(2),td:nth-child(3),td:nth-child(6),td:nth-child(7),td:nth-child(8),th{white-space:nowrap;overflow-wrap:normal}
+.scroll{overflow:auto}table{border-collapse:collapse;width:100%;min-width:1200px;background:#fffefa}td,th{border:1px solid #c8d1c9;padding:10px;text-align:left;overflow-wrap:anywhere}
+td:first-child,td:nth-child(2),td:nth-child(3),td:nth-child(6),td:nth-child(7),td:nth-child(8),th{white-space:nowrap;overflow-wrap:normal}
+td:nth-child(5){min-width:20rem}
 a{color:#245e4d}:focus-visible{outline:3px solid #a25b16;outline-offset:3px}p{max-width:80ch}
 </style><main><h1>ainovel 全项目验证历史</h1><p>覆盖整个产品。稳定性与产出质量分别记录；真实稿件及诊断证据保存在仓库外。</p>
 <label>搜索日期、模块、场景、版本或关联记录 <input id="query" type="search"></label>
 <label>验证阶段 <select id="phase"><option value="">全部</option><option value="stability">功能稳定性</option><option value="quality">产出质量</option></select></label>
 <label>结果 <select id="result"><option value="">全部</option><option>通过</option><option>失败</option><option>未执行</option><option>受阻</option><option>未验证</option></select></label>
-<p id="status" role="status"></p><div class="scroll"><table><thead><tr><th>ID</th><th>日期</th><th>源码版本</th><th>模块</th><th>场景</th><th>阶段</th><th>结果</th><th>详情</th><th>修复关联ID</th></tr></thead><tbody>"""
+<p id="status" role="status"></p><div class="scroll" role="region" aria-label="验证历史表，可左右滚动查看" tabindex="0"><table><thead><tr><th>ID</th><th>日期</th><th>源码版本</th><th>模块</th><th>场景</th><th>阶段</th><th>结果</th><th>详情</th><th>修复关联ID</th></tr></thead><tbody>"""
         + body
         + """</tbody></table></div><p><a href="README.md">记录说明</a> · <a href="需求与场景矩阵.md">全项目场景矩阵</a></p></main><script>
 const query=document.querySelector('#query'),phase=document.querySelector('#phase'),result=document.querySelector('#result');
