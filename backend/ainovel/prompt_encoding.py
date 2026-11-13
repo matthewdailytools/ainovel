@@ -5,6 +5,8 @@ import hashlib
 
 from .db import DomainError, dumps
 
+BODY_FIELDS = ("正文", "候选正文", "本次候选", "原稿")
+
 
 def encode_prompt(instruction, context):
     frame = {"任务": instruction, "上下文": context}
@@ -18,7 +20,7 @@ def encode_prompt(instruction, context):
     content = chapter["content"]
     if not content:
         return frame
-    key = next((key for key in ("正文", "候选正文", "本次候选") if instruction.get(key) == content), None)
+    key = next((key for key in BODY_FIELDS if instruction.get(key) == content), None)
     if key is None:
         return frame
     encoded = deepcopy(frame)
@@ -45,7 +47,7 @@ def expand_prompt(frame):
         return result
     reference = chapter["content_ref"]
     path = reference.get("path")
-    if path not in (["任务", "正文"], ["任务", "候选正文"], ["任务", "本次候选"]):
+    if path not in (["任务", key] for key in BODY_FIELDS):
         raise DomainError("prompt_reference", "正文引用路径无效，未发送。")
     text = result.get("任务", {}).get(path[1])
     if (

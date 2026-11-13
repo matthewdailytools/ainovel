@@ -6,7 +6,7 @@ from ainovel.db import DomainError, dumps
 from ainovel.prompt_encoding import encode_prompt, expand_prompt
 
 
-@pytest.mark.parametrize("key", ["正文", "候选正文", "本次候选"])
+@pytest.mark.parametrize("key", ["正文", "候选正文", "本次候选", "原稿"])
 def test_large_target_prose_has_one_canonical_body_and_roundtrips_exactly(key):
     text = "她查阅记录。😀𠮷\n" * 2000
     instruction = {key: text, "可引用原文": [{"source_id": "P1", "text": text[:100]}]}
