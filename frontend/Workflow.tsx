@@ -8,9 +8,11 @@ import {
   type Novel,
   type Task,
   type WorkflowInput,
+  type GenreProfile,
 } from './api'
 import type { Notify } from './App'
 import story from '../fixtures/original-story.json'
+import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 
 export function WorkflowPage({
   novel,
@@ -20,6 +22,7 @@ export function WorkflowPage({
   modelReady,
   notify,
   onStarted,
+  onGenreSettings,
 }: {
   novel: Novel
   accounts: Account[]
@@ -28,6 +31,7 @@ export function WorkflowPage({
   modelReady: boolean
   notify: Notify
   onStarted: (id: string) => Promise<void>
+  onGenreSettings: () => void
 }) {
   const [mode, setMode] = useState<'assisted' | 'automatic'>('assisted')
   const [brief, setBrief] = useState(novel.brief)
@@ -41,6 +45,7 @@ export function WorkflowPage({
     '第三人称限定视角，克制白话，动作有因果，人物选择遵循当时掌握的信息与资源。',
   )
   const [runLimit, setRunLimit] = useState('')
+  const [seenGenre, setSeenGenre] = useState<GenreProfile>()
   const [tasks, setTasks] = useState<Task[]>([])
   const [busy, setBusy] = useState(false)
   const pendingRequest = useRef<{ signature: string; key: string } | null>(null)
@@ -143,6 +148,7 @@ export function WorkflowPage({
   async function start(event: React.FormEvent) {
     event.preventDefault()
     await perform(async () => {
+      if (seenGenre?.branch_id !== branchId) throw new Error('正在读取来源版本的题材配置，请稍后再启动。')
       const parsed =
         mode === 'assisted'
           ? plots
@@ -179,6 +185,10 @@ export function WorkflowPage({
         account,
         adoption,
         writing_profile: profile,
+        genre_profile_basis: {
+          source_artifact_id: seenGenre.source_artifact_id ?? null,
+          catalog_version: seenGenre.catalog_version,
+        },
         budget_limit: runLimit ? Number(runLimit) : null,
       }
       const signature = JSON.stringify(payload)
@@ -218,6 +228,12 @@ export function WorkflowPage({
       <div className="workflow-grid">
         <section className="card">
           <form onSubmit={start}>
+            <GenreProfileNotice
+              branchId={branchId}
+              onSettings={onGenreSettings}
+              scope="新建半自动／全自动批次的规划、写作、审查与修订"
+              onResolved={setSeenGenre}
+            />
             <fieldset>
               <legend>创作分工</legend>
               <label className="radio-card">
@@ -332,8 +348,17 @@ export function WorkflowPage({
               </p>
               <p>自动采纳会写入本次新建版本。模型审查结果需经作者最终审阅；写满章数不会自动通过整书验收。</p>
             </div>
-            <button className="primary wide" disabled={busy || !modelReady}>
-              {busy ? '提交中…' : modelReady ? '创建独立版本并启动' : '请先配置模型账户和单价'}
+            <button
+              className="primary wide"
+              disabled={busy || !modelReady || seenGenre?.branch_id !== branchId}
+            >
+              {busy
+                ? '提交中…'
+                : !modelReady
+                  ? '请先配置模型账户和单价'
+                  : seenGenre?.branch_id !== branchId
+                    ? '正在读取来源题材配置…'
+                    : '创建独立版本并启动'}
             </button>
           </form>
         </section>
@@ -380,6 +405,17 @@ export function WorkflowPage({
                   {task.result.continued_from && (
                     <p className="small muted">已承接上次检查点；原稿、费用历史与修订轮次保留。</p>
                   )}
+                  <details>
+                    <summary>本批次冻结的频道与题材</summary>
+                    {task.result.genre_profile_snapshot &&
+                    !task.result.genre_profile_snapshot.legacy_unconfigured ? (
+                      <GenreProfileDetails profile={task.result.genre_profile_snapshot} />
+                    ) : (
+                      <p className="small muted">
+                        这是未冻结题材装配的历史批次，恢复时沿用原有范围。当前配置不会被自动套入旧稿；新配置用于新建批次。
+                      </p>
+                    )}
+                  </details>
                   {task.result.continued_to && (
                     <button
                       onClick={() =>

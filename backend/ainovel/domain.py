@@ -3,7 +3,17 @@ import json
 from time import time
 
 from .db import DomainError, dumps, uid
+from .genre_catalog import assemble_profile
 from .models import Fact
+
+
+def same_task_payload(left, right):
+    # Added in 0.2: omitted and null both mean an older caller supplied no seen basis.
+    # A supplied basis object (including its explicit null reader ID) remains distinct.
+    def normalized(value):
+        return {k: v for k, v in value.items() if k != "genre_profile_basis" or v is not None}
+
+    return normalized(left) == normalized(right)
 
 
 def utf16_slice(text, start, end):
@@ -308,6 +318,47 @@ class Domain:
                 workflow_result.update(progress)
             return result
 
+    def genre_profile(self, branch_id, definitions=None):
+        branch = self.branch(branch_id)
+        if definitions is None:
+            rows = self.db.all(
+                "SELECT id,kind,payload FROM artifacts WHERE branch_id=? AND kind='reader' "
+                "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",
+                (branch_id,),
+            )
+            definitions = [{**r, "payload": json.loads(r["payload"])} for r in rows]
+        reader = next((row for row in definitions if row["kind"] == "reader"), None)
+        return {
+            **assemble_profile(reader["payload"] if reader else None),
+            "source_artifact_id": reader["id"] if reader else None,
+            "source_story_revision": branch["story_revision"],
+        }
+
+    def check_genre_snapshot(self, branch_id, snapshot):
+        if not snapshot or snapshot.get("legacy_unconfigured"):
+            return
+        readers = self.db.all(
+            "SELECT id FROM artifacts WHERE branch_id=? AND kind='reader' "
+            "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",
+            (branch_id,),
+        )
+        if (readers[0]["id"] if readers else None) != snapshot.get("source_artifact_id"):
+            raise DomainError(
+                "genre_profile_changed",
+                "本任务的频道题材设定已改变，原快照保留；请按新配置创建独立批次，不混用两套设定。",
+                409,
+            )
+
+    @staticmethod
+    def check_genre_basis(profile, basis):
+        if basis is not None and (
+            basis["source_artifact_id"] != profile["source_artifact_id"]
+            or basis["catalog_version"] != profile["catalog_version"]
+        ):
+            raise DomainError(
+                "genre_profile_changed", "频道题材配置已在其他窗口改变，请刷新并确认后再生成。", 409
+            )
+
     def context(self, branch_id, chapter_id=None):
         branch = self.branch(branch_id)
         chapter = self.chapter(chapter_id, branch_id) if chapter_id else None
@@ -328,13 +379,15 @@ class Domain:
             AND kind IN ('intent','reader','world','characters','outline')) WHERE rank=1 ORDER BY created DESC""",
             (branch_id,),
         )
+        definitions = [{**row, "payload": json.loads(row["payload"])} for row in definitions]
         return {
             "novel": self.db.one("SELECT * FROM novels WHERE id=?", (branch["novel_id"],)),
             "branch": branch,
             "chapter": chapter,
             "facts": facts,
             "recent": list(reversed(previous)),
-            "definitions": [{**row, "payload": json.loads(row["payload"])} for row in definitions],
+            "definitions": definitions,
+            "genre_profile": self.genre_profile(branch_id, definitions),
             "coverage": "每类最新采用设定、目标章节之前最近100条有效事实及最近两章；更早原文需主动查询，未知故事时间保留未知。",
         }
 
@@ -345,7 +398,7 @@ class Domain:
         rows = self.db.all("SELECT task_id FROM task_requests WHERE key=?", (key,))
         if rows:
             task = self.task(rows[0]["task_id"])
-            if task["kind"] != kind or task["payload"] != payload:
+            if task["kind"] != kind or not same_task_payload(task["payload"], payload):
                 raise DomainError("idempotency", "该提交标识已用于不同输入，未创建新任务。", 409)
             return task
 
@@ -360,20 +413,58 @@ class Domain:
             if chapter["revision"] != payload.get("base_revision"):
                 raise DomainError("revision_conflict", "请先保存当前正文并重新选择目标版本。", 409)
         task_id = uid()
+        profile = self.genre_profile(branch_id)
+        initial = {"genre_profile_snapshot": profile}
+        if kind == "workflow":
+            initial["expected_story_revision"] = profile["source_story_revision"]
         with self.db.connect(True) as db:
             key = payload.get("client_request_id")
             if key:
                 prior = db.execute("SELECT task_id FROM task_requests WHERE key=?", (key,)).fetchone()
                 if prior:
                     previous = self.task(prior[0])
-                    if previous["kind"] != kind or previous["payload"] != payload:
+                    if previous["kind"] != kind or not same_task_payload(previous["payload"], payload):
                         raise DomainError("idempotency", "提交标识已用于不同输入。", 409)
                     return previous
+            revision = db.execute("SELECT story_revision FROM branches WHERE id=?", (branch_id,)).fetchone()[
+                0
+            ]
+            reader = db.execute(
+                "SELECT id FROM artifacts WHERE branch_id=? AND kind='reader' "
+                "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",
+                (branch_id,),
+            ).fetchone()
+            if (reader[0] if reader else None) != profile["source_artifact_id"]:
+                raise DomainError("genre_profile_changed", "频道题材配置在提交时改变，请刷新后重试。", 409)
+            if kind == "module":
+                self.check_genre_basis(profile, payload.get("genre_profile_basis"))
+            if revision != profile["source_story_revision"]:
+                raise DomainError("story_changed", "创作配置在提交时改变，请刷新后重试。", 409)
             db.execute(
-                "INSERT INTO tasks(id,kind,novel_id,branch_id,status,payload,created,updated) VALUES(?,?,?,?,?,?,?,?)",
-                (task_id, kind, payload["novel_id"], branch_id, "queued", dumps(payload), time(), time()),
+                "INSERT INTO tasks(id,kind,novel_id,branch_id,status,payload,result,created,updated) VALUES(?,?,?,?,?,?,?,?,?)",
+                (
+                    task_id,
+                    kind,
+                    payload["novel_id"],
+                    branch_id,
+                    "queued",
+                    dumps(payload),
+                    dumps(initial),
+                    time(),
+                    time(),
+                ),
             )
             self.db.event(db, task_id, "queued", {"kind": kind})
+            self.db.event(
+                db,
+                task_id,
+                "genre_profile_frozen",
+                {
+                    "catalog_version": profile["catalog_version"],
+                    "source_artifact_id": profile["source_artifact_id"],
+                    "story_revision": revision,
+                },
+            )
             if key:
                 db.execute("INSERT INTO task_requests VALUES(?,?)", (key, task_id))
         return self.task(task_id)
@@ -387,6 +478,7 @@ class Domain:
             ):
                 raise DomainError("idempotency", "该续跑标识已用于其他检查点或决定。", 409)
             return previous
+        self.check_genre_snapshot(current["branch_id"], current["result"].get("genre_profile_snapshot"))
         if current["kind"] != "workflow" or current["status"] not in (
             "paused",
             "blocked_runtime",
@@ -412,7 +504,7 @@ class Domain:
                 saved = json.loads(prior["result"])
                 if (
                     prior["kind"] != "workflow"
-                    or json.loads(prior["payload"]) != payload
+                    or not same_task_payload(json.loads(prior["payload"]), payload)
                     or saved.get("continued_from") != current["id"]
                     or saved.get("continuation_request") != request
                 ):

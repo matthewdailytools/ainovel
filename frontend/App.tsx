@@ -309,6 +309,7 @@ export function App() {
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
+                    onGenreSettings={() => setPage('records')}
                   />
                 )}
                 {page === 'library' && <LibraryPage novelId={novelId} notify={notify} />}
@@ -323,9 +324,10 @@ export function App() {
                     onStarted={async (id) => {
                       await refreshBranches(novel.id, id)
                     }}
+                    onGenreSettings={() => setPage('records')}
                   />
                 )}
-                {page === 'records' && branch && <Records branch={branch} notify={notify} />}
+                {page === 'records' && branch && <Records key={branch.id} branch={branch} notify={notify} />}
               </>
             )}
           </main>

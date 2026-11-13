@@ -2,6 +2,54 @@ import type { components } from './api-schema'
 export type ModuleInput = components['schemas']['ModuleInput']
 export type WorkflowInput = components['schemas']['WorkflowInput']
 export type ContinuationInput = components['schemas']['ContinuationInput']
+export type DefinitionInput = components['schemas']['DefinitionInput']
+export type GenreTopic = {
+  id: string
+  title: string
+  name: string
+  group: string
+  owner: string
+  items: string[]
+}
+export type GenreCatalog = {
+  version: string
+  genres: { id: string; name: string; title: string; family: string; description: string }[]
+  mechanisms: { id: string; name: string; title: string; items: string[] }[]
+  audiences: { id: string; name: string }[]
+}
+export type GenreProfile = {
+  catalog_version: string
+  audience: '不限' | '男频' | '女频'
+  primary_genre: string | null
+  secondary_genres: string[]
+  genre_ids: string[]
+  custom_genres: string[]
+  mechanisms: string[]
+  mechanism_ids: string[]
+  custom_mechanisms: string[]
+  author_exceptions: string[]
+  author_notes: string
+  reading_promises: string[]
+  focus: string[]
+  checks: string[]
+  required_topics: GenreTopic[]
+  optional_topics: GenreTopic[]
+  conflicts: string[]
+  priority: string[]
+  configured: boolean
+  source_artifact_id?: string | null
+  source_story_revision?: number | null
+  story_revision?: number
+  branch_id?: string
+  reader_definition?: {
+    audience?: string
+    genres?: string[]
+    mechanisms?: string[]
+    author_exceptions?: string[]
+    text?: string
+  } | null
+  legacy_unconfigured?: boolean
+}
 export type Novel = { id: string; title: string; brief: string }
 export type Branch = { id: string; novel_id: string; name: string; mode: string; story_revision: number }
 export type Chapter = {
@@ -29,7 +77,7 @@ export type Artifact = {
     review_passed?: boolean
     [key: string]: unknown
   }
-  basis: Record<string, unknown>
+  basis: Record<string, unknown> & { genre_profile?: GenreProfile }
 }
 export type Task = {
   id: string
@@ -49,6 +97,7 @@ export type Task = {
     latest_artifact?: string
     plan?: unknown
     completion?: unknown
+    genre_profile_snapshot?: GenreProfile
   }
   payload: {
     mode?: 'assisted' | 'automatic'

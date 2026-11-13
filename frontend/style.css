@@ -1269,6 +1269,63 @@ summary {
     padding-inline: 12px !important;
   }
 }
+.genre-settings,
+.genre-profile-notice,
+.genre-profile-details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.genre-profile-notice {
+  padding: 12px;
+  background: var(--tint);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-block: 16px;
+}
+.genre-adopted {
+  padding: 12px;
+  background: var(--tint);
+  border-radius: 6px;
+}
+.genre-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 8px 16px;
+  padding: 8px;
+  max-height: 22rem;
+  overflow: auto;
+}
+.genre-choices .check {
+  margin: 0;
+  min-width: 0;
+  align-items: flex-start;
+  min-height: 44px;
+}
+.genre-choices .check input {
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.genre-profile-details h4 {
+  margin-block: 16px 4px;
+}
+.genre-author-notes {
+  white-space: pre-wrap;
+}
+.genre-profile-details ul {
+  padding-left: 22px;
+  margin-block: 6px 12px;
+}
+.genre-topic-list li {
+  margin-bottom: 12px;
+}
+.genre-topic-list p {
+  margin-block: 4px;
+}
+.genre-preview {
+  border-top: 1px solid var(--line);
+  margin-block: 20px;
+  padding-top: 16px;
+}
 @media (prefers-reduced-motion: reduce) {
   * {
     scroll-behavior: auto !important;

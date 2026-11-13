@@ -17,6 +17,7 @@ from pydantic import Field
 from .budget import Budget
 from .db import Database, DomainError, dumps, uid
 from .domain import Domain, utf16_slice
+from .genre_catalog import assemble_profile, get_catalog
 from .library import Library, MAX_FILE
 from .models import (
     AcceptInput,
@@ -171,7 +172,7 @@ def create_app(settings=None, schema_only=False):
         return {
             "accounts": [account.public() for account in settings.providers.values()],
             "budget": budget.report(),
-            "sending_scope": "模型仅收到本次指令、目标章、已采用设定、前文有效事实、最近两章和主动勾选的摘录；整书任务另含简报与章纲。密钥仅在后端。",
+            "sending_scope": "模型仅收到本次指令、目标章、已采用设定、所选频道题材按动作展开的冻结配置、前文有效事实、最近两章和主动勾选的摘录；整书任务另含简报与章纲。作者要求优先于预设，密钥仅在后端。",
         }
 
     @app.get("/api/novels")
@@ -336,11 +337,41 @@ def create_app(settings=None, schema_only=False):
             and not data.chapter_id
         ):
             raise DomainError("chapter_required", "该操作需要章节。")
-        return domain.queue("module", {**data.model_dump(), "module_version": MODULES[data.action].version})
+        payload = data.model_dump()
+        if data.genre_profile_basis is None:
+            payload.pop("genre_profile_basis")
+        return domain.queue("module", {**payload, "module_version": MODULES[data.action].version})
 
     @app.get("/api/modules")
     def module_specs():
         return public_modules()
+
+    @app.get("/api/genre-catalog")
+    def genre_catalog():
+        return get_catalog()
+
+    @app.get("/api/branches/{branch_id}/genre-profile")
+    def genre_profile(branch_id: str):
+        profile = domain.genre_profile(branch_id)
+        source_id = profile["source_artifact_id"]
+        return {
+            **profile,
+            "branch_id": branch_id,
+            "story_revision": profile["source_story_revision"],
+            "reader_definition": domain.artifact(source_id)["payload"] if source_id else None,
+            "source_revision_note": "本次装配时的故事版本；保存设定使用 story_revision 进行版本校验。",
+        }
+
+    @app.post("/api/genre-profile/preview")
+    def preview_genre_profile(data: DefinitionInput):
+        if data.kind != "reader":
+            raise DomainError("genre_profile", "频道题材预览仅用于读者与题材配置。")
+        return {
+            **assemble_profile(data.model_dump(exclude={"kind", "base_story_revision"})),
+            "source_artifact_id": None,
+            "source_story_revision": None,
+            "preview": True,
+        }
 
     def provider_ready(account):
         provider = settings.providers.get(account)
@@ -349,7 +380,10 @@ def create_app(settings=None, schema_only=False):
 
     @app.post("/api/workflows", status_code=202)
     def start_workflow(data: WorkflowInput):
-        previous = domain.find_request("workflow", data.model_dump())
+        payload = data.model_dump()
+        if data.genre_profile_basis is None:
+            payload.pop("genre_profile_basis")
+        previous = domain.find_request("workflow", payload)
         if previous:
             return previous
         provider_ready(data.account)
@@ -362,8 +396,27 @@ def create_app(settings=None, schema_only=False):
             raise DomainError("plots", "全自动仅接收简报与粗纲，不复用半自动的章级输入。")
         source = domain.branch(data.source_branch_id, data.novel_id) if data.source_branch_id else None
         definitions = domain.context(source["id"])["definitions"] if source else []
+        profile = (
+            domain.genre_profile(source["id"], definitions)
+            if source
+            else {
+                **assemble_profile(None),
+                "source_artifact_id": None,
+            }
+        )
+        domain.check_genre_basis(
+            profile, data.genre_profile_basis.model_dump() if data.genre_profile_basis else None
+        )
         branch_id = uid()
         with db.connect(True) as tx:
+            if (
+                source
+                and tx.execute("SELECT story_revision FROM branches WHERE id=?", (source["id"],)).fetchone()[
+                    0
+                ]
+                != source["story_revision"]
+            ):
+                raise DomainError("story_changed", "源作品设定在创建时改变，请刷新后重试。", 409)
             tx.execute(
                 "INSERT INTO branches(id,novel_id,name,mode,created) VALUES(?,?,?,?,?)",
                 (
@@ -392,7 +445,7 @@ def create_app(settings=None, schema_only=False):
                         time(),
                     ),
                 )
-        return domain.queue("workflow", data.model_dump(), branch_id)
+        return domain.queue("workflow", payload, branch_id)
 
     @app.post("/api/branches/{branch_id}/definitions", status_code=201)
     def save_definition(branch_id: str, data: DefinitionInput):
@@ -502,6 +555,7 @@ def create_app(settings=None, schema_only=False):
         if current["status"] in ("blocked_runtime", "cancelled") and not data.acknowledge_unknown:
             raise DomainError("unknown_result", "上次调用可能已计费；确认账本后可明确重新派发。", 409)
         result = current["result"]
+        domain.check_genre_snapshot(current["branch_id"], result.get("genre_profile_snapshot"))
         reject_pending = None
         branch_snapshot = None
         if current["kind"] == "workflow":

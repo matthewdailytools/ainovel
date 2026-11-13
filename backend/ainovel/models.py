@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -23,6 +23,11 @@ class SaveInput(Input):
 class RestoreInput(Input):
     base_revision: int = Field(ge=0)
     revision_id: str
+
+
+class GenreProfileBasis(Input):
+    source_artifact_id: str | None = Field(min_length=1, max_length=128)
+    catalog_version: str = Field(min_length=1, max_length=100)
 
 
 class ModuleInput(Input):
@@ -54,6 +59,7 @@ class ModuleInput(Input):
     account: str
     max_output_tokens: int = Field(default=8192, ge=64, le=16_384)
     budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    genre_profile_basis: GenreProfileBasis | None = None
 
 
 class CandidateEdit(Input):
@@ -112,6 +118,7 @@ class WorkflowInput(Input):
         default="第三人称限定视角，克制白话，人物选择有依据，遵守能力和信息边界。", max_length=5000
     )
     budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    genre_profile_basis: GenreProfileBasis | None = None
 
 
 class FeedbackInput(Input):
@@ -192,6 +199,13 @@ class DefinitionInput(Input):
     kind: Literal["intent", "reader", "world", "characters", "outline"]
     text: str = Field(min_length=1, max_length=20_000)
     audience: Literal["不限", "男频", "女频"] = "不限"
-    genres: list[str] = Field(default_factory=list, max_length=10)
-    mechanisms: list[str] = Field(default_factory=list, max_length=10)
+    genres: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=10
+    )
+    mechanisms: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=10
+    )
+    author_exceptions: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(
+        default_factory=list, max_length=30
+    )
     base_story_revision: int = Field(ge=0)

@@ -243,6 +243,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/genre-catalog': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Genre Catalog */
+    get: operations['genre_catalog_api_genre_catalog_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/genre-profile': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Genre Profile */
+    get: operations['genre_profile_api_branches__branch_id__genre_profile_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/genre-profile/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Preview Genre Profile */
+    post: operations['preview_genre_profile_api_genre_profile_preview_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workflows': {
     parameters: {
       query?: never
@@ -1008,6 +1059,8 @@ export interface components {
       genres?: string[]
       /** Mechanisms */
       mechanisms?: string[]
+      /** Author Exceptions */
+      author_exceptions?: string[]
       /** Base Story Revision */
       base_story_revision: number
     }
@@ -1089,6 +1142,13 @@ export interface components {
        */
       source_quote: string
     }
+    /** GenreProfileBasis */
+    GenreProfileBasis: {
+      /** Source Artifact Id */
+      source_artifact_id: string | null
+      /** Catalog Version */
+      catalog_version: string
+    }
     /** HTTPValidationError */
     HTTPValidationError: {
       /** Detail */
@@ -1146,6 +1206,7 @@ export interface components {
       max_output_tokens: number
       /** Budget Limit */
       budget_limit?: number | null
+      genre_profile_basis?: components['schemas']['GenreProfileBasis'] | null
     }
     /** MoveInput */
     MoveInput: {
@@ -1301,6 +1362,7 @@ export interface components {
       writing_profile: string
       /** Budget Limit */
       budget_limit?: number | null
+      genre_profile_basis?: components['schemas']['GenreProfileBasis'] | null
     }
   }
   responses: never
@@ -1905,6 +1967,90 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  genre_catalog_api_genre_catalog_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+    }
+  }
+  genre_profile_api_branches__branch_id__genre_profile_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_genre_profile_api_genre_profile_preview_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DefinitionInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
         headers: {
           [name: string]: unknown
         }

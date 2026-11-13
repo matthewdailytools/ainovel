@@ -11,6 +11,7 @@ from time import time
 from .budget import Budget
 from .db import Database, DomainError, dumps, uid
 from .domain import Domain, char_count, utf16_slice
+from .genre_catalog import profile_for_action
 from .evidence import source_units, resolve_field, source_schema, completion_sources
 from .models import Completion, Memory, Plan, Review, RevisionPatch
 from .providers import ModelClient
@@ -21,8 +22,11 @@ SYSTEM = """你是中文原创小说工作台的执行模块。区分作者指�
 允许角色有依据地误判。叙述应具体，动作有因果，人物声音有区别，避免重复解释与为凑字数重复段落。
 没有证据保留未知。按请求只输出正文、建议或符合指定结构的 JSON，不加 Markdown 代码围栏。
 未采纳候选的审查意见只用于纠错，不代表故事中已经发生的事实。
+频道题材配置只用于当前动作的阅读承诺、叙事重点和审阅提示，不是已发生的故事事实。
+作者明确要求、固定情节和例外优先于频道题材预设；女频不等于必须恋爱，男频不等于必须后宫。
+未明确锁定的题材偏好只写入findings中的suggestion，不得加入固定checks或仅据此阻断；不要在单章强行兑现全书主题。
 """
-PROMPT_VERSION = "0.1.6"
+PROMPT_VERSION = "0.2.0"
 
 
 def parse_json(text):
@@ -110,6 +114,38 @@ class Worker:
             )
             self.db.event(db, self.task["id"], "checkpoint", {"status": status, **result})
 
+    def genre_snapshot(self):
+        result = self.task["result"]
+        if "genre_profile_snapshot" not in result:
+            # Existing attempts did not select a versioned catalogue. Do not retrofit
+            # new preset promises into their already written chapters on recovery.
+            result["genre_profile_snapshot"] = {
+                "catalog_version": "legacy-unconfigured",
+                "configured": False,
+                "legacy_unconfigured": True,
+                "audience": "不限",
+                "primary_genre": None,
+                "secondary_genres": [],
+                "genre_ids": [],
+                "custom_genres": [],
+                "mechanisms": [],
+                "mechanism_ids": [],
+                "custom_mechanisms": [],
+                "author_exceptions": [],
+                "author_notes": "",
+                "reading_promises": [],
+                "focus": [],
+                "checks": [],
+                "required_topics": [],
+                "optional_topics": [],
+                "conflicts": [],
+                "priority": [],
+                "source_artifact_id": None,
+                "source_story_revision": None,
+                "note": "旧任务未冻结目录配置，沿用原有作者设定；新目录预设不追溯套用。",
+            }
+        return result["genre_profile_snapshot"]
+
     async def call(
         self,
         instruction,
@@ -135,7 +171,21 @@ class Worker:
             and self.domain.branch(self.task["branch_id"])["story_revision"] != workflow_revision
         ):
             raise DomainError("story_changed", "故事版本在执行步骤间改变，请检查后明确恢复。", 409)
-        prompt = dumps({"任务": instruction, "上下文": context or {}})
+        profile = self.genre_snapshot()
+        self.domain.check_genre_snapshot(self.task["branch_id"], profile)
+        if (
+            self.task["kind"] == "module"
+            and not profile.get("legacy_unconfigured")
+            and self.domain.branch(self.task["branch_id"])["story_revision"]
+            != profile["source_story_revision"]
+        ):
+            raise DomainError("story_changed", "排队后创作配置或故事版本改变，未发送旧任务。", 409)
+        source_instruction = instruction
+        while isinstance(source_instruction.get("原始任务"), dict):
+            source_instruction = source_instruction["原始任务"]
+        action = source_instruction.get("action", source_instruction.get("动作", "unknown"))
+        context = {**(context or {}), "genre_profile": profile_for_action(profile, action)}
+        prompt = dumps({"任务": instruction, "上下文": context})
         if schema and self.settings.providers[payload["account"]].kind != "openai":
             prompt += "\n只返回符合以下 JSON Schema 的对象：\n" + dumps(
                 contract or schema.model_json_schema()
@@ -215,6 +265,13 @@ class Worker:
                     "timeout_seconds": self.settings.timeout,
                     "idle_timeout_seconds": self.settings.idle_timeout,
                     "story_revision": (context or {}).get("branch", {}).get("story_revision"),
+                    "genre_profile": {
+                        "catalog_version": profile.get("catalog_version"),
+                        "source_artifact_id": profile.get("source_artifact_id"),
+                        "source_story_revision": profile.get("source_story_revision"),
+                        "snapshot_sha256": hashlib.sha256(dumps(profile).encode()).hexdigest(),
+                        "legacy_unconfigured": profile.get("legacy_unconfigured", False),
+                    },
                     "target_version": {
                         key: value
                         for key, value in ((context or {}).get("chapter") or {}).items()
@@ -325,6 +382,16 @@ class Worker:
 
     def context(self, branch_id, chapter_id=None, references=()):
         context = self.domain.context(branch_id, chapter_id)
+        snapshot = self.genre_snapshot() if self.task else context["genre_profile"]
+        context["genre_profile"] = snapshot
+        if not snapshot.get("legacy_unconfigured"):
+            for definition in context["definitions"]:
+                if definition["kind"] != "reader":
+                    definition["payload"] = {
+                        key: value
+                        for key, value in definition["payload"].items()
+                        if key not in {"audience", "genres", "mechanisms", "author_exceptions"}
+                    }
         context["facts"] = [
             {
                 key: fact[key]
@@ -446,11 +513,15 @@ class Worker:
                 "chapter_revision": request.get("base_revision"),
                 "story_revision": context["branch"]["story_revision"],
                 "coverage": context["coverage"],
+                "genre_profile": self.genre_snapshot(),
             },
             self.task["id"],
             self.attempt,
         )
-        self.checkpoint({"artifact_id": artifact["id"], "coverage": context["coverage"]}, "succeeded")
+        self.checkpoint(
+            {**self.task["result"], "artifact_id": artifact["id"], "coverage": context["coverage"]},
+            "succeeded",
+        )
 
     async def grounded(self, instruction, schema, context, validator, max_output=4096, contract=None):
         current = instruction
@@ -501,6 +572,8 @@ class Worker:
                 "可引用原文": units,
                 "固定条件": fixed,
                 "作者写作要求": instructions or {},
+                "作者明确例外": self.genre_snapshot().get("author_exceptions", []),
+                "题材审阅政策": "作者例外是明确要求，按本章时点与触发条件核对，不能被频道预设覆盖；有原文依据的明确违反可列blocker。频道重点及题材checks仅作审阅提示，未被作者锁定时只给suggestion，不加入固定checks，不要求每章提前发生全书终局。",
                 "情节覆盖": "同时核对作者写作要求中的本章情节、结果和禁止项。清单之外的问题只写入findings，禁止向checks追加条件。关键事件被拖延到后章或正文与明确要求的结果相反，应指出具体遗漏与原文，不能只检查固定条件清单。不要要求未来章纲在本章提前发生。",
                 "要求": "checks对每条固定条件逐字列出且仅列一次。evidence和findings.quote优先只填「可引用原文」中的source_id编号，后端自动回填该版本原文；不要重写或概括引文。否定条件可选体现克制收场的段落。条件性约束须保留触发关系：本章明确没有实施受约束行动时，不得仅因前置条件仍待核实而判违规；检查正文是否遵守限制。明确要求本章完成的情节仍须核对是否完成。findings.chapter必须为本次章节号。解释放summary/reason，区分阻断与偏好。未知不冒充pass。",
                 "章节号": number,
@@ -650,6 +723,7 @@ class Worker:
                 "检查范围": scope,
                 "简报": payload["brief"],
                 "固定方向": payload["fixed"],
+                "作者明确例外": self.genre_snapshot().get("author_exceptions", []),
                 "采用规划": plan,
                 "可引用原文": units,
                 "分段全文报告": reports,
@@ -666,6 +740,10 @@ class Worker:
             "source_versions": [
                 {"id": c["id"], "position": c["position"], "revision": c["revision"]} for c in chapters
             ],
+            "genre_profile": {
+                key: self.genre_snapshot().get(key)
+                for key in ("catalog_version", "source_artifact_id", "source_story_revision")
+            },
         }
 
     async def workflow(self):
@@ -825,6 +903,7 @@ class Worker:
                     {
                         "chapter_revision": chapter["revision"],
                         "story_revision": context["branch"]["story_revision"],
+                        "genre_profile": self.genre_snapshot(),
                     },
                     self.task["id"],
                     self.attempt,

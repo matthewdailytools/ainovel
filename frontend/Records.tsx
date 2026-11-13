@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type Branch, type Chapter, type Fact } from './api'
 import type { Notify } from './App'
+import { GenreSettings } from './GenreProfile'
 
 type Completion = {
   chapter_count: number
@@ -53,9 +54,6 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
   const [definition, setDefinition] = useState({
     kind: 'intent',
     text: '',
-    audience: '不限',
-    genres: '',
-    mechanisms: '',
   })
   const [definitions, setDefinitions] = useState<
     {
@@ -113,6 +111,7 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
           刷新当前版本
         </button>
       </div>
+      <GenreSettings key={branch.id} branchId={branch.id} notify={notify} onSaved={refresh} />
       <div className="records-grid">
         <section className="card">
           <h2>故事状态与影响</h2>
@@ -424,8 +423,6 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
               void perform(async () => {
                 await api(`/branches/${branch.id}/definitions`, 'POST', {
                   ...definition,
-                  genres: definition.genres.split('、').filter(Boolean),
-                  mechanisms: definition.mechanisms.split('、').filter(Boolean),
                   base_story_revision: storyRevision,
                 })
                 setDefinition({ ...definition, text: '' })
@@ -442,7 +439,6 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
                 >
                   {[
                     ['intent', '创作意图与锁定方向'],
-                    ['reader', '读者与题材'],
                     ['world', '世界与社会规则'],
                     ['characters', '人物档案与关系'],
                     ['outline', '粗纲、多线与伏笔安排'],
@@ -452,33 +448,6 @@ export function Records({ branch, notify }: { branch: Branch; notify: Notify }) 
                     </option>
                   ))}
                 </select>
-              </label>
-              <label>
-                阅读取向
-                <select
-                  value={definition.audience}
-                  onChange={(e) => setDefinition({ ...definition, audience: e.target.value })}
-                >
-                  {['不限', '男频', '女频'].map((v) => (
-                    <option key={v}>{v}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                主辅题材（顿号分隔）
-                <input
-                  value={definition.genres}
-                  onChange={(e) => setDefinition({ ...definition, genres: e.target.value })}
-                  placeholder="例如：现实、悬疑"
-                />
-              </label>
-              <label>
-                机制（顿号分隔）
-                <input
-                  value={definition.mechanisms}
-                  onChange={(e) => setDefinition({ ...definition, mechanisms: e.target.value })}
-                  placeholder="例如：证据追查、职业成长"
-                />
               </label>
             </div>
             <label>

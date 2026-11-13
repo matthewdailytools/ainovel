@@ -9,10 +9,12 @@ import {
   type ModuleInput,
   type Novel,
   type Task,
+  type GenreProfile,
 } from './api'
 import type { Notify } from './App'
 import { Difference, Editor, type Selection } from './Editor'
 import { readDraft, writeDraft, type Draft } from './drafts'
+import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 
 const actions = [
   ['writing.advise', '卡点诊断与方向'],
@@ -41,12 +43,14 @@ export function Writing({
   account,
   modelReady,
   notify,
+  onGenreSettings,
 }: {
   novel: Novel
   branch: Branch
   account: string
   modelReady: boolean
   notify: Notify
+  onGenreSettings: () => void
 }) {
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [loading, setLoading] = useState(true)
@@ -66,6 +70,7 @@ export function Writing({
   const [instruction, setInstruction] = useState('')
   const [fixed, setFixed] = useState('')
   const [profile, setProfile] = useState(presets[0])
+  const [seenGenre, setSeenGenre] = useState<GenreProfile>()
   const [references, setReferences] = useState<Excerpt[]>([])
   const [selectedRefs, setSelectedRefs] = useState<string[]>([])
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
@@ -291,6 +296,7 @@ export function Writing({
     event.preventDefault()
     await doAction(async () => {
       const row = current.current ? await save() : undefined
+      if (seenGenre?.branch_id !== branch.id) throw new Error('正在读取本版本题材配置，请稍后再生成。')
       if (action === 'writing.rewrite_selection' && !selection.text)
         throw new Error('请在正文中选择要改写的文字。')
       const data: ModuleInput = {
@@ -305,6 +311,10 @@ export function Writing({
           .map((v) => v.trim())
           .filter(Boolean),
         writing_profile: profile,
+        genre_profile_basis: {
+          source_artifact_id: seenGenre.source_artifact_id ?? null,
+          catalog_version: seenGenre.catalog_version,
+        },
         reference_ids: selectedRefs,
         account,
         max_output_tokens: 8192,
@@ -652,6 +662,7 @@ export function Writing({
           <h2>创作辅助</h2>
           <span className="badge">作者决定采纳</span>
         </div>
+        <GenreProfileNotice branchId={branch.id} onSettings={onGenreSettings} onResolved={setSeenGenre} />
         <form onSubmit={generate}>
           {tasks[0]?.payload.instruction && (
             <button
@@ -739,20 +750,32 @@ export function Writing({
             </fieldset>
           </details>
           <p className="small muted">发送当前章、有效前文与主动选入的资料；候选与正文分开保存。</p>
-          <button className="primary wide" disabled={busy || loading || !modelReady || !!activeTask}>
+          <button
+            className="primary wide"
+            disabled={busy || loading || !modelReady || !!activeTask || seenGenre?.branch_id !== branch.id}
+          >
             {!modelReady
               ? '请先配置模型账户和单价'
               : busy
                 ? '正在提交…'
                 : activeTask
                   ? '本版本有任务执行中'
-                  : '生成候选 →'}
+                  : seenGenre?.branch_id !== branch.id
+                    ? '正在读取题材配置…'
+                    : '生成候选 →'}
           </button>
         </form>
         {activeTask && (
           <div className="notice" role="status">
             <strong>{label(activeTask.status)}</strong>
             <p>关闭浏览器不取消本机任务。</p>
+            {activeTask.result.genre_profile_snapshot &&
+              !activeTask.result.genre_profile_snapshot.legacy_unconfigured && (
+                <details>
+                  <summary>本次任务冻结的题材配置</summary>
+                  <GenreProfileDetails profile={activeTask.result.genre_profile_snapshot} />
+                </details>
+              )}
             <button
               onClick={() =>
                 void doAction(async () => {
@@ -979,6 +1002,12 @@ function Candidate({
         <details>
           <summary>查看本章检查依据</summary>
           <pre className="report">{JSON.stringify(artifact.payload.review, null, 2)}</pre>
+        </details>
+      )}
+      {artifact.basis.genre_profile && !artifact.basis.genre_profile.legacy_unconfigured && (
+        <details>
+          <summary>候选生成时的频道与题材</summary>
+          <GenreProfileDetails profile={artifact.basis.genre_profile} />
         </details>
       )}
       <div className="actions">
