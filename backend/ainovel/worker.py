@@ -410,6 +410,22 @@ class Worker:
         if previous:
             saved = json.loads(previous[0]["result"])
             return await validated(saved)
+        if schema and provider.kind == "openai":
+            # Keep completed semantic-cache reuse ahead of wire compatibility
+            # checks, but never record an unsupported schema as dispatched.
+            from .providers import WIRE_SCHEMA_VERSION, strict_schema
+
+            wire_schema = strict_schema(contract or schema.model_json_schema())
+            wire_metadata = {
+                "wire_schema_version": WIRE_SCHEMA_VERSION,
+                "wire_schema_sha256": hashlib.sha256(
+                    json.dumps(
+                        wire_schema, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+                    ).encode()
+                ).hexdigest(),
+            }
+        else:
+            wire_metadata = {}
         buffer = ""
         last_flush = time()
         self.db.emit(
@@ -421,6 +437,7 @@ class Worker:
                 "schema": schema.__name__ if schema else None,
                 "template_version": PROMPT_VERSION,
                 "request": {
+                    **wire_metadata,
                     "system_sha256": hashlib.sha256(SYSTEM.encode()).hexdigest(),
                     "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                     "semantic_prompt_sha256": hashlib.sha256(semantic_prompt.encode()).hexdigest(),

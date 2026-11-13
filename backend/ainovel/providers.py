@@ -1,25 +1,14 @@
 """Streaming adapters with bounded input/output, cancellation and shared money reservation."""
 
 import asyncio
+import hashlib
 import json
 
 import httpx
 
 from .db import DomainError
 from .settings import CONTEXT_SAFETY_TOKENS
-
-
-def strict_schema(value):
-    """Pydantic defaults remain local; OpenAI strict objects require every field."""
-    if isinstance(value, list):
-        return [strict_schema(item) for item in value]
-    if not isinstance(value, dict):
-        return value
-    result = {key: strict_schema(item) for key, item in value.items() if key != "default"}
-    if result.get("type") == "object":
-        result["required"] = list(result.get("properties", {}))
-        result["additionalProperties"] = False
-    return result
+from .openai_schema import VERSION as WIRE_SCHEMA_VERSION, strict_schema
 
 
 class ModelClient:
@@ -76,7 +65,7 @@ class ModelClient:
             if provider.reasoning:
                 body["reasoning"] = {"effort": provider.reasoning}
             endpoint = provider.base_url + "/responses"
-            if schema:
+            if schema is not None:
                 body["text"] = {
                     "format": {
                         "type": "json_schema",
@@ -101,6 +90,21 @@ class ModelClient:
             "utf-8"
         )
         request_bytes = len(request_body)
+        request_metadata = {}
+        if provider.kind == "openai" and schema is not None:
+            request_metadata = {
+                "wire_schema_version": WIRE_SCHEMA_VERSION,
+                "wire_schema_sha256": hashlib.sha256(
+                    json.dumps(
+                        body["text"]["format"]["schema"],
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode()
+                ).hexdigest(),
+                "request_sha256": hashlib.sha256(request_body).hexdigest(),
+                "request_bytes": request_bytes,
+            }
         if request_bytes > provider.max_input_bytes:
             raise DomainError("context_limit", "包括结构契约的请求超过账户字节上限，未截断或付费调用。")
         # Bytes are deliberately a conservative token upper bound, not a model
@@ -302,6 +306,7 @@ class ModelClient:
                 "requested_model": provider.model,
                 "request_id": request_id,
                 "service_tier": actual_tier,
+                **({"request_metadata": request_metadata} if request_metadata else {}),
             }
         except BaseException as error:
             if (
@@ -318,6 +323,11 @@ class ModelClient:
                 error.partial_text = output
             error.known_usage = bool(usage)
             error.repairable = repairable
+            if request_metadata:
+                error.provider_details = {
+                    **getattr(error, "provider_details", {}),
+                    "request_metadata": request_metadata,
+                }
             if isinstance(error, (httpx.TimeoutException, TimeoutError)):
                 unknown = DomainError(
                     "unknown_timeout",
@@ -325,11 +335,15 @@ class ModelClient:
                     502,
                 )
                 unknown.partial_text = output
+                if request_metadata:
+                    unknown.provider_details = error.provider_details
                 raise unknown from error
             if isinstance(error, httpx.HTTPError):
                 unknown = DomainError(
                     "network_unknown", "网络连接中断，费用预留保留；未自动重试或切换账户。", 502
                 )
                 unknown.partial_text = output
+                if request_metadata:
+                    unknown.provider_details = error.provider_details
                 raise unknown from error
             raise
