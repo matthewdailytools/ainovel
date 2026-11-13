@@ -548,5 +548,82 @@
     "result": "passed",
     "record": "2026-11-13-longform-context-recovery.md",
     "fix_of": "longform-context-001"
+  },
+  {
+    "id": "longform-memory-format-001",
+    "date": "2026-11-13",
+    "commit": "6f2d9cd",
+    "module": "十章结构化记忆",
+    "scenario": "合法JSON仍将belief误填kind，两轮后停止未采用",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-memory-contract-recovery.md",
+    "fix_of": ""
+  },
+  {
+    "id": "longform-memory-format-002",
+    "date": "2026-11-13",
+    "commit": "a8131b4",
+    "module": "十章结构化记忆",
+    "scenario": "精确枚举诊断与有限修复回归61项；真实任务已推进第六章",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-memory-contract-recovery.md",
+    "fix_of": "longform-memory-format-001"
+  },
+  {
+    "id": "context-backend-full-001",
+    "date": "2026-11-13",
+    "commit": "6f2d9cd",
+    "module": "全量后端",
+    "scenario": "可逆正文/来源/单元编码及真实Worker故障在内404项",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-memory-contract-recovery.md",
+    "fix_of": ""
+  },
+  {
+    "id": "official-library-001",
+    "date": "2026-11-13",
+    "commit": "a8131b4",
+    "module": "资料书库",
+    "scenario": "官方单页下载成功，首次后续UI选区等待不足",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-official-library-live.md",
+    "fix_of": ""
+  },
+  {
+    "id": "official-library-002",
+    "date": "2026-11-13",
+    "commit": "a8131b4",
+    "module": "资料书库",
+    "scenario": "第二次联网真实超时失败，无伪造书籍",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-official-library-live.md",
+    "fix_of": ""
+  },
+  {
+    "id": "official-library-003",
+    "date": "2026-11-13",
+    "commit": "a8131b4",
+    "module": "资料书库",
+    "scenario": "明确复用首次官方来源，精确回源摘录及主动资料包零调用",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-official-library-live.md",
+    "fix_of": "official-library-001"
+  },
+  {
+    "id": "longform-independent-001",
+    "date": "2026-11-13",
+    "commit": "a8131b4",
+    "module": "长篇独立质量",
+    "scenario": "前四章固定事件基本保持，但测量基准和同章高低推理有三项阻断",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-longform-independent-review.md",
+    "fix_of": ""
   }
 ]
