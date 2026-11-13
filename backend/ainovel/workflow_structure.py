@@ -7,6 +7,11 @@ from .extraction_scenes import can_auto_replace
 
 
 def safe_automatic(item):
+    record = item["record"]
+    if record["kind"] == "relationship" and record["from_id"] == record["to_id"]:
+        # A missing counterpart must not silently become the same character.
+        # Keep explicit author adoption available for intentional self-relations.
+        return False
     if not item.get("target_id"):
         return True
     before = item["previous_record"]["record"]
@@ -128,7 +133,9 @@ async def maintain(worker, result):
     ):
         result["waiting_structure"] = identifier
         worker.checkpoint(
-            result, "needs_review", "结构候选需作者核对；旧事实纠错、档案改写及保留／放弃承诺不自动采用。"
+            result,
+            "needs_review",
+            "结构候选需作者核对；关系两端相同须确认身份，旧事实纠错、档案改写及保留／放弃承诺不自动采用。",
         )
         return False
     data = AdoptExtraction(
