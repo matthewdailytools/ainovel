@@ -139,6 +139,7 @@ export type Task = {
     genre_profile_snapshot?: GenreProfile
   }
   payload: {
+    completion_scope?: 'whole_book' | 'segment'
     mode?: 'assisted' | 'automatic'
     chapters?: number
     account: string
@@ -285,6 +286,7 @@ export const statuses: Record<string, string> = {
   blocked_runtime: '运行已停止',
   blocked_creative: '创作检查未通过',
   production_complete: '生成完成，待作者验收',
+  segment_complete: '本批阶段完成，非全书完结',
   candidate: '待采纳',
   accepted: '已采纳',
   rejected: '已拒绝',

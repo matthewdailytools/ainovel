@@ -15,7 +15,7 @@ from .db import Database, DomainError, dumps, uid
 from .domain import Domain, char_count, utf16_slice
 from .genre_catalog import profile_for_action
 from .evidence import source_units, resolve_field, source_schema, completion_sources
-from .models import Completion, Memory, Plan, Review, RevisionPatch
+from .models import Completion, Memory, Plan, Review, RevisionPatch, SegmentCompletion
 from .providers import ModelClient
 from .prompt_encoding import encode_prompt
 from .settings import Settings
@@ -138,7 +138,12 @@ class Worker:
             ).fetchone()
             if current["attempt"] != self.attempt or current["cancel"] or current["lease_until"] < time():
                 raise DomainError("cancelled", "任务已停止。", 409)
-            if status == "production_complete":
+            completion_scope = self.task["payload"].get("completion_scope", "whole_book")
+            if (status == "production_complete" and completion_scope != "whole_book") or (
+                status == "segment_complete" and completion_scope != "segment"
+            ):
+                raise DomainError("workflow_scope", "批次完成状态与冻结的运行范围不一致。", 409)
+            if status in {"production_complete", "segment_complete"}:
                 from .story_graph import graph_snapshot, promise_status
 
                 revision = db.execute(
@@ -148,13 +153,29 @@ class Worker:
                     raise DomainError("story_changed", "完成检查后故事已改变，不能记录为制作完成。", 409)
                 if result.get("pending_structure") or result.get("waiting_structure"):
                     raise DomainError("workflow_progress", "章节结构维护尚未完成，不能结束批次。", 409)
-                promises = promise_status(graph_snapshot(db, self.task["branch_id"]))
+                snapshot = graph_snapshot(db, self.task["branch_id"])
+                promises = promise_status(snapshot)
                 result["maintained_promises"] = promises
-                if not promises["closed"]:
+                if status == "production_complete" and not promises["closed"]:
                     status, error = (
                         "blocked_creative",
                         "已维护的伏笔仍有未闭合或失效记录，请先在故事与审阅中核对。",
                     )
+                if completion_scope == "segment":
+                    report = result.get("completion", {})
+                    if (
+                        report.get("scope") != "segment"
+                        or report.get("closed") is not False
+                        or report.get("complete") is not True
+                        or any(p["result"] != "pass" for p in report.get("promises", []))
+                        or any(f["severity"] == "blocker" for f in report.get("findings", []))
+                    ):
+                        raise DomainError("workflow_progress", "本批范围检查未通过，不能记录阶段完成。", 409)
+                    result["invalid_story_records"] = [
+                        r["id"] for r in snapshot["records"] if not r["archived"] and r["invalid_reasons"]
+                    ]
+                    if result["invalid_story_records"]:
+                        status, error = "blocked_creative", "本批依赖的故事记录已失效，请先核对再完成阶段。"
                 if self.task["payload"].get("scene_maintenance"):
                     from .extraction_scenes import coverage
 
@@ -943,6 +964,7 @@ class Worker:
     async def completion_report(self, chapters, payload, plan, scope, previous=()):
         units, reports = completion_sources(chapters, previous)
         sources = {unit["source_id"]: unit for unit in units}
+        segment = payload.get("completion_scope", "whole_book") == "segment"
         author_fields = self.author_snapshot().get("intent_contract", {})
         required_promises = (
             list(
@@ -957,13 +979,57 @@ class Worker:
             if scope == "全书"
             else []
         )
+        condition_chapters = {}
+        if segment:
+            positions = {chapter["position"] for chapter in chapters}
+            condition_chapters = {
+                condition: plot["number"]
+                for plot in plan["chapters"]
+                if plot["number"] in positions
+                for condition in [
+                    f"第{plot['number']}章情节：{plot['plot']}",
+                    *[f"第{plot['number']}章固定条件：{item}" for item in plot["fixed"]],
+                ]
+            }
+            required_promises = list(
+                dict.fromkeys(
+                    [
+                        *payload["fixed"],
+                        *author_fields.get("prohibitions", []),
+                        *condition_chapters,
+                    ]
+                )
+            )
+        verified_evidence, verified_findings = {}, {}
+
+        def source_metadata(unit):
+            return {key: unit[key] for key in ("chapter", "chapter_id", "revision", "start", "end")}
+
+        def quoted_source(chapter, quote):
+            start = len(chapter["content"][: chapter["content"].find(quote)].encode("utf-16-le")) // 2
+            return {
+                "chapter": chapter["position"],
+                "chapter_id": chapter["id"],
+                "revision": chapter["revision"],
+                "start": start,
+                "end": start + len(quote.encode("utf-16-le")) // 2,
+            }
 
         def validate(report):
             issues = []
+            verified_evidence.clear()
+            verified_findings.clear()
             conditions = [item["condition"] for item in report["promises"]]
             for condition in required_promises:
                 if conditions.count(condition) != 1:
-                    issues.append("全书promises必须逐字覆盖每项冻结作者硬约定且仅出现一次：" + condition)
+                    issues.append(
+                        (
+                            "本批promises必须逐字覆盖每项本批约定且仅出现一次："
+                            if segment
+                            else "全书promises必须逐字覆盖每项冻结作者硬约定且仅出现一次："
+                        )
+                        + condition
+                    )
             for index, finding in enumerate(report["findings"]):
                 selected = resolve_field(finding, "quote", sources)
                 cited = next((c for c in chapters if c["position"] == finding["chapter"]), None)
@@ -971,35 +1037,80 @@ class Worker:
                     issues.append(f"findings[{index}].chapter 与所选编号不一致")
                 if not cited or not finding["quote"] or finding["quote"] not in cited["content"]:
                     issues.append(f"findings[{index}] 引文或章节无效")
+                elif segment:
+                    if selected:
+                        verified_findings[index] = source_metadata(selected)
+                    elif cited["content"].find(finding["quote"]) != cited["content"].rfind(finding["quote"]):
+                        issues.append(f"findings[{index}] 引文在该章不唯一，请选择明确source_id")
+                    else:
+                        verified_findings[index] = quoted_source(cited, finding["quote"])
             for index, promise in enumerate(report["promises"]):
-                resolve_field(promise, "evidence", sources)
+                selected = resolve_field(promise, "evidence", sources)
+                expected = condition_chapters.get(promise["condition"])
+                if expected is not None and promise["evidence"]:
+                    if selected:
+                        if selected["chapter"] != expected:
+                            issues.append(f"promises[{index}] 引用编号不属于约定的第{expected}章")
+                        else:
+                            verified_evidence[index] = source_metadata(selected)
+                    else:
+                        matches = [c for c in chapters if promise["evidence"] in c["content"]]
+                        if (
+                            len(matches) != 1
+                            or matches[0]["position"] != expected
+                            or matches[0]["content"].find(promise["evidence"])
+                            != matches[0]["content"].rfind(promise["evidence"])
+                        ):
+                            issues.append(
+                                f"promises[{index}] 裸引文须在第{expected}章唯一定位；重复或跨章时请选择该章source_id"
+                            )
+                        else:
+                            verified_evidence[index] = quoted_source(matches[0], promise["evidence"])
+                elif segment and selected:
+                    verified_evidence[index] = source_metadata(selected)
                 if promise["result"] == "pass" and (
                     not promise["evidence"] or not any(promise["evidence"] in c["content"] for c in chapters)
                 ):
                     issues.append(f"promises[{index}] 没有本次版本原文依据")
             return issues
 
+        instruction = {
+            "动作": "整书完结检查",
+            "检查范围": scope,
+            "简报": payload["brief"],
+            "固定方向": payload["fixed"],
+            "作者明确例外": self.genre_snapshot().get("author_exceptions", []),
+            "必须逐项核对的作者硬约定": required_promises,
+            "作者契约核对": "全书范围逐项核对冻结作者契约fixed_results、prohibitions与ending；‘必须逐项核对的作者硬约定’每项逐字作为promises.condition且仅列一次，不能只核对章纲而遗漏作者原话。未完成核心终局或固定结果不能closed；证据不足标unknown。分段范围只核对当前时点应推进的部分，不要求提前终局。情绪、钩子和阅读体验给具体依据与建议，不以未锁偏好冒充硬约定。",
+            "采用规划": plan,
+            "可引用原文": units,
+            "分段全文报告": reports,
+            "要求": "核对简报、采用规划中的主冲突、人物去向、明确承诺和伏笔。分段范围提供该段全文，只核对阶段推进及承接，不能把后段计划回收的伏笔当错误。全书范围汇总全部分段全文报告、报告所引的冻结正文和末章全文，核对核心承诺终局；分段当时尚未发生的后段事件须结合后段报告判断。不能因章数满而closed。不要新增泛化的‘保证全书所有伏笔无遗漏’作为承诺项；模型可能漏检的局限单列summary，作者最终通读。具体承诺缺证据仍标unknown。findings.quote及promises.evidence只填本次source_id编号，后端回填冻结原文；findings.chapter与编号章节一致。不得拼接引文。",
+        }
+        if segment:
+            instruction.update(
+                动作="批次范围检查",
+                必须逐项核对的本批约定=required_promises,
+                作者契约核对="只核对本批章级情节、当前适用的固定条件与禁止项，不要求未来全书终局或后续伏笔提前兑现。complete只表示当前范围推进及承接合格，不表示全书closed。",
+                要求="阅读本次所列固定版本全文或其分段报告和原文证据，逐项核对‘必须逐项核对的本批约定’，每项逐字作为promises.condition且仅列一次。第N章情节和固定条件必须引用第N章的source_id，不得借另一章证据通过。核对本批应发生的情节与当前因果、人物认知/能力、承接及依赖，严重当前错误列blocker。全书未来结局、尚未到回收时点的承诺不是本段错误；保留待续，不将它们改为resolved或retained来制造阶段完成。complete只判断本批是否完成，不输出closed。findings.quote与promises.evidence只选本次source_id，编号章节必须对应。不能拼接或改写引文。",
+            )
+            instruction.pop("必须逐项核对的作者硬约定")
         report = await self.grounded(
-            {
-                "动作": "整书完结检查",
-                "检查范围": scope,
-                "简报": payload["brief"],
-                "固定方向": payload["fixed"],
-                "作者明确例外": self.genre_snapshot().get("author_exceptions", []),
-                "必须逐项核对的作者硬约定": required_promises,
-                "作者契约核对": "全书范围逐项核对冻结作者契约fixed_results、prohibitions与ending；‘必须逐项核对的作者硬约定’每项逐字作为promises.condition且仅列一次，不能只核对章纲而遗漏作者原话。未完成核心终局或固定结果不能closed；证据不足标unknown。分段范围只核对当前时点应推进的部分，不要求提前终局。情绪、钩子和阅读体验给具体依据与建议，不以未锁偏好冒充硬约定。",
-                "采用规划": plan,
-                "可引用原文": units,
-                "分段全文报告": reports,
-                "要求": "核对简报、采用规划中的主冲突、人物去向、明确承诺和伏笔。分段范围提供该段全文，只核对阶段推进及承接，不能把后段计划回收的伏笔当错误。全书范围汇总全部分段全文报告、报告所引的冻结正文和末章全文，核对核心承诺终局；分段当时尚未发生的后段事件须结合后段报告判断。不能因章数满而closed。不要新增泛化的‘保证全书所有伏笔无遗漏’作为承诺项；模型可能漏检的局限单列summary，作者最终通读。具体承诺缺证据仍标unknown。findings.quote及promises.evidence只填本次source_id编号，后端回填冻结原文；findings.chapter与编号章节一致。不得拼接引文。",
-            },
-            Completion,
+            instruction,
+            SegmentCompletion if segment else Completion,
             None,
             validate,
             8192,
         )
+        if segment:
+            for index, source in verified_evidence.items():
+                report["promises"][index]["evidence_chapter"] = source["chapter"]
+                report["promises"][index]["evidence_source"] = source
+            for index, source in verified_findings.items():
+                report["findings"][index]["evidence_source"] = source
         return {
             **report,
+            **({"scope": "segment", "closed": False} if segment else {}),
             "coverage": f"{scope}：{'全部分段全文报告、其原文证据及末章全文的汇总' if previous else '所列章节的固定版本全文'}；分段模型审阅不等于作者通读或零漏检保证。",
             "source_versions": [
                 {"id": c["id"], "position": c["position"], "revision": c["revision"]} for c in chapters
@@ -1016,6 +1127,7 @@ class Worker:
 
     async def workflow(self):
         payload, result = self.task["payload"], self.task["result"]
+        segment = payload.get("completion_scope", "whole_book") == "segment"
         branch_id = self.task["branch_id"]
         current_revision = self.domain.branch(branch_id)["story_revision"]
         if result.get("expected_story_revision", current_revision) != current_revision:
@@ -1023,16 +1135,27 @@ class Worker:
         result["expected_story_revision"] = current_revision
         if "plan" not in result:
             if payload["mode"] == "assisted":
-                plan = {"chapters": payload["plots"], "ending": "遵循作者粗纲与固定情节"}
+                plan = {
+                    "chapters": payload["plots"],
+                    "ending": "本批遵循章级情节，后续全书终局不要求提前完成"
+                    if segment
+                    else "遵循作者粗纲与固定情节",
+                }
             else:
+                planning = {
+                    "动作": "全书滚动规划",
+                    "作品简报": payload["brief"],
+                    "固定方向": payload["fixed"],
+                    "章数": payload["chapters"],
+                    "要求": "给出完整粗粒度章纲和结局；编号连续。当前章生成时再细化场景，不把未来计划当事实。",
+                }
+                if segment:
+                    planning.update(
+                        动作="阶段批次规划",
+                        要求="只规划本次选定章数的阶段情节，编号连续。按简报明确当前推进范围与承接，不能把长篇开篇批次强行写成全书结局；ending记录后续长程方向，不是本批必须兑现的结果。未来计划不当事实。",
+                    )
                 plan = await self.call(
-                    {
-                        "动作": "全书滚动规划",
-                        "作品简报": payload["brief"],
-                        "固定方向": payload["fixed"],
-                        "章数": payload["chapters"],
-                        "要求": "给出完整粗粒度章纲和结局；编号连续。当前章生成时再细化场景，不把未来计划当事实。",
-                    },
+                    planning,
                     Plan,
                     self.context(branch_id),
                 )
@@ -1121,6 +1244,10 @@ class Worker:
                         "scope": "前次冻结版本的纠错材料；按当前原文核对，不把旧报告当成当前事实。",
                     },
                 }
+                if segment:
+                    instructions["本次运行范围"] = (
+                        "阶段批次：只完成当前章级情节及阶段承接。结局方向属于全书后续计划，未到本章的终局和伏笔不得提前兑现或标为回收。"
+                    )
                 for rejected in reversed(result.get("interventions", [])):
                     prior = self.domain.artifact(rejected["artifact_id"])
                     if prior["chapter_id"] == chapter["id"] and prior["status"] == "rejected":
@@ -1250,7 +1377,9 @@ class Worker:
                     self.checkpoint(result)
                 reports = parents
                 level += 1
-            completion = await self.completion_report(chapters, payload, result["plan"], "全书", reports)
+            completion = await self.completion_report(
+                chapters, payload, result["plan"], "本次批次" if segment else "全书", reports
+            )
             if self.domain.branch(branch_id)["story_revision"] != result["expected_story_revision"]:
                 raise DomainError("story_changed", "完结检查期间正文改变，报告不得用于当前稿。", 409)
             result["completion"] = {
@@ -1263,20 +1392,28 @@ class Worker:
                 for f in report["findings"]
                 if f["severity"] == "blocker"
             ]
+            if self.domain.task(self.task["id"])["pause"]:
+                self.checkpoint(result, "paused")
+                return
             if (
-                completion["closed"]
-                and completion["promises"]
+                (completion["complete"] if segment else completion["closed"] and completion["promises"])
                 and all(p["result"] == "pass" for p in completion["promises"])
                 and not blockers
                 and not any(c["stale"] for c in chapters)
             ):
-                self.checkpoint(result, "production_complete")
+                self.checkpoint(result, "segment_complete" if segment else "production_complete")
                 return
             if round_number < 2 and blockers:
                 result["next_chapter"] = min(f["chapter"] for f in blockers)
                 self.checkpoint(result)
             else:
-                self.checkpoint(result, "blocked_creative", "整书检查仍有未通过或未知项，已保留报告供审阅。")
+                self.checkpoint(
+                    result,
+                    "blocked_creative",
+                    "本批范围检查仍有未通过或未知项，已保留报告供审阅。"
+                    if segment
+                    else "整书检查仍有未通过或未知项，已保留报告供审阅。",
+                )
                 return
 
     async def run_once(self):

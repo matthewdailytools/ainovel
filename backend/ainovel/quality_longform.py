@@ -18,6 +18,12 @@ from .quality_reference import write_json
 from .settings import ROOT, Settings
 
 ACTIVE = {"queued", "running"}
+EVALUATION_WRITING_PROFILE = (
+    "第三人称限定视角，克制白话，人物选择有依据，遵守能力和信息边界。"
+    "涉及测量或数值比较时先交代共同固定基准、单位与方向，前后一致；"
+    "基准不能对齐时保留原始观测和待验证推测，不写成确定证据。"
+    "估计与实测精度分开，自查算术及高低关系，不为解释而重复段落。"
+)
 
 
 def signature(value):
@@ -66,6 +72,7 @@ def workflow_payload(spec, story, novel_id, mode):
     return WorkflowInput(
         novel_id=novel_id,
         mode=mode,
+        completion_scope="segment" if spec.stage == "ten" else "whole_book",
         brief=story["brief"] + scope,
         fixed=story["fixed"],
         plots=deepcopy(story["chapters"][: spec.chapters]) if mode == "assisted" else [],
@@ -76,6 +83,7 @@ def workflow_payload(spec, story, novel_id, mode):
         scene_maintenance=True,
         min_chars=spec.min_chars,
         max_chars=spec.max_chars,
+        writing_profile=EVALUATION_WRITING_PROFILE,
         budget_limit=spec.run_limit,
     ).model_dump(exclude_none=True)
 
@@ -181,6 +189,10 @@ class LongformEvaluation:
             workflows[mode] = {"payload": payload, "payload_sha256": signature(payload), "started": time()}
             self.save()
         entry = workflows[mode]
+        if self.spec.stage == "ten" and entry["payload"].get("completion_scope") != "segment":
+            raise ValueError(
+                "Legacy ten-chapter payload used whole-book completion; preserve it for read-only observation and start an explicit segment run"
+            )
         if signature(entry["payload"]) != entry["payload_sha256"]:
             raise ValueError("Frozen workflow payload is damaged")
         if "id" not in entry:
@@ -262,6 +274,8 @@ class LongformEvaluation:
             "capture_consistent": before == after,
             "captured_story_revision": after,
             "model_completion": task["status"] == "production_complete",
+            "segment_completion": task["status"] == "segment_complete",
+            "completion_scope": task["payload"].get("completion_scope", "whole_book"),
             "literary_quality": "unverified",
             "benefit": "unverified",
             "scope": self.record["scope"],
@@ -306,7 +320,8 @@ class LongformEvaluation:
         novel = self.create_novel()
         for mode in self.spec.modes:
             task = self.observe(self.dispatch(mode, novel))
-            if task["status"] != "production_complete":
+            expected_terminal = "segment_complete" if self.spec.stage == "ten" else "production_complete"
+            if task["status"] != expected_terminal:
                 self.record["stopped"] = {
                     "task_id": task["id"],
                     "status": task["status"],

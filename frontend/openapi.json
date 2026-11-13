@@ -3720,6 +3720,12 @@
       },
       "WorkflowInput": {
         "properties": {
+          "completion_scope": {
+            "type": "string",
+            "enum": ["whole_book", "segment"],
+            "title": "Completion Scope",
+            "default": "whole_book"
+          },
           "scene_maintenance": { "type": "boolean", "title": "Scene Maintenance", "default": false },
           "structured_maintenance": {
             "type": "boolean",

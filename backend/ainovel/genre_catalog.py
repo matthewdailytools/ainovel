@@ -183,12 +183,14 @@ _ACTIONS = {
     "world.generate": "world",
     "ideation.explore": "ideation",
     "全书滚动规划": "planning",
+    "阶段批次规划": "planning",
     "根据情节补写正文": "scene",
     "按章纲写完整正文": "scene",
     "审查正文": "review",
     "用局部替换修订正文": "review",
     "从正文提取事实候选与章节摘要": "memory",
     "整书完结检查": "completion",
+    "批次范围检查": "completion",
 }
 _OWNERS = {
     "scene": {"M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21"},

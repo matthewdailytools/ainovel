@@ -125,6 +125,7 @@ class Plot(Input):
 
 
 class WorkflowInput(Input):
+    completion_scope: Literal["whole_book", "segment"] = "whole_book"
     scene_maintenance: bool = False
     structured_maintenance: bool = False
     inherit_story_record_ids: list[str] = Field(default_factory=list, max_length=300)
@@ -204,6 +205,13 @@ class Plan(Input):
 
 class Completion(Input):
     closed: bool
+    promises: list[ReviewCheck]
+    findings: list[Finding]
+    summary: str
+
+
+class SegmentCompletion(Input):
+    complete: bool
     promises: list[ReviewCheck]
     findings: list[Finding]
     summary: str

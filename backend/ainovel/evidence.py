@@ -107,11 +107,52 @@ def completion_sources(chapters, previous=()):
                 quote = item[field]
                 if not quote:
                     continue
+                expected_chapter = item["chapter"] if key == "findings" else item.get("evidence_chapter")
+                verified = item.get("evidence_source")
+                if verified is not None:
+                    if not isinstance(verified, dict) or set(verified) != {
+                        "chapter",
+                        "chapter_id",
+                        "revision",
+                        "start",
+                        "end",
+                    }:
+                        raise ValueError("Completion report source metadata is invalid")
+                    chapter = next(
+                        (
+                            c
+                            for c in chapters
+                            if c["id"] == verified["chapter_id"]
+                            and c["revision"] == verified["revision"]
+                            and c["position"] == verified["chapter"]
+                        ),
+                        None,
+                    )
+                    if not chapter or (
+                        expected_chapter is not None and chapter["position"] != expected_chapter
+                    ):
+                        raise ValueError("Completion report source version is not in the frozen chapters")
+                    start, end = verified["start"], verified["end"]
+                    raw = chapter["content"].encode("utf-16-le")
+                    if (
+                        type(start) is not int
+                        or type(end) is not int
+                        or not 0 <= start < end <= len(raw) // 2
+                    ):
+                        raise ValueError("Completion report source range is invalid")
+                    if raw[start * 2 : end * 2].decode("utf-16-le") != quote:
+                        raise ValueError("Completion report source text differs from the frozen quotation")
+                    source_id = f"C{chapter['position']:03}R{len(units) + 1:04}"
+                    item[field] = append(
+                        {"source_id": source_id, "text": quote, "start": start, "end": end}, chapter
+                    )
+                    continue
                 chapter = next(
                     (
                         c
                         for c in chapters
-                        if quote in c["content"] and (key != "findings" or c["position"] == item["chapter"])
+                        if quote in c["content"]
+                        and (expected_chapter is None or c["position"] == expected_chapter)
                     ),
                     None,
                 )

@@ -27,6 +27,7 @@ def same_task_payload(left, right):
                 (k in optional and v is None)
                 or (k in {"finding_indices", "story_chapter_ids", "inherit_story_record_ids"} and v == [])
                 or (k == "context_position" and v == 0)
+                or (k == "completion_scope" and v == "whole_book")
                 or (
                     k in {"structured_maintenance", "scene_maintenance", "include_scene_ranges"}
                     and v is False
@@ -807,9 +808,11 @@ class Domain:
             if spec and not spec["min_chars"] <= char_count(c["content"]) <= spec["max_chars"]
         ]
         model_report = production.get("completion", {})
+        completion_scope = spec.get("completion_scope", "whole_book")
         promises = completion_promises(self, branch_id)
         complete = (
-            bool(chapters)
+            completion_scope == "whole_book"
+            and bool(chapters)
             and len(chapters) == expected
             and not missing
             and not length_failures
@@ -817,6 +820,20 @@ class Domain:
             and model_report.get("closed", False)
             and not any(f["severity"] == "blocker" for f in model_report.get("findings", []))
             and workflow[0]["status"] == "production_complete"
+            and production.get("expected_story_revision") == branch["story_revision"]
+        )
+        segment_complete = (
+            completion_scope == "segment"
+            and bool(chapters)
+            and len(chapters) == expected
+            and not missing
+            and not length_failures
+            and model_report.get("complete", False)
+            and model_report.get("scope") == "segment"
+            and model_report.get("closed") is False
+            and all(p["result"] == "pass" for p in model_report.get("promises", []))
+            and not any(f["severity"] == "blocker" for f in model_report.get("findings", []))
+            and workflow[0]["status"] == "segment_complete"
             and production.get("expected_story_revision") == branch["story_revision"]
         )
         passed = complete and all(
@@ -831,6 +848,8 @@ class Domain:
             "chars": sum(char_count(c["content"]) for c in chapters),
             "missing_or_stale": missing,
             "length_failures": length_failures,
+            "completion_scope": completion_scope,
+            "segment_complete": segment_complete,
             "production_complete": complete,
             "accepted": passed,
             "author_finalized": finalized["author_finalized"],
@@ -838,7 +857,11 @@ class Domain:
             "assessments": list(latest.values()),
             "model_report": production.get("completion"),
             "promises": promises,
-            "note": "模型报告与作者验收分别记录；章数完成不等于全书通过。",
+            "note": (
+                "本批范围审查与全书完结分别记录；阶段完成不代表全书闭合或作者验收通过。"
+                if completion_scope == "segment"
+                else "模型报告与作者验收分别记录；章数完成不等于全书通过。"
+            ),
         }
 
     def export(self, branch_id, format="md"):

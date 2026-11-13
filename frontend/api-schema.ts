@@ -2345,6 +2345,12 @@ export interface components {
     /** WorkflowInput */
     WorkflowInput: {
       /**
+       * Completion Scope
+       * @default whole_book
+       * @enum {string}
+       */
+      completion_scope: 'whole_book' | 'segment'
+      /**
        * Scene Maintenance
        * @default false
        */

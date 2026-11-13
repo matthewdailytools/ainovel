@@ -37,6 +37,7 @@ export function WorkflowPage({
   onGenreSettings: () => void
 }) {
   const [mode, setMode] = useState<'assisted' | 'automatic'>('assisted')
+  const [completionScope, setCompletionScope] = useState<'whole_book' | 'segment'>('whole_book')
   const [brief, setBrief] = useState(novel.brief)
   const [fixed, setFixed] = useState('')
   const [plots, setPlots] = useState('')
@@ -71,6 +72,7 @@ export function WorkflowPage({
   const [status, setStatus] = useState('')
   const formSignature = JSON.stringify([
     mode,
+    completionScope,
     brief,
     fixed,
     plots,
@@ -201,6 +203,7 @@ export function WorkflowPage({
         novel_id: novel.id,
         source_branch_id: branchId || null,
         mode,
+        completion_scope: completionScope,
         brief,
         fixed: fixed
           .split('\n')
@@ -301,6 +304,21 @@ export function WorkflowPage({
               </label>
             </fieldset>
             <label>
+              本次任务范围
+              <select
+                value={completionScope}
+                onChange={(e) => setCompletionScope(e.target.value as 'whole_book' | 'segment')}
+              >
+                <option value="whole_book">整书完结：本次章数覆盖完整小说</option>
+                <option value="segment">阶段批次：只完成本次选定章节</option>
+              </select>
+            </label>
+            <p className="small">
+              {completionScope === 'segment'
+                ? '完成本批情节、篇幅、状态维护与范围审查后记录阶段完成。后续终局和未到回收时点的伏笔继续保留，不将本批标为全书完结。'
+                : '全部章数完成后核对主冲突、作者终局与已维护承诺；存在未闭合或严重问题时，全书仍未完成。'}
+            </p>
+            <label>
               作品设定、粗纲与结局方向
               <textarea
                 rows={7}
@@ -316,7 +334,7 @@ export function WorkflowPage({
               </button>
             )}
             <label>
-              全书固定条件（每行一条）
+              {completionScope === 'segment' ? '本批适用固定条件（每行一条）' : '全书固定条件（每行一条）'}
               <textarea rows={3} value={fixed} onChange={(e) => setFixed(e.target.value)} />
             </label>
             {mode === 'assisted' && (
@@ -462,7 +480,8 @@ export function WorkflowPage({
                   {visibleTasks.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.payload.mode === 'assisted' ? '半自动' : '全自动'} · {t.payload.account} ·{' '}
-                      {label(t.status)} · {new Date(t.created * 1000).toLocaleString('zh-CN')}
+                      {t.payload.completion_scope === 'segment' ? '阶段批次' : '整书完结'} · {label(t.status)}{' '}
+                      · {new Date(t.created * 1000).toLocaleString('zh-CN')}
                     </option>
                   ))}
                 </select>
@@ -484,6 +503,11 @@ export function WorkflowPage({
                     value={Math.min((task.result.next_chapter || 1) - 1, task.payload.chapters || 36)}
                   />
                   <p role="status">{task.error || '生成、审查、事实和采纳分别留有记录。'}</p>
+                  <p className="small muted">
+                    {task.payload.completion_scope === 'segment'
+                      ? '本次为阶段批次：范围检查通过只表示本批完成，未来终局与待回收承诺不被自动改为已闭合。'
+                      : '本次为整书范围：所有已维护承诺与核心终局通过后，才记录模型生产完成。'}
+                  </p>
                   <p className="small muted">
                     执行账户：{task.payload.account} · 本次预算上限：
                     {task.payload.budget_limit ?? '服务商共享上限'}{' '}
@@ -789,7 +813,11 @@ export function WorkflowPage({
                     </div>
                   )}
                   <details>
-                    <summary>采用规划与整书检查报告</summary>
+                    <summary>
+                      {task.payload.completion_scope === 'segment'
+                        ? '采用规划与本批范围报告'
+                        : '采用规划与整书检查报告'}
+                    </summary>
                     <pre>{JSON.stringify(task.result, null, 2)}</pre>
                   </details>
                   <a className="button" href={`/api/branches/${task.branch_id}/export?format=md`} download>

@@ -19,6 +19,9 @@ def test_ten_is_original_opening_not_compressed_book_and_books_remain_36(story):
     assisted = workflow_payload(ten, story, "novel", "assisted")
     automatic = workflow_payload(ten, story, "novel", "automatic")
     assert assisted["chapters"] == automatic["chapters"] == 10
+    assert assisted["completion_scope"] == automatic["completion_scope"] == "segment"
+    assert assisted["writing_profile"] == automatic["writing_profile"]
+    assert "共同固定基准" in assisted["writing_profile"]
     assert assisted["plots"] == story["chapters"][:10]
     assert automatic["plots"] == []
     assert assisted["brief"] == automatic["brief"]
@@ -29,6 +32,44 @@ def test_ten_is_original_opening_not_compressed_book_and_books_remain_36(story):
     books = workflow_payload(replace(ten, stage="books"), story, "novel", "assisted")
     assert books["chapters"] == 36 and books["plots"] == story["chapters"]
     assert books["brief"] == story["brief"]
+    assert books["completion_scope"] == "whole_book"
+    assert books["writing_profile"] == assisted["writing_profile"]
+
+
+def test_legacy_ten_payload_is_not_silently_reclassified_or_redispatched(tmp_path, story):
+    with httpx.Client(base_url="http://127.0.0.1") as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        payload = workflow_payload(RunSpec(), story, "n", "assisted")
+        payload.pop("completion_scope")
+        from ainovel.quality_longform import signature
+
+        runner.record["workflows"]["assisted"] = {
+            "payload": payload,
+            "payload_sha256": signature(payload),
+            "id": "old-frozen-task",
+        }
+        with pytest.raises(ValueError, match="Legacy ten-chapter"):
+            runner.dispatch("assisted", {"id": "n"})
+        assert "completion_scope" not in runner.record["workflows"]["assisted"]["payload"]
+
+
+@pytest.mark.parametrize("status", ["segment_complete", "production_complete"])
+def test_ten_run_requires_segment_terminal_without_confusing_book_completion(
+    tmp_path, story, monkeypatch, status
+):
+    with httpx.Client(base_url="http://127.0.0.1") as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        monkeypatch.setattr(
+            runner,
+            "get",
+            lambda path: {"accounts": [{"id": "deepseek", "configured": True, "priced": True}], "budget": []},
+        )
+        monkeypatch.setattr(runner, "create_novel", lambda: {"id": "n"})
+        monkeypatch.setattr(runner, "dispatch", lambda mode, novel: "t")
+        monkeypatch.setattr(runner, "observe", lambda identifier: task(status))
+        runner.run()
+    assert ("finished" in runner.record) == (status == "segment_complete")
+    assert ("stopped" in runner.record) == (status != "segment_complete")
 
 
 @pytest.mark.parametrize(

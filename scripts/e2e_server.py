@@ -19,7 +19,7 @@ from ainovel.worker import Worker
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend/tests"))
 from test_reference_flow import Model as ReferenceModel  # noqa: E402
 from test_story_extraction import ExtractionModel, UpdateModel  # noqa: E402
-from test_api_worker import FakeModel as BookModel  # noqa: E402
+from test_workflow_scope import SegmentModel as BookModel  # noqa: E402
 
 
 class Model(ReferenceModel):
@@ -104,9 +104,11 @@ class Model(ReferenceModel):
             }
         if instruction.get("动作") in {
             "全书滚动规划",
+            "阶段批次规划",
             "按章纲写完整正文",
             "从正文提取事实候选与章节摘要",
             "整书完结检查",
+            "批次范围检查",
         }:
             self.book_tasks.add(task_id)
         if task_id in self.book_tasks:
