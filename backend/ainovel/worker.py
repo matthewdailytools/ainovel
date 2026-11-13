@@ -18,7 +18,7 @@ from .evidence import source_units, resolve_field, source_schema, completion_sou
 from .models import Completion, Memory, Plan, Review, RevisionPatch, SegmentCompletion
 from .providers import ModelClient
 from .prompt_encoding import encode_prompt
-from .settings import Settings
+from .settings import ROOT, Settings
 from .targeted_revision import run_targeted_revision, validate_targeted_revision
 from .text_context import text_context
 
@@ -68,6 +68,25 @@ def parse_json(text):
         return json.loads(body)
     except ValueError as error:
         raise DomainError("invalid_structure", "模型结构化输出无法解析，已停止采纳。") from error
+
+
+def internal_diagnostic(error, task_id, attempt):
+    """Locate unexpected faults without serializing exception messages or input."""
+    frames = []
+    trace = error.__traceback__
+    while trace:
+        code = trace.tb_frame.f_code
+        try:
+            path = Path(code.co_filename).resolve()
+            relative = path.relative_to(ROOT)
+            if path.is_file() and relative.parts[0] in {"backend", "scripts"}:
+                frames.append(
+                    {"path": relative.as_posix(), "function": code.co_name, "line": trace.tb_lineno}
+                )
+        except OSError, ValueError:
+            pass
+        trace = trace.tb_next
+    return {"task_id": task_id, "attempt": attempt, "error_type": type(error).__name__, "frames": frames[-8:]}
 
 
 class Worker:
@@ -1249,8 +1268,19 @@ class Worker:
                         "阶段批次：只完成当前章级情节及阶段承接。结局方向属于全书后续计划，未到本章的终局和伏笔不得提前兑现或标为回收。"
                     )
                 for rejected in reversed(result.get("interventions", [])):
-                    prior = self.domain.artifact(rejected["artifact_id"])
-                    if prior["chapter_id"] == chapter["id"] and prior["status"] == "rejected":
+                    # Legacy redo records have no action; other intervention
+                    # kinds describe maintenance/account changes, not old prose.
+                    if "action" in rejected and rejected["action"] != "regenerate_pending":
+                        continue
+                    artifact_id = rejected.get("artifact_id")
+                    if artifact_id is None:
+                        continue
+                    prior = self.domain.artifact(artifact_id)
+                    if (
+                        prior["kind"] == "chapter_draft"
+                        and prior["chapter_id"] == chapter["id"]
+                        and prior["status"] == "rejected"
+                    ):
                         instructions["本章前次未采纳的审查意见"] = {
                             "review": prior["payload"].get("review"),
                             "chars": char_count(prior["payload"].get("text", "")),
@@ -1435,14 +1465,24 @@ class Worker:
                 else "内部步骤失败，进度已保留；请查看离线诊断。"
             )
             state = "cancelled" if code == "cancelled" else "blocked_runtime"
+            diagnostic = None
             if not isinstance(error, DomainError):
-                logging.error("task=%s error_type=%s", task["id"], type(error).__name__)
+                diagnostic = internal_diagnostic(error, task["id"], self.attempt)
+                logging.error(
+                    "task=%s attempt=%s error_type=%s frames=%s",
+                    diagnostic["task_id"],
+                    diagnostic["attempt"],
+                    diagnostic["error_type"],
+                    dumps(diagnostic["frames"]),
+                )
             with self.db.connect(True) as db:
                 changed = db.execute(
                     "UPDATE tasks SET status=?,error=?,updated=? WHERE id=? AND attempt=?",
                     (state, message, time(), task["id"], self.attempt),
                 )
                 if changed.rowcount:
+                    if diagnostic is not None:
+                        self.db.event(db, task["id"], "internal_error", diagnostic)
                     self.db.event(
                         db,
                         task["id"],
