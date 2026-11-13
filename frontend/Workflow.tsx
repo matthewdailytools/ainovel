@@ -16,6 +16,8 @@ import story from '../fixtures/original-story.json'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
 import { StoryInheritance, type InheritanceSelection } from './StoryInheritance'
+import { characterFieldRepairEnabled } from './characterFieldRepair'
+import { CharacterFieldRepairOption, FrozenCharacterFieldRepairPolicy } from './CharacterRepairDetails'
 
 export function WorkflowPage({
   novel,
@@ -47,6 +49,7 @@ export function WorkflowPage({
   const [adoption, setAdoption] = useState<'manual' | 'automatic'>('manual')
   const [structuredMaintenance, setStructuredMaintenance] = useState(true)
   const [sceneMaintenance, setSceneMaintenance] = useState(true)
+  const [characterFieldRepair, setCharacterFieldRepair] = useState(false)
   const [inheritance, setInheritance] = useState<InheritanceSelection>()
   const [profile, setProfile] = useState(
     '第三人称限定视角，克制白话，动作有因果，人物选择遵循当时掌握的信息与资源。',
@@ -82,6 +85,7 @@ export function WorkflowPage({
     adoption,
     structuredMaintenance,
     sceneMaintenance,
+    characterFieldRepair,
     profile,
     runLimit,
   ])
@@ -217,6 +221,11 @@ export function WorkflowPage({
         adoption,
         structured_maintenance: structuredMaintenance,
         scene_maintenance: structuredMaintenance && sceneMaintenance,
+        character_field_repair: characterFieldRepairEnabled(
+          characterFieldRepair,
+          adoption,
+          structuredMaintenance,
+        ),
         inherit_story_record_ids: inheritance?.selected_ids || [],
         inherit_source_revision: inheritance?.selected_ids.length ? inheritance.source_story_revision : null,
         writing_profile: profile,
@@ -396,7 +405,11 @@ export function WorkflowPage({
               采纳政策
               <select
                 value={adoption}
-                onChange={(e) => setAdoption(e.target.value as 'manual' | 'automatic')}
+                onChange={(e) => {
+                  const value = e.target.value as 'manual' | 'automatic'
+                  setAdoption(value)
+                  if (value !== 'automatic') setCharacterFieldRepair(false)
+                }}
               >
                 <option value="manual">每章保留候选，作者采纳后推进</option>
                 <option value="automatic">通过本章检查后自动采纳</option>
@@ -407,7 +420,10 @@ export function WorkflowPage({
                 <input
                   type="checkbox"
                   checked={structuredMaintenance}
-                  onChange={(e) => setStructuredMaintenance(e.target.checked)}
+                  onChange={(e) => {
+                    setStructuredMaintenance(e.target.checked)
+                    if (!e.target.checked) setCharacterFieldRepair(false)
+                  }}
                 />
                 每章采用后整理人物、时点、事件和伏笔
               </span>
@@ -427,6 +443,13 @@ export function WorkflowPage({
             <p className="small">
               与结构使用同一次整理调用；按新正文重新定位，未知时点明确保留。作者编辑过的旧绑定需核对后替换。
             </p>
+            <CharacterFieldRepairOption
+              checked={characterFieldRepair}
+              adoption={adoption}
+              maintenance={structuredMaintenance}
+              busy={busy}
+              onChange={setCharacterFieldRepair}
+            />
             <label>
               本批次预算（可低于共享总上限）
               <input
@@ -516,6 +539,7 @@ export function WorkflowPage({
                   {task.result.continued_from && (
                     <p className="small muted">已承接上次检查点；原稿、费用历史与修订轮次保留。</p>
                   )}
+                  <FrozenCharacterFieldRepairPolicy enabled={task.payload.character_field_repair} />
                   <details>
                     <summary>本批次冻结的频道与题材</summary>
                     {task.result.author_contract_snapshot && (

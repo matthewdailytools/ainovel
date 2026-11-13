@@ -2360,6 +2360,11 @@ export interface components {
        * @default false
        */
       structured_maintenance: boolean
+      /**
+       * Character Field Repair
+       * @default false
+       */
+      character_field_repair: boolean
       /** Inherit Story Record Ids */
       inherit_story_record_ids?: string[]
       /** Inherit Source Revision */

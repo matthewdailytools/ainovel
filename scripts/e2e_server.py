@@ -22,18 +22,64 @@ from test_story_extraction import ExtractionModel, UpdateModel  # noqa: E402
 from test_workflow_scope import SegmentModel as BookModel  # noqa: E402
 from helpers.character_review_fixture import character_review_output  # noqa: E402
 
+CHARACTER_REPAIR_FIXTURE = "character-field-repair-e2e"
+UNSUPPORTED_CHARACTER_NOTE = "工程替身错误备注：沈砚已经掌握飞行能力。"
+GROUNDED_CHARACTER_NOTE = "沈砚用旧尺测量潮水，留下可以回查的记录。"
+
 
 class Model(ReferenceModel):
     def __init__(self):
         super().__init__()
         self.book_tasks = set()
         self.book_model = BookModel()
+        self.character_repair_tasks = {}
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        source_instruction = instruction
+        while "原始任务" in source_instruction:
+            source_instruction = source_instruction["原始任务"]
+        brief = source_instruction.get("作品简报", "")
+        if CHARACTER_REPAIR_FIXTURE in brief:
+            self.character_repair_tasks[task_id] = "cannot" if "fixture-cannot-repair" in brief else "repair"
+        fixture = self.character_repair_tasks.get(task_id)
+        if fixture and source_instruction.get("动作") == "修正未采纳人物自由文本字段":
+            return {
+                "text": json.dumps(
+                    {
+                        "version": source_instruction["人物修订契约版本"],
+                        "input_sha256": source_instruction["input_sha256"],
+                        "fields": [
+                            {
+                                "record_id": target["record_id"],
+                                "field": target["field"],
+                                "old_sha256": target["old_sha256"],
+                                "decision": "cannot_repair" if fixture == "cannot" else "replace",
+                                "replacement": None if fixture == "cannot" else GROUNDED_CHARACTER_NOTE,
+                                "source_ids": target["source_ids"][:1],
+                                "reason": "确定性工程替身：只保留本项来源明确出现的测量与记录，不制造能力。",
+                            }
+                            for target in source_instruction["人物字段"]
+                        ],
+                    }
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-character-repair",
+                "model": "offline-character-repair-fixture",
+            }
         character_review = character_review_output(instruction)
         if character_review is not None:
+            if fixture:
+                for target, field in zip(
+                    source_instruction["人物字段"], character_review["fields"], strict=True
+                ):
+                    if target["text"] == UNSUPPORTED_CHARACTER_NOTE:
+                        field.update(
+                            result="unknown",
+                            source_ids=[],
+                            reason="工程替身：本项原文没有飞行能力依据，保持unknown。",
+                        )
             return {
                 "text": json.dumps(character_review),
                 "usage": {"input": 1, "output": 1},
@@ -163,6 +209,8 @@ class Model(ReferenceModel):
                         }
                     ]
                 )
+                if fixture and records:
+                    records[0]["record"]["notes"] = UNSUPPORTED_CHARACTER_NOTE
                 realized_events = set()
                 for old in instruction["已有记录索引"]:
                     if (

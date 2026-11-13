@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { api, label, type Artifact, type Chapter } from './api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api, label, type Artifact, type Chapter, type Task } from './api'
 import type { components } from './api-schema'
 import type { Notify } from './App'
 import { Difference } from './Editor'
@@ -9,6 +9,8 @@ import {
   extractionSourcesStale,
   type CharacterReviewResult,
 } from './characterSemanticReview'
+import { characterRepairAccess, currentRepairTasks } from './characterFieldRepair'
+import { CharacterFieldRepair } from './CharacterRepairDetails'
 
 type Schemas = components['schemas']
 type RecordPayload =
@@ -182,15 +184,60 @@ export function StoryExtraction({
   const [message, setMessage] = useState('')
   const [loadingArtifact, setLoadingArtifact] = useState(false)
   const [artifactError, setArtifactError] = useState('')
+  const [repairContext, setRepairContext] = useState<{
+    branchId: string
+    artifactId: string
+    tasks: Task[]
+    loaded: boolean
+    error: string
+  }>()
   const pending = useRef<{ signature: string; key: string } | null>(null)
   const alive = useRef(true)
   const artifactRequests = useRef(createExtractionRequestGuard())
+  const repairRequests = useRef(createExtractionRequestGuard())
   const currentTarget = useRef({ branchId, artifactId })
   currentTarget.current = { branchId, artifactId }
   const artifact =
     loadedArtifact?.branchId === branchId && loadedArtifact.value.id === artifactId
       ? loadedArtifact.value
       : undefined
+  const refreshRepairContext = useCallback(
+    async (candidate: ExtractionArtifact) => {
+      const isLatest = repairRequests.current.begin()
+      try {
+        const tasks = await currentRepairTasks(
+          candidate,
+          branchId,
+          await api<Task[]>(`/tasks?branch_id=${encodeURIComponent(branchId)}`),
+          (id) => api<Task>(`/tasks/${encodeURIComponent(id)}`),
+        )
+        if (
+          alive.current &&
+          isLatest() &&
+          currentTarget.current.branchId === branchId &&
+          currentTarget.current.artifactId === candidate.id
+        )
+          setRepairContext({ branchId, artifactId: candidate.id, tasks, loaded: true, error: '' })
+        return true
+      } catch (e) {
+        if (
+          alive.current &&
+          isLatest() &&
+          currentTarget.current.branchId === branchId &&
+          currentTarget.current.artifactId === candidate.id
+        )
+          setRepairContext({
+            branchId,
+            artifactId: candidate.id,
+            tasks: [],
+            loaded: false,
+            error: e instanceof Error ? e.message : '修订链读取失败，请刷新核对。',
+          })
+        return false
+      }
+    },
+    [branchId],
+  )
   useEffect(() => {
     alive.current = true
     let active = true
@@ -231,8 +278,9 @@ export function StoryExtraction({
       currentTarget.current.branchId === branchId &&
       currentTarget.current.artifactId === artifactId
     if (artifactId)
-      void api<ExtractionArtifact>(`/artifacts/${artifactId}`)
+      void api<ExtractionArtifact>(`/artifacts/${encodeURIComponent(artifactId)}`)
         .then((a) => {
+          if (a.branch_id !== branchId) throw new Error('候选不属于当前工作版本。')
           if (isCurrent()) setLoadedArtifact({ branchId, value: a })
         })
         .catch((e: unknown) => {
@@ -249,6 +297,15 @@ export function StoryExtraction({
       artifactRequests.current.invalidate()
     }
   }, [artifactId, branchId, notify])
+  useEffect(() => {
+    if (!artifact) return
+    void refreshRepairContext(artifact)
+    const timer = setInterval(() => void refreshRepairContext(artifact), 2000)
+    return () => {
+      clearInterval(timer)
+      repairRequests.current.invalidate()
+    }
+  }, [artifact, refreshRepairContext])
   async function refreshArtifact() {
     const isLatest = artifactRequests.current.begin()
     const isCurrent = () =>
@@ -259,10 +316,17 @@ export function StoryExtraction({
     setLoadingArtifact(true)
     setArtifactError('')
     try {
-      const next = await api<ExtractionArtifact>(`/artifacts/${artifactId}`)
+      const next = await api<ExtractionArtifact>(`/artifacts/${encodeURIComponent(artifactId)}`)
+      if (next.branch_id !== branchId) throw new Error('候选不属于当前工作版本。')
       if (isCurrent()) {
         setLoadedArtifact({ branchId, value: next })
-        setMessage('候选与复核报告已刷新，当前选择和输入保留，请核对最新内容。')
+        const repaired = await refreshRepairContext(next)
+        if (isCurrent())
+          setMessage(
+            repaired
+              ? '候选与复核报告已刷新，当前选择和输入保留，请核对最新内容。'
+              : '候选已读取，修订链尚未核对；选择和输入保留，请刷新重试。',
+          )
       }
     } catch (e) {
       if (isCurrent()) {
@@ -286,6 +350,20 @@ export function StoryExtraction({
     }
   }
   const running = history.tasks.filter((t) => ['queued', 'running'].includes(t.status))
+  const currentRepairContext =
+    repairContext?.branchId === branchId && repairContext.artifactId === artifactId
+      ? repairContext
+      : undefined
+  const repairAccess = artifact
+    ? characterRepairAccess(
+        artifact,
+        branchId,
+        currentRepairContext?.tasks || [],
+        !!currentRepairContext?.loaded,
+        Object.fromEntries(history.artifacts.map((a) => [a.id, a.status])),
+      )
+    : undefined
+  const repairReadOnly = !repairAccess || repairAccess.readOnly
   const stale = artifact && artifact.payload.source_story_revision !== storyRevision
   const reviewSourceStale =
     !!stale || !!(artifact && extractionSourcesStale(artifact.payload.source_manifest, chapters))
@@ -400,6 +478,9 @@ export function StoryExtraction({
             onChange={(e) => setArtifactSelection({ branchId, id: e.target.value })}
           >
             <option value="">请选择</option>
+            {artifactId && !history.artifacts.some((a) => a.id === artifactId) && (
+              <option value={artifactId}>修订链中的候选 · {artifactId.slice(0, 8)}</option>
+            )}
             {history.artifacts.map((a) => (
               <option key={a.id} value={a.id}>
                 {new Date(a.created * 1000).toLocaleString()} · {label(a.status)} · {a.id.slice(0, 8)}
@@ -419,6 +500,20 @@ export function StoryExtraction({
             <p>
               {artifact.payload.coverage} · {label(artifact.status)}
             </p>
+            {(currentRepairContext?.error ||
+              (!artifact.basis.character_field_repair && !repairAccess?.rootId && repairAccess?.reason)) && (
+              <p role="status">{currentRepairContext?.error || repairAccess?.reason}</p>
+            )}
+            {repairAccess && (
+              <CharacterFieldRepair
+                value={artifact.basis.character_field_repair}
+                access={repairAccess}
+                currentId={artifact.id}
+                busy={busy || loadingArtifact}
+                nameFor={nameFor}
+                onSelect={(id) => setArtifactSelection({ branchId, id })}
+              />
+            )}
             <p>
               来源故事修订{artifact.payload.source_story_revision}；当前{storyRevision}。
               {stale ? '源稿或故事已变更，不能直接采用旧候选。' : ''}
@@ -445,7 +540,7 @@ export function StoryExtraction({
                 <label className="check">
                   <input
                     type="checkbox"
-                    disabled={artifact.status !== 'candidate' || !!stale}
+                    disabled={busy || repairReadOnly || artifact.status !== 'candidate' || !!stale}
                     checked={selected.includes(p.id)}
                     onChange={(e) =>
                       setSelected((old) =>
@@ -552,7 +647,7 @@ export function StoryExtraction({
                     <label className="check">
                       <input
                         type="checkbox"
-                        disabled={busy || !!stale || artifact.status !== 'candidate'}
+                        disabled={busy || repairReadOnly || !!stale || artifact.status !== 'candidate'}
                         checked={selectedScenes.includes(s.id)}
                         onChange={(e) =>
                           setSelectedScenes((old) =>
@@ -597,7 +692,7 @@ export function StoryExtraction({
                         type="checkbox"
                         checked={confirmReplacement}
                         onChange={(e) => setConfirmReplacement(e.target.checked)}
-                        disabled={busy || artifact.status !== 'candidate'}
+                        disabled={busy || repairReadOnly || artifact.status !== 'candidate'}
                       />
                       确认归档旧绑定并采用所选新范围（历史保留）
                     </label>
@@ -609,6 +704,7 @@ export function StoryExtraction({
               className="primary"
               disabled={
                 busy ||
+                repairReadOnly ||
                 !!stale ||
                 artifact.status !== 'candidate' ||
                 (!selected.length &&
@@ -617,6 +713,8 @@ export function StoryExtraction({
               }
               onClick={() =>
                 void perform(async () => {
+                  if (repairReadOnly)
+                    throw new Error('历史或未核对的修订候选不能采用，请刷新并选择当前候选。')
                   const body = {
                     base_story_revision: storyRevision,
                     candidate_revision: artifact.candidate_revision,
@@ -645,9 +743,11 @@ export function StoryExtraction({
               确认采用所选结构（不修改正文）
             </button>
             <button
-              disabled={busy || artifact.status !== 'candidate'}
+              disabled={busy || repairReadOnly || artifact.status !== 'candidate'}
               onClick={() =>
                 void perform(async () => {
+                  if (repairReadOnly)
+                    throw new Error('历史或未核对的修订候选不能拒绝，请刷新并选择当前候选。')
                   await api(`/artifacts/${artifact.id}/reject`, 'POST', {
                     candidate_revision: artifact.candidate_revision,
                   })

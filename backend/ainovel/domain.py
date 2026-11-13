@@ -29,7 +29,13 @@ def same_task_payload(left, right):
                 or (k == "context_position" and v == 0)
                 or (k == "completion_scope" and v == "whole_book")
                 or (
-                    k in {"structured_maintenance", "scene_maintenance", "include_scene_ranges"}
+                    k
+                    in {
+                        "structured_maintenance",
+                        "scene_maintenance",
+                        "include_scene_ranges",
+                        "character_field_repair",
+                    }
                     and v is False
                 )
             )

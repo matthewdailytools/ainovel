@@ -189,8 +189,10 @@ def current_input(tx, worker, artifact_id):
     return artifact, task, review_input(tx, artifact, task)
 
 
-async def ensure_character_review(worker, artifact):
+async def ensure_character_review(worker, artifact, *, completed=None):
     """Return a bound artifact/token. Unknown is final, not a repair request."""
+    from .worker import parse_json
+
     with worker.db.connect() as tx:
         tx.execute("BEGIN")
         artifact, task, inputs = current_input(tx, worker, artifact["id"])
@@ -209,37 +211,50 @@ async def ensure_character_review(worker, artifact):
     contract["$defs"]["FieldReview"]["properties"]["source_ids"]["items"]["enum"] = [
         source["source_id"] for source in inputs["sources"]
     ]
-    response = await worker.grounded(
-        {
-            "动作": ACTION,
-            "字段复核契约版本": VERSION,
-            "input_sha256": token,
-            "人物字段": inputs["targets"],
-            "本项原文来源": inputs["sources"],
-            "冻结工作流边界": inputs["constraints"],
-            "结论判定": {
-                "supported": "字段中的全部实质断言均得到本项原文支持。如字段如实记录某事尚未知、未证实或仅为人物猜测，且来源确实如此，这一保留未知的描述本身可以得到支持；不要将它误当确定事实断言。",
-                "unknown": "缺少支持且没有相反证据时必须为unknown。未证实不等于证伪；没有证据证明成立，也不等于已经证明相反命题。人物猜测既不证明事情为真，也不证明其必假。冻结约束要求保持未知，不等于事实反命题已经成立。",
-                "contradicted": "须有本项来源明示的相反事实，并引用该依据。仅以没有支持、尚未交代、角色怀疑或要求保持未知为理由，不能判contradicted；这类依据不足应为unknown，不得补出相反事实。",
+
+    async def generate():
+        return await worker.grounded(
+            {
+                "动作": ACTION,
+                "字段复核契约版本": VERSION,
+                "input_sha256": token,
+                "人物字段": inputs["targets"],
+                "本项原文来源": inputs["sources"],
+                "冻结工作流边界": inputs["constraints"],
+                "结论判定": {
+                    "supported": "字段中的全部实质断言均得到本项原文支持。如字段如实记录某事尚未知、未证实或仅为人物猜测，且来源确实如此，这一保留未知的描述本身可以得到支持；不要将它误当确定事实断言。",
+                    "unknown": "缺少支持且没有相反证据时必须为unknown。未证实不等于证伪；没有证据证明成立，也不等于已经证明相反命题。人物猜测既不证明事情为真，也不证明其必假。冻结约束要求保持未知，不等于事实反命题已经成立。",
+                    "contradicted": "须有本项来源明示的相反事实，并引用该依据。仅以没有支持、尚未交代、角色怀疑或要求保持未知为理由，不能判contradicted；这类依据不足应为unknown，不得补出相反事实。",
+                },
+                "要求": "仅独立核对所列人物字段的全部实质断言能否由其本项原文支持。身份用于定位，字段本身不是证据，不引用当前记忆或外部知识循环佐证。brief/fixed用于约束冲突和时点边界，未来规划不能当已发生事实。逐项返回record_id、field、supported/unknown/contradicted、source_ids和理由；肯定须完整受支持，未知不能升级为事实。先区分来源支持、明确反证、依据不足，再给结论，不以阻止自动采用为由将unknown改判为contradicted。未知或矛盾是有效结果，不为通过删除断言、改写字段或勉强改判。只用本人物列出的来源编号，原句和位置由程序复原。",
             },
-            "要求": "仅独立核对所列人物字段的全部实质断言能否由其本项原文支持。身份用于定位，字段本身不是证据，不引用当前记忆或外部知识循环佐证。brief/fixed用于约束冲突和时点边界，未来规划不能当已发生事实。逐项返回record_id、field、supported/unknown/contradicted、source_ids和理由；肯定须完整受支持，未知不能升级为事实。先区分来源支持、明确反证、依据不足，再给结论，不以阻止自动采用为由将unknown改判为contradicted。未知或矛盾是有效结果，不为通过删除断言、改写字段或勉强改判。只用本人物列出的来源编号，原句和位置由程序复原。",
-        },
-        CharacterReview,
-        {
-            "branch": {"id": task["branch_id"], "story_revision": inputs["binding"]["story_revision"]},
-            "coverage": "仅本项冻结原文、人物身份及任务brief/fixed，不以既有自由文本档案为证据。",
-        },
-        lambda value: response_issues(value, inputs),
-        max_output=8192,
-        contract=contract,
-    )
+            CharacterReview,
+            {
+                "branch": {"id": task["branch_id"], "story_revision": inputs["binding"]["story_revision"]},
+                "coverage": "仅本项冻结原文、人物身份及任务brief/fixed，不以既有自由文本档案为证据。",
+            },
+            lambda value: response_issues(value, inputs),
+            max_output=8192,
+            contract=contract,
+        )
+
+    if completed is None:
+        response = await generate()
+    else:
+        response = CharacterReview.model_validate(completed["response"]).model_dump()
+        if response_issues(response, inputs):
+            raise DomainError("character_review", "已完成复核与当前人物字段契约不符，未复用。", 409)
     provider = worker.settings.providers[task["payload"]["account"]]
-    steps = []
-    for step in worker.db.all("SELECT fingerprint,result FROM task_steps WHERE task_id=?", (task["id"],)):
+    steps = deepcopy(completed["completed_steps"]) if completed else []
+    for step in (
+        []
+        if completed
+        else worker.db.all("SELECT fingerprint,result FROM task_steps WHERE task_id=?", (task["id"],))
+    ):
         saved = json.loads(step["result"])
         try:
-            content = json.loads(saved.get("text", ""))
-        except ValueError, TypeError:
+            content = parse_json(saved.get("text", ""))
+        except DomainError, ValueError, TypeError:
             continue
         if (
             isinstance(content, dict)
@@ -264,7 +279,9 @@ async def ensure_character_review(worker, artifact):
         "status": "supported"
         if all(field["result"] == "supported" for field in response["fields"])
         else "needs_review",
-        "reviewer": {
+        "reviewer": deepcopy(completed["reviewer"])
+        if completed
+        else {
             "task_id": task["id"],
             "account": provider.id,
             "provider": provider.kind,

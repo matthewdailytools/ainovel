@@ -128,6 +128,7 @@ class WorkflowInput(Input):
     completion_scope: Literal["whole_book", "segment"] = "whole_book"
     scene_maintenance: bool = False
     structured_maintenance: bool = False
+    character_field_repair: bool = Field(default=False, strict=True)
     inherit_story_record_ids: list[str] = Field(default_factory=list, max_length=300)
     inherit_source_revision: int | None = Field(default=None, ge=0)
     client_request_id: str | None = Field(default=None, min_length=8, max_length=128)

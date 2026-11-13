@@ -3732,6 +3732,11 @@
             "title": "Structured Maintenance",
             "default": false
           },
+          "character_field_repair": {
+            "type": "boolean",
+            "title": "Character Field Repair",
+            "default": false
+          },
           "inherit_story_record_ids": {
             "items": { "type": "string" },
             "type": "array",

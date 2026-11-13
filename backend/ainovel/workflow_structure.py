@@ -8,6 +8,7 @@ from .story_extraction import AdoptExtraction, adopt, freeze_sources, run_extrac
 from .story_graph import metadata_extension
 from .extraction_scenes import can_auto_replace
 from .character_review import ensure_character_review
+from .character_repair import ensure_candidate_review, origin, repair_fields
 
 
 def checkpoint_pending(worker, result, identifier, status, error=""):
@@ -131,6 +132,7 @@ async def maintain(worker, result):
                     "author_contract": worker.author_snapshot(),
                     "maintenance_chapter": {"id": chapter["id"], "revision": chapter["revision"]},
                     "maintenance_epoch": epoch,
+                    "character_field_origin": origin(payload, worker.task["id"], worker.attempt),
                 },
                 worker.task["id"],
                 worker.attempt,
@@ -142,8 +144,9 @@ async def maintain(worker, result):
 
     def adopted_by_author():
         fresh = worker.domain.task(worker.task["id"])["result"]
+        identifiers = {identifier, result.get("pending_structure", {}).get("artifact_id")}
         if not fresh.get("pending_structure") and any(
-            r.get("artifact_id") == identifier for r in fresh.get("structure_history", [])
+            r.get("artifact_id") in identifiers for r in fresh.get("structure_history", [])
         ):
             result.clear()
             result.update(fresh)
@@ -156,8 +159,34 @@ async def maintain(worker, result):
         return checkpoint_pending(worker, result, identifier, "paused")
     review_token = None
     if artifact["status"] == "candidate" and worker.task["payload"]["adoption"] == "automatic":
+        # An opt-in repair must not spend calls on a batch that already requires
+        # author decisions about other records or scene replacement.
+        if worker.task["payload"].get("character_field_repair") and (
+            any(not safe_automatic(r) for r in artifact["payload"]["records"])
+            or not can_auto_replace(worker.domain, artifact["payload"], worker.task)
+        ):
+            return checkpoint_pending(
+                worker,
+                result,
+                identifier,
+                "needs_review",
+                "结构候选包含需作者处理的内容，未派发人物字段自动修订。",
+            )
         try:
-            artifact, review_token = await ensure_character_review(worker, artifact)
+            if worker.task["payload"].get("character_field_repair") is True:
+                artifact, review_token, stop = await ensure_candidate_review(worker, artifact, result)
+            else:
+                artifact, review_token = await ensure_character_review(worker, artifact)
+                stop = ""
+            report = artifact["payload"].get("character_semantic_review")
+            if (
+                worker.task["payload"].get("character_field_repair") is True
+                and report
+                and report.get("input_sha256") == review_token
+                and report["status"] == "needs_review"
+            ):
+                artifact, review_token, stop = await repair_fields(worker, artifact, result)
+                identifier = artifact["id"]
         except DomainError as error:
             if (
                 error.code in {"candidate_changed", "workflow_progress", "story_changed"}
@@ -165,6 +194,10 @@ async def maintain(worker, result):
             ):
                 return True
             raise
+        if worker.domain.task(worker.task["id"])["pause"]:
+            return checkpoint_pending(worker, result, identifier, "paused")
+        if stop:
+            return checkpoint_pending(worker, result, identifier, "needs_review", stop)
         report = artifact["payload"].get("character_semantic_review")
         if report and report.get("input_sha256") == review_token and report["status"] == "needs_review":
             return checkpoint_pending(

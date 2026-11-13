@@ -85,6 +85,8 @@ export type Chapter = {
 }
 export type Artifact = {
   id: string
+  branch_id?: string
+  task_id?: string | null
   candidate_revision: number
   kind: string
   chapter_id: string | null
@@ -137,6 +139,7 @@ export type Task = {
     completion?: unknown
     author_contract_snapshot?: AuthorContract
     genre_profile_snapshot?: GenreProfile
+    character_field_repairs?: unknown
   }
   payload: {
     completion_scope?: 'whole_book' | 'segment'
@@ -149,6 +152,8 @@ export type Task = {
     writing_profile?: string
     budget_limit?: number | null
     structured_maintenance?: boolean
+    adoption?: 'manual' | 'automatic'
+    character_field_repair?: boolean
   }
 }
 export type Account = {

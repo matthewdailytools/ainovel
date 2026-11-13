@@ -309,6 +309,7 @@ class Worker:
             "逐项对照作者情节解释与本次正文",
             "只从本次正文独立提取物品与信息流向",
             "独立核对人物自由文本的本项来源蕴含",
+            "修正未采纳人物自由文本字段",
         }:
             # These source-isolated stages must not reinterpret source claims
             # through other adopted settings, genre preferences or old prose.
@@ -424,6 +425,11 @@ class Worker:
                     "semantic_prompt_sha256": hashlib.sha256(semantic_prompt.encode()).hexdigest(),
                     "prompt_utf8_bytes": len(prompt.encode()),
                     "max_output_tokens": max_output,
+                    **(
+                        {"character_field_repair_version": source_instruction["人物修订契约版本"]}
+                        if action == "修正未采纳人物自由文本字段" and "人物修订契约版本" in source_instruction
+                        else {}
+                    ),
                     **(
                         {"memory_evidence_version": source_instruction["事实证据契约版本"]}
                         if action == "从正文提取事实候选与章节摘要"

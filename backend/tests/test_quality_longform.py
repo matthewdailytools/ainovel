@@ -144,6 +144,67 @@ def test_fixture_or_configuration_change_cannot_silently_resume(tmp_path, story)
             LongformEvaluation(client, tmp_path, RunSpec(), {**story, "brief": "changed"})
 
 
+def test_legacy_run_keeps_frozen_configuration_and_missing_repair_disabled(tmp_path, story):
+    with httpx.Client(base_url="http://127.0.0.1") as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        runner.record.pop("workflow_options")
+        runner.save()
+        original = runner.path.read_bytes()
+        resumed = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        assert not resumed.character_field_repair
+        assert "workflow_options" not in resumed.record
+        with pytest.raises(ValueError, match="Frozen repair policy"):
+            LongformEvaluation(client, tmp_path, RunSpec(), story, character_field_repair=True)
+    assert runner.path.read_bytes() == original
+
+
+def test_explicit_new_repair_policy_survives_response_loss_without_new_dispatch_key(tmp_path, story):
+    requests = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if len(requests) == 1:
+            raise httpx.ReadTimeout("lost response")
+        return httpx.Response(202, json={"id": "new-task", "branch_id": "new-branch"})
+
+    with httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(handler)) as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story, character_field_repair=True)
+        with pytest.raises(httpx.ReadTimeout):
+            runner.dispatch("assisted", {"id": "novel"})
+        resumed = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        assert resumed.character_field_repair
+        assert resumed.dispatch("assisted", {"id": "novel"}) == "new-task"
+        with pytest.raises(ValueError, match="Frozen repair policy"):
+            LongformEvaluation(client, tmp_path, RunSpec(), story, character_field_repair=False)
+    assert requests[0] == requests[1]
+    assert requests[0]["character_field_repair"] is True
+    assert "character_field_repair" not in resumed.record["configuration"]
+
+
+@pytest.mark.parametrize("flag", [0, 1, "true"])
+def test_repair_policy_rejects_non_boolean_before_any_request(tmp_path, story, flag):
+    with httpx.Client(base_url="http://127.0.0.1") as client:
+        with pytest.raises(ValueError, match="Invalid frozen workflow options"):
+            LongformEvaluation(client, tmp_path, RunSpec(), story, character_field_repair=flag)
+    assert not (tmp_path / "run.json").exists()
+
+
+def test_signed_payload_cannot_silently_disagree_with_frozen_repair_policy(tmp_path, story):
+    from ainovel.quality_longform import signature
+
+    with httpx.Client(base_url="http://127.0.0.1") as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        payload = workflow_payload(RunSpec(), story, "n", "assisted", character_field_repair=True)
+        runner.record["workflows"]["assisted"] = {
+            "payload": payload,
+            "payload_sha256": signature(payload),
+            "id": "mismatched-task",
+        }
+        with pytest.raises(ValueError, match="differs from"):
+            runner.dispatch("assisted", {"id": "n"})
+
+
 def task(status="blocked_runtime"):
     return {
         "id": "t",

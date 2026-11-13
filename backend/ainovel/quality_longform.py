@@ -58,7 +58,7 @@ class RunSpec:
         return 10 if self.stage == "ten" else 36
 
 
-def workflow_payload(spec, story, novel_id, mode):
+def workflow_payload(spec, story, novel_id, mode, *, character_field_repair=False):
     if len(story["chapters"]) != 36 or [row["number"] for row in story["chapters"]] != list(range(1, 37)):
         raise ValueError("The original 36-chapter fixture must be complete and ordered")
     # A ten-chapter gate is the start of the original novel, not a compressed book.
@@ -80,6 +80,7 @@ def workflow_payload(spec, story, novel_id, mode):
         account=spec.account,
         adoption="automatic",
         structured_maintenance=True,
+        character_field_repair=character_field_repair,
         scene_maintenance=True,
         min_chars=spec.min_chars,
         max_chars=spec.max_chars,
@@ -117,7 +118,7 @@ def read_usage(data_dir, task_ids):
 
 
 class LongformEvaluation:
-    def __init__(self, client, folder, spec, story, data_dir=None):
+    def __init__(self, client, folder, spec, story, data_dir=None, *, character_field_repair=None):
         self.client, self.folder, self.spec, self.story = client, folder, spec, story
         self.data_dir = data_dir
         folder.mkdir(parents=True, exist_ok=True)
@@ -148,6 +149,26 @@ class LongformEvaluation:
         )
         if self.record["configuration"] != configuration or self.record["fixture_sha256"] != fixture:
             raise ValueError("Frozen fixture or evaluation configuration changed; use a new run directory")
+        # Keep legacy RunSpec/configuration hashes intact. Missing options on old
+        # runs mean disabled, never an invitation to upgrade their frozen policy.
+        options = self.record.get("workflow_options", {"character_field_repair": False})
+        if (
+            not isinstance(options, dict)
+            or set(options) != {"character_field_repair"}
+            or type(options["character_field_repair"]) is not bool
+            or (character_field_repair is not None and type(character_field_repair) is not bool)
+        ):
+            raise ValueError("Invalid frozen workflow options")
+        if self.path.exists():
+            if (
+                character_field_repair is not None
+                and character_field_repair != options["character_field_repair"]
+            ):
+                raise ValueError("Frozen repair policy changed; use a new run directory")
+        else:
+            options = {"character_field_repair": character_field_repair is True}
+            self.record["workflow_options"] = options
+        self.character_field_repair = options["character_field_repair"]
 
     def save(self):
         write_json(self.path, self.record)
@@ -183,7 +204,13 @@ class LongformEvaluation:
     def dispatch(self, mode, novel):
         workflows = self.record["workflows"]
         if mode not in workflows:
-            payload = workflow_payload(self.spec, self.story, novel["id"], mode)
+            payload = workflow_payload(
+                self.spec,
+                self.story,
+                novel["id"],
+                mode,
+                character_field_repair=self.character_field_repair,
+            )
             # No source branch/prose is inherited. Both modes start from the same brief.
             payload["client_request_id"] = uuid4().hex
             workflows[mode] = {"payload": payload, "payload_sha256": signature(payload), "started": time()}
@@ -195,6 +222,8 @@ class LongformEvaluation:
             )
         if signature(entry["payload"]) != entry["payload_sha256"]:
             raise ValueError("Frozen workflow payload is damaged")
+        if entry["payload"].get("character_field_repair", False) is not self.character_field_repair:
+            raise ValueError("Frozen payload differs from the evaluation repair policy")
         if "id" not in entry:
             task = self.request("POST", "/workflows", json=entry["payload"]).json()
             entry.update(id=task["id"], branch_id=task["branch_id"])
@@ -346,6 +375,12 @@ def main():
     parser.add_argument("--min-chars", type=int, default=2500)
     parser.add_argument("--max-chars", type=int, default=3500)
     parser.add_argument("--run-limit", type=float, default=10)
+    parser.add_argument(
+        "--character-field-repair",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="仅新运行显式开启AI新增人物字段最多两轮内容修订；旧运行缺省关闭，续跑继承冻结开关",
+    )
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--observe-task", help="只观察既有任务，不启动、恢复、重试或采纳")
@@ -378,7 +413,14 @@ def main():
     with httpx.Client(base_url=f"http://127.0.0.1:{args.port}", trust_env=False, timeout=30) as client:
         session = client.get("/api/session").raise_for_status().json()
         client.headers["X-Ainovel-CSRF"] = session["csrf"]
-        runner = LongformEvaluation(client, folder, spec, story, settings.data_dir)
+        runner = LongformEvaluation(
+            client,
+            folder,
+            spec,
+            story,
+            settings.data_dir,
+            character_field_repair=args.character_field_repair,
+        )
         runner.record.setdefault(
             "source_commit",
             subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, cwd=ROOT).strip(),
