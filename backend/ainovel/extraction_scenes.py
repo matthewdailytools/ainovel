@@ -41,7 +41,7 @@ def scene_issues(value, units, known, proposals):
         expected.setdefault(u["chapter_id"], []).append(u["source_id"])
     actual = {c: [] for c in expected}
     issues = []
-    for scene in value:
+    for scene_index, scene in enumerate(value):
         if not scene["title"].strip():
             issues.append("场景名称不能仅有空白。")
         selected = [indexed.get(i) for i in scene["source_ids"]]
@@ -65,9 +65,9 @@ def scene_issues(value, units, known, proposals):
                     event.update({k: proposal["record"][k] for k in proposal["update_fields"]})
                     event["sources"] = [*old["payload"]["sources"], *proposal["record"]["sources"]]
                 events[proposal["target_id"] or proposal["local_id"]] = event
-            orders = {
-                e["story_order"]
-                for e in events.values()
+            anchors = [
+                (identifier, e["story_order"])
+                for identifier, e in events.items()
                 if e["status"] == "actual"
                 and any(
                     s["chapter_id"] == chapter_id
@@ -75,10 +75,24 @@ def scene_issues(value, units, known, proposals):
                     and any(max(s["start"], u["start"]) < min(s["end"], u["end"]) for u in selected)
                     for s in e["sources"]
                 )
-            } - {None}
+            ]
+            orders = {order for _, order in anchors} - {None}
             if orders != {scene["story_order"]}:
+                ids = scene["source_ids"]
+                covered = "、".join(ids if len(ids) <= 8 else [*ids[:4], f"…共{len(ids)}项…", *ids[-4:]])
+                event_basis = (
+                    "、".join(f"{identifier}/order={order}" for identifier, order in anchors[:8])
+                    or "无实际事件"
+                )
+                if len(anchors) > 8:
+                    event_basis += f"…共{len(anchors)}个实际事件"
                 issues.append(
-                    "场景故事顺序须依据覆盖范围内的实际事件；没有依据时使用null和未知说明，不按章号猜测。"
+                    f"scenes[{scene_index}].story_order 当前值={scene['story_order']}；"
+                    f"覆盖source_ids=[{covered}]；关联actual event_id/order=[{event_basis}]；"
+                    f"实际事件顺序集合={sorted(orders)}。"
+                    "场景故事顺序须依据覆盖范围内唯一有效的实际事件顺序，不能当场景编号或按章号猜测；"
+                    "覆盖多个不同顺序或没有唯一依据时，核对原文后使用null与未知说明，或按实际事件合理拆分；"
+                    "不得从多个事件中任取一个值，服务不自动改序或清空。"
                 )
     if actual != expected:
         issues.append("每章场景须按原文编号连续分组、完整覆盖且每段只出现一次，不漏段、重复或倒序。")

@@ -12,6 +12,7 @@ from .story_graph import RECORD, Record, Strict, graph, references, validate_rec
 from .extraction_scenes import SceneProposal, adopt_scenes, freeze_scenes, normalize_scenes, scene_issues
 
 PROMISE_STAGE_GROUNDING_VERSION = "promise-stage-grounding/2"
+SCENE_GROUNDING_VERSION = "scene-event-order/1"
 
 
 class ProposedRecord(Strict):
@@ -116,6 +117,30 @@ def promise_stage_issues(record, path, records, source_hint):
                 f"可用事件id示例：{'、'.join(event_ids[:12]) or '本批无事件'}。"
             )
     return issues
+
+
+async def _grounded_extraction(worker, instruction, schema, context, validator, **kwargs):
+    """Keep final field diagnostics without changing the shared retry contract."""
+    last_issues = []
+
+    def validate(value):
+        issues = validator(value)
+        last_issues[:] = issues
+        return issues
+
+    try:
+        return await worker.grounded(instruction, schema, context, validate, **kwargs)
+    except DomainError as error:
+        if error.code != "evidence" or not last_issues:
+            raise
+        details = "；".join(issue[:800] for issue in last_issues[:6])
+        if len(last_issues) > 6:
+            details += f"；另{len(last_issues) - 6}项详见任务引用修正记录"
+        raise DomainError(
+            error.code,
+            f"结构候选在两轮引用修正后仍未通过校验（{len(last_issues)}项）：{details}",
+            error.status,
+        ) from error
 
 
 async def run_extraction(worker, request, context, snapshot=None):
@@ -231,13 +256,16 @@ async def run_extraction(worker, request, context, snapshot=None):
         "branch": context["branch"],
         "coverage": "仅本批已选择保存稿和正式身份索引；不把外部资料、预设或未来计划当事实。",
     }
-    result = await worker.grounded(
+    result = await _grounded_extraction(
+        worker,
         {
             "动作": "按保存稿反向整理长篇结构候选",
             "阶段证据契约版本": PROMISE_STAGE_GROUNDING_VERSION,
             **(
                 {
-                    "场景范围要求": "同时输出scenes，按每章原文source_id连续分组，完整覆盖且每段仅一次。不输出自己计算的位置，服务根据冻结原文计算UTF-16范围。人物视角明确character_id，可用本批人物local_id。story_order只采用所覆盖原文中实际事件的已知故事顺序；缺依据使用null和未知说明，不能按章号推断。不将未来计划当实际时点，插叙、倒叙及信息视角分别表达。"
+                    "场景证据契约版本": SCENE_GROUNDING_VERSION,
+                    "场景范围要求": "同时输出scenes，按每章原文source_id连续分组，完整覆盖且每段仅一次。不输出自己计算的位置，服务根据冻结原文计算UTF-16范围。人物视角明确character_id，可用本批人物local_id。story_order只采用所覆盖原文中实际事件的已知故事顺序；缺依据使用null和未知说明，不能按章号推断。不将未来计划当实际时点，插叙、倒叙及信息视角分别表达。",
+                    "场景顺序语义": "story_order是覆盖范围内实际事件的唯一有效故事顺序，不是场景编号或章节编号。先核对关联actual事件和其原文来源；同一场景覆盖多个不同事件顺序时不得任取一项，可依据实际事件合理拆分，或保留null并在note说明未知边界。没有唯一有效事件顺序时同样保留null；不得为了通过校验删事件、改正文、编造时点或清空已有事实。",
                 }
                 if with_scenes
                 else {}
