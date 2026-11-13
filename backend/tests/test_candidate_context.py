@@ -8,6 +8,7 @@ import pytest
 from ainovel.db import DomainError, dumps
 from ainovel.models import ModuleInput
 from ainovel.text_context import text_context
+from ainovel.prompt_encoding import expand_prompt
 from ainovel.worker import Worker
 
 
@@ -79,6 +80,33 @@ def test_candidate_context_separates_unsaved_content_from_saved_revision():
         == candidate["source_version_basis"]
     )
     assert text_context(context, ORIGINAL, "review")["chapter"]["revision"] == 3
+
+
+def test_large_review_wire_reference_keeps_candidate_and_saved_source_separate(settings, domain, story):
+    original = "渡船原稿，尚未修正。😀𠮷\n" * 1600
+    candidate = original.replace("尚未修正", "已完成修正")
+
+    def answer(wire, number):
+        assert "content" not in wire["上下文"]["chapter"]
+        assert wire["上下文"]["chapter"]["content_ref"]["path"] == ["任务", "正文"]
+        restored = expand_prompt(wire)
+        assert restored["任务"]["正文"] == candidate
+        assert restored["上下文"]["chapter"]["content"] == candidate
+        assert restored["上下文"]["chapter"]["content_status"] == "unadopted_candidate_under_review"
+        assert (
+            restored["上下文"]["source_version_basis"]["saved_content_sha256"]
+            == hashlib.sha256(original.encode()).hexdigest()
+        )
+        assert all(unit["text"] in candidate for unit in restored["任务"]["可引用原文"])
+        return {"checks": [], "findings": [], "summary": "只核对同一候选"}
+
+    model = OfflineModel(answer)
+    worker, context, chapter = claimed_worker(settings, domain, story, model, original)
+    result = asyncio.run(worker.review(candidate, [], context, 1))
+    assert not result["findings"]
+    assert len(model.requests) == 1
+    assert domain.chapter(chapter["id"])["content"] == original
+    assert context["chapter"]["content"] == original
 
 
 @pytest.mark.parametrize("operation", ["review", "memory"])

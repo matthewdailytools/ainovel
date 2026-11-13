@@ -17,6 +17,7 @@ from .genre_catalog import profile_for_action
 from .evidence import source_units, resolve_field, source_schema, completion_sources
 from .models import Completion, Memory, Plan, Review, RevisionPatch
 from .providers import ModelClient
+from .prompt_encoding import encode_prompt
 from .settings import Settings
 from .targeted_revision import run_targeted_revision, validate_targeted_revision
 from .text_context import text_context
@@ -277,7 +278,7 @@ class Worker:
                 else definition
                 for definition in context["definitions"]
             ]
-        prompt = dumps({"任务": instruction, "上下文": context})
+        prompt = dumps(encode_prompt(instruction, context))
         if schema and self.settings.providers[payload["account"]].kind != "openai":
             prompt += "\n只返回符合以下 JSON Schema 的对象：\n" + dumps(
                 contract or schema.model_json_schema()
