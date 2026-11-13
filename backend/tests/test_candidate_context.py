@@ -9,6 +9,7 @@ from ainovel.db import DomainError, dumps
 from ainovel.models import ModuleInput
 from ainovel.text_context import text_context
 from ainovel.prompt_encoding import expand_prompt
+from ainovel.prompt_encoding import encode_prompt
 from ainovel.worker import Worker
 
 
@@ -107,6 +108,24 @@ def test_large_review_wire_reference_keeps_candidate_and_saved_source_separate(s
     assert len(model.requests) == 1
     assert domain.chapter(chapter["id"])["content"] == original
     assert context["chapter"]["content"] == original
+
+
+def test_lossless_wire_encoding_change_reuses_completed_generation_but_not_changed_input(
+    settings, domain, story, monkeypatch
+):
+    text = "渡船测量记录😀𠮷。\n" * 1800
+    model = OfflineModel(lambda *_: {"answer": "already paid output"})
+    worker, context, _ = claimed_worker(settings, domain, story, model, text)
+    instruction = {"动作": "只测试既有步骤复用", "正文": text}
+    monkeypatch.setattr(
+        "ainovel.worker.encode_prompt", lambda instruction, context: {"任务": instruction, "上下文": context}
+    )
+    first = asyncio.run(worker.call(instruction, context=context))
+    monkeypatch.setattr("ainovel.worker.encode_prompt", encode_prompt)
+    assert asyncio.run(worker.call(instruction, context=context)) == first
+    assert len(model.requests) == 1
+    asyncio.run(worker.call({**instruction, "作者新增条件": "保持未知"}, context=context))
+    assert len(model.requests) == 2
 
 
 @pytest.mark.parametrize("operation", ["review", "memory"])

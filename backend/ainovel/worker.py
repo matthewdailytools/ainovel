@@ -278,11 +278,14 @@ class Worker:
                 else definition
                 for definition in context["definitions"]
             ]
+        semantic_prompt = dumps({"任务": instruction, "上下文": context})
         prompt = dumps(encode_prompt(instruction, context))
         if schema and self.settings.providers[payload["account"]].kind != "openai":
-            prompt += "\n只返回符合以下 JSON Schema 的对象：\n" + dumps(
+            schema_suffix = "\n只返回符合以下 JSON Schema 的对象：\n" + dumps(
                 contract or schema.model_json_schema()
             )
+            prompt += schema_suffix
+            semantic_prompt += schema_suffix
 
         async def validated(result):
             if not schema:
@@ -315,6 +318,8 @@ class Worker:
                     "invalid_structure", "结构化产物在两轮格式修正后仍未通过契约，未采纳。"
                 ) from error
 
+        # Lossless wire aliases must not discard a paid, completed generation
+        # after a restart. Version/model/complete semantic input still bind reuse.
         cache_basis = [
             provider.id,
             provider.kind,
@@ -322,7 +327,7 @@ class Worker:
             provider.base_url,
             provider.reasoning,
             SYSTEM,
-            prompt,
+            semantic_prompt,
             max_output,
         ]
         if schema and self.settings.providers[payload["account"]].kind == "openai":
@@ -350,6 +355,7 @@ class Worker:
                 "request": {
                     "system_sha256": hashlib.sha256(SYSTEM.encode()).hexdigest(),
                     "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                    "semantic_prompt_sha256": hashlib.sha256(semantic_prompt.encode()).hexdigest(),
                     "prompt_utf8_bytes": len(prompt.encode()),
                     "max_output_tokens": max_output,
                     "account": self.settings.providers[payload["account"]].public(),

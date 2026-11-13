@@ -4,6 +4,8 @@ from copy import deepcopy
 import hashlib
 
 from .db import DomainError, dumps
+from .prompt_sources import compact_sources, expand_sources
+from .prompt_units import compact_units, expand_units
 
 BODY_FIELDS = ("正文", "候选正文", "本次候选", "原稿")
 
@@ -16,13 +18,13 @@ def encode_prompt(instruction, context):
         return frame
     chapter = context.get("chapter")
     if not isinstance(chapter, dict) or not isinstance(chapter.get("content"), str):
-        return frame
+        return compact_sources(compact_units(frame, BODY_FIELDS))
     content = chapter["content"]
     if not content:
-        return frame
+        return compact_sources(compact_units(frame, BODY_FIELDS))
     key = next((key for key in BODY_FIELDS if instruction.get(key) == content), None)
     if key is None:
-        return frame
+        return compact_sources(compact_units(frame, BODY_FIELDS))
     encoded = deepcopy(frame)
     target = encoded["上下文"]["chapter"]
     del target["content"]
@@ -36,12 +38,12 @@ def encode_prompt(instruction, context):
         "path按数组中的字段逐层读取；其含义与原chapter.content相同，不是空稿或被省略内容。"
         "完整正文和逐字引用单元仍在任务中；来源版本、候选身份、视角与时点边界保持。"
     )
-    return encoded
+    return compact_sources(compact_units(encoded, BODY_FIELDS))
 
 
 def expand_prompt(frame):
     """Verify and reconstruct the original frame for audit/tests, never eval paths."""
-    result = deepcopy(frame)
+    result = expand_units(expand_sources(frame))
     chapter = result.get("上下文", {}).get("chapter")
     if not isinstance(chapter, dict) or "content_ref" not in chapter:
         return result
