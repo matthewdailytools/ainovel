@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, label, type Artifact, type Branch, type Chapter, type Task } from './api'
 import type { Notify } from './App'
 import { Difference } from './Editor'
+import { confirmLeave, useLeaveGuard } from './leaveGuard'
 
 type Card = {
   id: string
@@ -35,6 +36,17 @@ type ReferencePayload = {
   history?: { revision: number; cards: Card[]; application_plan: string; results: Record<string, string> }[]
 }
 export type ReferenceSession = { id: string; revision: number; payload: ReferencePayload }
+const editable = (p: ReferencePayload) =>
+  JSON.stringify([
+    p.goal,
+    p.cards,
+    p.selected_ids,
+    p.plot,
+    p.fixed,
+    p.application_plan,
+    p.branch_id,
+    p.chapter_id,
+  ])
 type Comparison = {
   plot_audit?: {
     status: string
@@ -368,26 +380,22 @@ export function ReferenceWorkspace({
     pending.current = null
     setMessage('任务已提交；阶段与费用单独记录，生成不会自动采纳。')
   }
+  const dirty = !!row && !!draft && editable(draft) !== editable(row.payload)
+  const candidateDirty =
+    !!candidate && candidate.status === 'candidate' && candidateText !== candidate.payload.text
+  const unsaved = dirty || candidateDirty || !!feedback.trim()
+  useLeaveGuard(unsaved, '参考规则、方案、候选或反馈')
+  function back() {
+    if (!unsaved || confirmLeave()) onBack()
+  }
   if (!row || !draft)
     return (
       <section className="card">
         <p role="status">正在载入参考会话…</p>
-        <button onClick={onBack}>返回资料书库</button>
+        <button onClick={back}>返回资料书库</button>
       </section>
     )
   const stale = row.revision !== base
-  const editable = (p: ReferencePayload) =>
-    JSON.stringify([
-      p.goal,
-      p.cards,
-      p.selected_ids,
-      p.plot,
-      p.fixed,
-      p.application_plan,
-      p.branch_id,
-      p.chapter_id,
-    ])
-  const dirty = editable(draft) !== editable(row.payload)
   const canRun = !busy && !running && !stale && !dirty && modelReady
   return (
     <div className="page-pad reference-workspace">
@@ -397,7 +405,7 @@ export function ReferenceWorkspace({
           <h1>参考仿写工作区</h1>
           <p>选段 → 拆解写法 → 本书方案 → 试写 → 对照采纳</p>
         </div>
-        <button onClick={onBack}>返回资料书库</button>
+        <button onClick={back}>返回资料书库</button>
       </div>
       {error && (
         <p className="notice" role="alert">

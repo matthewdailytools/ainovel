@@ -44,6 +44,17 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await page.getByLabel('本次目标章节').selectOption({ index: 1 })
   await page.getByLabel('本次原创情节与结果').fill('检查闸门外露磨损，但拿不到维修记录，不修门。')
   await page.getByLabel('固定条件（每行一条）').fill('不修门')
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('参考规则、方案、候选或反馈')
+    await dialog.dismiss()
+  })
+  await page.getByRole('button', { name: '返回资料书库', exact: true }).click()
+  await expect(page.getByLabel('本次原创情节与结果')).toHaveValue(
+    '检查闸门外露磨损，但拿不到维修记录，不修门。',
+  )
+  page.once('dialog', (dialog) => dialog.dismiss())
+  await page.getByRole('button', { name: '写作', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '参考仿写工作区' })).toBeVisible()
   await page.getByRole('button', { name: '保存本次规则与方案', exact: true }).click()
   await page.getByRole('button', { name: '生成本书应用方案', exact: true }).click()
   await page.getByRole('button', { name: '载入方案供编辑确认', exact: true }).click()

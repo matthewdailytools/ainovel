@@ -125,6 +125,27 @@ class Evaluation:
         if self.record["account"] != account or self.record["count"] != count:
             raise ValueError("Resume configuration differs")
 
+    def configure_cases(self, names=None, reference_first=False):
+        selected = names or [case[0] for case in CASES[: self.record["count"]]]
+        if (
+            len(selected) != self.record["count"]
+            or len(set(selected)) != len(selected)
+            or any(name not in {case[0] for case in CASES} for name in selected)
+        ):
+            raise ValueError("Select distinct known cases matching count")
+        settings = {"case_names": selected, "reference_first": reference_first}
+        for key, value in settings.items():
+            if key in self.record and self.record[key] != value:
+                raise ValueError("Resume case selection or order changed")
+        if (
+            self.record["tasks"]
+            and "case_names" not in self.record
+            and (names is not None or reference_first)
+        ):
+            raise ValueError("Cannot change an already-started legacy evaluation order")
+        self.record.update(settings)
+        self.save()
+
     def save(self):
         write_json(self.path, self.record)
 
@@ -181,7 +202,10 @@ class Evaluation:
         self.record["selected_configuration"] = selected
         self.record.setdefault("budget_before", config["budget"])
         self.record.setdefault("configuration", config["accounts"])
-        for index, (kind, source, plot, fixed) in enumerate(CASES[: self.record["count"]]):
+        selected_names = self.record.get("case_names", [case[0] for case in CASES[: self.record["count"]]])
+        for index, (kind, source, plot, fixed) in enumerate(CASES):
+            if kind not in selected_names:
+                continue
             prefix = f"case-{index + 1}"
             if any(row["case"] == kind for row in self.record["results"]):
                 continue
@@ -201,20 +225,24 @@ class Evaluation:
                 plot + "只写本场景，约500—800字，第三人称限定视角、现代白话、动作有因果，不写后续章节。"
             )
             common = {"account": self.account, "budget_limit": 5}
-            baseline = self.task(
-                prefix + "-baseline",
-                "/modules",
-                {
-                    **common,
-                    "action": "writing.expand_plot",
-                    "novel_id": novel["id"],
-                    "branch_id": novel["branch_id"],
-                    "chapter_id": chapter["id"],
-                    "base_revision": 0,
-                    "instruction": shared_plot,
-                    "fixed": fixed,
-                },
-            )
+
+            def baseline_task():
+                return self.task(
+                    prefix + "-baseline",
+                    "/modules",
+                    {
+                        **common,
+                        "action": "writing.expand_plot",
+                        "novel_id": novel["id"],
+                        "branch_id": novel["branch_id"],
+                        "chapter_id": chapter["id"],
+                        "base_revision": 0,
+                        "instruction": shared_plot,
+                        "fixed": fixed,
+                    },
+                )
+
+            baseline = None if self.record.get("reference_first") else baseline_task()
             book = self.once(
                 prefix + "-book",
                 "POST",
@@ -285,6 +313,8 @@ class Evaluation:
                 base_url + "/actions",
                 {**common, "base_revision": confirmed["revision"], "action": "draft"},
             )
+            if self.record.get("reference_first"):
+                baseline = baseline_task()
             saved = self.request("GET", f"/chapters/{chapter['id']}")
             if saved["revision"] != 0 or saved["content"]:
                 raise RuntimeError("Evaluation target changed; stop rather than overwrite")
@@ -311,6 +341,8 @@ def main():
     parser.add_argument("--run", action="store_true", required=True)
     parser.add_argument("--count", type=int, choices=range(1, 8), default=7)
     parser.add_argument("--account", default="deepseek")
+    parser.add_argument("--cases", help="Comma-separated exact case names; overrides count")
+    parser.add_argument("--reference-first", action="store_true")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--resume", type=Path)
     args = parser.parse_args()
@@ -322,7 +354,9 @@ def main():
     with httpx.Client(base_url=f"http://127.0.0.1:{args.port}", trust_env=False, timeout=30) as client:
         session = client.get("/api/session").raise_for_status().json()
         client.headers["X-Ainovel-CSRF"] = session["csrf"]
-        runner = Evaluation(client, folder, args.account, args.count)
+        names = args.cases.split(",") if args.cases else None
+        runner = Evaluation(client, folder, args.account, len(names) if names else args.count)
+        runner.configure_cases(names, args.reference_first)
         runner.record.setdefault(
             "source_commit",
             subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, cwd=ROOT).strip(),

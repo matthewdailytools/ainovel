@@ -7,6 +7,69 @@ import pytest
 from ainovel.quality_reference import CASES, Evaluation, blind_pack, write_json
 
 
+@pytest.mark.parametrize("reference_first", [False, True])
+def test_selected_case_pair_order_is_recorded_and_resume_cannot_change_it(tmp_path, reference_first):
+    class Runner(Evaluation):
+        def __init__(self):
+            super().__init__(None, tmp_path, "deepseek", 1)
+            self.order = []
+
+        def request(self, method, url, **kwargs):
+            if url == "/config":
+                return {"accounts": [{"id": "deepseek", "configured": True, "priced": True}], "budget": []}
+            if url.endswith("/units"):
+                return [{"id": "unit"}]
+            if url == "/chapters/chapter":
+                return {"revision": 0, "content": ""}
+            raise AssertionError(url)
+
+        def once(self, name, method, url, **kwargs):
+            if name.endswith("-novel"):
+                return {"id": "novel", "branch_id": "branch"}
+            if name.endswith("-chapter"):
+                return {"id": "chapter"}
+            if name.endswith("-book"):
+                return {"id": "book"}
+            if name.endswith("-session"):
+                return {
+                    "id": "session",
+                    "revision": 0,
+                    "payload": {
+                        key: ""
+                        for key in (
+                            "goal",
+                            "cards",
+                            "selected_ids",
+                            "plot",
+                            "fixed",
+                            "application_plan",
+                            "branch_id",
+                            "chapter_id",
+                        )
+                    },
+                }
+            return {"revision": 1}
+
+        def task(self, name, url, payload):
+            self.order.append(name)
+            return {"id": name, "payload": {"text": "独立候选", "cards": [{"id": "rule"}], "conflicts": []}}
+
+    runner = Runner()
+    runner.configure_cases(["调查"], reference_first)
+    runner.run()
+    assert len(runner.record["results"]) == 1
+    assert runner.record["results"][0]["case"] == "调查"
+    assert runner.order == (
+        ["case-3-analyze", "case-3-plan", "case-3-reference", "case-3-baseline"]
+        if reference_first
+        else ["case-3-baseline", "case-3-analyze", "case-3-plan", "case-3-reference"]
+    )
+    with pytest.raises(ValueError, match="changed"):
+        runner.configure_cases(["交涉"], reference_first)
+    with pytest.raises(ValueError, match="changed"):
+        runner.configure_cases(["调查"], not reference_first)
+
+
 def test_transient_windows_journal_lock_retries_only_local_replace(tmp_path, monkeypatch):
     target = tmp_path / "run.json"
     target.write_text('{"old": true}')
