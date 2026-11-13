@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import type { Notify } from './App'
+import { confirmLeave, useLeaveGuard } from './leaveGuard'
 
 type Segment = { title: string; start: number; end: number; same_title?: string[]; same_content?: string[] }
 type Mapping = Segment & {
@@ -36,6 +37,19 @@ const mapping = (s: Segment): Mapping => ({
   base_revision: null,
   allow_duplicate: false,
 })
+function mappingSignature(rows: Mapping[]) {
+  return JSON.stringify(
+    rows.map(({ title, start, end, action, chapter_id, base_revision, allow_duplicate }) => ({
+      title,
+      start,
+      end,
+      action,
+      chapter_id,
+      base_revision,
+      allow_duplicate,
+    })),
+  )
+}
 const actions = { append: '追加', replace: '替换', skip: '跳过' }
 
 export function ManuscriptImport({
@@ -52,6 +66,9 @@ export function ManuscriptImport({
   const [encoding, setEncoding] = useState('utf-8-sig')
   const [preview, setPreview] = useState<Preview>()
   const [mappings, setMappings] = useState<Mapping[]>([])
+  const [baseline, setBaseline] = useState(mappingSignature([]))
+  const dirty = mappingSignature(mappings) !== baseline
+  useLeaveGuard(dirty, '导入章界与映射')
   const [history, setHistory] = useState<History[]>([])
   const [selected, setSelected] = useState(0)
   const [content, setContent] = useState('')
@@ -86,7 +103,9 @@ export function ManuscriptImport({
   }
   function load(row: Preview) {
     setPreview(row)
-    setMappings(row.draft?.mappings || row.segments.map(mapping))
+    const values = row.draft?.mappings || row.segments.map(mapping)
+    setMappings(values)
+    setBaseline(mappingSignature(values))
     setReceipt(row.receipt || undefined)
     setSelected(0)
     setContent('')
@@ -118,7 +137,14 @@ export function ManuscriptImport({
   return (
     <section className="card" aria-label="长篇拆章导入">
       <h2>长篇拆章导入</h2>
-      <button onClick={onClose}>关闭导入工作区</button>
+      <button
+        disabled={busy}
+        onClick={() => {
+          if (!dirty || confirmLeave()) onClose()
+        }}
+      >
+        关闭导入工作区
+      </button>
       <p>预览 → 调整章界 → 追加／替换／跳过 → 确认回执。原文件与替换前修订保留，不调用模型。</p>
       <p role="status">{message}</p>
       <label>
@@ -138,7 +164,7 @@ export function ManuscriptImport({
           onChange={(e) => {
             const file = e.target.files?.[0]
             e.target.value = ''
-            if (file)
+            if (file && (!dirty || confirmLeave()))
               void perform(async () => {
                 const form = new FormData()
                 form.append('file', file)
@@ -157,9 +183,11 @@ export function ManuscriptImport({
         {history.map((row) => (
           <button
             key={row.id}
-            onClick={() =>
-              void perform(async () => load(await api(`/branches/${branchId}/import-previews/${row.id}`)))
-            }
+            disabled={busy}
+            onClick={() => {
+              if (!dirty || confirmLeave())
+                void perform(async () => load(await api(`/branches/${branchId}/import-previews/${row.id}`)))
+            }}
           >
             {row.filename} · {row.committed ? '已导入' : '未确认'} ·{' '}
             {new Date(row.created * 1000).toLocaleString()}
@@ -337,6 +365,7 @@ export function ManuscriptImport({
                 )
                 if (alive.current) {
                   setPreview(value)
+                  setBaseline(mappingSignature(values))
                   setMessage('章界和映射草稿已保存，刷新后可从预览历史恢复。')
                 }
               })
@@ -378,6 +407,7 @@ export function ManuscriptImport({
                 )
                 if (!alive.current) return
                 setReceipt(result)
+                setBaseline(mappingSignature(values.mappings))
                 setMessage(
                   '导入已完成，回执保留。目录已更新，当前编辑器输入仍保留，请从目录选择要继续的章节。',
                 )

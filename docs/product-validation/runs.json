@@ -262,5 +262,38 @@
     "result": "passed",
     "record": "2026-11-13-leave-guard.md",
     "fix_of": ""
+  },
+  {
+    "id": "project-baseline-001",
+    "date": "2026-11-13",
+    "commit": "f2afc74+working-tree",
+    "module": "全项目稳定性",
+    "scenario": "全量后端320项与无头端到端14项",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-project-stability-baseline.md",
+    "fix_of": ""
+  },
+  {
+    "id": "writing-conflict-001",
+    "date": "2026-11-13",
+    "commit": "f2afc74+working-tree",
+    "module": "全项目稳定性",
+    "scenario": "双窗口冲突首次换行断言",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-project-stability-baseline.md",
+    "fix_of": ""
+  },
+  {
+    "id": "writing-conflict-002",
+    "date": "2026-11-13",
+    "commit": "f2afc74+working-tree",
+    "module": "全项目稳定性",
+    "scenario": "逐行核对、原稿保留及刷新比较恢复",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-project-stability-baseline.md",
+    "fix_of": "writing-conflict-001"
   }
 ]
