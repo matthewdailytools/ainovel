@@ -21,6 +21,7 @@ import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
 import { SceneTimePanel } from './SceneTimePanel'
+import { confirmLeave } from './leaveGuard'
 
 const actions = [
   ['writing.advise', '卡点诊断与方向'],
@@ -107,6 +108,7 @@ export function Writing({
   }, [])
   const refresh = async () => setChapters(await api(`/branches/${branch.id}/chapters`))
   async function loadChapter(id: string, at = 0, authoritative = false) {
+    if (current.current && current.current.id !== id && !confirmLeave()) return
     const token = ++loadSequence.current
     setOpening(true)
     try {

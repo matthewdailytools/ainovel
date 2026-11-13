@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type Chapter } from './api'
 import type { Notify } from './App'
+import { confirmLeave, useLeaveGuard } from './leaveGuard'
 
 type Scene = {
   event_id?: string | null
@@ -64,6 +65,9 @@ export function SceneTimePanel({
   const [characters, setCharacters] = useState<Character[]>([])
   const [form, setForm] = useState<Scene>(() => fresh(chapter))
   const [editing, setEditing] = useState<Row>()
+  const [baseline, setBaseline] = useState(() => JSON.stringify(fresh(chapter)))
+  const dirty = JSON.stringify(form) !== baseline
+  useLeaveGuard(dirty, '场景时点绑定')
   const [context, setContext] = useState<Context>()
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -128,7 +132,10 @@ export function SceneTimePanel({
       setBundle(undefined)
       const row = result.scenes.find((r) => r.id === editing?.id) || result.scenes.at(-1)
       setEditing(row)
-      if (row) setForm(row.payload)
+      if (row) {
+        setForm(row.payload)
+        setBaseline(JSON.stringify(row.payload))
+      }
       setMessage(
         archived
           ? '已归档保存的绑定，历史保留。'
@@ -157,6 +164,8 @@ export function SceneTimePanel({
           <button
             disabled={busy}
             onClick={() => {
+              if (dirty && !confirmLeave()) return
+              setBaseline(JSON.stringify(fresh(chapter)))
               setForm(fresh(chapter))
               setEditing(undefined)
               setHistory([])
@@ -168,6 +177,8 @@ export function SceneTimePanel({
             <article className="fact" key={row.id}>
               <button
                 onClick={() => {
+                  if (dirty && !confirmLeave()) return
+                  setBaseline(JSON.stringify(row.payload))
                   setEditing(row)
                   setForm(structuredClone(row.payload))
                   setHistory([])

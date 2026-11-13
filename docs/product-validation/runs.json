@@ -251,5 +251,16 @@
     "result": "passed",
     "record": "2026-11-13-scene-maintenance.md",
     "fix_of": ""
+  },
+  {
+    "id": "leave-guard-001",
+    "date": "2026-11-13",
+    "commit": "fe1622f+working-tree",
+    "module": "工作台与表单",
+    "scenario": "跨作品切换、未提交设置与场景切章",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-leave-guard.md",
+    "fix_of": ""
   }
 ]

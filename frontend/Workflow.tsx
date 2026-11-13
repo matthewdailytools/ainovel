@@ -11,6 +11,7 @@ import {
   type GenreProfile,
 } from './api'
 import type { Notify } from './App'
+import { useLeaveGuard } from './leaveGuard'
 import story from '../fixtures/original-story.json'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
@@ -68,6 +69,22 @@ export function WorkflowPage({
   const [continueLimit, setContinueLimit] = useState('')
   const [continueReason, setContinueReason] = useState('')
   const [status, setStatus] = useState('')
+  const formSignature = JSON.stringify([
+    mode,
+    brief,
+    fixed,
+    plots,
+    count,
+    minChars,
+    maxChars,
+    adoption,
+    structuredMaintenance,
+    sceneMaintenance,
+    profile,
+    runLimit,
+  ])
+  const [submittedForm, setSubmittedForm] = useState(formSignature)
+  useLeaveGuard(formSignature !== submittedForm, '整书创作设置')
   async function refresh() {
     const rows = (await api<Task[]>('/tasks')).filter((t) => t.kind === 'workflow' && t.novel_id === novel.id)
     setTasks(rows)
@@ -215,6 +232,7 @@ export function WorkflowPage({
         pendingRequest.current = { signature, key: crypto.randomUUID() }
       payload.client_request_id = pendingRequest.current.key
       const row = await api<Task>('/workflows', 'POST', payload)
+      setSubmittedForm(formSignature)
       setTasks((tasks) => [row, ...tasks.filter((task) => task.id !== row.id)])
       await onStarted(row.branch_id)
       setSelectedTask(row.id)

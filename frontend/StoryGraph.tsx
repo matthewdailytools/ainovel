@@ -3,6 +3,7 @@ import { api, type Chapter } from './api'
 import type { components } from './api-schema'
 import type { Notify } from './App'
 import { StoryExtraction } from './StoryExtraction'
+import { useLeaveGuard } from './leaveGuard'
 
 type Schemas = components['schemas']
 type Payload =
@@ -113,15 +114,7 @@ export function StoryGraph({
     coverage: string
   }>()
   const dirty = JSON.stringify(draft) !== JSON.stringify(editing?.payload || fresh(draft.kind))
-  useEffect(() => {
-    if (!dirty) return
-    const guard = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ''
-    }
-    window.addEventListener('beforeunload', guard)
-    return () => window.removeEventListener('beforeunload', guard)
-  }, [dirty])
+  useLeaveGuard(dirty, '长篇结构记录')
   useEffect(() => {
     let active = true
     void api<Graph>(`/branches/${branchId}/story-graph`)

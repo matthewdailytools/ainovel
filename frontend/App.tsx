@@ -4,6 +4,7 @@ import { Writing } from './Writing'
 import { LibraryPage } from './Library'
 import { WorkflowPage } from './Workflow'
 import { Records } from './Records'
+import { confirmLeave } from './leaveGuard'
 
 export type Notify = (error: unknown) => void
 export function App() {
@@ -82,18 +83,25 @@ export function App() {
     const timer = setInterval(() => void refreshConfig().catch(notify), 10_000)
     return () => clearInterval(timer)
   }, [ready, refreshConfig, notify])
+  function navigate(id: string) {
+    if (id !== page && confirmLeave()) setPage(id)
+  }
   async function createNovel(event: React.FormEvent) {
     event.preventDefault()
     if (creating || !title.trim()) return
     setCreating(true)
+    const generation = selection.current.generation
+    const submittedTitle = title
     try {
-      const result = await api<{ id: string }>('/novels', 'POST', { title: title.trim(), brief: '' })
+      const result = await api<{ id: string }>('/novels', 'POST', { title: submittedTitle.trim(), brief: '' })
       setNovels(await api('/novels'))
-      setBranches([])
-      setBranchId('')
-      setNovelId(result.id)
-      setPage('writing')
-      setTitle('')
+      if (selection.current.generation === generation && confirmLeave()) {
+        setBranches([])
+        setBranchId('')
+        setNovelId(result.id)
+        setPage('writing')
+      }
+      setTitle((current) => (current === submittedTitle ? '' : current))
     } catch (e) {
       notify(e)
     } finally {
@@ -122,7 +130,7 @@ export function App() {
               key={id}
               className={page === id ? 'nav active' : 'nav'}
               aria-current={page === id ? 'page' : undefined}
-              onClick={() => setPage(id)}
+              onClick={() => navigate(id)}
             >
               {name}
             </button>
@@ -230,6 +238,10 @@ export function App() {
                 value={novelId}
                 onChange={(e) => {
                   if (e.target.value === novelId) return
+                  if (!confirmLeave()) {
+                    e.target.value = novelId
+                    return
+                  }
                   setBranches([])
                   setBranchId('')
                   setNovelId(e.target.value)
@@ -247,7 +259,14 @@ export function App() {
             </label>
             <label>
               工作版本
-              <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+              <select
+                value={branchId}
+                onChange={(e) => {
+                  if (e.target.value === branchId) return
+                  if (confirmLeave()) setBranchId(e.target.value)
+                  else e.target.value = branchId
+                }}
+              >
                 <option value="" disabled>
                   选择版本
                 </option>
@@ -320,7 +339,7 @@ export function App() {
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
-                    onGenreSettings={() => setPage('records')}
+                    onGenreSettings={() => navigate('records')}
                   />
                 )}
                 {page === 'library' && (
@@ -330,7 +349,7 @@ export function App() {
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
-                    onWriting={() => setPage('writing')}
+                    onWriting={() => navigate('writing')}
                   />
                 )}
                 {page === 'workflow' && novel && (
@@ -345,7 +364,7 @@ export function App() {
                     onStarted={async (id) => {
                       await refreshBranches(novel.id, id, selectionGeneration)
                     }}
-                    onGenreSettings={() => setPage('records')}
+                    onGenreSettings={() => navigate('records')}
                   />
                 )}
                 {page === 'records' && branch && (
