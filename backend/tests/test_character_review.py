@@ -1,6 +1,7 @@
 import asyncio
 from copy import deepcopy
 import json
+from typing import Literal
 
 import pytest
 
@@ -50,7 +51,13 @@ class ReviewModel:
         if self.callback:
             self.callback()
         return {
-            "text": dumps({"version": VERSION, "input_sha256": task["input_sha256"], "fields": fields}),
+            "text": dumps(
+                {
+                    "version": task["字段复核契约版本"],
+                    "input_sha256": task["input_sha256"],
+                    "fields": fields,
+                }
+            ),
             "usage": {"input": 1, "output": 1},
             "call_id": "offline-character-review",
             "model": "observed-test-model",
@@ -186,7 +193,14 @@ def test_semantic_non_support_is_valid_no_retry_and_author_can_still_adopt(
     saved = domain.artifact(artifact["id"])
     assert saved["status"] == "candidate"
     assert saved["payload"]["character_semantic_review"]["status"] == "needs_review"
+    assert {row["result"] for row in saved["payload"]["character_semantic_review"]["results"]} == {verdict}
     assert len(model.calls) == 1
+    assert (
+        domain.db.all(
+            "SELECT * FROM task_events WHERE task_id=? AND kind='citation_repair'", (worker.task["id"],)
+        )
+        == []
+    )
     assert domain.db.all("SELECT * FROM story_records") == []
     assert domain.chapter(chapter["id"]) == chapter
     response = client.post(
@@ -273,6 +287,75 @@ def test_saved_report_recovers_without_call_and_records_are_not_rewritten(settin
         domain.artifact(artifact["id"])["payload"]["character_semantic_review"]
         == reviewed["payload"]["character_semantic_review"]
     )
+
+
+@pytest.mark.parametrize("already_adopted", [False, True])
+def test_v1_report_and_paid_step_stay_historical_until_explicit_v2_review(
+    settings, domain, story, monkeypatch, already_adopted
+):
+    class V1Review(character_review.CharacterReview):
+        version: Literal["character-field-entailment/1"]
+
+    model = ReviewModel()
+    worker, result, artifact, chapter = pending(settings, domain, story, model=model)
+    with monkeypatch.context() as legacy:
+        legacy.setattr(character_review, "VERSION", "character-field-entailment/1")
+        legacy.setattr(character_review, "CharacterReview", V1Review)
+        old, old_token = asyncio.run(ensure_character_review(worker, artifact))
+    old_report = deepcopy(old["payload"]["character_semantic_review"])
+    old_steps = domain.db.all("SELECT * FROM task_steps WHERE task_id=?", (worker.task["id"],))
+    assert old_report["version"] == "character-field-entailment/1"
+    assert len(old_steps) == len(model.calls) == 1
+    if already_adopted:
+        adopt(
+            domain,
+            story["branch_id"],
+            artifact["id"],
+            AdoptExtraction(
+                base_story_revision=result["expected_story_revision"],
+                candidate_revision=0,
+                selected_ids=[r["id"] for r in artifact["payload"]["records"]],
+                idempotency_key="explicit-author-adopted-v1",
+            ),
+        )
+        original_graph = graph(domain, story["branch_id"])
+        restored_progress = domain.task(worker.task["id"])["result"]
+        assert asyncio.run(maintain(worker, restored_progress))
+        assert graph(domain, story["branch_id"]) == original_graph
+        assert domain.artifact(artifact["id"])["payload"]["character_semantic_review"] == old_report
+        assert len(model.calls) == 1
+    else:
+        with pytest.raises(DomainError, match="复核绑定已失效"):
+            adopt(
+                domain,
+                story["branch_id"],
+                artifact["id"],
+                AdoptExtraction(
+                    base_story_revision=result["expected_story_revision"],
+                    candidate_revision=0,
+                    selected_ids=[r["id"] for r in artifact["payload"]["records"]],
+                    idempotency_key="v1-cannot-authorize-v2-automatic",
+                ),
+                worker.attempt,
+                old_token,
+            )
+        assert domain.artifact(artifact["id"])["payload"]["character_semantic_review"] == old_report
+        assert domain.db.all("SELECT * FROM story_records") == []
+        fresh, token = asyncio.run(ensure_character_review(worker, old))
+        assert token != old_token
+        report = fresh["payload"]["character_semantic_review"]
+        assert report["version"] == VERSION == "character-field-entailment/2"
+        assert fresh["payload"]["character_semantic_review_history"] == [old_report]
+        assert report["completed_steps"][0]["fingerprint"] != old_steps[0]["fingerprint"]
+        assert len(model.calls) == 2
+        assert domain.db.all("SELECT * FROM story_records") == []
+    assert domain.chapter(chapter["id"]) == chapter
+    for previous in old_steps:
+        saved = domain.db.one(
+            "SELECT * FROM task_steps WHERE task_id=? AND fingerprint=?",
+            (worker.task["id"], previous["fingerprint"]),
+        )
+        assert saved == previous
 
 
 @pytest.mark.parametrize("split_surrogate", [False, True])

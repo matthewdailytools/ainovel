@@ -11,7 +11,7 @@ import {
 } from './characterSemanticReview'
 
 const report: Report = {
-  version: 'character-field-entailment/1',
+  version: 'character-field-entailment/2',
   candidate_revision: 3,
   input_sha256: 'a'.repeat(64),
   status: 'supported',
@@ -51,11 +51,27 @@ test('当前有效报告保留字段证据、模型与版本，容忍派生报�
     '林舟是渡工。',
     'test-provider / test-model',
     'test-account',
-    'character-field-entailment/1',
+    'character-field-entailment/2',
     '不等于作者认可',
     '作者仍可明确选择采用',
   ])
     expect(html).toContain(text)
+})
+
+test('旧版v1报告兼容展示为历史，即便候选修订一致且supported也不能作为当前支持', () => {
+  const legacy: Report = { ...report, version: 'character-field-entailment/1' }
+  expect(readCharacterSemanticReview(legacy)).toEqual(legacy)
+  expect(characterReviewState(legacy, 3, false).state).toBe('legacy')
+  expect(characterReviewState(legacy, 4, true).state).toBe('legacy')
+  const html = render(legacy)
+  expect(html).toContain('旧版历史报告')
+  expect(html).toContain('复核规则已变化')
+  expect(html).toContain('不作为当前人物字段复核的有效支持')
+  expect(html).toContain('character-field-entailment/1')
+  expect(html).toContain('林舟 · 档案：来源支持')
+  expect(html).toContain('林舟是渡工。')
+  expect(html).not.toContain('均有来源支持')
+  expect(render(legacy, 4, true)).toContain('来源正文或故事已变化或待复检，需重新核对')
 })
 
 test('缺失报告不能显示通过，刷新提示明确', () => {
@@ -68,7 +84,7 @@ test('缺失报告不能显示通过，刷新提示明确', () => {
 })
 
 test.each([
-  { ...report, version: 'character-field-entailment/2' },
+  { ...report, version: 'character-field-entailment/3' },
   { ...report, candidate_revision: '3' },
   { ...report, reviewer: { model: 'test-model' } },
   { ...report, results: [{ ...report.results[0], field: 'title' }] },

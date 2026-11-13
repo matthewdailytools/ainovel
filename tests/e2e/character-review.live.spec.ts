@@ -46,6 +46,8 @@ test('日常实例：人物字段待核报告、原文与刷新只读核验，�
     throw new Error('待核字段缺少真实已保存的复核报告')
   }
   expect(report.status).toBe('needs_review')
+  const historical = process.env.AINOVEL_CHARACTER_REVIEW_HISTORY === '1'
+  expect(report.version).toBe(`character-field-entailment/${historical ? 1 : 2}`)
   const result = report.results[0]
   expect(['unknown', 'contradicted']).toContain(result.result)
 
@@ -84,14 +86,25 @@ test('日常实例：人物字段待核报告、原文与刷新只读核验，�
   const panel = page.getByRole('region', { name: '结构化整理与确认', exact: true })
   await panel.getByRole('combobox', { name: '保存的结构候选', exact: true }).selectOption(artifactId)
   const review = panel.getByRole('region', { name: '人物字段来源复核', exact: true })
-  await expect(review).toContainText('人物字段待核对')
+  await expect(review).toContainText(historical ? '旧版历史报告' : '人物字段待核对')
   await review.getByText(/^查看字段结论、理由与来源/).click()
   await expect(review).toContainText(String(result.reason))
   await expect(review).toContainText(result.result === 'unknown' ? '未知' : '矛盾')
   await expect(review).toContainText('模型辅助核对')
-  await expect(review).toContainText('保存稿修订1')
+  if (Array.isArray(result.evidence) && result.evidence.length) {
+    await expect(review).toContainText('保存稿修订1')
+  } else {
+    await expect(review).toContainText('未提供原文证据。')
+  }
+  await panel.getByText('核对具体内容、关联和原文', { exact: true }).click()
+  await expect(
+    panel
+      .locator('blockquote')
+      .filter({ hasText: String(saved.payload.records[0].record.sources[0].quote) })
+      .last(),
+  ).toBeVisible()
   await panel.getByRole('button', { name: '刷新候选与复核报告', exact: true }).click()
-  await expect(review).toContainText('人物字段待核对')
+  await expect(review).toContainText(historical ? '旧版历史报告' : '人物字段待核对')
   const desktop = testInfo.outputPath('character-review-desktop.png')
   await page.screenshot({ path: desktop, fullPage: true })
   await page.setViewportSize({ width: 320, height: 800 })
@@ -122,6 +135,8 @@ test('日常实例：人物字段待核报告、原文与刷新只读核验，�
         chapterId,
         artifactId,
         reportStatus: report.status,
+        reportVersion: report.version,
+        historical,
         fieldResult: result.result,
         unexpectedWrites,
         positionWrites,

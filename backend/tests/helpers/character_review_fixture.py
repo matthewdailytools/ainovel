@@ -1,7 +1,7 @@
 """Deterministic contract responses; these do not assess literary entailment."""
 
 CHARACTER_REVIEW_ACTION = "独立核对人物自由文本的本项来源蕴含"
-CHARACTER_REVIEW_VERSION = "character-field-entailment/1"
+CHARACTER_REVIEW_VERSION = "character-field-entailment/2"
 
 
 def character_review_output(instruction):

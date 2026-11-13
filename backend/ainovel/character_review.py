@@ -11,7 +11,7 @@ from pydantic import Field, ValidationError
 from .db import DomainError, dumps
 from .story_graph import Strict
 
-VERSION = "character-field-entailment/1"
+VERSION = "character-field-entailment/2"
 ACTION = "独立核对人物自由文本的本项来源蕴含"
 
 
@@ -24,7 +24,7 @@ class FieldReview(Strict):
 
 
 class CharacterReview(Strict):
-    version: Literal["character-field-entailment/1"]
+    version: Literal["character-field-entailment/2"]
     input_sha256: str = Field(min_length=64, max_length=64)
     fields: list[FieldReview] = Field(min_length=1, max_length=120)
 
@@ -217,7 +217,12 @@ async def ensure_character_review(worker, artifact):
             "人物字段": inputs["targets"],
             "本项原文来源": inputs["sources"],
             "冻结工作流边界": inputs["constraints"],
-            "要求": "仅独立核对所列人物字段的全部实质断言能否由其本项原文支持。身份用于定位，字段本身不是证据，不引用当前记忆或外部知识循环佐证。brief/fixed用于约束冲突和时点边界，未来规划不能当已发生事实。逐项返回record_id、field、supported/unknown/contradicted、source_ids和理由；肯定须完整受支持，未知不能升级为事实。缺证据判unknown，不要求证明相反命题；contradicted须有相反依据。未知或矛盾是有效结果，不为通过删除断言、改写字段或勉强改判。只用本人物列出的来源编号，原句和位置由程序复原。",
+            "结论判定": {
+                "supported": "字段中的全部实质断言均得到本项原文支持。如字段如实记录某事尚未知、未证实或仅为人物猜测，且来源确实如此，这一保留未知的描述本身可以得到支持；不要将它误当确定事实断言。",
+                "unknown": "缺少支持且没有相反证据时必须为unknown。未证实不等于证伪；没有证据证明成立，也不等于已经证明相反命题。人物猜测既不证明事情为真，也不证明其必假。冻结约束要求保持未知，不等于事实反命题已经成立。",
+                "contradicted": "须有本项来源明示的相反事实，并引用该依据。仅以没有支持、尚未交代、角色怀疑或要求保持未知为理由，不能判contradicted；这类依据不足应为unknown，不得补出相反事实。",
+            },
+            "要求": "仅独立核对所列人物字段的全部实质断言能否由其本项原文支持。身份用于定位，字段本身不是证据，不引用当前记忆或外部知识循环佐证。brief/fixed用于约束冲突和时点边界，未来规划不能当已发生事实。逐项返回record_id、field、supported/unknown/contradicted、source_ids和理由；肯定须完整受支持，未知不能升级为事实。先区分来源支持、明确反证、依据不足，再给结论，不以阻止自动采用为由将unknown改判为contradicted。未知或矛盾是有效结果，不为通过删除断言、改写字段或勉强改判。只用本人物列出的来源编号，原句和位置由程序复原。",
         },
         CharacterReview,
         {

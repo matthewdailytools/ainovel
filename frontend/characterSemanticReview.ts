@@ -1,6 +1,7 @@
+export const CHARACTER_REVIEW_VERSION = 'character-field-entailment/2'
 export type CharacterReviewResult = 'supported' | 'unknown' | 'contradicted'
 export type CharacterSemanticReview = {
-  version: 'character-field-entailment/1'
+  version: typeof CHARACTER_REVIEW_VERSION | 'character-field-entailment/1'
   candidate_revision: number
   input_sha256: string
   status: 'supported' | 'needs_review'
@@ -31,7 +32,7 @@ function revision(value: unknown): value is number {
 export function readCharacterSemanticReview(value: unknown): CharacterSemanticReview | undefined {
   if (
     !object(value) ||
-    value.version !== 'character-field-entailment/1' ||
+    (value.version !== CHARACTER_REVIEW_VERSION && value.version !== 'character-field-entailment/1') ||
     !revision(value.candidate_revision) ||
     typeof value.input_sha256 !== 'string' ||
     !value.input_sha256 ||
@@ -103,7 +104,7 @@ export function readCharacterSemanticReview(value: unknown): CharacterSemanticRe
 }
 
 type ReviewState =
-  'missing' | 'invalid' | 'historical' | 'stale' | 'needs_review' | 'supported' | 'not_required'
+  'missing' | 'invalid' | 'legacy' | 'historical' | 'stale' | 'needs_review' | 'supported' | 'not_required'
 
 export function characterReviewState(value: unknown, candidateRevision: number, sourceStale: boolean) {
   const report = readCharacterSemanticReview(value)
@@ -112,15 +113,17 @@ export function characterReviewState(value: unknown, candidateRevision: number, 
       ? 'missing'
       : !report
         ? 'invalid'
-        : report.candidate_revision !== candidateRevision
-          ? 'historical'
-          : sourceStale
-            ? 'stale'
-            : report.status === 'needs_review' || report.results.some((item) => item.result !== 'supported')
-              ? 'needs_review'
-              : report.results.length
-                ? 'supported'
-                : 'not_required'
+        : report.version !== CHARACTER_REVIEW_VERSION
+          ? 'legacy'
+          : report.candidate_revision !== candidateRevision
+            ? 'historical'
+            : sourceStale
+              ? 'stale'
+              : report.status === 'needs_review' || report.results.some((item) => item.result !== 'supported')
+                ? 'needs_review'
+                : report.results.length
+                  ? 'supported'
+                  : 'not_required'
   return { report, state }
 }
 
