@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:legacy": "node --test tests/api-test.test.mjs tests/product-review.test.mjs",
     "generate:api": "node scripts/generate-api-types.mjs",
-    "format:check": "prettier --check frontend vite.config.ts vitest.config.ts scripts/generate-api-types.mjs package.json tsconfig.json fixtures"
+    "format:check": "prettier --check frontend vite.config.ts vitest.config.ts scripts/generate-api-types.mjs package.json tsconfig.json fixtures playwright.config.ts tests/e2e",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",
@@ -25,6 +26,7 @@
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@types/node": "26.6.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

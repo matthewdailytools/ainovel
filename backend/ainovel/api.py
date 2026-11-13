@@ -181,7 +181,9 @@ def create_app(settings=None, schema_only=False):
 
     @app.get("/api/novels")
     def novels():
-        return db.all("SELECT * FROM novels ORDER BY created DESC")
+        return db.all(
+            "SELECT * FROM novels WHERE id NOT IN (SELECT novel_id FROM reference_workspace) ORDER BY created DESC"
+        )
 
     @app.post("/api/novels", status_code=201)
     def create_novel(data: NovelInput):
@@ -334,6 +336,8 @@ def create_app(settings=None, schema_only=False):
 
     @app.post("/api/modules", status_code=202)
     def run_module(data: ModuleInput):
+        if data.action.startswith("reference."):
+            raise DomainError("reference_route", "请从参考会话提交动作，以冻结选段、规则、方案和检查对象。")
         provider_ready(data.account)
         if (
             data.action
@@ -348,7 +352,13 @@ def create_app(settings=None, schema_only=False):
         ):
             raise DomainError("chapter_required", "该操作需要章节。")
         payload = data.model_dump()
-        for key in ("genre_profile_basis", "author_contract_basis", "source_review_id"):
+        for key in (
+            "genre_profile_basis",
+            "author_contract_basis",
+            "source_review_id",
+            "reference_session_id",
+            "reference_revision",
+        ):
             if payload[key] is None:
                 payload.pop(key)
         if not payload["finding_indices"]:
@@ -356,6 +366,8 @@ def create_app(settings=None, schema_only=False):
         if data.action == "revision.targeted":
             validate_targeted_revision(domain, payload, domain.context(data.branch_id, data.chapter_id))
         return domain.queue("module", {**payload, "module_version": MODULES[data.action].version})
+
+    from .reference import register_routes as register_reference_routes
 
     @app.get("/api/modules")
     def module_specs():
@@ -752,6 +764,8 @@ def create_app(settings=None, schema_only=False):
                 raise DomainError("candidate_conflict", "候选已在其他窗口更新，本地编辑请保留并比较。", 409)
             if "review" in payload:
                 payload["previous_review"] = payload.pop("review")
+            if "reference_comparison" in payload:
+                payload["previous_reference_comparison"] = payload.pop("reference_comparison")
             if "revision_trace" in payload:
                 payload["previous_revision_trace"] = payload.pop("revision_trace")
             payload.update(text=data.text, review_passed=False, memory={})
@@ -1047,6 +1061,8 @@ def create_app(settings=None, schema_only=False):
         if len(backup_id) != 32 or any(c not in "0123456789abcdef" for c in backup_id):
             raise DomainError("backup_id", "备份标识无效。")
         return verify_backup(settings.data_dir / "backups" / (backup_id + ".zip"))
+
+    register_reference_routes(app, domain, provider_ready)
 
     dist = ROOT / "dist"
     if dist.is_dir():

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, label, type Book, type Excerpt, type Unit } from './api'
+import { api, label, type Book, type Excerpt, type Unit, type Branch } from './api'
 import type { Notify } from './App'
+import { ReferenceWorkspace, type ReferenceSession } from './ReferenceWorkspace'
 
 type Hit = {
   id: string
@@ -14,7 +15,35 @@ type Hit = {
 }
 type Search = { hits: Hit[]; next_offset: number | null; matching: string; coverage: Book[] }
 type Job = { id: string; title: string; status: string; error: string; book_id: string }
-export function LibraryPage({ novelId, notify }: { novelId: string; notify: Notify }) {
+export function LibraryPage({
+  novelId,
+  branch,
+  account,
+  modelReady,
+  notify,
+  onWriting,
+}: {
+  novelId: string
+  branch?: Branch
+  account: string
+  modelReady: boolean
+  notify: Notify
+  onWriting: () => void
+}) {
+  const [studyId, setStudyId] = useState('')
+  const [studies, setStudies] = useState<ReferenceSession[]>([])
+  const [studyGoal, setStudyGoal] = useState('学习这个片段怎样组织人物判断、信息和局部进展。')
+  useEffect(() => {
+    let active = true
+    void api<ReferenceSession[]>('/reference-sessions')
+      .then((rows) => {
+        if (active) setStudies(rows)
+      })
+      .catch(notify)
+    return () => {
+      active = false
+    }
+  }, [studyId, notify])
   const [books, setBooks] = useState<Book[]>([])
   const [bookId, setBookId] = useState('')
   const [units, setUnits] = useState<Unit[]>([])
@@ -123,6 +152,19 @@ export function LibraryPage({ novelId, notify }: { novelId: string; notify: Noti
     )
   }
   const book = books.find((b) => b.id === bookId)
+  if (studyId)
+    return (
+      <ReferenceWorkspace
+        key={studyId}
+        identifier={studyId}
+        branch={branch}
+        account={account}
+        modelReady={modelReady}
+        notify={notify}
+        onBack={() => setStudyId('')}
+        onWriting={onWriting}
+      />
+    )
   return (
     <div className="library-page page-pad">
       <div className="page-heading">
@@ -402,6 +444,32 @@ export function LibraryPage({ novelId, notify }: { novelId: string; notify: Noti
                 <p className="small">
                   已选 {selection.text.length} 个 UTF-16 单元；资料不会自动变成小说事实。
                 </p>
+                <label>
+                  参考学习目标
+                  <textarea
+                    value={studyGoal}
+                    onChange={(e) => setStudyGoal(e.target.value)}
+                    rows={2}
+                    maxLength={3000}
+                  />
+                </label>
+                <button
+                  disabled={busy || !selection.text || !studyGoal.trim()}
+                  onClick={() =>
+                    void perform(async () => {
+                      const value = await api<ReferenceSession>('/reference-sessions', 'POST', {
+                        unit_id: unit.id,
+                        start: selection.start,
+                        end: selection.end,
+                        quote: selection.text,
+                        goal: studyGoal,
+                      })
+                      setStudyId(value.id)
+                    })
+                  }
+                >
+                  拆解这段写法
+                </button>
                 <button
                   className="primary"
                   disabled={!selection.text || busy}
@@ -447,6 +515,12 @@ export function LibraryPage({ novelId, notify }: { novelId: string; notify: Noti
           )}
         </section>
         <aside className="card">
+          <h2>参考学习历史</h2>
+          {studies.map((study) => (
+            <button className="wide" key={study.id} onClick={() => setStudyId(study.id)}>
+              {study.payload.source.title} · {study.payload.goal.slice(0, 35)} · 修订{study.revision}
+            </button>
+          ))}
           <h2>当前资料包</h2>
           {excerpts.length ? (
             excerpts.map((e) => (
@@ -455,6 +529,23 @@ export function LibraryPage({ novelId, notify }: { novelId: string; notify: Noti
                   {e.title} ↗ 原文
                 </button>
                 <blockquote>{e.quote}</blockquote>
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    void perform(async () => {
+                      const value = await api<ReferenceSession>('/reference-sessions', 'POST', {
+                        unit_id: e.unit_id,
+                        start: e.start,
+                        end: e.end,
+                        quote: e.quote,
+                        goal: studyGoal,
+                      })
+                      setStudyId(value.id)
+                    })
+                  }
+                >
+                  从此摘录拆解写法
+                </button>
                 <p>{e.note}</p>
               </div>
             ))

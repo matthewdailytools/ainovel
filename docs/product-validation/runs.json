@@ -1,1 +1,24 @@
-[]
+[
+  {
+    "id": "reference-001-failed",
+    "date": "2026-11-13",
+    "commit": "3597cc6+working-tree",
+    "module": "参考仿写",
+    "scenario": "刷新恢复与对照采纳",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-reference-first-loop.md",
+    "fix_of": ""
+  },
+  {
+    "id": "reference-002-retest",
+    "date": "2026-11-13",
+    "commit": "3597cc6+working-tree",
+    "module": "参考仿写",
+    "scenario": "选段至采纳、刷新恢复及原稿历史",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-reference-first-loop.md",
+    "fix_of": "reference-001-failed"
+  }
+]

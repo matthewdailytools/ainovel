@@ -216,7 +216,7 @@ def test_submission_checks_the_contract_seen_by_user_before_creating_work(
     [
         value
         for value in ModuleInput.model_fields["action"].annotation.__args__
-        if value != "revision.targeted"
+        if value != "revision.targeted" and not value.startswith("reference.")
     ],
 )
 def test_all_auxiliary_actions_receive_frozen_contract(settings, domain, story, action):

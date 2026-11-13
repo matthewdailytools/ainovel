@@ -26,4 +26,6 @@ jobs:
       - run: npm test
       - run: npm run test:legacy
       - run: npm run build
+      - run: npx playwright install chromium
+      - run: npm run test:e2e
       - run: node scripts/build-product-review.mjs --check

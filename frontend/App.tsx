@@ -322,7 +322,16 @@ export function App() {
                     onGenreSettings={() => setPage('records')}
                   />
                 )}
-                {page === 'library' && <LibraryPage novelId={novelId} notify={notify} />}
+                {page === 'library' && (
+                  <LibraryPage
+                    novelId={novelId}
+                    branch={branch}
+                    account={account}
+                    modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
+                    notify={notify}
+                    onWriting={() => setPage('writing')}
+                  />
+                )}
                 {page === 'workflow' && novel && (
                   <WorkflowPage
                     key={novel.id}

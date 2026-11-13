@@ -51,6 +51,10 @@ class ModuleInput(Input):
         "ideation.explore",
         "intent.compile",
         "revision.targeted",
+        "reference.analyze",
+        "reference.plan",
+        "reference.draft",
+        "reference.check",
     ]
     novel_id: str
     branch_id: str
@@ -72,6 +76,9 @@ class ModuleInput(Input):
     author_contract_basis: AuthorContractBasis | None = None
     source_review_id: str | None = Field(default=None, min_length=1, max_length=128)
     finding_indices: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list, max_length=20)
+
+    reference_session_id: str | None = None
+    reference_revision: int | None = Field(default=None, ge=0)
 
 
 class CandidateEdit(Input):

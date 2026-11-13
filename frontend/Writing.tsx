@@ -18,6 +18,7 @@ import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
 import { ChapterContext } from './ChapterContext'
 import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
+import { ReferenceComparison } from './ReferenceWorkspace'
 
 const actions = [
   ['writing.advise', '卡点诊断与方向'],
@@ -1090,6 +1091,7 @@ function Candidate({
           <pre className="report">{JSON.stringify(artifact.payload.review, null, 2)}</pre>
         </details>
       )}
+      <ReferenceComparison value={artifact.payload.reference_comparison} />
       {!!artifact.payload.previous_revision_trace && (
         <details>
           <summary>编辑前的原问题复检（已失效）</summary>
@@ -1121,6 +1123,7 @@ function Candidate({
         <button
           className="primary"
           disabled={
+            artifact.kind.startsWith('reference_') ||
             (artifact.kind === 'intent' && !!artifact.payload.author_text) ||
             busy ||
             candidateChanged ||

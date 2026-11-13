@@ -12,7 +12,13 @@ def same_task_payload(left, right):
     # Added in 0.2: omitted and null both mean an older caller supplied no seen basis.
     # A supplied basis object (including its explicit null reader ID) remains distinct.
     def normalized(value):
-        optional = {"genre_profile_basis", "author_contract_basis", "source_review_id"}
+        optional = {
+            "genre_profile_basis",
+            "author_contract_basis",
+            "source_review_id",
+            "reference_session_id",
+            "reference_revision",
+        }
         return {
             k: v
             for k, v in value.items()
@@ -141,6 +147,10 @@ class Domain:
         with self.db.connect(True) as db:
             if attempt:
                 self.db.check_attempt(db, task_id, attempt)
+            if reference := basis.get("reference_session"):
+                from .reference import check_reference_tx
+
+                check_reference_tx(db, reference)
             # A setting may change while the last model call is in flight. Validate
             # inside the artifact transaction, as well as before dispatching calls.
             if task_id:
@@ -184,6 +194,16 @@ class Domain:
                     time(),
                 ),
             )
+            if reference := basis.get("reference_session"):
+                saved = db.execute(
+                    "SELECT payload FROM reference_sessions WHERE id=?", (reference["id"],)
+                ).fetchone()
+                state = json.loads(saved[0])
+                state["results"][request["action"].split(".")[-1]] = artifact_id
+                db.execute(
+                    "UPDATE reference_sessions SET payload=?,updated=? WHERE id=?",
+                    (dumps(state), time(), reference["id"]),
+                )
         return self.artifact(artifact_id)
 
     @staticmethod
@@ -278,6 +298,16 @@ class Domain:
                 raise DomainError(
                     "author_confirmation_required",
                     "请先将契约提案载入作者表单，核对原话与AI推导后确认采用。",
+                    409,
+                )
+            if reference := artifact["basis"].get("reference_session"):
+                from .reference import check_reference_tx
+
+                check_reference_tx(db, reference)
+            if artifact["kind"].startswith("reference_"):
+                raise DomainError(
+                    "reference_confirmation_required",
+                    "参考分析和方案请在参考工作区核对后保存为本次采用内容；此动作不采纳正文。",
                     409,
                 )
             if require_review and not payload.get("review_passed"):
@@ -521,6 +551,10 @@ class Domain:
             initial["targeted_revision_snapshot"] = validate_targeted_revision(
                 self, payload, self.context(branch_id, payload.get("chapter_id"))
             )
+        if kind == "module" and payload.get("action", "").startswith("reference."):
+            from .reference import reference_basis
+
+            initial["reference_snapshot"] = reference_basis(self, payload)
         if kind == "workflow":
             initial["expected_story_revision"] = profile["source_story_revision"]
         with self.db.connect(True) as db:

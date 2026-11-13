@@ -996,6 +996,93 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/reference-sessions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** References */
+    get: operations['references_api_reference_sessions_get']
+    put?: never
+    /** Create Reference */
+    post: operations['create_reference_api_reference_sessions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/reference-sessions/{identifier}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Reference */
+    get: operations['get_reference_api_reference_sessions__identifier__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    /** Edit Reference */
+    patch: operations['edit_reference_api_reference_sessions__identifier__patch']
+    trace?: never
+  }
+  '/api/reference-sessions/{identifier}/tasks': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Reference Tasks */
+    get: operations['reference_tasks_api_reference_sessions__identifier__tasks_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/reference-sessions/{identifier}/actions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Start Reference */
+    post: operations['start_reference_api_reference_sessions__identifier__actions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/reference-sessions/{identifier}/feedback': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Feedback */
+    post: operations['feedback_api_reference_sessions__identifier__feedback_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1128,6 +1215,23 @@ export interface components {
        */
       acknowledge_unknown: boolean
     }
+    /** CreateReference */
+    CreateReference: {
+      /** Unit Id */
+      unit_id: string
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Quote */
+      quote: string
+      /** Goal */
+      goal: string
+      /** Branch Id */
+      branch_id?: string | null
+      /** Chapter Id */
+      chapter_id?: string | null
+    }
     /** DefinitionInput */
     DefinitionInput: {
       /**
@@ -1165,6 +1269,33 @@ export interface components {
        * @enum {string}
        */
       format: 'epub' | 'page_text'
+    }
+    /** EditReference */
+    EditReference: {
+      /** Base Revision */
+      base_revision: number
+      /** Goal */
+      goal: string
+      /** Cards */
+      cards?: components['schemas']['ReferenceCard'][]
+      /** Selected Ids */
+      selected_ids?: string[]
+      /**
+       * Plot
+       * @default
+       */
+      plot: string
+      /** Fixed */
+      fixed?: string[]
+      /**
+       * Application Plan
+       * @default
+       */
+      application_plan: string
+      /** Branch Id */
+      branch_id?: string | null
+      /** Chapter Id */
+      chapter_id?: string | null
     }
     /** ExcerptInput */
     ExcerptInput: {
@@ -1302,6 +1433,10 @@ export interface components {
         | 'ideation.explore'
         | 'intent.compile'
         | 'revision.targeted'
+        | 'reference.analyze'
+        | 'reference.plan'
+        | 'reference.draft'
+        | 'reference.check'
       /** Novel Id */
       novel_id: string
       /** Branch Id */
@@ -1342,6 +1477,10 @@ export interface components {
       source_review_id?: string | null
       /** Finding Indices */
       finding_indices?: number[]
+      /** Reference Session Id */
+      reference_session_id?: string | null
+      /** Reference Revision */
+      reference_revision?: number | null
     }
     /** MoveInput */
     MoveInput: {
@@ -1387,6 +1526,61 @@ export interface components {
       note: string
       /** Base Revision */
       base_revision: number
+    }
+    /** ReferenceAction */
+    ReferenceAction: {
+      /** Base Revision */
+      base_revision: number
+      /**
+       * Action
+       * @enum {string}
+       */
+      action: 'analyze' | 'plan' | 'draft' | 'check'
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
+      /** Candidate Id */
+      candidate_id?: string | null
+      /**
+       * Check Saved
+       * @default false
+       */
+      check_saved: boolean
+    }
+    /** ReferenceCard */
+    ReferenceCard: {
+      /**
+       * Id
+       * @default
+       */
+      id: string
+      /** Observation */
+      observation: string
+      /** Interpretation */
+      interpretation: string
+      /** Technique */
+      technique: string
+      /** Conditions */
+      conditions: string
+      /**
+       * Exceptions
+       * @default
+       */
+      exceptions: string
+      /** Evidence */
+      evidence: string
+    }
+    /** ReferenceFeedback */
+    ReferenceFeedback: {
+      /** Base Revision */
+      base_revision: number
+      /** Text */
+      text: string
+      /** Candidate Id */
+      candidate_id?: string | null
     }
     /** RenameInput */
     RenameInput: {
@@ -3631,6 +3825,237 @@ export interface operations {
       cookie?: never
     }
     requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  references_api_reference_sessions_get: {
+    parameters: {
+      query?: {
+        branch_id?: string | null
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_reference_api_reference_sessions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateReference']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_reference_api_reference_sessions__identifier__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  edit_reference_api_reference_sessions__identifier__patch: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['EditReference']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  reference_tasks_api_reference_sessions__identifier__tasks_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  start_reference_api_reference_sessions__identifier__actions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReferenceAction']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  feedback_api_reference_sessions__identifier__feedback_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReferenceFeedback']
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {

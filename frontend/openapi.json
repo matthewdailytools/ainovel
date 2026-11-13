@@ -1717,6 +1717,194 @@
           }
         }
       }
+    },
+    "/api/reference-sessions": {
+      "get": {
+        "summary": "References",
+        "operationId": "references_api_reference_sessions_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Reference",
+        "operationId": "create_reference_api_reference_sessions_post",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateReference" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/reference-sessions/{identifier}": {
+      "get": {
+        "summary": "Get Reference",
+        "operationId": "get_reference_api_reference_sessions__identifier__get",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Edit Reference",
+        "operationId": "edit_reference_api_reference_sessions__identifier__patch",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EditReference" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/reference-sessions/{identifier}/tasks": {
+      "get": {
+        "summary": "Reference Tasks",
+        "operationId": "reference_tasks_api_reference_sessions__identifier__tasks_get",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/reference-sessions/{identifier}/actions": {
+      "post": {
+        "summary": "Start Reference",
+        "operationId": "start_reference_api_reference_sessions__identifier__actions_post",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReferenceAction" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/reference-sessions/{identifier}/feedback": {
+      "post": {
+        "summary": "Feedback",
+        "operationId": "feedback_api_reference_sessions__identifier__feedback_post",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ReferenceFeedback" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1888,6 +2076,21 @@
         "required": ["client_request_id", "account", "reason"],
         "title": "ContinuationInput"
       },
+      "CreateReference": {
+        "properties": {
+          "unit_id": { "type": "string", "title": "Unit Id" },
+          "start": { "type": "integer", "minimum": 0, "title": "Start" },
+          "end": { "type": "integer", "exclusiveMinimum": 0, "title": "End" },
+          "quote": { "type": "string", "maxLength": 10000, "minLength": 1, "title": "Quote" },
+          "goal": { "type": "string", "maxLength": 3000, "minLength": 1, "title": "Goal" },
+          "branch_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Branch Id" },
+          "chapter_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Chapter Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["unit_id", "start", "end", "quote", "goal"],
+        "title": "CreateReference"
+      },
       "DefinitionInput": {
         "properties": {
           "kind": {
@@ -1943,6 +2146,38 @@
         "type": "object",
         "required": ["title"],
         "title": "DownloadInput"
+      },
+      "EditReference": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "goal": { "type": "string", "maxLength": 3000, "minLength": 1, "title": "Goal" },
+          "cards": {
+            "items": { "$ref": "#/components/schemas/ReferenceCard" },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Cards"
+          },
+          "selected_ids": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Selected Ids"
+          },
+          "plot": { "type": "string", "maxLength": 12000, "title": "Plot", "default": "" },
+          "fixed": { "items": { "type": "string" }, "type": "array", "maxItems": 30, "title": "Fixed" },
+          "application_plan": {
+            "type": "string",
+            "maxLength": 12000,
+            "title": "Application Plan",
+            "default": ""
+          },
+          "branch_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Branch Id" },
+          "chapter_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Chapter Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "goal"],
+        "title": "EditReference"
       },
       "ExcerptInput": {
         "properties": {
@@ -2121,7 +2356,11 @@
               "world.generate",
               "ideation.explore",
               "intent.compile",
-              "revision.targeted"
+              "revision.targeted",
+              "reference.analyze",
+              "reference.plan",
+              "reference.draft",
+              "reference.check"
             ],
             "title": "Action"
           },
@@ -2182,6 +2421,14 @@
             "type": "array",
             "maxItems": 20,
             "title": "Finding Indices"
+          },
+          "reference_session_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Reference Session Id"
+          },
+          "reference_revision": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Reference Revision"
           }
         },
         "additionalProperties": false,
@@ -2232,6 +2479,60 @@
         "type": "object",
         "required": ["chapter_id", "cursor", "base_revision"],
         "title": "ReadingInput"
+      },
+      "ReferenceAction": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "action": { "type": "string", "enum": ["analyze", "plan", "draft", "check"], "title": "Action" },
+          "account": { "type": "string", "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          },
+          "candidate_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Candidate Id" },
+          "check_saved": { "type": "boolean", "title": "Check Saved", "default": false }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "action", "account", "client_request_id"],
+        "title": "ReferenceAction"
+      },
+      "ReferenceCard": {
+        "properties": {
+          "id": { "type": "string", "maxLength": 128, "title": "Id", "default": "" },
+          "observation": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Observation" },
+          "interpretation": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Interpretation"
+          },
+          "technique": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Technique" },
+          "conditions": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Conditions" },
+          "exceptions": { "type": "string", "maxLength": 2000, "title": "Exceptions", "default": "" },
+          "evidence": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Evidence" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["observation", "interpretation", "technique", "conditions", "evidence"],
+        "title": "ReferenceCard"
+      },
+      "ReferenceFeedback": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "text": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Text" },
+          "candidate_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Candidate Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "text"],
+        "title": "ReferenceFeedback"
       },
       "RenameInput": {
         "properties": { "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" } },

@@ -78,6 +78,9 @@ class Database:
                 raise DomainError("future_schema", "数据库版本高于当前程序，已停止写入。")
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+            from .reference import SCHEMA as REFERENCE_SCHEMA
+
+            db.executescript(REFERENCE_SCHEMA)
             db.execute(
                 """INSERT OR IGNORE INTO revisions(id,chapter_id,revision,content,cause,created)
                 SELECT lower(hex(randomblob(16))),id,0,CASE WHEN revision=0 THEN content ELSE '' END,

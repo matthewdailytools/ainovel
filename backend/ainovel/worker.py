@@ -32,7 +32,7 @@ SYSTEM = """你是中文原创小说工作台的执行模块。区分作者指�
 作者契约中的author_text是作者原话，provenance区分作者确认与AI提案。情绪目标和核心钩子是体验方向，不自行升级成硬性剧情。
 作者已确认的固定结果、禁止项和终局不得被预设或本次模糊指令覆盖。本次明确指令若与作品锁定冲突，应指出冲突并等待作者明确改约，不静默替换锁定。全书结果和终局在全书检查核对，单章只核对禁止项及当前时点明确应发生的结果。
 """
-PROMPT_VERSION = "0.3.1"
+PROMPT_VERSION = "0.4.0"
 
 
 def parse_json(text):
@@ -177,6 +177,12 @@ class Worker:
             frozen_selection = self.task["result"].get("targeted_revision_snapshot")
             if frozen_selection and selection != frozen_selection:
                 raise DomainError("review_stale", "来源审稿报告在修订过程中改变，请重新选择问题。", 409)
+        if payload.get("action", "").startswith("reference."):
+            from .reference import reference_basis
+
+            current_reference = reference_basis(self.domain, payload)
+            if current_reference != self.task["result"].get("reference_snapshot"):
+                raise DomainError("reference_changed", "参考输入已改变，停止派发。", 409)
         expected = (context or {}).get("branch")
         if expected and self.domain.branch(expected["id"])["story_revision"] != expected["story_revision"]:
             raise DomainError("story_changed", "故事版本在步骤之间改变，已停止后续调用。", 409)
@@ -492,7 +498,11 @@ class Worker:
             "表达预设": request["writing_profile"],
         }
         kind = "advice"
-        if action == "intent.compile":
+        if action.startswith("reference."):
+            from .reference import run_reference
+
+            kind, payload = await run_reference(self, request, context)
+        elif action == "intent.compile":
             payload, kind = await compile_contract(self, request, context), "intent"
         elif action == "revision.targeted":
             kind, payload = await run_targeted_revision(self, request, context)
@@ -573,6 +583,7 @@ class Worker:
                 "genre_profile": self.genre_snapshot(),
                 "author_contract": self.author_snapshot(),
                 "targeted_revision": self.task["result"].get("targeted_revision_snapshot"),
+                "reference_session": self.task["result"].get("reference_snapshot"),
             },
             self.task["id"],
             self.attempt,

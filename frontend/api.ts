@@ -199,6 +199,8 @@ export type Unit = {
 }
 export type Excerpt = {
   id: string
+  start: number
+  end: number
   quote: string
   note: string
   title: string
