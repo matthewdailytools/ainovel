@@ -4,10 +4,11 @@ import json
 from time import time
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_serializer
 
 from .db import DomainError, dumps, uid
 from .story_graph import Strict, graph, graph_snapshot, metadata_revision_compatible, query_context
+from .scene_order import SceneOrderAudit, audit_valid
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scene_times(
@@ -21,6 +22,7 @@ INSERT OR IGNORE INTO extension_migrations VALUES('scene-time/1',unixepoch());
 
 
 class SceneTime(Strict):
+    order_basis: SceneOrderAudit | None = None
     event_id: str | None = None
     event_revision: int | None = Field(default=None, ge=0)
     title: str = Field(min_length=1, max_length=200)
@@ -33,6 +35,13 @@ class SceneTime(Strict):
     character_id: str | None = None
     note: str = Field(default="", max_length=2000)
 
+    @model_serializer(mode="wrap")
+    def retain_legacy_serialization(self, handler):
+        value = handler(self)
+        if self.order_basis is None:
+            value.pop("order_basis", None)
+        return value
+
 
 class SaveScene(Strict):
     base_story_revision: int = Field(ge=0)
@@ -42,6 +51,8 @@ class SaveScene(Strict):
 
 
 def event_basis_valid(tx, payload, chapter_id, indexed):
+    if not audit_valid(tx, payload, chapter_id, indexed):
+        return False
     if payload.get("event_id") is None and payload.get("event_revision") is None:
         return True
     event = indexed.get(payload.get("event_id"))
@@ -79,7 +90,12 @@ def scenes(domain, branch_id, chapter_id):
         row["stale"] = row["payload"]["source_revision"] != chapter["revision"] or bool(
             row["payload"]["character_id"] and row["payload"]["character_id"] not in identities
         )
-    if any(r["payload"].get("event_id") or r["payload"].get("event_revision") is not None for r in rows):
+    if any(
+        r["payload"].get("order_basis") is not None
+        or r["payload"].get("event_id")
+        or r["payload"].get("event_revision") is not None
+        for r in rows
+    ):
         with domain.db.connect() as tx:
             tx.execute("BEGIN")
             indexed = {r["id"]: r for r in graph_snapshot(tx, branch_id)["records"]}
@@ -114,8 +130,37 @@ def save_scene(domain, branch_id, chapter_id, data, identifier=None):
             raise DomainError("scene_changed", "场景绑定在其他窗口更新，请重新比较。", 409)
         if creating and (data.base_revision is not None or data.archived):
             raise DomainError("scene_changed", "新场景不能指定旧修订或直接归档。")
+        previous = json.loads(old["payload"]) if old else {}
+        if not data.archived:
+            if previous.get("order_basis") is None:
+                for key in ("event_id", "event_revision"):
+                    if key not in data.scene.model_fields_set and key in previous:
+                        p[key] = previous[key]
+            if "order_basis" not in data.scene.model_fields_set and previous.get("order_basis") is not None:
+                p["order_basis"] = previous["order_basis"]
+            if previous.get("order_basis") is not None:
+                fixed = (
+                    "order_basis",
+                    "source_revision",
+                    "start",
+                    "end",
+                    "story_order",
+                    "story_time",
+                    "event_id",
+                    "event_revision",
+                )
+                if any(p.get(key) != previous.get(key) for key in fixed):
+                    raise DomainError(
+                        "scene_basis_readonly",
+                        "提取依据与范围须保留；需要改变时请归档旧绑定并新建手工范围。",
+                        409,
+                    )
+            elif p.get("order_basis") is not None:
+                raise DomainError(
+                    "scene_basis_readonly", "事件引用依据只能由提取核对后采用；手工范围不伪造依据。", 409
+                )
         if data.archived:
-            p = json.loads(old["payload"])
+            p = previous
         if branch[0] != data.base_story_revision or (
             not data.archived and chapter["revision"] != p["source_revision"]
         ):
@@ -124,7 +169,11 @@ def save_scene(domain, branch_id, chapter_id, data, identifier=None):
             raise DomainError("scene_range", "请填写场景名并核对起止位置。")
         if not data.archived:
             utf16_slice(chapter["content"], p["start"], p["end"])
-            if (p["event_id"] is not None or p["event_revision"] is not None) and not event_basis_valid(
+            if (
+                p.get("order_basis") is not None
+                or p["event_id"] is not None
+                or p["event_revision"] is not None
+            ) and not event_basis_valid(
                 tx, p, chapter_id, {r["id"]: r for r in graph_snapshot(tx, branch_id)["records"]}
             ):
                 raise DomainError(

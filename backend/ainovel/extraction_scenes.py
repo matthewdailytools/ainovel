@@ -99,7 +99,7 @@ def scene_issues(value, units, known, proposals):
     return issues
 
 
-def normalize_scenes(value, units, chapters, allocated):
+def normalize_scenes(value, units, chapters, allocated, event_nodes=None):
     from .domain import utf16_slice
 
     indexed = {u["source_id"]: u for u in units}
@@ -114,8 +114,15 @@ def normalize_scenes(value, units, chapters, allocated):
                 else len(chapter["content"].encode("utf-16-le")) // 2
             )
             actor = group["character_id"] or None
+            fields = {k: v for k, v in group.items() if k not in {"source_ids", "character_id"}}
+            if event_nodes is not None:
+                from .scene_order import make_audit
+
+                fields["story_order"], fields["order_basis"] = make_audit(
+                    group, [indexed[i] for i in group["source_ids"]], event_nodes, allocated
+                )
             scene = SceneTime(
-                **{k: v for k, v in group.items() if k not in {"source_ids", "character_id"}},
+                **fields,
                 source_revision=chapter["revision"],
                 start=start,
                 end=end,
@@ -215,7 +222,11 @@ def adopt_scenes(tx, branch_id, payload, chosen_ids, confirm_replace, required=F
             ).fetchone()
         ):
             raise DomainError("scene_viewpoint", "请同时选择场景所需的本批人物，不能使用其他版本身份。", 409)
-        if p["story_order"] is not None:
+        if p.get("order_basis") is not None:
+            from .scene_order import adopted_audit
+
+            p["order_basis"] = adopted_audit(tx, p, chapter["id"], {r["id"]: r for r in effective["records"]})
+        elif p["story_order"] is not None:
             anchors = [
                 r
                 for r in effective["records"]

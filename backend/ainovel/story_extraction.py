@@ -10,6 +10,13 @@ from .db import DomainError, dumps, uid
 from .evidence import source_units
 from .story_graph import RECORD, Record, Strict, graph, references, validate_record
 from .extraction_scenes import SceneProposal, adopt_scenes, freeze_scenes, normalize_scenes, scene_issues
+from .scene_order import (
+    VERSION as LINKED_SCENE_VERSION,
+    LinkedSceneProposal,
+    effective_records,
+    execution_version,
+    linked_scene_issues,
+)
 
 PROMISE_STAGE_GROUNDING_VERSION = "promise-stage-grounding/2"
 SCENE_GROUNDING_VERSION = "scene-event-order/1"
@@ -33,6 +40,10 @@ class Extraction(Strict):
 
 class ExtractionWithScenes(Extraction):
     scenes: list[SceneProposal] = Field(min_length=1, max_length=200)
+
+
+class ExtractionWithLinkedScenes(Extraction):
+    scenes: list[LinkedSceneProposal] = Field(min_length=1, max_length=200)
 
 
 class StartExtraction(Strict):
@@ -155,6 +166,7 @@ async def run_extraction(worker, request, context, snapshot=None):
         ]
     indexed = {u["source_id"]: u for u in units}
     with_scenes = request.get("include_scene_ranges", False)
+    linked_scenes = with_scenes and execution_version(worker.task) == LINKED_SCENE_VERSION
     if with_scenes and len(units) > 2000:
         raise DomainError("scene_range", "本批超过2000个原文片段，请缩小章节范围后整理场景。")
     existing = [r for r in graph(worker.domain, request["branch_id"])["records"] if not r["archived"]]
@@ -249,7 +261,13 @@ async def run_extraction(worker, request, context, snapshot=None):
             if not references(record).issubset(known | set(local)):
                 issues.append("关联只能使用本批local_id或已提供的正式标识。")
         if with_scenes:
-            issues.extend(scene_issues(value["scenes"], units, by_id, value["records"]))
+            issues.extend(
+                linked_scene_issues(
+                    value["scenes"], units, by_id, value["records"], worker.domain, request["branch_id"]
+                )
+                if linked_scenes
+                else scene_issues(value["scenes"], units, by_id, value["records"])
+            )
         return issues
 
     narrow = {
@@ -267,7 +285,16 @@ async def run_extraction(worker, request, context, snapshot=None):
                     "场景范围要求": "同时输出scenes，按每章原文source_id连续分组，完整覆盖且每段仅一次。不输出自己计算的位置，服务根据冻结原文计算UTF-16范围。人物视角明确character_id，可用本批人物local_id。story_order只采用所覆盖原文中实际事件的已知故事顺序；缺依据使用null和未知说明，不能按章号推断。不将未来计划当实际时点，插叙、倒叙及信息视角分别表达。",
                     "场景顺序语义": "story_order是覆盖范围内实际事件的唯一有效故事顺序，不是场景编号或章节编号。先核对关联actual事件和其原文来源；同一场景覆盖多个不同事件顺序时不得任取一项，可依据实际事件合理拆分，或保留null并在note说明未知边界。没有唯一有效事件顺序时同样保留null；不得为了通过校验删事件、改正文、编造时点或清空已有事实。",
                 }
-                if with_scenes
+                if with_scenes and not linked_scenes
+                else {}
+            ),
+            **(
+                {
+                    "场景证据契约版本": LINKED_SCENE_VERSION,
+                    "场景范围要求": "输出scenes，按每章source_id连续分组，完整覆盖且每段仅一次；不输出位置或story_order，服务计算UTF-16范围。人物视角须明确本批人物local_id或已有身份。",
+                    "场景顺序语义": "order_basis须显式选择{kind:event_refs,refs:[事件local_id或已有event正式id]}，或{kind:unknown,reason:具体未知边界,refs:可选相关事件id列表}。event_refs必须来自本场景原文支持的有效actual事件，服务按引用的有效字段精确联接唯一故事顺序，并核对全部覆盖实际事件；不得重复输出scalar或把场景编号、章号当事件顺序。多个不同顺序（包括回忆）须有依据合理拆分，或明确unknown及原因；没有依据同样明确unknown。不得删事件、改来源、借planned或其它章、任取一个值或自动清空时点以通过。未知可保存但不代表时点已验证；相关refs仍须有效。",
+                }
+                if linked_scenes
                 else {}
             ),
             "可引用原文": units,
@@ -328,12 +355,17 @@ async def run_extraction(worker, request, context, snapshot=None):
             "伏笔显式追加": "已有promise的新增埋设、强化或回收使用append_stages=true，指定target_id、target_revision及update_fields包含stages；record.stages只输出本批新增且有独立来源的阶段，服务将完整保留旧阶段并追加，不能重建或重复未提供的旧历史。索引只提供当前状态与阶段数。追加不能改写历史或自动决定retained/abandoned；无证据列unknowns。append_stages默认false，仍表示原有的整字段替换提案，不能假装已掌握未提供历史，自动采用仍受既有安全政策约束。sources字段原有追加/明确替换语义不变。",
             "要求": "仅提取所给正文有依据的人物、事件、状态、关系及伏笔。已有身份用正式id关联，避免重建同一人物；新项使用本批local_id。更新已有项必须指定target_id、target_revision和非空update_fields，只列本批确有新依据的变化字段，未列字段保持原值，不猜测未提供的旧档案。sources默认追加证据；明确需替换时才列sources。状态在更晚事件中变化时新建事件与状态，不把新变化回写成旧事件当时的状态；修改旧状态只作为有明确依据的纠错提案。quote填source_id，其余来源位置由服务复原。档案、作者知识、角色知识及读者知识分开；计划不冒充实际，未知故事时间和冲突保持可见。不确定伏笔只列unknowns。每项解释推导边界，不能改稿或自动采用。",
         },
-        ExtractionWithScenes if with_scenes else Extraction,
+        ExtractionWithLinkedScenes if linked_scenes else ExtractionWithScenes if with_scenes else Extraction,
         narrow,
         validate,
         max_output=request["max_output_tokens"],
     )
     allocated = {r["local_id"]: r["target_id"] or uid() for r in result["records"]}
+    scene_nodes = (
+        effective_records(by_id, result["records"], worker.domain, request["branch_id"])
+        if linked_scenes
+        else None
+    )
     for item in result["records"]:
         item["id"] = allocated[item["local_id"]]
         if item["target_id"]:
@@ -365,7 +397,11 @@ async def run_extraction(worker, request, context, snapshot=None):
     ]
     result["source_story_revision"] = snapshot["story_revision"]
     if with_scenes:
-        result["scenes"] = normalize_scenes(result["scenes"], units, snapshot["chapters"], allocated)
+        result["scenes"] = normalize_scenes(
+            result["scenes"], units, snapshot["chapters"], allocated, scene_nodes
+        )
+        if linked_scenes:
+            result["scene_contract_version"] = LINKED_SCENE_VERSION
         result["scene_replacements"] = snapshot.get("scene_replacements", [])
         result["scene_required"] = True
     return "story_extraction", result
@@ -499,6 +535,11 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None, character_review_t
             "story_revision": revision + increment,
             "note": "仅所选结构候选已确认；未选项保留在原产物，不影响正文。",
         }
+        if payload.get("scene_contract_version") == LINKED_SCENE_VERSION:
+            selected_scenes = [s for s in payload.get("scenes", []) if s["id"] in scene_revisions]
+            result["scene_contract_version"] = LINKED_SCENE_VERSION
+            result["unknown_story_times"] = sum(s["scene"]["story_order"] is None for s in selected_scenes)
+            result["story_times_verified"] = bool(selected_scenes) and result["unknown_story_times"] == 0
         tx.execute("INSERT INTO receipts VALUES(?,?,?)", (data.idempotency_key, artifact_id, dumps(result)))
         if maintenance_owner:
             owner = maintenance_owner
@@ -518,6 +559,15 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None, character_review_t
                         "record_revisions": record_revisions,
                         "scene_ids": list(scene_revisions),
                         "scene_revisions": scene_revisions,
+                        **(
+                            {
+                                "scene_contract_version": LINKED_SCENE_VERSION,
+                                "unknown_story_times": result["unknown_story_times"],
+                                "story_times_verified": result["story_times_verified"],
+                            }
+                            if result.get("scene_contract_version") == LINKED_SCENE_VERSION
+                            else {}
+                        ),
                         "policy": "worker_automatic" if attempt else "author_confirmed",
                         "created": time(),
                     }

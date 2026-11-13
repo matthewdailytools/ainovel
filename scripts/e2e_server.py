@@ -364,6 +364,14 @@ class Model(ReferenceModel):
                             "note": "工程替身不推断时点",
                         }
                     ]
+                    if instruction.get("场景证据契约版本") == "scene-event-refs/2":
+                        for scene in payload["scenes"]:
+                            scene.pop("story_order")
+                            scene["order_basis"] = {
+                                "kind": "unknown",
+                                "reason": "本测试仅有范围依据，未独立确认故事时点。",
+                                "refs": [],
+                            }
                 return {
                     "text": json.dumps(payload),
                     "usage": {"input": 1, "output": 1},
@@ -394,6 +402,14 @@ class Model(ReferenceModel):
                     }
                     for chapter in chapters
                 ]
+                if instruction.get("场景证据契约版本") == "scene-event-refs/2":
+                    for scene in payload["scenes"]:
+                        scene.pop("story_order")
+                        scene["order_basis"] = {
+                            "kind": "unknown",
+                            "reason": "本测试仅有范围依据，未独立确认故事时点。",
+                            "refs": [],
+                        }
                 result["text"] = json.dumps(payload)
             return result
         return await super().generate(account, task_id, system, prompt, max_output, **kwargs)

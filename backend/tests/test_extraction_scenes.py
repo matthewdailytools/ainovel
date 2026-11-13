@@ -36,6 +36,14 @@ class SceneModel(ExtractionModel):
             )
             for i, u in enumerate(units)
         ]
+        if instruction.get("场景证据契约版本") == "scene-event-refs/2":
+            for i, scene in enumerate(value["scenes"]):
+                scene.pop("story_order")
+                scene["order_basis"] = (
+                    {"kind": "event_refs", "refs": ["e"]}
+                    if i == 0
+                    else {"kind": "unknown", "reason": "本段没有唯一实际事件顺序", "refs": []}
+                )
         result["text"] = dumps(value)
         return result
 
@@ -196,13 +204,17 @@ class SceneOnlyModel:
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         instruction = json.loads(prompt.split("\n只返回")[0])["任务"]
         units = instruction["可引用原文"]
+        scene = {**scene_proposal(), "source_ids": [u["source_id"] for u in units]}
+        if instruction.get("场景证据契约版本") == "scene-event-refs/2":
+            scene.pop("story_order")
+            scene["order_basis"] = {"kind": "unknown", "reason": "本章未建立实际事件顺序", "refs": []}
         return {
             "text": dumps(
                 {
                     "records": [],
                     "unknowns": [],
                     "coverage": "本章",
-                    "scenes": [{**scene_proposal(), "source_ids": [u["source_id"] for u in units]}],
+                    "scenes": [scene],
                 }
             ),
             "usage": {"input": 1, "output": 1},
@@ -315,7 +327,7 @@ def test_bound_time_survives_added_evidence_but_not_a_correction_and_revert(prep
     assert next(
         r for r in scenes(domain, story["branch_id"], chapter["id"])["scenes"] if r["id"] == binding["id"]
     )["stale"]
-    with pytest.raises(DomainError, match="事件依据已改变"):
+    with pytest.raises(DomainError, match="事件依据已改变|提取依据与范围须保留"):
         save_scene(
             domain,
             story["branch_id"],

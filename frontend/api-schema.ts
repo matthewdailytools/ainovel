@@ -1712,6 +1712,19 @@ export interface components {
       /** After */
       after?: string[]
     }
+    /** EventWitness */
+    EventWitness: {
+      /** Ref */
+      ref: string
+      /** Event Id */
+      event_id: string
+      /** Event Revision */
+      event_revision?: number | null
+      /** Story Order */
+      story_order?: number | null
+      /** Record Sha256 */
+      record_sha256: string
+    }
     /** ExcerptInput */
     ExcerptInput: {
       /** Unit Id */
@@ -2209,8 +2222,34 @@ export interface components {
        */
       archived: boolean
     }
+    /** SceneOrderAudit */
+    SceneOrderAudit: {
+      /**
+       * Version
+       * @constant
+       */
+      version: 'scene-event-refs/2'
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'event_refs' | 'unknown'
+      /**
+       * Reason
+       * @default
+       */
+      reason: string
+      /** Refs */
+      refs?: components['schemas']['EventWitness'][]
+      /**
+       * Covered Events
+       * @description 候选生成时覆盖事件的冻结审计快照，可能未被选择采用；不是当前正式事件依赖。正式依赖仅refs。
+       */
+      covered_events?: components['schemas']['EventWitness'][]
+    }
     /** SceneTime */
     SceneTime: {
+      order_basis?: components['schemas']['SceneOrderAudit'] | null
       /** Event Id */
       event_id?: string | null
       /** Event Revision */

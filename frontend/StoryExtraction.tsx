@@ -11,6 +11,7 @@ import {
 } from './characterSemanticReview'
 import { characterRepairAccess, currentRepairTasks } from './characterFieldRepair'
 import { CharacterFieldRepair } from './CharacterRepairDetails'
+import { SceneOrderBasisDetails } from './SceneOrderBasisDetails'
 
 type Schemas = components['schemas']
 type RecordPayload =
@@ -668,6 +669,7 @@ export function StoryExtraction({
                           : '作者视角'}
                     </p>
                     {s.scene.note && <p>{s.scene.note}</p>}
+                    <SceneOrderBasisDetails scene={s.scene} stale={!!stale} nameFor={nameFor} />
                     {s.quote !== undefined && (
                       <details>
                         <summary>核对场景原文</summary>
@@ -681,10 +683,13 @@ export function StoryExtraction({
                     <details>
                       <summary>对照将归档的旧场景绑定</summary>
                       {artifact.payload.scene_replacements.map((s) => (
-                        <p key={s.id}>
-                          {s.payload.title} · 旧稿修订{s.payload.source_revision} · 位置{s.payload.start}—
-                          {s.payload.end} · 绑定修订{s.revision}
-                        </p>
+                        <article key={s.id}>
+                          <p>
+                            {s.payload.title} · 旧稿修订{s.payload.source_revision} · 位置{s.payload.start}—
+                            {s.payload.end} · 绑定修订{s.revision}
+                          </p>
+                          <SceneOrderBasisDetails scene={s.payload} historical nameFor={nameFor} />
+                        </article>
                       ))}
                     </details>
                     <label className="check">

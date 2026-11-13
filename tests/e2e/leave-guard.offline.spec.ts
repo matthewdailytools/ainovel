@@ -92,7 +92,7 @@ test('未保存场景：拒绝切章保留表单，保存后可切换且不串�
   await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue('场景甲章')
   await page.getByRole('button', { name: '确认保存场景时点', exact: true }).click()
   await expect(
-    page.getByText('场景时点已确认，不修改正文。正文后续变化时须重新复核范围。', { exact: true }),
+    page.getByText('场景范围已保存，故事时点仍未知；未据此核实人物当前知识。正文未改变。', { exact: true }),
   ).toBeVisible()
   page.once('dialog', () => {
     throw new Error('保存成功后不应拦截切章')

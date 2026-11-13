@@ -3014,6 +3014,22 @@
         "required": ["title", "kind"],
         "title": "Event"
       },
+      "EventWitness": {
+        "properties": {
+          "ref": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Ref" },
+          "event_id": { "type": "string", "minLength": 1, "title": "Event Id" },
+          "event_revision": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Event Revision"
+          },
+          "story_order": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Story Order" },
+          "record_sha256": { "type": "string", "maxLength": 64, "minLength": 64, "title": "Record Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["ref", "event_id", "record_sha256"],
+        "title": "EventWitness"
+      },
       "ExcerptInput": {
         "properties": {
           "unit_id": { "type": "string", "title": "Unit Id" },
@@ -3583,8 +3599,34 @@
         "required": ["base_story_revision", "scene"],
         "title": "SaveScene"
       },
+      "SceneOrderAudit": {
+        "properties": {
+          "version": { "type": "string", "const": "scene-event-refs/2", "title": "Version" },
+          "kind": { "type": "string", "enum": ["event_refs", "unknown"], "title": "Kind" },
+          "reason": { "type": "string", "maxLength": 2000, "title": "Reason", "default": "" },
+          "refs": {
+            "items": { "$ref": "#/components/schemas/EventWitness" },
+            "type": "array",
+            "maxItems": 60,
+            "title": "Refs"
+          },
+          "covered_events": {
+            "items": { "$ref": "#/components/schemas/EventWitness" },
+            "type": "array",
+            "title": "Covered Events",
+            "description": "候选生成时覆盖事件的冻结审计快照，可能未被选择采用；不是当前正式事件依赖。正式依赖仅refs。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["version", "kind"],
+        "title": "SceneOrderAudit"
+      },
       "SceneTime": {
         "properties": {
+          "order_basis": {
+            "anyOf": [{ "$ref": "#/components/schemas/SceneOrderAudit" }, { "type": "null" }]
+          },
           "event_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Event Id" },
           "event_revision": {
             "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],

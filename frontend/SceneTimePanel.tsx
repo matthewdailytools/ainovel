@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import { api, type Chapter } from './api'
 import type { Notify } from './App'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
+import { hasSceneOrderBasis, sceneSaveMessage } from './sceneOrderBasis'
+import { SceneOrderBasisDetails } from './SceneOrderBasisDetails'
 
 type Scene = {
   event_id?: string | null
   event_revision?: number | null
+  order_basis?: unknown
   title: string
   source_revision: number
   start: number
@@ -63,6 +66,7 @@ export function SceneTimePanel({
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<Data>()
   const [characters, setCharacters] = useState<Character[]>([])
+  const [eventNames, setEventNames] = useState<Record<string, string>>({})
   const [form, setForm] = useState<Scene>(() => fresh(chapter))
   const [editing, setEditing] = useState<Row>()
   const [baseline, setBaseline] = useState(() => JSON.stringify(fresh(chapter)))
@@ -73,6 +77,8 @@ export function SceneTimePanel({
   const [message, setMessage] = useState('')
   const [history, setHistory] = useState<{ revision: number; payload: Scene; archived: number }[]>([])
   const [bundle, setBundle] = useState<Bundle>()
+  const linkedTime = hasSceneOrderBasis(form)
+  const eventNameFor = (id: string) => eventNames[id] || '事件名称暂不可用'
   useEffect(() => {
     if (!open) return
     let active = true
@@ -84,6 +90,11 @@ export function SceneTimePanel({
         if (active) {
           setData(d)
           setCharacters(g.records.filter((r) => r.kind === 'character' && !r.archived))
+          setEventNames(
+            Object.fromEntries(
+              g.records.filter((r) => r.kind === 'event').map((r) => [r.id, r.payload.title]),
+            ),
+          )
         }
       })
       .catch((e) => {
@@ -136,11 +147,7 @@ export function SceneTimePanel({
         setForm(row.payload)
         setBaseline(JSON.stringify(row.payload))
       }
-      setMessage(
-        archived
-          ? '已归档保存的绑定，历史保留。'
-          : '场景时点已确认，不修改正文。正文后续变化时须重新复核范围。',
-      )
+      setMessage(sceneSaveMessage(row ? row.payload.story_order : form.story_order, archived))
     } catch (e) {
       notify(e)
       setMessage(e instanceof Error ? e.message : '保存失败，表单保留。')
@@ -184,8 +191,15 @@ export function SceneTimePanel({
                   setHistory([])
                 }}
               >
-                {row.payload.title} · {row.archived ? '已归档' : row.stale ? '待复核' : '已确认'} ·{' '}
-                {row.payload.start}—{row.payload.end}
+                {row.payload.title} ·{' '}
+                {row.archived
+                  ? '已归档'
+                  : row.stale
+                    ? '待复核'
+                    : row.payload.story_order === null
+                      ? '范围已保存，时点未知'
+                      : '已确认'}{' '}
+                · {row.payload.start}—{row.payload.end}
               </button>
             </article>
           ))}
@@ -197,12 +211,19 @@ export function SceneTimePanel({
               onChange={(e) => setForm({ ...form, title: e.target.value })}
             />
           </label>
+          <SceneOrderBasisDetails scene={form} stale={editing?.stale} nameFor={eventNameFor} />
+          {linkedTime && (
+            <p>
+              事件时点依据随范围保留。可编辑场景名称、说明和信息视角；如需调整范围或故事时点，请先归档此绑定，再新建手工确认范围，原依据与历史保留。
+            </p>
+          )}
           <div className="form-grid">
             <label>
               场景开始位置
               <input
                 type="number"
                 value={form.start}
+                readOnly={linkedTime}
                 onChange={(e) => setForm({ ...form, start: Number(e.target.value) })}
               />
             </label>
@@ -211,12 +232,14 @@ export function SceneTimePanel({
               <input
                 type="number"
                 value={form.end}
+                readOnly={linkedTime}
                 onChange={(e) => setForm({ ...form, end: Number(e.target.value) })}
               />
             </label>
           </div>
           <div className="actions">
             <button
+              disabled={busy || linkedTime}
               onClick={() =>
                 setForm({
                   ...form,
@@ -229,6 +252,7 @@ export function SceneTimePanel({
               用当前选区复核场景范围
             </button>
             <button
+              disabled={busy || linkedTime}
               onClick={() =>
                 setForm({ ...form, start: 0, end: chapter.content.length, source_revision: chapter.revision })
               }
@@ -241,6 +265,7 @@ export function SceneTimePanel({
             <input
               type="number"
               value={form.story_order ?? ''}
+              readOnly={linkedTime}
               onChange={(e) =>
                 setForm({ ...form, story_order: e.target.value === '' ? null : Number(e.target.value) })
               }
@@ -251,10 +276,11 @@ export function SceneTimePanel({
             <input
               value={form.story_time}
               maxLength={200}
+              readOnly={linkedTime}
               onChange={(e) => setForm({ ...form, story_time: e.target.value })}
             />
           </label>
-          {form.event_id && (
+          {form.event_id && !linkedTime && (
             <div className="notice">
               <p>
                 此时点关联实际事件修订{form.event_revision}
@@ -336,6 +362,7 @@ export function SceneTimePanel({
                 修订{h.revision} · {h.payload.title} · 故事序{h.payload.story_order ?? '未知'} ·{' '}
                 {h.payload.start}—{h.payload.end}
               </p>
+              <SceneOrderBasisDetails scene={h.payload} historical nameFor={eventNameFor} />
             </article>
           ))}
           <section aria-label="当前光标有效状态">
@@ -348,6 +375,13 @@ export function SceneTimePanel({
                     : '当前位置尚无有效场景绑定'}
                 </p>
                 <p>{context.longform.coverage}</p>
+                {context.longform.scene_binding && (
+                  <SceneOrderBasisDetails
+                    scene={context.longform.scene_binding.payload}
+                    stale={context.longform.scene_binding.stale}
+                    nameFor={eventNameFor}
+                  />
+                )}
                 {context.longform.blocked && <p role="alert">场景绑定待复核，模型动作暂停。</p>}
                 <p>
                   有效状态 {context.longform.states.length}；冲突组 {context.longform.conflicts.length}
@@ -387,6 +421,11 @@ export function SceneTimePanel({
                     <h4>
                       {s.binding.payload.title} · 故事序{s.binding.payload.story_order ?? '未知'}
                     </h4>
+                    <SceneOrderBasisDetails
+                      scene={s.binding.payload}
+                      stale={s.binding.stale}
+                      nameFor={eventNameFor}
+                    />
                     <p>
                       进入时有效状态 {s.entry.states.length}；离开时有效状态 {s.exit.states.length}
                     </p>
