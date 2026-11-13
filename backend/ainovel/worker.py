@@ -37,6 +37,26 @@ longform.plans单独列出作者维护的未来计划，包含各信息视角的
 作者已确认的固定结果、禁止项和终局不得被预设或本次模糊指令覆盖。本次明确指令若与作品锁定冲突，应指出冲突并等待作者明确改约，不静默替换锁定。全书结果和终局在全书检查核对，单章只核对禁止项及当前时点明确应发生的结果。
 """
 PROMPT_VERSION = "0.13.0"
+STRUCTURE_REPAIR_VERSION = "2"
+
+
+def structure_issues(error):
+    if not hasattr(error, "errors"):
+        return [{"type": "invalid_json"}]
+    issues = []
+    for item in error.errors():
+        issue = {"field": list(item["loc"]), "type": item["type"]}
+        if item["type"] == "literal_error":
+            # Return the offending enum and its actual contract, not a generic
+            # literal_error that leaves the model guessing between sibling fields.
+            value = item.get("input")
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                issue["actual"] = value[:200] if isinstance(value, str) else value
+            expected = item.get("ctx", {}).get("expected")
+            if isinstance(expected, str):
+                issue["allowed"] = expected[:2000]
+        issues.append(issue)
+    return issues
 
 
 def parse_json(text):
@@ -293,19 +313,23 @@ class Worker:
             try:
                 return schema.model_validate(parse_json(result["text"])).model_dump()
             except (DomainError, ValueError) as error:
-                issues = (
-                    [{"field": list(item["loc"]), "type": item["type"]} for item in error.errors()]
-                    if hasattr(error, "errors")
-                    else [{"type": "invalid_json"}]
-                )
+                issues = structure_issues(error)
                 if structure_repairs:
                     return await self.call(
                         {
                             "动作": "仅修正结构化产物格式",
+                            "修复契约版本": STRUCTURE_REPAIR_VERSION,
                             "原始任务": instruction,
                             "原始输出": result["text"],
                             "错误字段": issues,
-                            "要求": "严格遵守枚举与字段，不新增或改变事实。回到任务正文校验逐字引文。",
+                            "要求": "严格遵守各字段枚举，按错误字段中的actual与allowed核对；不能把相邻字段的取值混用。不新增或改变事实。回到任务正文校验逐字引文。",
+                            **(
+                                {
+                                    "事实字段说明": "kind是领域类别，只能event/knowledge/capability/resource/relationship/promise/world；truth是真实性标记，只能fact/belief/uncertain/plan。belief、uncertain、plan不是kind。角色误信仍保留truth=belief，不升级为作者事实。"
+                                }
+                                if schema is Memory
+                                else {}
+                            ),
                         },
                         schema,
                         context,
