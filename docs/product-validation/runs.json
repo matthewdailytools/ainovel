@@ -339,5 +339,27 @@
     "result": "unverified",
     "record": "2026-11-13-reference-quality.md",
     "fix_of": ""
+  },
+  {
+    "id": "reference-journal-001",
+    "date": "2026-11-13",
+    "commit": "8d6700c+working-tree",
+    "module": "质量评测可靠性",
+    "scenario": "Windows运行记录替换被拒绝，第四类方案派发后脚本终止",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-reference-quality.md",
+    "fix_of": ""
+  },
+  {
+    "id": "reference-journal-002",
+    "date": "2026-11-13",
+    "commit": "8d6700c+working-tree",
+    "module": "质量评测可靠性",
+    "scenario": "有限本地替换重试与原任务幂等恢复",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-reference-quality.md",
+    "fix_of": "reference-journal-001"
   }
 ]

@@ -61,9 +61,18 @@ CASES = [
 
 
 def write_json(path, value):
-    temporary = path.with_suffix(".tmp")
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(path)
+    # Windows readers/virus scanners can briefly deny replacement of an open file.
+    # Retry only the already-written local journal, never a network/model request.
+    for attempt in range(20):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            sleep(0.05)
 
 
 def blind_pack(folder, results):

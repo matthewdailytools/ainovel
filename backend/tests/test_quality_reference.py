@@ -1,9 +1,47 @@
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 
-from ainovel.quality_reference import CASES, Evaluation, blind_pack
+from ainovel.quality_reference import CASES, Evaluation, blind_pack, write_json
+
+
+def test_transient_windows_journal_lock_retries_only_local_replace(tmp_path, monkeypatch):
+    target = tmp_path / "run.json"
+    target.write_text('{"old": true}')
+    original = Path.replace
+    attempts = []
+
+    def replace(path, destination):
+        attempts.append(path)
+        if len(attempts) < 3:
+            raise PermissionError("reader temporarily denies delete sharing")
+        return original(path, destination)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    monkeypatch.setattr("ainovel.quality_reference.sleep", lambda seconds: None)
+    write_json(target, {"task_id": "already-submitted"})
+    assert len(attempts) == 3 and len(set(attempts)) == 1
+    assert json.loads(target.read_text()) == {"task_id": "already-submitted"}
+
+
+def test_persistent_journal_lock_is_bounded_and_preserves_previous_record(tmp_path, monkeypatch):
+    target = tmp_path / "run.json"
+    target.write_text('{"old": true}')
+    attempts = []
+
+    def replace(path, destination):
+        attempts.append(path)
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(Path, "replace", replace)
+    monkeypatch.setattr("ainovel.quality_reference.sleep", lambda seconds: None)
+    with pytest.raises(PermissionError):
+        write_json(target, {"new": True})
+    assert len(attempts) == 20
+    assert json.loads(target.read_text()) == {"old": True}
+    assert json.loads(attempts[-1].read_text()) == {"new": True}
 
 
 def test_original_case_matrix_and_anonymous_pack_keep_decoding_key_separate(tmp_path):
