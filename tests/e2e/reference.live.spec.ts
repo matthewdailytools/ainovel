@@ -27,7 +27,9 @@ test('日常实例：独立参考学习手工流程，无模型调用或原稿�
   await page.getByRole('button', { name: '添加手工写法卡', exact: true }).click()
   await page.getByText('编辑卡片 1：观察、解释、写法与证据', { exact: true }).click()
   await page.getByRole('textbox', { name: '原文观察', exact: true }).fill('只取得部分答案')
-  await page.getByRole('textbox', { name: '作用解释（分析判断）', exact: true }).fill('可能使下一步行动有依据')
+  await page
+    .getByRole('textbox', { name: '作用解释（分析判断）', exact: true })
+    .fill('可能使下一步行动有依据')
   await page.getByRole('textbox', { name: '可迁移写法', exact: true }).fill('用局部证据推动下一步选择')
   await page.getByRole('textbox', { name: '适用条件', exact: true }).fill('角色仍有未解决问题')
   await page.getByRole('checkbox', { name: /本次采用/ }).check()
