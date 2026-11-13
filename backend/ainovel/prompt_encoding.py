@@ -22,14 +22,26 @@ def encode_prompt(instruction, context):
     content = chapter["content"]
     if not content:
         return compact_sources(compact_units(frame, BODY_FIELDS))
-    key = next((key for key in BODY_FIELDS if instruction.get(key) == content), None)
+    owner, path = instruction, ["任务"]
+    key = next((key for key in BODY_FIELDS if owner.get(key) == content), None)
+    # Format repairs retain the same original task inside an explicit wrapper.
+    # Never search arbitrary user dictionaries or prior model output for prose.
+    if key is None and instruction.get("动作") == "仅修正结构化产物格式":
+        for _ in range(3):
+            if not isinstance(owner.get("原始任务"), dict):
+                break
+            owner = owner["原始任务"]
+            path.append("原始任务")
+            key = next((key for key in BODY_FIELDS if owner.get(key) == content), None)
+            if key is not None:
+                break
     if key is None:
         return compact_sources(compact_units(frame, BODY_FIELDS))
     encoded = deepcopy(frame)
     target = encoded["上下文"]["chapter"]
     del target["content"]
     target["content_ref"] = {
-        "path": ["任务", key],
+        "path": [*path, key],
         "sha256": hashlib.sha256(content.encode()).hexdigest(),
         "utf16_length": len(content.encode("utf-16-le")) // 2,
     }
@@ -49,9 +61,17 @@ def expand_prompt(frame):
         return result
     reference = chapter["content_ref"]
     path = reference.get("path")
-    if path not in (["任务", key] for key in BODY_FIELDS):
+    if (
+        not isinstance(path, list)
+        or not 2 <= len(path) <= 5
+        or path[0] != "任务"
+        or path[-1] not in BODY_FIELDS
+        or any(part != "原始任务" for part in path[1:-1])
+    ):
         raise DomainError("prompt_reference", "正文引用路径无效，未发送。")
-    text = result.get("任务", {}).get(path[1])
+    text = result
+    for part in path:
+        text = text.get(part) if isinstance(text, dict) else None
     if (
         not isinstance(text, str)
         or hashlib.sha256(text.encode()).hexdigest() != reference.get("sha256")

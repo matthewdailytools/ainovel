@@ -40,6 +40,18 @@ def test_small_requests_and_different_baseline_or_nested_instruction_are_not_ali
         assert encode_prompt(instruction, context) == {"任务": instruction, "上下文": context}
 
 
+@pytest.mark.parametrize("depth", [1, 2, 3])
+def test_explicit_format_repair_can_reference_exact_original_body_without_reading_model_output(depth):
+    text = "她核对原始数据😀𠮷。\n" * 2000
+    original = {"正文": text, "固定条件": ["保留未知"]}
+    for _ in range(depth):
+        original = {"动作": "仅修正结构化产物格式", "原始任务": original, "原始输出": "待修正JSON"}
+    context = {"chapter": {"content": text, "base_revision": 1}}
+    encoded = encode_prompt(original, context)
+    assert encoded["上下文"]["chapter"]["content_ref"]["path"] == ["任务", *(["原始任务"] * depth), "正文"]
+    assert expand_prompt(encoded) == {"任务": original, "上下文": context}
+
+
 @pytest.mark.parametrize("change", ["hash", "length", "path"])
 def test_reference_integrity_rejects_wrong_hash_utf16_and_unknown_paths(change):
     text = "正文😀𠮷" * 10000
