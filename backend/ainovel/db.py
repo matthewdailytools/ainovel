@@ -77,33 +77,43 @@ class Database:
             if existing and db.execute("SELECT version FROM schema_version").fetchone()[0] > 1:
                 raise DomainError("future_schema", "数据库版本高于当前程序，已停止写入。")
             db.execute("PRAGMA journal_mode=WAL")
-            db.executescript(SCHEMA)
             from .reference import SCHEMA as REFERENCE_SCHEMA
-
-            db.executescript(REFERENCE_SCHEMA)
             from .story_graph import SCHEMA as STORY_SCHEMA
-
-            db.executescript(STORY_SCHEMA)
             from .manuscript_import import SCHEMA as IMPORT_SCHEMA
-
-            db.executescript(IMPORT_SCHEMA)
             from .scene_time import SCHEMA as SCENE_SCHEMA
 
-            db.executescript(SCENE_SCHEMA)
-            db.execute(
-                """INSERT OR IGNORE INTO revisions(id,chapter_id,revision,content,cause,created)
-                SELECT lower(hex(randomblob(16))),id,0,CASE WHEN revision=0 THEN content ELSE '' END,
-                '初始稿快照',? FROM chapters WHERE NOT EXISTS
-                (SELECT 1 FROM revisions r WHERE r.chapter_id=chapters.id AND r.revision=0)""",
-                (time(),),
-            )
+            # executescript commits an existing transaction. Begin inside this single
+            # script so every extension and the subsequent backfill commit together.
             try:
-                db.execute(
-                    "CREATE VIRTUAL TABLE IF NOT EXISTS source_fts USING fts5(unit_id UNINDEXED,content,tokenize='trigram')"
+                db.executescript(
+                    "BEGIN IMMEDIATE;\n"
+                    + "\n".join((SCHEMA, REFERENCE_SCHEMA, STORY_SCHEMA, IMPORT_SCHEMA, SCENE_SCHEMA))
                 )
-                self.fts = True
-            except sqlite3.OperationalError:
-                self.fts = False
+                db.execute(
+                    """INSERT OR IGNORE INTO revisions(id,chapter_id,revision,content,cause,created)
+                    SELECT lower(hex(randomblob(16))),id,0,CASE WHEN revision=0 THEN content ELSE '' END,
+                    '初始稿快照',? FROM chapters WHERE NOT EXISTS
+                    (SELECT 1 FROM revisions r WHERE r.chapter_id=chapters.id AND r.revision=0)""",
+                    (time(),),
+                )
+                try:
+                    db.execute(
+                        "CREATE VIRTUAL TABLE IF NOT EXISTS source_fts USING fts5(unit_id UNINDEXED,content,tokenize='trigram')"
+                    )
+                    self.fts = True
+                except sqlite3.OperationalError as error:
+                    code = getattr(error, "sqlite_errorcode", None)
+                    missing_capability = str(error).strip().lower() in (
+                        "no such module: fts5",
+                        "no such tokenizer: trigram",
+                    )
+                    if (code is not None and code & 255 != sqlite3.SQLITE_ERROR) or not missing_capability:
+                        raise
+                    self.fts = False
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
 
     @contextmanager
     def connect(self, write=False):
