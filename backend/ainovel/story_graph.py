@@ -309,6 +309,12 @@ def validate_record(tx, branch_id, identifier, payload):
             require_kind(payload["event_id"], "event")
         if payload["truth"] == "actual" and not payload["sources"]:
             raise DomainError("evidence", "实际关系需要原文依据。")
+        if (
+            payload["truth"] == "actual"
+            and payload["event_id"]
+            and rows[payload["event_id"]]["payload"]["status"] != "actual"
+        ):
+            raise DomainError("evidence", "实际关系绑定的事件须已经发生。")
     else:
         for stage in payload["stages"]:
             if stage["event_id"]:
@@ -482,6 +488,13 @@ def query_context(
         "states": states,
         "conflicts": conflicts,
         "uncertain": uncertain,
+        "plans": [
+            r
+            for r in valid.values()
+            if (r["kind"] == "event" and r["payload"]["status"] == "planned")
+            or (r["kind"] in {"state", "relationship"} and r["payload"]["truth"] == "planned")
+        ]
+        + [r for r in promises if r["payload"]["stages"][-1]["status"] == "planned"],
         "characters": [r for r in valid.values() if r["kind"] == "character"],
         "events": [
             r

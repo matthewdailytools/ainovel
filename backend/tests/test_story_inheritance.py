@@ -151,6 +151,12 @@ def test_selected_setup_plans_have_independent_ids_and_never_copy_actual_history
     assert domain.task(task["id"])["status"] == "blocked_creative"
     if mode == "automatic":
         assert model.plan_context["longform"]["states"] == []
+        assert any(
+            r["kind"] == "state"
+            and r["payload"]["audience"] == "character"
+            and r["payload"]["truth"] == "planned"
+            for r in model.plan_context["longform"]["plans"]
+        )
         assert model.plan_context["recent"] == []
         assert "旧版经历" not in json.dumps(model.plan_context, ensure_ascii=False)
     assert graph(domain, story["branch_id"]) == source_before

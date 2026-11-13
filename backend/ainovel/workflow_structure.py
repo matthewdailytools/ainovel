@@ -12,6 +12,18 @@ def safe_automatic(item):
     after = item["record"]
     if metadata_extension(before, after):
         return True
+    marker = {"event": "status", "state": "truth", "relationship": "truth"}.get(before["kind"])
+    if (
+        marker
+        and before[marker] == "planned"
+        and after[marker] == "actual"
+        and not before["sources"]
+        and after["sources"]
+        and metadata_extension(before, {**after, marker: "planned"})
+    ):
+        # Only a source-free plan can be realized in place. Retaining earlier
+        # citations to a future plan would grant actual knowledge too early.
+        return True
     if before["kind"] == "promise":
         # Stage advancement must not silently remove the original evidence.
         evidence_preserved = metadata_extension(before, {**after, "stages": before["stages"]})

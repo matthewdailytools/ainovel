@@ -55,6 +55,55 @@ class Model(ReferenceModel):
                         }
                     ]
                 )
+                realized_events = set()
+                for old in instruction["已有记录索引"]:
+                    if (
+                        old.get("source_free_plan")
+                        and old["kind"] == "event"
+                        and old["title"] in unit["text"]
+                    ):
+                        records.append(
+                            {
+                                "local_id": "realized-" + old["id"],
+                                "target_id": old["id"],
+                                "target_revision": old["revision"],
+                                "update_fields": ["status"],
+                                "reasoning": "当前章明确兑现相同事件",
+                                "record": {
+                                    "kind": "event",
+                                    "title": old["title"],
+                                    "status": "actual",
+                                    "sources": [source],
+                                },
+                            }
+                        )
+                        realized_events.add(old["id"])
+                for old in instruction["已有记录索引"]:
+                    if (
+                        old.get("source_free_plan")
+                        and old["kind"] == "state"
+                        and old["event_id"] in realized_events
+                    ):
+                        records.append(
+                            {
+                                "local_id": "realized-" + old["id"],
+                                "target_id": old["id"],
+                                "target_revision": old["revision"],
+                                "update_fields": ["truth"],
+                                "reasoning": "工程替身中测量已发生，状态断言保持",
+                                "record": {
+                                    "kind": "state",
+                                    "title": old["title"],
+                                    "truth": "actual",
+                                    "sources": [source],
+                                    **{
+                                        k: old[k]
+                                        for k in ("character_id", "event_id", "category", "key", "audience")
+                                    },
+                                    "value": old["planned_value"],
+                                },
+                            }
+                        )
                 return {
                     "text": json.dumps({"records": records, "unknowns": [], "coverage": "当前章"}),
                     "usage": {"input": 1, "output": 1},

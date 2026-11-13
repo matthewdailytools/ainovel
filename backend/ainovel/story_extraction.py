@@ -156,6 +156,18 @@ async def run_extraction(worker, request, context, snapshot=None):
                     "revision": r["revision"],
                     "kind": r["kind"],
                     "invalid_reasons": r["invalid_reasons"],
+                    "source_free_plan": not r["payload"]["sources"]
+                    and (r["payload"].get("status") == "planned" or r["payload"].get("truth") == "planned"),
+                    **(
+                        {"planned_value": r["payload"]["value"]}
+                        if r["kind"] == "state" and r["payload"]["truth"] == "planned"
+                        else {}
+                    ),
+                    **(
+                        {"planned_relation": r["payload"]["relation"]}
+                        if r["kind"] == "relationship" and r["payload"]["truth"] == "planned"
+                        else {}
+                    ),
                     **{
                         k: v
                         for k, v in r["payload"].items()
@@ -169,11 +181,20 @@ async def run_extraction(worker, request, context, snapshot=None):
                             "category",
                             "key",
                             "audience",
+                            "truth",
+                            "character_id",
+                            "event_id",
+                            "until_event_id",
+                            "from_id",
+                            "to_id",
+                            "participants",
+                            "after",
                         }
                     },
                 }
                 for r in existing
             ],
+            "计划兑现边界": "source_free_plan只表示尚无原文依据的计划，绝不表示实际。仅本批正文明确兑现同一事件、状态或关系且其他断言不变时，才可提案只更新status或truth为actual并提供本批原文。计划值不同或已有历史来源时，不做自动兑现；新建有依据的实际记录或保留为待作者核对的提案。实际状态须关联实际事件，必要时在同批明确提出事件兑现。不改写已发生历史，也不把计划引用当成实际证据。",
             "要求": "仅提取所给正文有依据的人物、事件、状态、关系及伏笔。已有身份用正式id关联，避免重建同一人物；新项使用本批local_id。更新已有项必须指定target_id、target_revision和非空update_fields，只列本批确有新依据的变化字段，未列字段保持原值，不猜测未提供的旧档案。sources默认追加证据；明确需替换时才列sources。状态在更晚事件中变化时新建事件与状态，不把新变化回写成旧事件当时的状态；修改旧状态只作为有明确依据的纠错提案。quote填source_id，其余来源位置由服务复原。档案、作者知识、角色知识及读者知识分开；计划不冒充实际，未知故事时间和冲突保持可见。不确定伏笔只列unknowns。每项解释推导边界，不能改稿或自动采用。",
         },
         Extraction,

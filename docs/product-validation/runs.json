@@ -178,12 +178,34 @@
   {
     "id": "story-inheritance-001",
     "date": "2026-11-13",
-    "commit": "9b26eed+working-tree",
+    "commit": "d336eab",
     "module": "新版本结构继承",
     "scenario": "明确选择、依赖校验、历史隔离、独立身份与事务回滚",
     "phase": "stability",
     "result": "passed",
     "record": "2026-11-13-story-inheritance.md",
+    "fix_of": ""
+  },
+  {
+    "id": "story-inheritance-live-001",
+    "date": "2026-11-13",
+    "commit": "d336eab",
+    "module": "新版本结构继承",
+    "scenario": "日常只读、默认不选、费用不变及更新数据核对",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-story-inheritance.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-realization-001",
+    "date": "2026-11-13",
+    "commit": "d336eab+working-tree",
+    "module": "计划兑现",
+    "scenario": "原文支持的受限兑现、前文认知隔离及实际关系约束",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-plan-realization.md",
     "fix_of": ""
   }
 ]
