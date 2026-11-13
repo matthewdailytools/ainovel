@@ -1,5 +1,35 @@
-export const PLOT_AUDIT_VERSION = 'author-plot-audit/1'
+export const PLOT_AUDIT_VERSION = 'author-plot-audit/2'
+export const PLOT_AUDIT_V1_VERSION = 'author-plot-audit/1'
+export const isBoundPlotAuditVersion = (value: unknown) =>
+  value === PLOT_AUDIT_VERSION || value === PLOT_AUDIT_V1_VERSION
 type SourceKind = 'author_instruction' | 'author_plot' | 'workflow_plan'
+type OriginalPlotCheck = {
+  item_id: string
+  result: 'pass' | 'fail' | 'unknown'
+  observed: string
+  evidence: string
+  reason: string
+  repair: string
+}
+type PlotFlowObservation = {
+  object_id: string
+  supplier_id: string
+  recipient_id: string
+  stage: 'offered' | 'requested' | 'completed' | 'planned' | 'refused' | 'unknown'
+  certainty: 'explicit' | 'ambiguous'
+  evidence: string
+  note: string
+}
+type PlotGuard = {
+  code: string
+  expected_supplier: string
+  expected_recipient: string
+  object: string
+  recipient_scope?: 'only'
+  scope_condition?: string
+  observations?: PlotFlowObservation[]
+  policy?: string
+}
 export type PlotAudit = {
   status: 'model_pass' | 'failed' | 'unverified'
   summary: string
@@ -14,6 +44,8 @@ export type PlotAudit = {
     direction: string
     result: string
     certainty: 'explicit' | 'ambiguous'
+    recipient_scope?: 'only' | 'unrestricted' | 'unspecified'
+    scope_condition?: string
   }[]
   checks: {
     item_id: string
@@ -22,6 +54,8 @@ export type PlotAudit = {
     evidence: string
     reason: string
     repair: string
+    original_model_check?: OriginalPlotCheck
+    guard_override?: PlotGuard
   }[]
   findings: {
     severity: 'blocker' | 'suggestion'
@@ -37,6 +71,7 @@ export type PlotAudit = {
     candidate_revision: number
   }
   target?: { kind: 'saved_chapter'; chapter_id: string; revision: number; content_sha256: string }
+  original_model_summary?: string
 }
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -45,6 +80,74 @@ function object(value: unknown): value is Record<string, unknown> {
 const hash = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value)
 const strings = (value: Record<string, unknown>, keys: string[]) =>
   keys.every((key) => typeof value[key] === 'string')
+
+function readOriginalCheck(value: unknown): OriginalPlotCheck | undefined {
+  if (
+    !object(value) ||
+    !strings(value, ['item_id', 'observed', 'evidence', 'reason', 'repair']) ||
+    (value.result !== 'pass' && value.result !== 'fail' && value.result !== 'unknown')
+  )
+    return undefined
+  return {
+    item_id: String(value.item_id),
+    result: value.result,
+    observed: String(value.observed),
+    evidence: String(value.evidence),
+    reason: String(value.reason),
+    repair: String(value.repair),
+  }
+}
+
+function readGuard(value: unknown): PlotGuard | undefined {
+  if (!object(value) || !strings(value, ['code', 'expected_supplier', 'expected_recipient', 'object']))
+    return undefined
+  const guard: PlotGuard = {
+    code: String(value.code),
+    expected_supplier: String(value.expected_supplier),
+    expected_recipient: String(value.expected_recipient),
+    object: String(value.object),
+  }
+  if (value.code !== 'restricted_recipient_unverified') return guard
+  if (
+    value.recipient_scope !== 'only' ||
+    typeof value.scope_condition !== 'string' ||
+    typeof value.policy !== 'string' ||
+    !Array.isArray(value.observations) ||
+    value.observations.length > 24
+  )
+    return undefined
+  const observations: PlotFlowObservation[] = []
+  for (const row of value.observations) {
+    if (
+      !object(row) ||
+      !strings(row, ['object_id', 'supplier_id', 'recipient_id', 'evidence', 'note']) ||
+      (row.stage !== 'offered' &&
+        row.stage !== 'requested' &&
+        row.stage !== 'completed' &&
+        row.stage !== 'planned' &&
+        row.stage !== 'refused' &&
+        row.stage !== 'unknown') ||
+      (row.certainty !== 'explicit' && row.certainty !== 'ambiguous')
+    )
+      return undefined
+    observations.push({
+      object_id: String(row.object_id),
+      supplier_id: String(row.supplier_id),
+      recipient_id: String(row.recipient_id),
+      stage: row.stage,
+      certainty: row.certainty,
+      evidence: String(row.evidence),
+      note: String(row.note),
+    })
+  }
+  return {
+    ...guard,
+    recipient_scope: value.recipient_scope,
+    scope_condition: value.scope_condition,
+    policy: value.policy,
+    observations,
+  }
+}
 
 export function readPlotAudit(value: unknown): PlotAudit | undefined {
   if (
@@ -55,7 +158,9 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
     value.items.length > 12 ||
     !Array.isArray(value.checks) ||
     value.checks.length > 12 ||
-    !Array.isArray(value.findings)
+    !Array.isArray(value.findings) ||
+    (value.version !== undefined && typeof value.version !== 'string') ||
+    (value.original_model_summary !== undefined && typeof value.original_model_summary !== 'string')
   )
     return undefined
   const items: PlotAudit['items'] = []
@@ -66,7 +171,12 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
       !object(item) ||
       !strings(item, ['id', 'author_evidence', 'actor', 'action', 'object', 'direction', 'result']) ||
       !item.id ||
-      (item.certainty !== 'explicit' && item.certainty !== 'ambiguous')
+      (item.certainty !== 'explicit' && item.certainty !== 'ambiguous') ||
+      (value.version === PLOT_AUDIT_VERSION &&
+        ((item.recipient_scope !== 'only' &&
+          item.recipient_scope !== 'unrestricted' &&
+          item.recipient_scope !== 'unspecified') ||
+          typeof item.scope_condition !== 'string'))
     )
       return undefined
     items.push({
@@ -78,6 +188,12 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
       direction: String(item.direction),
       result: String(item.result),
       certainty: item.certainty,
+      ...(value.version === PLOT_AUDIT_VERSION
+        ? {
+            recipient_scope: item.recipient_scope as 'only' | 'unrestricted' | 'unspecified',
+            scope_condition: String(item.scope_condition),
+          }
+        : {}),
     })
   }
   for (const check of value.checks) {
@@ -91,6 +207,16 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
           (typeof check.observed === 'string' && !check.observed.trim())))
     )
       return undefined
+    const original =
+      check.original_model_check === undefined ? undefined : readOriginalCheck(check.original_model_check)
+    const guard = check.guard_override === undefined ? undefined : readGuard(check.guard_override)
+    if (
+      (check.original_model_check !== undefined && (!original || original.item_id !== check.item_id)) ||
+      (check.guard_override !== undefined && !guard) ||
+      (guard?.code === 'restricted_recipient_unverified' &&
+        (value.version !== PLOT_AUDIT_VERSION || check.result !== 'unknown' || !original))
+    )
+      return undefined
     checks.push({
       item_id: String(check.item_id),
       result: check.result,
@@ -98,6 +224,8 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
       evidence: String(check.evidence),
       reason: String(check.reason),
       repair: String(check.repair),
+      ...(original ? { original_model_check: original } : {}),
+      ...(guard ? { guard_override: guard } : {}),
     })
   }
   const itemIds = new Set(items.map((item) => item.id))
@@ -147,7 +275,7 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
       content_sha256: value.target.content_sha256,
     }
   }
-  if (['version', 'source', 'candidate_sha256', 'candidate_revision'].some((key) => key in value)) {
+  if (['source', 'candidate_sha256', 'candidate_revision'].some((key) => key in value)) {
     if (
       typeof value.version !== 'string' ||
       !object(value.source) ||
@@ -178,6 +306,9 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
     findings,
     binding,
     target,
+    ...(typeof value.original_model_summary === 'string'
+      ? { original_model_summary: value.original_model_summary }
+      : {}),
   }
 }
 
@@ -196,7 +327,7 @@ export function plotAuditState(
     reportSavedChapter?: { chapter_id: string; revision: number; content_sha256: string }
   },
 ) {
-  if (!audit.binding || audit.binding.version !== PLOT_AUDIT_VERSION) return 'legacy'
+  if (!audit.binding || !isBoundPlotAuditVersion(audit.binding.version)) return 'legacy'
   if (
     target.edited ||
     target.targetStatus === 'historical' ||

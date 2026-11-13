@@ -1021,5 +1021,115 @@
     "result": "blocked",
     "record": "2026-11-13-character-field-finite-repair.md",
     "fix_of": ""
+  },
+  {
+    "id": "scene-order-diagnostics-001",
+    "date": "2026-11-13",
+    "commit": "794eb8c",
+    "module": "场景与实际事件顺序",
+    "scenario": "64项专项/CI通过；字段级反馈与最终错误准确，门禁和两轮不变，原任务未重跑",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-scene-extraction-diagnostics.md",
+    "fix_of": "longform-finite-real-001"
+  },
+  {
+    "id": "plot-reference-binding-first-001",
+    "date": "2026-11-13",
+    "commit": "187b893",
+    "module": "新参考报告绑定自查",
+    "scenario": "新执行参考报告缺内容/版本绑定会误标历史，暂停一次未完成全量，原日志保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-shared-plot-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-reference-binding-fixed-001",
+    "date": "2026-11-13",
+    "commit": "187b893",
+    "module": "新参考报告实际绑定",
+    "scenario": "仅返回时绑定实际candidate修订/保存稿目标；旧提示/缓存/已存报告不改，专项通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-shared-plot-review.md",
+    "fix_of": "plot-reference-binding-first-001"
+  },
+  {
+    "id": "plot-reference-target-first-001",
+    "date": "2026-11-13",
+    "commit": "187b893",
+    "module": "参考独立报告当前对象",
+    "scenario": "只读复现新保存稿误标历史/候选编辑旧报告仍一致；两个入口缺当前target核对",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-shared-plot-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-reference-target-fixed-001",
+    "date": "2026-11-13",
+    "commit": "187b893",
+    "module": "参考目标读取及失效",
+    "scenario": "读取实际对象/branch/修订/body，失败晚响应保守；双入口新鲜/改稿失效无头通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-shared-plot-review.md",
+    "fix_of": "plot-reference-target-first-001"
+  },
+  {
+    "id": "plot-e2e-first-001",
+    "date": "2026-11-13",
+    "commit": "187b893",
+    "module": "新情节用例定位",
+    "scenario": "4条首轮3过1败：候选编辑框定位超时，其他新路径及参考全流程通过，trace保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-shared-plot-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-e2e-retest-001",
+    "date": "2026-11-13",
+    "commit": "187b893",
+    "module": "新情节用例复测",
+    "scenario": "精确textbox定位及可编辑断言；4条通过，不修改业务或删除版本/原稿断言",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-shared-plot-review.md",
+    "fix_of": "plot-e2e-first-001"
+  },
+  {
+    "id": "plot-project-e2e-first-001",
+    "date": "2026-11-13",
+    "commit": "187b893",
+    "module": "全项目写作设置保护",
+    "scenario": "全量首轮30过1未过：旧用例未处理新设置离开确认，浏览器默认拒绝，原输入正确保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-shared-plot-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-project-e2e-retest-001",
+    "date": "2026-11-13",
+    "commit": "187b893",
+    "module": "全项目共享核对回归",
+    "scenario": "新增取消/接受切章断言后完整31通过；同源码697后端/81前端通过，不计中断轮为完成",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-shared-plot-review.md",
+    "fix_of": "plot-project-e2e-first-001"
+  },
+  {
+    "id": "plot-live-v1-001",
+    "date": "2026-11-13",
+    "commit": "187b893",
+    "module": "共享核对v1真实漏检",
+    "scenario": "6calls/CNY0.134934，保留只向师傅但仍pass；独立流向有同物额外unknown接收者，原稿/旧任务不变",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-shared-plot-live.md",
+    "fix_of": ""
   }
 ]

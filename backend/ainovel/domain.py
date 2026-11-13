@@ -586,6 +586,10 @@ class Domain:
         profile = self.genre_profile(branch_id)
         contract = self.author_contract(branch_id)
         initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
+        if payload.get("plot_contract_check") is True:
+            from .plot_audit import VERSION as PLOT_CONTRACT_VERSION
+
+            initial["plot_contract_version"] = PLOT_CONTRACT_VERSION
         if kind == "workflow":
             inherited = self.db.all(
                 "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind='structure_inheritance' AND status='accepted' ORDER BY created DESC LIMIT 1",

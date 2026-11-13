@@ -1058,7 +1058,10 @@ export function Writing({
           <div className="notice" role="status">
             <strong>{label(activeTask.status)}</strong>
             <p>关闭浏览器不取消本机任务。</p>
-            <FrozenPlotAuditPolicy enabled={activeTask.payload.plot_contract_check} />
+            <FrozenPlotAuditPolicy
+              enabled={activeTask.payload.plot_contract_check}
+              version={activeTask.result.plot_contract_version}
+            />
             {activeTask.result.author_contract_snapshot && (
               <details>
                 <summary>本次任务冻结的创作约定</summary>
@@ -1106,7 +1109,10 @@ export function Writing({
                   {label(task.status)} · {task.id.slice(0, 8)}
                 </strong>
                 <p>{task.error}</p>
-                <FrozenPlotAuditPolicy enabled={task.payload.plot_contract_check} />
+                <FrozenPlotAuditPolicy
+                  enabled={task.payload.plot_contract_check}
+                  version={task.result.plot_contract_version}
+                />
                 <button
                   disabled={busy}
                   onClick={() =>

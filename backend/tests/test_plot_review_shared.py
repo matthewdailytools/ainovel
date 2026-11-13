@@ -47,6 +47,8 @@ class PlotModel(SegmentModel):
                 ],
                 "note": "工程提案保留只与尚未，非新增作者条件。",
             }
+            if instruction.get("情节核对契约版本") == VERSION:
+                output["items"][0].update(recipient_scope="unspecified", scope_condition="")
         elif action == "逐项对照作者情节解释与本次正文":
             output = {
                 "checks": [

@@ -29,9 +29,9 @@ def test_new_reference_draft_and_edited_candidate_check_have_actual_bindings(
     assert report["source"]["text_sha256"] == hashlib.sha256(AUTHOR.encode()).hexdigest()
     assert report["candidate_sha256"] == hashlib.sha256(draft["payload"]["text"].encode()).hexdigest()
     assert "target" not in report
-    # Existing reference interpret/compare/flow instructions and cache inputs remain legacy-identical.
+    # Newly opted-in tasks explicitly execute the server-frozen current contract.
     assert len(model.audits) == 3
-    assert all("情节核对契约版本" not in frame["任务"] for frame in model.audits)
+    assert all(frame["任务"].get("情节核对契约版本") == VERSION for frame in model.audits)
     original = domain.artifact(draft["id"])
     text = original["payload"]["text"] + "他们保留原记录。"
     response = client.patch("/api/artifacts/" + draft["id"], json={"candidate_revision": 0, "text": text})

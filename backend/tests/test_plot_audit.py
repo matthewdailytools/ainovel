@@ -126,6 +126,8 @@ class Integrated(Model):
                 ],
                 "note": "AI解释，未成为故事事实",
             }
+            if value["任务"].get("情节核对契约版本") == "author-plot-audit/2":
+                output["items"][0].update(recipient_scope="unspecified", scope_condition="")
         elif action == "逐项对照作者情节解释与本次正文":
             self.audits.append(value)
             output = {

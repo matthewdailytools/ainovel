@@ -140,6 +140,26 @@ test('候选rev1检查按被检候选实际修订确认，不能用报告artifac
   expect(state(value, candidate, edited)).toBe('historical')
 })
 
+test('v2范围限定报告继续绑定真实保存稿或被检候选，兼容既有target读取', async () => {
+  const value = {
+    ...audit,
+    version: 'author-plot-audit/2',
+    items: audit.items.map((item) => ({ ...item, recipient_scope: 'only', scope_condition: '' })),
+  }
+  const savedReport = {
+    ...value,
+    target: { kind: 'saved_chapter', chapter_id: 'chapter-1', revision: 1, content_sha256: sha(text) },
+  }
+  expect(comparisonPlotTarget({ plot_audit: savedReport })).toEqual(saved)
+  expect(state(savedReport, saved, await loadPlotAuditTarget(saved, 'branch-a', async () => chapter))).toBe(
+    'model_pass',
+  )
+  const candidateReport = { ...value, candidate_revision: 1 }
+  expect(
+    state(candidateReport, candidate, await loadPlotAuditTarget(candidate, 'branch-a', async () => body)),
+  ).toBe('model_pass')
+})
+
 test('仅audit.target也可定位保存稿，冲突或缺失的对象元数据保守处理', () => {
   expect(
     comparisonPlotTarget({

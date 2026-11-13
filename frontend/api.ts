@@ -144,6 +144,7 @@ export type Task = {
     author_contract_snapshot?: AuthorContract
     genre_profile_snapshot?: GenreProfile
     character_field_repairs?: unknown
+    plot_contract_version?: string
   }
   payload: {
     completion_scope?: 'whole_book' | 'segment'

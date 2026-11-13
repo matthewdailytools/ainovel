@@ -553,6 +553,7 @@ export function WorkflowPage({
                   <FrozenPlotAuditPolicy
                     enabled={task.payload.plot_contract_check}
                     mode={task.payload.mode}
+                    version={task.result.plot_contract_version}
                   />
                   <details>
                     <summary>本批次冻结的频道与题材</summary>

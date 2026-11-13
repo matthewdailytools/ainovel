@@ -5,7 +5,7 @@ import hashlib
 import json
 
 from .db import DomainError
-from .plot_audit import VERSION, audit_plot
+from .plot_audit import VERSION, LEGACY_VERSION, audit_plot
 
 
 def module_plot_source(request):
@@ -55,8 +55,18 @@ def unresolved_without_blocker(review):
 def bind_plot_audit(audit, author_text, text, source_kind, *, candidate_revision=0, target=None):
     """Bind a newly returned report without mutating saved reports or paid inputs."""
     bound = deepcopy(audit)
+    version = audit.get("version", LEGACY_VERSION)
+    if version not in {LEGACY_VERSION, VERSION} or (
+        version == VERSION
+        and any(
+            item.get("recipient_scope") not in {"only", "unrestricted", "unspecified"}
+            or not isinstance(item.get("scope_condition"), str)
+            for item in audit["items"]
+        )
+    ):
+        raise DomainError("plot_version", "情节报告未执行对应的接收范围契约，未盖成新版本。", 409)
     bound.update(
-        version=VERSION,
+        version=version,
         source_kind=source_kind,
         source={"kind": source_kind, "text_sha256": hashlib.sha256(author_text.encode()).hexdigest()},
         candidate_sha256=hashlib.sha256(text.encode()).hexdigest(),

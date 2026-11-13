@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { plotAuditState, readPlotAudit } from './plotAudit'
+import { isBoundPlotAuditVersion, PLOT_AUDIT_V1_VERSION, plotAuditState, readPlotAudit } from './plotAudit'
 
 export function PlotAuditOption({
   checked,
@@ -28,7 +28,16 @@ export function PlotAuditOption({
   )
 }
 
-export function FrozenPlotAuditPolicy({ enabled, mode }: { enabled: unknown; mode?: string }) {
+export function FrozenPlotAuditPolicy({
+  enabled,
+  mode,
+  version,
+}: {
+  enabled: unknown
+  mode?: string
+  version?: unknown
+}) {
+  const actualVersion = version === undefined ? PLOT_AUDIT_V1_VERSION : version
   return (
     <p className="small muted">
       本任务冻结的情节逐项核对：{enabled === true ? '已开启（额外模型费用）' : '未开启'}。
@@ -38,6 +47,10 @@ export function FrozenPlotAuditPolicy({ enabled, mode }: { enabled: unknown; mod
           : mode === 'assisted'
             ? '核对来源是作者提供的本章情节。'
             : '核对来源仅为本次原始指令。')}
+      {enabled === true &&
+        (isBoundPlotAuditVersion(actualVersion)
+          ? `冻结版本：${String(actualVersion)}。${actualVersion === PLOT_AUDIT_V1_VERSION ? '未含限定接收者补充。' : ''}`
+          : '冻结版本无法确认，待核对。')}
     </p>
   )
 }
@@ -156,7 +169,16 @@ export function PlotAuditDetails({
         )}
         <p>{audit.policy}</p>
         <p>{audit.summary}</p>
+        {audit.original_model_summary !== undefined && (
+          <details>
+            <summary>改判前的模型摘要（不代表最终核对结论）</summary>
+            <p>{audit.original_model_summary}</p>
+          </details>
+        )}
         <p>{audit.interpretation_note}</p>
+        {audit.binding?.version === PLOT_AUDIT_V1_VERSION && (
+          <p>此v1报告未含限定接收者补充；可按原有范围核对绑定内容，未执行v2补充核对。</p>
+        )}
         {workflowPlan && <p>以下是对AI生成章纲的解释和核对，不能升级为作者原话硬条件。</p>}
         {audit.binding && (
           <p className="small muted">
@@ -184,12 +206,66 @@ export function PlotAuditDetails({
                   .filter(Boolean)
                   .join(' · ')}
               </p>
+              {item.recipient_scope && (
+                <p>
+                  接收者范围：
+                  {
+                    { only: '仅限指定接收者', unrestricted: '未限定接收者', unspecified: '范围未明确' }[
+                      item.recipient_scope
+                    ]
+                  }
+                  ； 范围条件：{item.scope_condition || '无明示条件'}。
+                </p>
+              )}
               <p>本稿观察：{check.observed}</p>
               <p>
                 {checkLabels[check.result]}：{check.reason}
               </p>
               <blockquote>{check.evidence}</blockquote>
               {check.repair && <p>修订建议：{check.repair}</p>}
+              {check.guard_override && (
+                <section aria-label="流向补充核对">
+                  <p>
+                    补充核对：{check.guard_override.code}；最终结论以本项“{checkLabels[check.result]}”为准。
+                  </p>
+                  <p>
+                    解析预期：{check.guard_override.expected_supplier} →{' '}
+                    {check.guard_override.expected_recipient}； 物品或信息：{check.guard_override.object}。
+                  </p>
+                  {check.guard_override.scope_condition !== undefined && (
+                    <p>范围条件：{check.guard_override.scope_condition || '无明示条件'}。</p>
+                  )}
+                  {check.guard_override.policy && <p>{check.guard_override.policy}</p>}
+                  {!!check.guard_override.observations?.length && (
+                    <>
+                      <p>以下保留模型观察；unknown表示身份未确认，不能根据备注猜测其具体人物。</p>
+                      {check.guard_override.observations.map((row, index) => (
+                        <div key={index}>
+                          <p>
+                            物品编号：{row.object_id}；给出方编号：{row.supplier_id}；接收者编号：
+                            {row.recipient_id}；阶段：{row.stage}；确定性：{row.certainty}。
+                          </p>
+                          <blockquote>{row.evidence}</blockquote>
+                          {row.note && <p>模型观察备注：{row.note}</p>}
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </section>
+              )}
+              {check.original_model_check && (
+                <details>
+                  <summary>改判前模型结论（仅历史，不代表最终核对）</summary>
+                  <p>
+                    原模型曾标{check.original_model_check.result}：{check.original_model_check.reason}
+                  </p>
+                  <p>原模型观察：{check.original_model_check.observed}</p>
+                  <blockquote>{check.original_model_check.evidence}</blockquote>
+                  {check.original_model_check.repair && (
+                    <p>原模型建议：{check.original_model_check.repair}</p>
+                  )}
+                </details>
+              )}
             </article>
           )
         })}

@@ -148,7 +148,8 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
     const finished = await (await page.request.get(`/api/tasks/${task.id}`)).json()
     const report = await (await page.request.get(`/api/artifacts/${finished.result.artifact_id}`)).json()
     expect(report.payload.target.kind).toBe(saved ? 'saved_manuscript' : 'candidate')
-    expect(report.payload.plot_audit.version).toBe('author-plot-audit/1')
+    expect(finished.result.plot_contract_version).toBe('author-plot-audit/2')
+    expect(report.payload.plot_audit.version).toBe(finished.result.plot_contract_version)
     await showIndependent(passedTitle)
     return report
   }

@@ -26,6 +26,17 @@ CHARACTER_REPAIR_FIXTURE = "character-field-repair-e2e"
 UNSUPPORTED_CHARACTER_NOTE = "工程替身错误备注：沈砚已经掌握飞行能力。"
 GROUNDED_CHARACTER_NOTE = "沈砚用旧尺测量潮水，留下可以回查的记录。"
 PLOT_UNKNOWN_FIXTURE = "plot-check-e2e-unknown"
+PLOT_EXCLUSIVE_FIXTURE = "plot-scope-exclusive-e2e"
+EXCLUSIVE_BODY = (
+    "沈砚回到修船铺，把记录本摊在师傅面前。他把已经核对过的潮水读数完整告诉师傅，"
+    "师傅听完，又逐项复述了一遍，将数字记在自己的本子里。沈砚等墨迹干了才翻过纸页，"
+    "没有把前后两次测量混为一谈。桌边的油灯晃了一下，师傅用手掌压住翘起的纸角。\n\n"
+    "片刻后，沈砚又把同一份潮水读数完整告诉门边另一个人。那人听过数字，在一张窄纸上记下，"
+    "收好纸张才离开。门帘遮住了对方的脸，沈砚没有问姓名，也没有再作解释。\n\n"
+    "风从门缝钻进来，吹动墙上的旧船图。沈砚把旧尺擦干，放回钉着铁皮的木匣，"
+    "再将原始记录锁进柜中。师傅把灯芯挑短，让他明早仍照原来的标记复测。"
+    "他答应下来，检查过门闩，又看了一眼桌上已经抄好的数字，才端起那碗凉了的水。"
+)
 
 
 class Model(ReferenceModel):
@@ -34,6 +45,7 @@ class Model(ReferenceModel):
         self.book_tasks = set()
         self.book_model = BookModel()
         self.character_repair_tasks = {}
+        self.exclusive_plot_tasks = set()
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
@@ -41,6 +53,18 @@ class Model(ReferenceModel):
         source_instruction = instruction
         while "原始任务" in source_instruction:
             source_instruction = source_instruction["原始任务"]
+        if source_instruction.get(
+            "动作"
+        ) == "按章纲写完整正文" and PLOT_EXCLUSIVE_FIXTURE in source_instruction.get("本章", {}).get(
+            "plot", ""
+        ):
+            self.exclusive_plot_tasks.add(task_id)
+            self.book_tasks.add(task_id)
+            return {
+                "text": EXCLUSIVE_BODY,
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-exclusive-body",
+            }
         brief = source_instruction.get("作品简报", "")
         if CHARACTER_REPAIR_FIXTURE in brief:
             self.character_repair_tasks[task_id] = "cannot" if "fixture-cannot-repair" in brief else "repair"
@@ -145,21 +169,39 @@ class Model(ReferenceModel):
         while "原始任务" in instruction:
             instruction = instruction["原始任务"]
         plot_unknown = PLOT_UNKNOWN_FIXTURE in instruction.get("作者原话", "")
+        scoped = instruction.get("情节核对契约版本") == "author-plot-audit/2"
+        exclusive = scoped and PLOT_EXCLUSIVE_FIXTURE in instruction.get("作者原话", "")
         if instruction.get("动作") == "仅依据作者原话整理本场景情节":
+            item = {
+                "author_evidence": "AUTHOR0001",
+                "actor": "沈砚" if plot_unknown else "她",
+                "action": "测量并记录" if plot_unknown else "检查",
+                "object": "潮水读数" if plot_unknown else "闸门",
+                "direction": "",
+                "result": "是否公开读数尚未确定" if plot_unknown else "不修门",
+                "certainty": "ambiguous" if plot_unknown else "explicit",
+            }
+            if scoped:
+                item.update(recipient_scope="unspecified", scope_condition="")
+            if exclusive:
+                item.update(
+                    actor="沈砚",
+                    action="告诉",
+                    object="潮水读数",
+                    direction="沈砚向师傅告知潮水读数",
+                    result="只向师傅交付读数",
+                    certainty="explicit",
+                    transfer_object="潮水读数",
+                    supplier="沈砚",
+                    recipient="师傅",
+                    transfer_scope="completed",
+                    recipient_scope="only",
+                    scope_condition="本章中",
+                )
             return {
                 "text": json.dumps(
                     {
-                        "items": [
-                            {
-                                "author_evidence": "AUTHOR0001",
-                                "actor": "沈砚" if plot_unknown else "她",
-                                "action": "测量并记录" if plot_unknown else "检查",
-                                "object": "潮水读数" if plot_unknown else "闸门",
-                                "direction": "",
-                                "result": "是否公开读数尚未确定" if plot_unknown else "不修门",
-                                "certainty": "ambiguous" if plot_unknown else "explicit",
-                            }
-                        ],
+                        "items": [item],
                         "note": "仅为确定性界面验证",
                     }
                 ),
@@ -174,7 +216,9 @@ class Model(ReferenceModel):
                             {
                                 "item_id": "P01",
                                 "result": "unknown" if plot_unknown else "pass",
-                                "observed": "只看到量潮记录，公开安排仍未知"
+                                "observed": "沈砚已向师傅交付潮水读数"
+                                if exclusive
+                                else "只看到量潮记录，公开安排仍未知"
                                 if plot_unknown
                                 else "保留测量，没有修门",
                                 "evidence": instruction["可引用原文"][0]["source_id"]
@@ -191,6 +235,45 @@ class Model(ReferenceModel):
                 ),
                 "usage": {"input": 1, "output": 1},
                 "call_id": "offline",
+            }
+        if (
+            scoped
+            and task_id in self.exclusive_plot_tasks
+            and instruction.get("动作") == "只从本次正文独立提取物品与信息流向"
+        ):
+            entities = instruction["实体别名对照"]
+            supplier = next(key for key, name in entities.items() if name == "沈砚")
+            recipient = next(key for key, name in entities.items() if name == "师傅")
+            object_id = next(key for key, name in instruction["待识别物品名称"].items() if name == "潮水读数")
+            units = instruction["可引用原文"]
+            return {
+                "text": json.dumps(
+                    {
+                        "flows": [
+                            {
+                                "object_id": object_id,
+                                "supplier_id": supplier,
+                                "recipient_id": recipient,
+                                "stage": "completed",
+                                "certainty": "explicit",
+                                "evidence": units[0]["source_id"],
+                                "note": "师傅已经听取并记下读数。",
+                            },
+                            {
+                                "object_id": object_id,
+                                "supplier_id": supplier,
+                                "recipient_id": "unknown",
+                                "stage": "completed",
+                                "certainty": "explicit",
+                                "evidence": units[1]["source_id"],
+                                "note": "另一人已听取同一读数，但原文没有可映射的姓名，不能猜测其身份。",
+                            },
+                        ],
+                        "note": "确定性工程观察；保留正向与未知接收者，不判断作者限定是否成立。",
+                    }
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-exclusive-flows",
             }
         if instruction.get("动作") in {
             "全书滚动规划",

@@ -1,23 +1,42 @@
 """Separate author-only interpretation from evidence-grounded prose comparison."""
 
+from copy import deepcopy
 from typing import Literal
 
 from pydantic import Field
 
 from .evidence import resolve_field, source_schema, source_units
 from .models import Input as StrictModel
+from .db import DomainError
 
-VERSION = "author-plot-audit/1"
+LEGACY_VERSION = "author-plot-audit/1"
+VERSION = "author-plot-audit/2"
 
 
-def source_metadata(source_kind):
+def execution_version(worker):
+    marker = ((getattr(worker, "task", None) or {}).get("result") or {}).get(
+        "plot_contract_version", LEGACY_VERSION
+    )
+    if marker not in {LEGACY_VERSION, VERSION}:
+        raise DomainError("plot_version", "情节核对版本无法确认，未升级或重发旧任务。", 409)
+    return marker
+
+
+def source_metadata(source_kind, version=LEGACY_VERSION):
     if source_kind is None:
         # Existing reference tasks retain their frozen prompt/cache identity.
         return {}
     return {
-        "情节核对契约版本": VERSION,
+        "情节核对契约版本": version,
         "情节来源": source_kind,
         "来源边界": "只解释本次给定的单章情节／指令，不读取全书未来、旧稿意见或候选反推条件。保留原话中的只、仅、不、尚未等范围、否定、接收者与时点限定，不能规范化后丢掉限制。workflow_plan是本批次AI工作章纲，不伪称作者原话、已发生事实或新增作者锁定；其余来源是作者本次明确输入。仅核对该来源明确叙事事件，不把润色、评价等操作要求虚构成剧情；计划安排不是已经发生的事实，歧义保留待核对。",
+        **(
+            {
+                "接收范围契约": "recipient_scope仅依来源明示限制填写only、明确不限制为unrestricted、未说明为unspecified，不能仅凭只出现一人就判only。scope_condition须保留该限制的原话连续条件或时点，未给条件则空；无法解释时标ambiguous，不丢只/仅或新增硬条件。已发生、尝试与未来计划用transfer_scope区分。"
+            }
+            if version == VERSION
+            else {}
+        ),
     }
 
 
@@ -37,6 +56,16 @@ class PlotItem(StrictModel):
 
 class AuthorPlot(StrictModel):
     items: list[PlotItem] = Field(max_length=12)
+    note: str = Field(max_length=2000)
+
+
+class ScopedPlotItem(PlotItem):
+    recipient_scope: Literal["only", "unrestricted", "unspecified"]
+    scope_condition: str = Field(max_length=800)
+
+
+class ScopedAuthorPlot(StrictModel):
+    items: list[ScopedPlotItem] = Field(max_length=12)
     note: str = Field(max_length=2000)
 
 
@@ -69,7 +98,7 @@ class FlowObservations(StrictModel):
     note: str = Field(max_length=2000)
 
 
-async def independent_flows(worker, items, text, checks, *, source_label="作者原话"):
+async def independent_flows(worker, items, text, checks, *, source_label="作者原话", version=LEGACY_VERSION):
     expected = [
         item
         for item in items
@@ -122,6 +151,7 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
             "实体别名对照": entities,
             "待识别物品名称": objects,
             "可引用原文": units,
+            **({"情节核对契约版本": VERSION} if version == VERSION else {}),
             "要求": "只提取正文实际给出、索取、交换、借还或传递的方向，不判断是否符合任何作者要求。supplier是给出方，recipient是取得方；交易失败也须区分原本提议的方向。offered/requested是当前提出的方向，completed是已交付，未来计划为planned，拒绝项为refused。只能据原文明确信息映射实体编号；不能映射则unknown，其他物品为other。引用FLOW编号。",
         },
         FlowObservations,
@@ -151,6 +181,33 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
             and flow["recipient_id"] == entity_ids[item["supplier"]]
         ]
         row = rows[item["id"]]
+        extra = [
+            flow
+            for flow in relevant
+            if flow["supplier_id"] == entity_ids[item["supplier"]]
+            and flow["recipient_id"] != entity_ids[item["recipient"]]
+        ]
+        if version == VERSION and item.get("recipient_scope") == "only" and extra and row["result"] == "pass":
+            row["original_model_check"] = deepcopy(row)
+            row.update(
+                result="unknown",
+                observed=("存在正向观察，" if forward else "未取得完整正向依据，")
+                + "同一给出方对同一内容还有接收方向未核实在限定范围内，需核对身份、条件或时点。",
+                evidence=extra[0]["evidence"],
+                reason="独立观察发现同一给出方对同一内容还有非限定或未能映射的接收方向。已有正向例子不证明‘仅向’成立；身份、条件或时点仍须核对，不能猜测unknown是谁或直接判违背。",
+                repair="保留原稿和原模型结论，先核对接收者及限制适用的条件／时点，不自动改稿。",
+                guard_override={
+                    "code": "restricted_recipient_unverified",
+                    "expected_supplier": item["supplier"],
+                    "expected_recipient": item["recipient"],
+                    "object": item["transfer_object"],
+                    "recipient_scope": "only",
+                    "scope_condition": item.get("scope_condition", ""),
+                    "observations": deepcopy(extra),
+                    "policy": "补充观察仅阻止宣称一致，不认定unknown身份或新增作者条件。",
+                },
+            )
+            continue
         if reverse and not forward:
             row.update(
                 result="fail",
@@ -175,8 +232,13 @@ async def interpret_plot(worker, author_text, *, source_kind=None):
         return {"items": [], "note": "缺少作者情节，不能从候选反推。"}
     author_units = source_units(author_text, "AUTHOR")
     author_sources = {unit["source_id"]: unit for unit in author_units}
-    author_contract = AuthorPlot.model_json_schema()
-    author_contract["$defs"]["PlotItem"]["properties"]["author_evidence"]["enum"] = list(author_sources)
+    version = execution_version(worker) if source_kind is not None else LEGACY_VERSION
+    scoped = version == VERSION
+    schema = ScopedAuthorPlot if scoped else AuthorPlot
+    author_contract = schema.model_json_schema()
+    author_contract["$defs"]["ScopedPlotItem" if scoped else "PlotItem"]["properties"]["author_evidence"][
+        "enum"
+    ] = list(author_sources)
 
     def validate_author(value):
         issues = []
@@ -195,6 +257,21 @@ async def interpret_plot(worker, author_text, *, source_kind=None):
                 )
             ):
                 issues.append("明确交换须给出不同的双方和物品；不能确定时标歧义，不编造流向。")
+            if scoped and item["scope_condition"] and item["scope_condition"] not in author_text:
+                issues.append("scope_condition只能为来源的连续原话条件／时点，不得补造限制。")
+            if (
+                scoped
+                and item["recipient_scope"] == "only"
+                and item["certainty"] == "explicit"
+                and (
+                    not all(item[key].strip() for key in ("transfer_object", "supplier", "recipient"))
+                    or item["supplier"] == item["recipient"]
+                    or item["transfer_scope"] == "none"
+                )
+            ):
+                issues.append(
+                    "明确的仅向接收范围须有原话支持的不同双方、内容与实际／尝试／计划阶段；不能确认则保留歧义。"
+                )
         return issues
 
     source_label = "本章工作章纲（AI规划）" if source_kind == "workflow_plan" else "作者原话"
@@ -204,10 +281,10 @@ async def interpret_plot(worker, author_text, *, source_kind=None):
             "动作": "仅依据作者原话整理本场景情节",
             source_label: author_text,
             "可引用原文": author_units,
-            **source_metadata(source_kind),
+            **source_metadata(source_kind, version),
             "要求": "只整理原话明确给出的事件、行动者、动作、对象、给出与取得方向和结果。每项引用AUTHOR编号；未给出的字段留空。给出/取得须填写supplier（给出方）、recipient（取得方）、transfer_object和transfer_scope：实际发起尝试为attempted，已交付为completed，仅决定/未来安排为planned，无交换传递为none并将direction留空。不能把愿望改成已发生结果；有多种解读标ambiguous并保留歧义。这里只是AI解释提案，不是作者新增锁定项或本书事实。",
         },
-        AuthorPlot,
+        schema,
         {"scope": f"仅{source_label}，尚未读取候选"},
         validate_author,
         contract=author_contract,
@@ -216,6 +293,7 @@ async def interpret_plot(worker, author_text, *, source_kind=None):
 
 
 async def audit_plot(worker, author_text, text, number, *, source_kind=None):
+    version = execution_version(worker) if source_kind is not None else LEGACY_VERSION
     source_label = "本章工作章纲（AI规划）" if source_kind == "workflow_plan" else "作者原话"
     contract = await interpret_plot(worker, author_text, source_kind=source_kind)
     items = [{"id": f"P{index:02}", **item} for index, item in enumerate(contract["items"], 1)]
@@ -228,6 +306,7 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None):
             "summary": "未整理出可逐项核对的情节，不能视为通过。",
             "interpretation_note": contract["note"],
             "policy": "AI解释未形成作者新条件，正文未改变。",
+            **({"version": version} if source_kind is not None else {}),
         }
     units = source_units(text, f"PLOT{number:03}P")
     sources = {unit["source_id"]: unit for unit in units}
@@ -258,7 +337,7 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None):
             "独立整理的解释提案": items,
             "本次候选": text,
             "可引用原文": units,
-            **source_metadata(source_kind),
+            **source_metadata(source_kind, version),
             "要求": "先写本稿实际发生了什么，再逐项比较行动者、对象、流向及结果；不要用候选重新解释作者原话来制造一致。即使交易成败相同，对象或流向反转也应指出。歧义或证据不足标unknown，不能把AI解释升级成作者新条件；偏好不判fail。只能引用PLOT原文编号，不能拿AUTHOR证据作正文证据。",
         },
         PlotAudit,
@@ -267,12 +346,17 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None):
         contract=comparison_contract,
     )
     direction_guard = await independent_flows(
-        worker, items, text, compared["checks"], source_label=source_label
+        worker, items, text, compared["checks"], source_label=source_label, version=version
     )
     if any(row.get("guard_override") for row in compared["checks"]):
         compared["original_model_summary"] = compared["summary"]
         compared["summary"] = (
-            f"独立流向核对发现给出方与取得方反向，已列出{source_label}、解释及正文依据，请作者核对后决定修订。"
+            "独立接收范围核对仍有待确认项，原模型结论、补充观察与逐字依据保留，不能宣称一致。"
+            if any(
+                row.get("guard_override", {}).get("code") == "restricted_recipient_unverified"
+                for row in compared["checks"]
+            )
+            else f"独立流向核对发现给出方与取得方反向，已列出{source_label}、解释及正文依据，请作者核对后决定修订。"
         )
     indexed = {item["id"]: item for item in items}
     findings = []
@@ -302,4 +386,5 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None):
         else "model_pass",
         "findings": findings,
         "policy": f"解释来自{source_label}，仍须作者核对；不写入故事事实，不自动采用候选。",
+        **({"version": version} if source_kind is not None else {}),
     }

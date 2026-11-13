@@ -222,9 +222,15 @@ async def compare(worker, text, fixed, context, snapshot, number):
     review = await worker.review(text, fixed, context, number, p["plot"])
     plot_audit = None
     if worker.task["payload"].get("plot_contract_check"):
-        from .plot_audit import audit_plot
+        from .plot_audit import VERSION, audit_plot, execution_version
 
-        plot_audit = await audit_plot(worker, p["plot"], text, number)
+        plot_audit = await audit_plot(
+            worker,
+            p["plot"],
+            text,
+            number,
+            source_kind="author_plot" if execution_version(worker) == VERSION else None,
+        )
         review["findings"].extend(plot_audit["findings"])
         review["plot_audit"] = plot_audit
         review["summary_before_plot_audit"] = review["summary"]
@@ -300,9 +306,11 @@ async def run_reference(worker, request, context):
         write_context["selected_external_references"] = []
         interpreted = None
         if request.get("plot_contract_check"):
-            from .plot_audit import interpret_plot
+            from .plot_audit import VERSION, execution_version, interpret_plot
 
-            interpreted = await interpret_plot(worker, p["plot"])
+            interpreted = await interpret_plot(
+                worker, p["plot"], source_kind="author_plot" if execution_version(worker) == VERSION else None
+            )
         text = await worker.call(
             {
                 "动作": "按确认参考应用方案原创试写",
