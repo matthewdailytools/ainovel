@@ -181,14 +181,30 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
             and flow["recipient_id"] == entity_ids[item["supplier"]]
         ]
         row = rows[item["id"]]
+        original_check = deepcopy(row) if version == VERSION else None
         extra = [
             flow
             for flow in relevant
             if flow["supplier_id"] == entity_ids[item["supplier"]]
             and flow["recipient_id"] != entity_ids[item["recipient"]]
         ]
-        if version == VERSION and item.get("recipient_scope") == "only" and extra and row["result"] == "pass":
-            row["original_model_check"] = deepcopy(row)
+        if reverse and not forward:
+            row.update(
+                result="fail",
+                observed=f"{item['recipient']}向{item['supplier']}给出/提议给出{item['transfer_object']}",
+                evidence=reverse[0]["evidence"],
+                reason=f"{source_label}解析为{item['supplier']}向{item['recipient']}给出{item['transfer_object']}；本稿观察为{item['recipient']}向{item['supplier']}给出同一物品，方向相反。",
+                repair="按作者原话核对取得方与给出方，保留原稿，生成待审修订。",
+                guard_override={
+                    "code": "reverse_transfer",
+                    "expected_supplier": item["supplier"],
+                    "expected_recipient": item["recipient"],
+                    "object": item["transfer_object"],
+                },
+            )
+        elif (
+            version == VERSION and item.get("recipient_scope") == "only" and extra and row["result"] == "pass"
+        ):
             row.update(
                 result="unknown",
                 observed=("存在正向观察，" if forward else "未取得完整正向依据，")
@@ -207,23 +223,10 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
                     "policy": "补充观察仅阻止宣称一致，不认定unknown身份或新增作者条件。",
                 },
             )
-            continue
-        if reverse and not forward:
-            row.update(
-                result="fail",
-                observed=f"{item['recipient']}向{item['supplier']}给出/提议给出{item['transfer_object']}",
-                evidence=reverse[0]["evidence"],
-                reason=f"{source_label}解析为{item['supplier']}向{item['recipient']}给出{item['transfer_object']}；本稿观察为{item['recipient']}向{item['supplier']}给出同一物品，方向相反。",
-                repair="按作者原话核对取得方与给出方，保留原稿，生成待审修订。",
-                guard_override={
-                    "code": "reverse_transfer",
-                    "expected_supplier": item["supplier"],
-                    "expected_recipient": item["recipient"],
-                    "object": item["transfer_object"],
-                },
-            )
         elif not forward and row["result"] == "pass":
             row.update(result="unknown", reason="未获得独立且同向的正文流向证据，不能仅凭模型结论标通过。")
+        if version == VERSION and row != original_check:
+            row.setdefault("original_model_check", original_check)
     return {"status": "observed", "entities": entities, "objects": objects, **observed}
 
 
@@ -345,10 +348,19 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None):
         validate_checks,
         contract=comparison_contract,
     )
+    original_checks = (
+        {row["item_id"]: deepcopy(row) for row in compared["checks"]} if version == VERSION else {}
+    )
     direction_guard = await independent_flows(
         worker, items, text, compared["checks"], source_label=source_label, version=version
     )
-    if any(row.get("guard_override") for row in compared["checks"]):
+    if version == VERSION:
+        for row in compared["checks"]:
+            original = original_checks[row["item_id"]]
+            if row != original:
+                row.setdefault("original_model_check", original)
+        compared.setdefault("original_model_summary", compared["summary"])
+    elif any(row.get("guard_override") for row in compared["checks"]):
         compared["original_model_summary"] = compared["summary"]
         compared["summary"] = (
             "独立接收范围核对仍有待确认项，原模型结论、补充观察与逐字依据保留，不能宣称一致。"
@@ -372,18 +384,36 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None):
                     "repair": row["repair"],
                 }
             )
-    return {
-        "items": items,
-        "direction_guard": direction_guard,
-        **compared,
-        "interpretation_note": contract["note"],
-        "status": "failed"
+    status = (
+        "failed"
         if any(finding["severity"] == "blocker" for finding in findings)
         else "unverified"
         if not items
         or any(item["certainty"] == "ambiguous" for item in items)
         or any(row["result"] == "unknown" for row in compared["checks"])
-        else "model_pass",
+        else "model_pass"
+    )
+    if version == VERSION:
+        counts = {
+            result: sum(row["result"] == result for row in compared["checks"])
+            for result in ("pass", "fail", "unknown")
+        }
+        ambiguous = sum(item["certainty"] == "ambiguous" for item in items)
+        conclusion = {
+            "failed": "存在明确不符，须核对后决定修订。",
+            "unverified": "仍待核对，不能视为情节一致。",
+            "model_pass": "模型核对通过，仍须作者核对。",
+        }[status]
+        compared["summary"] = (
+            f"最终情节核对：通过{counts['pass']}项、不符{counts['fail']}项、未知{counts['unknown']}项；"
+            f"解释歧义{ambiguous}项。{conclusion}原模型摘要另行保留。"
+        )
+    return {
+        "items": items,
+        "direction_guard": direction_guard,
+        **compared,
+        "interpretation_note": contract["note"],
+        "status": status,
         "findings": findings,
         "policy": f"解释来自{source_label}，仍须作者核对；不写入故事事实，不自动采用候选。",
         **({"version": version} if source_kind is not None else {}),
