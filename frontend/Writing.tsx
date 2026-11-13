@@ -21,8 +21,15 @@ import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
 import { SceneTimePanel } from './SceneTimePanel'
-import { confirmLeave } from './leaveGuard'
+import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
+import {
+  adviceDirectionBasis,
+  checkDirectionTarget,
+  directionExpansionInstruction,
+  readDirectionExpansionInstruction,
+  type DirectionBasis,
+} from './directionHandoff'
 
 const actions = [
   ['writing.advise', '卡点诊断与方向'],
@@ -85,6 +92,11 @@ export function Writing({
     feedbackHandoff ? 'writing.rewrite_selection' : 'writing.advise',
   )
   const [instruction, setInstruction] = useState(feedbackHandoff?.text || '')
+  const [directionBasis, setDirectionBasis] = useState<DirectionBasis>()
+  const directionForm = useRef({ action, instruction })
+  directionForm.current = { action, instruction }
+  const instructionField = useRef<HTMLTextAreaElement>(null)
+  useLeaveGuard(!!directionBasis, '已载入的作者选定方向')
   const [confirmedFeedbackRevision, setConfirmedFeedbackRevision] = useState<number | null>(null)
   const [fixed, setFixed] = useState('')
   const [profile, setProfile] = useState(presets[0])
@@ -125,6 +137,11 @@ export function Writing({
       if (authoritative) await writeDraft({ id, base: row.revision, text: row.content, updated: Date.now() })
       const draft = await readDraft(id)
       if (!alive.current || token !== loadSequence.current) return
+      if (directionBasis && directionBasis.chapter_id !== id) {
+        setDirectionBasis(undefined)
+        setInstruction('')
+        setAction('writing.advise')
+      }
       current.current = row
       setChapter(row)
       setRename(row.title)
@@ -324,6 +341,40 @@ export function Writing({
       await loadChapter(row.id)
     })
   }
+  async function loadAdviceDirection(source: Artifact, selected: string): Promise<boolean> {
+    if (feedbackHandoff) throw new Error('请先退出反馈修订，再载入本章方向。')
+    const row = current.current
+    if (!row) throw new Error('请先打开建议对应章节。')
+    const target = { novelId: novel.id, branchId: branch.id, chapterId: row.id, revision: row.revision }
+    adviceDirectionBasis(source, target)
+    const before = directionForm.current
+    const chapterSequence = loadSequence.current
+    const fresh = await api<Artifact>(`/artifacts/${source.id}`)
+    if (!alive.current) return false
+    const basis = adviceDirectionBasis(fresh, target, source.candidate_revision)
+    if (current.current?.id !== row.id || chapterSequence !== loadSequence.current || opening)
+      throw new Error('正在打开其他章节，选定方向保留，请回到来源章节后重试。')
+    if (
+      directionForm.current.action !== before.action ||
+      directionForm.current.instruction !== before.instruction
+    )
+      throw new Error('读取来源期间补写表单已被编辑，选定方向仍保留，请核对后重新载入。')
+    const direction = selected.trim()
+    if (!direction) throw new Error('请先填写作者选定的本章方向。')
+    if (
+      before.instruction.trim() &&
+      before.instruction !== direction &&
+      !window.confirm(
+        '将替换当前“情节或具体要求”，并切换为按情节补写整章。固定条件、写法和资料包保留；不会生成、采纳或改动正文。继续载入？',
+      )
+    )
+      return false
+    setDirectionBasis({ ...basis, loaded_revision: current.current.revision })
+    setAction('writing.expand_plot')
+    setInstruction(direction)
+    instructionField.current?.focus()
+    return true
+  }
   async function generate(event: React.FormEvent) {
     event.preventDefault()
     await doAction(async () => {
@@ -343,11 +394,20 @@ export function Writing({
           confirmedRevision: confirmedFeedbackRevision,
         })
       }
+      if (directionBasis && action === 'writing.expand_plot') {
+        if (!row) throw new Error('请先打开选定方向对应章节。')
+        const target = { novelId: novel.id, branchId: branch.id, chapterId: row.id, revision: row.revision }
+        checkDirectionTarget(directionBasis, target)
+        const source = await api<Artifact>(`/artifacts/${directionBasis.advice_id}`)
+        adviceDirectionBasis(source, target, directionBasis.candidate_revision)
+      }
       const submittedInstruction = feedbackHandoff
         ? feedbackRevisionInstruction(feedbackHandoff, instruction)
-        : instruction
+        : directionBasis && action === 'writing.expand_plot'
+          ? directionExpansionInstruction(directionBasis, instruction)
+          : instruction
       if (submittedInstruction.length > 20_000)
-        throw new Error('反馈与本次修订要求合计过长，请缩短本次要求后再生成。')
+        throw new Error('本次要求与来源记录合计过长，请缩短本次要求后再生成。')
       const data: ModuleInput = {
         include_scene_ranges: false,
         action,
@@ -791,11 +851,30 @@ export function Writing({
             <button
               type="button"
               onClick={() => {
-                const previous = tasks[0].payload
-                setInstruction(previous.instruction || '')
-                setAction(previous.action || 'writing.advise')
-                setFixed(previous.fixed?.join('\n') || '')
-                setProfile(previous.writing_profile || presets[0])
+                try {
+                  const previous = tasks[0].payload
+                  const restored =
+                    previous.action === 'writing.expand_plot'
+                      ? readDirectionExpansionInstruction(previous.instruction || '')
+                      : undefined
+                  if (restored) {
+                    if (!current.current) throw new Error('请先打开方向任务对应章节。')
+                    checkDirectionTarget(restored.basis, {
+                      novelId: novel.id,
+                      branchId: branch.id,
+                      chapterId: current.current.id,
+                      revision: current.current.revision,
+                    })
+                  }
+                  if (directionBasis && !confirmLeave()) return
+                  setDirectionBasis(restored?.basis)
+                  setInstruction(restored?.instruction ?? previous.instruction ?? '')
+                  setAction(previous.action || 'writing.advise')
+                  setFixed(previous.fixed?.join('\n') || '')
+                  setProfile(previous.writing_profile || presets[0])
+                } catch (error) {
+                  notify(error)
+                }
               }}
             >
               恢复最近任务的输入
@@ -811,9 +890,24 @@ export function Writing({
               ))}
             </select>
           </label>
+          {directionBasis && (
+            <section className="notice" aria-label="作者选定方向来源">
+              <p role="status">方向已载入本章补写表单；载入操作本身未生成或改动正文。可继续编辑情节要求。</p>
+              <p className="small muted">
+                来源建议 {directionBasis.advice_id} · 候选版本 {directionBasis.candidate_revision} · 原稿修订{' '}
+                {directionBasis.source_revision ?? '未绑定'}；目标章 {chapter?.title}（
+                {directionBasis.chapter_id}），载入时保存稿修订 {directionBasis.loaded_revision}
+                。建议是启发记录，不是本书设定。
+              </p>
+              <button type="button" onClick={() => setDirectionBasis(undefined)}>
+                清除方向来源，保留当前要求
+              </button>
+            </section>
+          )}
           <label>
             情节或具体要求
             <textarea
+              ref={instructionField}
               value={instruction}
               onChange={(e) => setInstruction(e.target.value)}
               rows={5}
@@ -981,7 +1075,12 @@ export function Writing({
             <>
               <label>
                 比较候选
-                <select value={candidate?.id || ''} onChange={(e) => setCandidateId(e.target.value)}>
+                <select
+                  value={candidate?.id || ''}
+                  onChange={(e) => {
+                    if (confirmLeave()) setCandidateId(e.target.value)
+                  }}
+                >
                   {visibleArtifacts.map((a, i) => (
                     <option key={a.id} value={a.id}>
                       候选 {visibleArtifacts.length - i} · {a.kind} · {label(a.status)}
@@ -995,10 +1094,13 @@ export function Writing({
                   artifact={candidate}
                   onIntentSettings={onGenreSettings}
                   novelId={novel.id}
+                  branchId={branch.id}
                   chapter={chapter}
                   account={account}
                   modelReady={modelReady}
                   revisionDisabled={!!activeTask || busy}
+                  directionDisabled={!!activeTask || busy || opening || !!feedbackHandoff}
+                  onDirection={loadAdviceDirection}
                   notify={notify}
                   beforeRun={save}
                   onStarted={(task) => {
@@ -1035,9 +1137,12 @@ function Candidate({
   onIntentSettings,
   revisionDisabled,
   novelId,
+  branchId,
   chapter,
   account,
   modelReady,
+  directionDisabled,
+  onDirection,
   notify,
   beforeRun,
   onStarted,
@@ -1050,9 +1155,12 @@ function Candidate({
   onIntentSettings: () => void
   revisionDisabled: boolean
   novelId: string
+  branchId: string
   chapter?: Chapter
   account: string
   modelReady: boolean
+  directionDisabled: boolean
+  onDirection: (source: Artifact, selected: string) => Promise<boolean>
   notify: Notify
   beforeRun: () => Promise<Chapter | undefined>
   onStarted: (task: Task) => void
@@ -1064,6 +1172,22 @@ function Candidate({
   const [edit, setEdit] = useState(artifact.payload.text || '')
   const [editRevision, setEditRevision] = useState(artifact.candidate_revision)
   const candidateChanged = editRevision !== artifact.candidate_revision
+  const [selectedDirection, setSelectedDirection] = useState('')
+  useLeaveGuard(!!selectedDirection.trim(), '尚未载入的作者选定方向')
+  let directionError = ''
+  if (artifact.kind === 'advice') {
+    try {
+      if (!chapter) throw new Error('请先打开建议对应章节。')
+      adviceDirectionBasis(artifact, {
+        novelId,
+        branchId,
+        chapterId: chapter.id,
+        revision: chapter.revision,
+      })
+    } catch (error) {
+      directionError = error instanceof Error ? error.message : '方向来源暂不可核对。'
+    }
+  }
   const [baseline, setBaseline] = useState<string>()
   const [comparisonError, setComparisonError] = useState('')
   useEffect(() => {
@@ -1215,6 +1339,51 @@ function Candidate({
             前往创作约定核对提案
           </button>
         </div>
+      )}
+      {artifact.kind === 'advice' && (
+        <section aria-label="选择方向后补写">
+          <h4>选择方向后补写</h4>
+          <p className="small muted">
+            从建议中挑选一种方向，改成你愿意采用的情节。只载入本章补写表单，由你再决定是否生成。
+          </p>
+          <label>
+            作者选定的本章方向
+            <textarea
+              value={selectedDirection}
+              onChange={(event) => setSelectedDirection(event.target.value)}
+              rows={4}
+              maxLength={18_000}
+            />
+          </label>
+          <p className="small muted">
+            来源建议 {artifact.id} · 候选版本 {artifact.candidate_revision} · 目标章{' '}
+            {chapter?.title || '未打开'}。固定条件、写法和资料包保留。
+          </p>
+          {directionError && <p role="status">{directionError}</p>}
+          {chapter && artifact.base_revision !== chapter.revision && (
+            <p className="small muted">
+              建议基于原稿修订 {artifact.base_revision ?? '未绑定'}，当前保存稿已是修订 {chapter.revision}
+              ；请按当前正文重新核对方向。
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={
+              directionDisabled ||
+              !!directionError ||
+              candidateChanged ||
+              edit !== (artifact.payload.text || '') ||
+              !selectedDirection.trim()
+            }
+            onClick={() =>
+              void perform(async () => {
+                if (await onDirection(artifact, selectedDirection)) setSelectedDirection('')
+              })
+            }
+          >
+            将选定方向载入本章补写（不生成）
+          </button>
+        </section>
       )}
       <div className="actions">
         <button

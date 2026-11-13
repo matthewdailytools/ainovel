@@ -31,6 +31,18 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if instruction.get("action") == "writing.advise":
+            return {
+                "text": "方向一：她先核对公开刻度，再向守闸人借尺复测，暂不修门。\n方向二：改查私藏账簿。\n以上只供作者选择，不代表已经发生。",
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline",
+            }
+        if instruction.get("action") == "writing.expand_plot":
+            return {
+                "text": "她在闸门前停下，先把公开刻度抄进本子。守闸人把旧尺递给她，她沿原来的标记复测，又记下读数。她只检查，没有修门，也未动用尚未取得的工具。",
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline",
+            }
         if instruction.get("action") == "writing.rewrite_selection":
             if "后台故障演练：慢速可取消" in instruction.get("作者要求", ""):
                 partial = "等待核查的未采纳片段。" * 15
