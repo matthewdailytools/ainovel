@@ -371,6 +371,9 @@ th {
   border-radius: 9px;
   min-width: 0;
 }
+.reference-workspace {
+  overflow-wrap: anywhere;
+}
 details {
   margin: 14px 0;
 }

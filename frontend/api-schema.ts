@@ -2029,6 +2029,11 @@ export interface components {
     }
     /** ReferenceAction */
     ReferenceAction: {
+      /**
+       * Plot Contract Check
+       * @default false
+       */
+      plot_contract_check: boolean
       /** Base Revision */
       base_revision: number
       /**

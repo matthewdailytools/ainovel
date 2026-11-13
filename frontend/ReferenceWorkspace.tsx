@@ -36,6 +36,22 @@ type ReferencePayload = {
 }
 export type ReferenceSession = { id: string; revision: number; payload: ReferencePayload }
 type Comparison = {
+  plot_audit?: {
+    status: string
+    policy: string
+    interpretation_note: string
+    items: {
+      id: string
+      author_evidence: string
+      actor: string
+      action: string
+      object: string
+      direction: string
+      result: string
+      certainty: string
+    }[]
+    checks: { item_id: string; result: string; observed: string; evidence: string; reason: string }[]
+  }
   target?: {
     kind: string
     chapter_id: string
@@ -59,6 +75,51 @@ export function ReferenceComparison({ value }: { value: unknown }) {
     <section className="notice" aria-label="参考写法对照">
       <h3>参考写法对照 · 等待作者判断</h3>
       <p>{data.summary}</p>
+      {data.plot_audit && (
+        <details>
+          <summary>
+            作者情节逐项核对 ·{' '}
+            {(
+              { model_pass: '模型标通过', failed: '发现不符', unverified: '待核对' } as Record<string, string>
+            )[data.plot_audit.status] || '待核对'}
+          </summary>
+          <p>{data.plot_audit.policy}</p>
+          <p>{data.plot_audit.interpretation_note}</p>
+          {data.plot_audit.items.map((item) => {
+            const check = data.plot_audit?.checks.find((row) => row.item_id === item.id)
+            return (
+              <article className="fact" key={item.id}>
+                <strong>
+                  {item.id} · AI解释{item.certainty === 'ambiguous' ? '（存在歧义）' : '（仍须核对）'}
+                </strong>
+                <blockquote>{item.author_evidence}</blockquote>
+                <p>
+                  {[item.actor, item.action, item.object, item.direction, item.result]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+                {check && (
+                  <>
+                    <p>本稿观察：{check.observed}</p>
+                    <p>
+                      {
+                        (
+                          { pass: '模型标一致', fail: '模型标不符', unknown: '未能核实' } as Record<
+                            string,
+                            string
+                          >
+                        )[check.result]
+                      }
+                      ：{check.reason}
+                    </p>
+                    <blockquote>{check.evidence}</blockquote>
+                  </>
+                )}
+              </article>
+            )
+          })}
+        </details>
+      )}
       {data.target && (
         <p className="small muted">
           检查对象：{data.target.kind} · 原稿基线修订 {data.target.base_revision}
@@ -127,6 +188,7 @@ export function ReferenceWorkspace({
   const [tasks, setTasks] = useState<Task[]>([])
   const [historical, setHistorical] = useState<Artifact>()
   const [busy, setBusy] = useState(false)
+  const [plotContractCheck, setPlotContractCheck] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [feedback, setFeedback] = useState('')
@@ -290,6 +352,7 @@ export function ReferenceWorkspace({
       base_revision: base,
       account,
       check_saved: checkSaved,
+      plot_contract_check: plotContractCheck && (name === 'draft' || name === 'check'),
       candidate_id: name === 'check' && !checkSaved ? candidate?.id : null,
     }
     const signature = JSON.stringify(values)
@@ -325,7 +388,7 @@ export function ReferenceWorkspace({
   const dirty = editable(draft) !== editable(row.payload)
   const canRun = !busy && !running && !stale && !dirty && modelReady
   return (
-    <div className="page-pad">
+    <div className="page-pad reference-workspace">
       <div className="page-heading">
         <div>
           <span className="eyebrow">从参考写法到本书原创正文</span>
@@ -570,6 +633,15 @@ export function ReferenceWorkspace({
             value={draft.fixed.join('\n')}
             onChange={(e) => edit({ fixed: e.target.value.split('\n') })}
           />
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={plotContractCheck}
+            onChange={(e) => setPlotContractCheck(e.target.checked)}
+            disabled={busy || running}
+          />
+          试写／对照时额外核对情节角色、对象与方向（增加两步模型调用，仍受预算保护）
         </label>
         <button
           disabled={!canRun || !draft.chapter_id || !draft.selected_ids.length || !draft.plot.trim()}

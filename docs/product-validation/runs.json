@@ -372,5 +372,38 @@
     "result": "unverified",
     "record": "2026-11-13-reference-quality.md",
     "fix_of": "reference-quality-001"
+  },
+  {
+    "id": "plot-fidelity-v11",
+    "date": "2026-11-13",
+    "commit": "2907519+working-tree",
+    "module": "情节忠实性",
+    "scenario": "原候选复检仍漏掉交易方向，不判改进通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-13-plot-fidelity.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-audit-narrow-001",
+    "date": "2026-11-13",
+    "commit": "2907519+working-tree",
+    "module": "情节忠实性",
+    "scenario": "来源哈希在320px撑宽页面",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-plot-fidelity.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-audit-narrow-002",
+    "date": "2026-11-13",
+    "commit": "2907519+working-tree",
+    "module": "情节忠实性",
+    "scenario": "哈希换行、两步核对及采纳恢复",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-plot-fidelity.md",
+    "fix_of": "plot-audit-narrow-001"
   }
 ]

@@ -3402,6 +3402,7 @@
       },
       "ReferenceAction": {
         "properties": {
+          "plot_contract_check": { "type": "boolean", "title": "Plot Contract Check", "default": false },
           "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
           "action": { "type": "string", "enum": ["analyze", "plan", "draft", "check"], "title": "Action" },
           "account": { "type": "string", "title": "Account" },

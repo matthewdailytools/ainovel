@@ -83,6 +83,7 @@ class EditReference(StrictModel):
 
 
 class ReferenceAction(StrictModel):
+    plot_contract_check: bool = False
     base_revision: int = Field(ge=0)
     action: Literal["analyze", "plan", "draft", "check"]
     account: str
@@ -213,12 +214,20 @@ async def compare(worker, text, fixed, context, snapshot, number):
         validate,
     )
     review = await worker.review(text, fixed, context, number, p["plot"])
+    plot_audit = None
+    if worker.task["payload"].get("plot_contract_check"):
+        from .plot_audit import audit_plot
+
+        plot_audit = await audit_plot(worker, p["plot"], text, number)
+        review["findings"].extend(plot_audit["findings"])
+        review["plot_audit"] = plot_audit
     return {
         **value,
         "condition_review": review,
         "overlap": overlap_report(p["source"]["quote"], text),
         "candidate_sha256": hashlib.sha256(text.encode()).hexdigest(),
         "formal_quality": "unverified",
+        **({"plot_audit": plot_audit} if plot_audit is not None else {}),
     }
 
 
@@ -308,7 +317,8 @@ async def run_reference(worker, request, context):
         "reference_comparison": checks,
         "review": review,
         "review_passed": all(c["result"] == "pass" for c in review["checks"])
-        and not any(f["severity"] == "blocker" for f in review["findings"]),
+        and not any(f["severity"] == "blocker" for f in review["findings"])
+        and checks.get("plot_audit", {}).get("status", "model_pass") == "model_pass",
         "memory": {},
     }
 
@@ -467,6 +477,8 @@ def register_routes(app, domain, provider_ready):
             reference_session_id=identifier,
             reference_revision=row["revision"],
         ).model_dump(exclude_none=True)
+        if data.plot_contract_check:
+            request["plot_contract_check"] = True
         if data.action == "check":
             if data.check_saved:
                 request["reference_check_text"] = chapter["content"]

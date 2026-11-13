@@ -32,6 +32,47 @@ class Model(ReferenceModel):
         instruction = value["任务"]
         while "原始任务" in instruction:
             instruction = instruction["原始任务"]
+        if instruction.get("动作") == "仅依据作者原话整理本场景情节":
+            return {
+                "text": json.dumps(
+                    {
+                        "items": [
+                            {
+                                "author_evidence": "AUTHOR0001",
+                                "actor": "她",
+                                "action": "检查",
+                                "object": "闸门",
+                                "direction": "",
+                                "result": "不修门",
+                                "certainty": "explicit",
+                            }
+                        ],
+                        "note": "仅为确定性界面验证",
+                    }
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline",
+            }
+        if instruction.get("动作") == "逐项对照作者情节解释与本次正文":
+            return {
+                "text": json.dumps(
+                    {
+                        "checks": [
+                            {
+                                "item_id": "P01",
+                                "result": "pass",
+                                "observed": "保留测量，没有修门",
+                                "evidence": "PLOT001P0001",
+                                "reason": "工程替身结果，不代表模型语义能力",
+                                "repair": "",
+                            }
+                        ],
+                        "summary": "工程替身情节核对",
+                    }
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline",
+            }
         if instruction.get("动作") in {
             "全书滚动规划",
             "按章纲写完整正文",

@@ -57,6 +57,52 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await page.getByText('阶段任务与历史规则版本', { exact: true }).click()
   await expect(page.getByText('reference.draft · 候选已生成', { exact: false })).toBeVisible()
   await expect(page.getByRole('region', { name: '参考写法对照', exact: true })).toBeVisible()
+  await page.setViewportSize({ width: 320, height: 800 })
+  const overflow = await page.evaluate(() =>
+    [...document.querySelectorAll('body *')]
+      .filter(
+        (element) =>
+          (element.getBoundingClientRect().right > innerWidth + 1 ||
+            element.scrollWidth > element.clientWidth + 1) &&
+          element.getBoundingClientRect().width > 0,
+      )
+      .map((element) => ({
+        tag: element.tagName,
+        className: element.className,
+        right: element.getBoundingClientRect().right,
+        scroll: element.scrollWidth,
+        client: element.clientWidth,
+        text: element.textContent?.slice(0, 30),
+      }))
+      .slice(-20),
+  )
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+    JSON.stringify(overflow),
+  ).toBeTruthy()
+  const plotOption = page.getByRole('checkbox', { name: /额外核对情节角色、对象与方向/ })
+  await plotOption.focus()
+  await expect(plotOption).toBeFocused()
+  await plotOption.press('Space')
+  await expect(plotOption).toBeChecked()
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const auditedRequest = page.waitForRequest(
+    (request) => request.url().endsWith('/actions') && request.method() === 'POST',
+  )
+  await page.getByRole('button', { name: '重新对照候选', exact: true }).click()
+  expect((await auditedRequest).postDataJSON().plot_contract_check).toBe(true)
+  await page.getByText('独立对照报告（核对固定对象及版本）', { exact: true }).click()
+  const plotAudit = page.getByText('作者情节逐项核对 · 模型标通过', { exact: true })
+  await expect(plotAudit).toBeVisible()
+  await plotAudit.click()
+  await expect(page.getByText('本稿观察：保留测量，没有修门', { exact: true })).toBeVisible()
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '200%'
+  })
+  await expect(page.getByText('本稿观察：保留测量，没有修门', { exact: true })).toBeVisible()
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = ''
+  })
   await page.getByRole('button', { name: '对照后采纳到目标正文', exact: true }).click()
   await expect(page.getByText('已采纳为新正文修订，原稿历史保留。故事记录可按需整理。')).toBeVisible()
   await page.getByRole('button', { name: '回到写作页继续编辑或恢复版本' }).click()
