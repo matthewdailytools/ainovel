@@ -11,7 +11,7 @@ from .evidence import source_units
 from .story_graph import RECORD, Record, Strict, graph, references, validate_record
 from .extraction_scenes import SceneProposal, adopt_scenes, freeze_scenes, normalize_scenes, scene_issues
 
-PROMISE_STAGE_GROUNDING_VERSION = "promise-stage-grounding/1"
+PROMISE_STAGE_GROUNDING_VERSION = "promise-stage-grounding/2"
 
 
 class ProposedRecord(Strict):
@@ -21,6 +21,7 @@ class ProposedRecord(Strict):
     target_id: str | None = None
     target_revision: int | None = Field(default=None, ge=0)
     update_fields: list[str] = Field(default_factory=list, max_length=30)
+    append_stages: bool = Field(default=False, strict=True)
 
 
 class Extraction(Strict):
@@ -165,6 +166,31 @@ async def run_extraction(worker, request, context, snapshot=None):
                     issues.append("更新须明确update_fields，仅能修改该记录已定义字段，kind不可变。")
             elif proposal["update_fields"] or proposal["target_revision"] is not None:
                 issues.append("新记录不能指定更新字段或目标修订。")
+            if proposal["append_stages"]:
+                if (
+                    not target
+                    or target["kind"] != "promise"
+                    or record["kind"] != "promise"
+                    or "stages" not in proposal["update_fields"]
+                ):
+                    issues.append(
+                        f"{path} append_stages=true仅适用于已有promise且update_fields明确包含stages；"
+                        "不得用于新记录、其他类型或未选择的字段。"
+                    )
+                else:
+                    count = len(target["payload"]["stages"]) + len(record["stages"])
+                    if count > 100:
+                        issues.append(
+                            f"{path}.stages 追加后为{count}个阶段，超过100上限；未截断历史。"
+                            "保留旧阶段，当前无法追加时列unknowns或交作者处理，不得删除历史以通过。"
+                        )
+                    if any(
+                        s["status"] not in {"planted", "reinforced", "resolved"} for s in record["stages"]
+                    ):
+                        issues.append(
+                            f"{path}.stages 追加模式仅接受有本批原文依据的planted/reinforced/resolved；"
+                            "计划、保留或放弃不能借追加模式自动决定。"
+                        )
             source_fields = [(f"{path}.sources", record["sources"])]
             if record["kind"] == "promise":
                 source_fields += [
@@ -226,6 +252,14 @@ async def run_extraction(worker, request, context, snapshot=None):
                     "source_free_plan": not r["payload"]["sources"]
                     and (r["payload"].get("status") == "planned" or r["payload"].get("truth") == "planned"),
                     **(
+                        {
+                            "promise_current_status": r["payload"]["stages"][-1]["status"],
+                            "promise_stage_count": len(r["payload"]["stages"]),
+                        }
+                        if r["kind"] == "promise"
+                        else {}
+                    ),
+                    **(
                         {"planned_value": r["payload"]["value"]}
                         if r["kind"] == "state" and r["payload"]["truth"] == "planned"
                         else {}
@@ -263,6 +297,7 @@ async def run_extraction(worker, request, context, snapshot=None):
             ],
             "计划兑现边界": "source_free_plan只表示尚无原文依据的计划，绝不表示实际。仅本批正文明确兑现同一事件、状态或关系且其他断言不变时，才可提案只更新status或truth为actual并提供本批原文。计划值不同或已有历史来源时，不做自动兑现；新建有依据的实际记录或保留为待作者核对的提案。实际状态须关联实际事件，必要时在同批明确提出事件兑现。不改写已发生历史，也不把计划引用当成实际证据。",
             "伏笔阶段要求": "planted、reinforced、resolved每个阶段都须在自身stages[i].sources独立选择有依据的source_id，主record.sources不能代替，不自动挪用主来源。同段确实支持多个阶段时可显式选择同一source_id，但各阶段仍须分别填写。retained、abandoned须在note记录明确作者理由，不编造决定；event_id仅能关联本批或已有的event，缺证据保留unknowns。",
+            "伏笔显式追加": "已有promise的新增埋设、强化或回收使用append_stages=true，指定target_id、target_revision及update_fields包含stages；record.stages只输出本批新增且有独立来源的阶段，服务将完整保留旧阶段并追加，不能重建或重复未提供的旧历史。索引只提供当前状态与阶段数。追加不能改写历史或自动决定retained/abandoned；无证据列unknowns。append_stages默认false，仍表示原有的整字段替换提案，不能假装已掌握未提供历史，自动采用仍受既有安全政策约束。sources字段原有追加/明确替换语义不变。",
             "要求": "仅提取所给正文有依据的人物、事件、状态、关系及伏笔。已有身份用正式id关联，避免重建同一人物；新项使用本批local_id。更新已有项必须指定target_id、target_revision和非空update_fields，只列本批确有新依据的变化字段，未列字段保持原值，不猜测未提供的旧档案。sources默认追加证据；明确需替换时才列sources。状态在更晚事件中变化时新建事件与状态，不把新变化回写成旧事件当时的状态；修改旧状态只作为有明确依据的纠错提案。quote填source_id，其余来源位置由服务复原。档案、作者知识、角色知识及读者知识分开；计划不冒充实际，未知故事时间和冲突保持可见。不确定伏笔只列unknowns。每项解释推导边界，不能改稿或自动采用。",
         },
         ExtractionWithScenes if with_scenes else Extraction,
@@ -278,7 +313,11 @@ async def run_extraction(worker, request, context, snapshot=None):
             item["previous_record"] = {"revision": old["revision"], "record": deepcopy(old["payload"])}
             merged = deepcopy(old["payload"])
             for field in item["update_fields"]:
-                merged[field] = deepcopy(item["record"][field])
+                merged[field] = (
+                    deepcopy(old["payload"]["stages"]) + deepcopy(item["record"]["stages"])
+                    if field == "stages" and item["append_stages"]
+                    else deepcopy(item["record"][field])
+                )
             if "sources" not in item["update_fields"]:
                 unique = {
                     (s["chapter_id"], s["revision"], s["start"], s["end"], s["quote"]): s

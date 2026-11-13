@@ -84,7 +84,7 @@ def test_stage_feedback_repairs_then_maintains_atomically(settings, domain, stor
     worker, progress, task, chapter = pending_workflow(settings, domain, story, model)
     assert asyncio.run(maintain(worker, progress))
     assert len(model.calls) == 2
-    assert model.calls[0]["任务"]["阶段证据契约版本"] == "promise-stage-grounding/1"
+    assert model.calls[0]["任务"]["阶段证据契约版本"] == "promise-stage-grounding/2"
     feedback = model.calls[1]["任务"]["定位错误"]
     location = f"records[4](local_id=p).record.stages[0]({status}).{field}"
     assert any(location in issue for issue in feedback)
