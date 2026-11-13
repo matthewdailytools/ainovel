@@ -295,5 +295,16 @@
     "result": "passed",
     "record": "2026-11-13-project-stability-baseline.md",
     "fix_of": "writing-conflict-001"
+  },
+  {
+    "id": "project-live-001",
+    "date": "2026-11-13",
+    "commit": "183f3d1",
+    "module": "日常实例与恢复",
+    "scenario": "六条无头路径、实际恢复、既有记录及费用逐条核对",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-project-stability-baseline.md",
+    "fix_of": ""
   }
 ]
