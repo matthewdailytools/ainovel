@@ -103,6 +103,48 @@ def test_two_scene_positions_have_distinct_effective_states(domain, story, setup
     )
 
 
+def test_whole_chapter_keeps_scene_entry_and_exit_state_separate(domain, story, setup_time, settings):
+    from ainovel.scene_time import chapter_context
+
+    target, character = setup_time
+    bind(domain, story, target, character, end=3)
+    bind(domain, story, target, character, title="以后", start=6, end=len(target["content"]), story_order=21)
+    bundle = chapter_context(domain, story["branch_id"], target["id"])
+    assert bundle["unbound_ranges"] == [{"start": 3, "end": 6, "status": "unbound"}]
+    assert bundle["scenes"][0]["entry"]["states"] == []
+    assert bundle["scenes"][1]["entry"]["states"][0]["payload"]["value"] == "已学会"
+    gap = domain.context(story["branch_id"], target["id"], 4)
+    assert gap["longform"]["unbound_scene_range"] and gap["recent"] == []
+    assembled = Worker(settings).whole_chapter_context(domain.context(story["branch_id"], target["id"]))
+    assert assembled["longform"]["states"] == []
+    assert len(assembled["chapter_scenes"]["scenes"]) == 2 and assembled["facts"] == []
+
+
+def test_whole_chapter_rejects_stale_later_scene_even_when_first_is_current(
+    domain, story, setup_time, settings
+):
+    target, character = setup_time
+    first = bind(domain, story, target, character)
+    bind(domain, story, target, character, title="以后", start=6, end=len(target["content"]), story_order=21)
+    latest = domain.save(target["id"], target["revision"], target["content"] + "新稿")
+    row = first["scenes"][0]
+    save_scene(
+        domain,
+        story["branch_id"],
+        target["id"],
+        SaveScene(
+            base_story_revision=domain.branch(story["branch_id"])["story_revision"],
+            base_revision=row["revision"],
+            scene={**row["payload"], "source_revision": latest["revision"]},
+        ),
+        row["id"],
+    )
+    context = domain.context(story["branch_id"], target["id"])
+    assert context["longform"]["scene_binding"]
+    with pytest.raises(DomainError, match="整章动作包含"):
+        Worker(settings).whole_chapter_context(context)
+
+
 def test_edit_invalidates_binding_but_readonly_context_remains_available(domain, story, setup_time, settings):
     target, character = setup_time
     bind(domain, story, target, character)

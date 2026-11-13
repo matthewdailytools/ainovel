@@ -346,6 +346,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/scene-context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Whole Context */
+    get: operations['whole_context_api_branches__branch_id__chapters__chapter_id__scene_context_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/history': {
     parameters: {
       query?: never
@@ -3167,6 +3184,38 @@ export interface operations {
       header?: never
       path: {
         branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  whole_context_api_branches__branch_id__chapters__chapter_id__scene_context_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
       }
       cookie?: never
     }

@@ -2,11 +2,21 @@ import { useEffect, useRef, useState } from 'react'
 import { api, label, type Artifact, type Chapter } from './api'
 import type { components } from './api-schema'
 import type { Notify } from './App'
+import { Difference } from './Editor'
 
 type Schemas = components['schemas']
 type RecordPayload =
   Schemas['Character'] | Schemas['Event'] | Schemas['State'] | Schemas['Promise'] | Schemas['Relationship']
-type Proposal = { id: string; local_id: string; record: RecordPayload; reasoning: string }
+type Proposal = {
+  id: string
+  local_id: string
+  record: RecordPayload
+  reasoning: string
+  target_id?: string | null
+  target_revision?: number | null
+  update_fields?: string[]
+  previous_record?: { revision: number; record: RecordPayload }
+}
 type ExtractionPayload = {
   records: Proposal[]
   unknowns: string[]
@@ -20,6 +30,45 @@ type History = {
   artifacts: { id: string; status: string; created: number }[]
 }
 const kinds = { character: '人物', event: '事件', state: '时点状态', promise: '伏笔', relationship: '关系' }
+const fieldNames: Record<string, string> = {
+  title: '名称',
+  aliases: '别名',
+  profile: '档案',
+  notes: '说明',
+  volume: '卷别',
+  sources: '原文来源',
+  depends_on: '依赖',
+  thread: '线别',
+  story_order: '故事顺序',
+  story_time: '故事时间',
+  status: '发生状态',
+  participants: '参与人物',
+  after: '先行事件',
+  character_id: '所属人物',
+  event_id: '变化事件',
+  category: '状态类别',
+  key: '状态事项',
+  value: '状态值',
+  audience: '信息视角',
+  truth: '事实性质',
+  until_event_id: '失效事件',
+  stages: '伏笔阶段',
+  from_id: '关系起点',
+  to_id: '关系终点',
+  relation: '关系描述',
+}
+function describe(value: unknown, nameFor: (id: string) => string): string {
+  if (value === null || value === undefined) return '未指定'
+  if (Array.isArray(value)) return value.map((v) => describe(v, nameFor)).join('\n')
+  if (typeof value === 'object') {
+    if ('quote' in value)
+      return `原文：${String(value.quote)}${'chapter_id' in value ? ` · 章节${String(value.chapter_id)}` : ''}${'revision' in value ? ` · 修订${String(value.revision)}` : ''}`
+    if ('status' in value)
+      return `阶段：${String(value.status)}${'note' in value ? ` · ${String(value.note)}` : ''}${'event_id' in value && value.event_id ? ` · 事件${nameFor(String(value.event_id))}` : ''}`
+    return '请结合下方关联与原文核对'
+  }
+  return typeof value === 'string' ? nameFor(value) : String(value)
+}
 
 export function StoryExtraction({
   branchId,
@@ -229,9 +278,37 @@ export function StoryExtraction({
                       )
                     }
                   />
-                  采用{kinds[p.record.kind]}：{p.record.title}
+                  {p.target_id ? '更新' : '采用'}
+                  {kinds[p.record.kind]}：{p.record.title}
                 </label>
                 <p>模型推导：{p.reasoning}</p>
+                {p.previous_record && (
+                  <details>
+                    <summary>对照正式记录修订{p.previous_record.revision}与更新提案</summary>
+                    <p>
+                      仅明确列出的字段会变化，其他字段保留。原文默认追加新证据；明确列出“原文来源”时为替换。
+                    </p>
+                    {[...new Set([...(p.update_fields || []), 'sources'])].map((field) => (
+                      <section key={field}>
+                        <h4>
+                          {fieldNames[field] || field}
+                          {field === 'sources' && !p.update_fields?.includes('sources') ? '（追加证据）' : ''}
+                        </h4>
+                        <Difference
+                          before={describe(
+                            Object.entries(p.previous_record!.record).find(([key]) => key === field)?.[1],
+                            nameFor,
+                          )}
+                          after={describe(
+                            Object.entries(p.record).find(([key]) => key === field)?.[1],
+                            nameFor,
+                          )}
+                          beforeLabel="正式旧记录"
+                        />
+                      </section>
+                    ))}
+                  </details>
+                )}
                 <details>
                   <summary>核对具体内容、关联和原文</summary>
                   <p>{p.record.notes}</p>

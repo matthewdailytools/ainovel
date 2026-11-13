@@ -707,6 +707,38 @@
         }
       }
     },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/scene-context": {
+      "get": {
+        "summary": "Whole Context",
+        "operationId": "whole_context_api_branches__branch_id__chapters__chapter_id__scene_context_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/history": {
       "get": {
         "summary": "History",

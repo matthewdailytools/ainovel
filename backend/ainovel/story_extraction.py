@@ -8,13 +8,16 @@ from pydantic import Field
 
 from .db import DomainError, dumps, uid
 from .evidence import source_units
-from .story_graph import Record, Strict, graph, references, sources, validate_record
+from .story_graph import RECORD, Record, Strict, graph, references, sources, validate_record
 
 
 class ProposedRecord(Strict):
     local_id: str = Field(min_length=1, max_length=100)
     record: Record
     reasoning: str = Field(min_length=1, max_length=2000)
+    target_id: str | None = None
+    target_revision: int | None = Field(default=None, ge=0)
+    update_fields: list[str] = Field(default_factory=list, max_length=30)
 
 
 class Extraction(Strict):
@@ -88,14 +91,32 @@ async def run_extraction(worker, request, context):
     indexed = {u["source_id"]: u for u in units}
     existing = [r for r in graph(worker.domain, request["branch_id"])["records"] if not r["archived"]]
     known = {r["id"] for r in existing}
+    by_id = {r["id"]: r for r in existing}
 
     def validate(value):
         issues = []
         local = [r["local_id"] for r in value["records"]]
+        targets = [r["target_id"] for r in value["records"] if r["target_id"]]
+        if len(targets) != len(set(targets)):
+            issues.append("同一正式记录在本批只能有一个更新提案。")
         if len(set(local)) != len(local) or set(local) & known:
             issues.append("候选local_id必须独立、唯一，不得与正式标识相同。")
         for proposal in value["records"]:
             record = proposal["record"]
+            target = by_id.get(proposal["target_id"])
+            if proposal["target_id"]:
+                if (
+                    not target
+                    or target["revision"] != proposal["target_revision"]
+                    or target["kind"] != record["kind"]
+                ):
+                    issues.append("更新目标必须使用当前索引中同类型记录的正式id和revision。")
+                if not proposal["update_fields"] or any(
+                    k not in record or k == "kind" for k in proposal["update_fields"]
+                ):
+                    issues.append("更新须明确update_fields，仅能修改该记录已定义字段，kind不可变。")
+            elif proposal["update_fields"] or proposal["target_revision"] is not None:
+                issues.append("新记录不能指定更新字段或目标修订。")
             quoted = sources(record)
             if not quoted:
                 issues.append("每项候选都需本批原文依据；不能从作者计划推断发生。")
@@ -132,6 +153,7 @@ async def run_extraction(worker, request, context):
             "已有记录索引": [
                 {
                     "id": r["id"],
+                    "revision": r["revision"],
                     "kind": r["kind"],
                     "invalid_reasons": r["invalid_reasons"],
                     **{
@@ -152,16 +174,35 @@ async def run_extraction(worker, request, context):
                 }
                 for r in existing
             ],
-            "要求": "仅提取所给正文有依据的人物、事件、状态、关系及伏笔。已有身份用正式id关联，避免重建同一人物；新项使用本批local_id。quote填source_id，其余来源位置由服务复原。档案、作者知识、角色知识及读者知识分开；计划不冒充实际，未知故事时间和冲突保持可见。不确定伏笔只列unknowns。每项解释推导边界，不能改稿或自动采用。",
+            "要求": "仅提取所给正文有依据的人物、事件、状态、关系及伏笔。已有身份用正式id关联，避免重建同一人物；新项使用本批local_id。更新已有项必须指定target_id、target_revision和非空update_fields，只列本批确有新依据的变化字段，未列字段保持原值，不猜测未提供的旧档案。sources默认追加证据；明确需替换时才列sources。状态在更晚事件中变化时新建事件与状态，不把新变化回写成旧事件当时的状态；修改旧状态只作为有明确依据的纠错提案。quote填source_id，其余来源位置由服务复原。档案、作者知识、角色知识及读者知识分开；计划不冒充实际，未知故事时间和冲突保持可见。不确定伏笔只列unknowns。每项解释推导边界，不能改稿或自动采用。",
         },
         Extraction,
         narrow,
         validate,
         max_output=request["max_output_tokens"],
     )
-    allocated = {r["local_id"]: uid() for r in result["records"]}
+    allocated = {r["local_id"]: r["target_id"] or uid() for r in result["records"]}
     for item in result["records"]:
         item["id"] = allocated[item["local_id"]]
+        if item["target_id"]:
+            old = by_id[item["target_id"]]
+            item["previous_record"] = {"revision": old["revision"], "record": deepcopy(old["payload"])}
+            merged = deepcopy(old["payload"])
+            for field in item["update_fields"]:
+                merged[field] = deepcopy(item["record"][field])
+            if "sources" not in item["update_fields"]:
+                unique = {
+                    (s["chapter_id"], s["revision"], s["start"], s["end"], s["quote"]): s
+                    for s in [*merged["sources"], *item["record"]["sources"]]
+                }
+                merged["sources"] = list(unique.values())
+                if len(merged["sources"]) > 30:
+                    raise DomainError(
+                        "story_sources_limit",
+                        "合并后来源超过30条，未自动丢弃旧证据；请先手工核对来源或明确提出来源替换。",
+                    )
+            item["record"] = RECORD.validate_python(merged).model_dump()
+        item["dependency_proposals"] = [allocated[k] for k in references(item["record"]) if k in allocated]
         item["record"] = rewrite_references(item["record"], allocated)
     result["source_manifest"] = [
         {k: c[k] for k in ("id", "revision", "position", "title")} for c in snapshot["chapters"]
@@ -198,24 +239,44 @@ def adopt(domain, branch_id, artifact_id, data):
         if len(chosen) != len(data.selected_ids) or not chosen.issubset(indexed):
             raise DomainError("story_selection", "候选选择重复或不存在。")
         for identifier in chosen:
-            missing = references(indexed[identifier]["record"]) & (set(indexed) - chosen)
+            missing = set(
+                indexed[identifier].get("dependency_proposals", references(indexed[identifier]["record"]))
+            ) & (set(indexed) - chosen)
             if missing:
                 raise DomainError(
                     "story_dependencies", "所选候选还依赖未选择的人物或事件，请明确一并选择。", 409
                 )
         # All tentative rows stay inside this transaction; any validation failure rolls back ALL.
+        record_revisions = {}
         for identifier in chosen:
             p = indexed[identifier]["record"]
-            tx.execute(
-                "INSERT INTO story_records VALUES(?,?,?,?,?,?,?,?)",
-                (identifier, branch_id, p["kind"], 0, dumps(p), 0, time(), time()),
-            )
+            item = indexed[identifier]
+            if item.get("target_id"):
+                old = tx.execute(
+                    "SELECT * FROM story_records WHERE id=? AND branch_id=? AND archived=0",
+                    (identifier, branch_id),
+                ).fetchone()
+                if not old or old["revision"] != item["target_revision"] or old["kind"] != p["kind"]:
+                    raise DomainError("record_changed", "待更新正式记录已改变，请重新整理。", 409)
+                record_revisions[identifier] = old["revision"] + 1
+                tx.execute(
+                    "UPDATE story_records SET revision=revision+1,payload=?,updated=? WHERE id=?",
+                    (dumps(p), time(), identifier),
+                )
+            else:
+                record_revisions[identifier] = 0
+                tx.execute(
+                    "INSERT INTO story_records VALUES(?,?,?,?,?,?,?,?)",
+                    (identifier, branch_id, p["kind"], 0, dumps(p), 0, time(), time()),
+                )
         for identifier in chosen:
             p = indexed[identifier]["record"]
             validate_record(tx, branch_id, identifier, p)
             tx.execute(
-                "INSERT INTO story_record_history VALUES(?,?,?,?,?)", (identifier, 0, dumps(p), 0, time())
+                "INSERT INTO story_record_history VALUES(?,?,?,?,?)",
+                (identifier, record_revisions[identifier], dumps(p), 0, time()),
             )
+            tx.execute("DELETE FROM story_record_dependencies WHERE record_id=?", (identifier,))
             for parent in references(p):
                 parent_revision = tx.execute(
                     "SELECT revision FROM story_records WHERE id=?", (parent,)
@@ -229,6 +290,7 @@ def adopt(domain, branch_id, artifact_id, data):
         result = {
             "artifact_id": artifact_id,
             "record_ids": data.selected_ids,
+            "record_revisions": record_revisions,
             "request": request_signature,
             "story_revision": revision + 1,
             "note": "仅所选结构候选已确认；未选项保留在原产物，不影响正文。",

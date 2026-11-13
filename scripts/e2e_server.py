@@ -17,7 +17,7 @@ from ainovel.worker import Worker
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend/tests"))
 from test_reference_flow import Model as ReferenceModel  # noqa: E402
-from test_story_extraction import ExtractionModel  # noqa: E402
+from test_story_extraction import ExtractionModel, UpdateModel  # noqa: E402
 
 
 class Model(ReferenceModel):
@@ -27,7 +27,12 @@ class Model(ReferenceModel):
         while "原始任务" in instruction:
             instruction = instruction["原始任务"]
         if instruction.get("动作") == "按保存稿反向整理长篇结构候选":
-            return await ExtractionModel().generate(account, task_id, system, prompt, max_output, **kwargs)
+            fixture = (
+                UpdateModel()
+                if any(r["kind"] == "character" for r in instruction["已有记录索引"])
+                else ExtractionModel()
+            )
+            return await fixture.generate(account, task_id, system, prompt, max_output, **kwargs)
         return await super().generate(account, task_id, system, prompt, max_output, **kwargs)
 
 

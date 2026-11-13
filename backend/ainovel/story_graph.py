@@ -348,8 +348,9 @@ def query_context(
     audience="author",
     character_id=None,
     text_position=0,
+    snapshot=None,
 ):
-    value = graph(domain, branch_id)
+    value = snapshot if snapshot is not None else graph(domain, branch_id)
     chapter_positions = {c["id"]: c["position"] for c in value["chapters"]}
     at_position = chapter_positions.get(chapter_id, 1_000_000)
     valid = {}

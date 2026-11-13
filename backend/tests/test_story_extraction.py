@@ -94,6 +94,20 @@ class ExtractionModel:
         return {"text": dumps(result), "usage": {"input": 1, "output": 1}, "call_id": "offline-extraction"}
 
 
+class UpdateModel(ExtractionModel):
+    async def generate(self, *args, **kwargs):
+        result = await super().generate(*args, **kwargs)
+        value = json.loads(result["text"])
+        target = next(r for r in self.calls[-1]["任务"]["已有记录索引"] if r["kind"] == "character")
+        proposal = value["records"][0]
+        proposal.update(target_id=target["id"], target_revision=target["revision"], update_fields=["aliases"])
+        proposal["record"]["aliases"] = ["小宁", "禾姑娘"]
+        proposal["record"]["profile"] = "此字段不能覆盖原档案"
+        value["records"] = [proposal]
+        result["text"] = dumps(value)
+        return result
+
+
 @pytest.fixture
 def extraction_source(domain, story):
     chapter = domain.save(story["chapter_id"], 0, "😀宁禾看懂暗号，钱叔收起铜牌。")
@@ -112,9 +126,9 @@ def queue(client, domain, story):
     return response.json()
 
 
-def produce(client, domain, settings, story):
+def produce(client, domain, settings, story, model=None):
     task = queue(client, domain, story)
-    model = ExtractionModel()
+    model = model or ExtractionModel()
     worker = Worker(settings, model)
     worker.task = worker.claim()
     worker.attempt = worker.task["attempt"]
@@ -217,6 +231,79 @@ def test_extraction_receives_adopted_author_and_genre_contracts(
     assert context["genre_profile"]["audience"] == "女频"
     assert context["genre_profile"]["action"] == "按保存稿反向整理长篇结构候选"
     assert context["genre_profile"]["author_exceptions"]
+
+
+def test_explicit_field_update_reuses_identity_and_preserves_unlisted_profile(
+    client, domain, settings, story, extraction_source
+):
+    from ainovel.story_graph import SaveRecord, save_record
+
+    saved = save_record(
+        domain,
+        story["branch_id"],
+        SaveRecord(
+            base_story_revision=domain.branch(story["branch_id"])["story_revision"],
+            record={
+                "kind": "character",
+                "title": "宁禾",
+                "aliases": ["小宁"],
+                "profile": "作者完整档案，应原样保留",
+            },
+        ),
+    )["records"][0]
+    artifact, model = produce(client, domain, settings, story, UpdateModel())
+    proposal = artifact["payload"]["records"][0]
+    assert proposal["id"] == saved["id"] and proposal["target_revision"] == 0
+    assert proposal["previous_record"]["record"]["profile"] == "作者完整档案，应原样保留"
+    assert proposal["record"]["profile"] == "作者完整档案，应原样保留"
+    assert "作者完整档案，应原样保留" not in dumps(model.calls)
+    response = client.post(
+        f"/api/branches/{story['branch_id']}/story-extractions/{artifact['id']}/adopt",
+        json=adoption(domain, story, artifact),
+    )
+    assert response.status_code == 200, response.text
+    records = domain.db.all("SELECT * FROM story_records")
+    assert len(records) == 1 and records[0]["id"] == saved["id"] and records[0]["revision"] == 1
+    current = json.loads(records[0]["payload"])
+    assert current["aliases"] == ["小宁", "禾姑娘"] and current["profile"] == "作者完整档案，应原样保留"
+    assert len(domain.db.all("SELECT * FROM story_record_history WHERE record_id=?", (saved["id"],))) == 2
+
+
+def test_update_and_new_record_roll_back_together_on_conflict(
+    client, domain, settings, story, extraction_source
+):
+    from ainovel.story_graph import SaveRecord, save_record
+
+    saved = save_record(
+        domain,
+        story["branch_id"],
+        SaveRecord(
+            base_story_revision=domain.branch(story["branch_id"])["story_revision"],
+            record={"kind": "character", "title": "宁禾", "aliases": ["小宁"], "profile": "原档案"},
+        ),
+    )["records"][0]
+
+    class BadBatch(UpdateModel):
+        async def generate(self, *args, **kwargs):
+            result = await super().generate(*args, **kwargs)
+            value = json.loads(result["text"])
+            bad = deepcopy(value["records"][0])
+            bad.update(local_id="new-person", target_id=None, target_revision=None, update_fields=[])
+            bad["record"].update(title="另一个人", aliases=["禾姑娘"])
+            value["records"].append(bad)
+            result["text"] = dumps(value)
+            return result
+
+    artifact, _ = produce(client, domain, settings, story, BadBatch())
+    response = client.post(
+        f"/api/branches/{story['branch_id']}/story-extractions/{artifact['id']}/adopt",
+        json=adoption(domain, story, artifact),
+    )
+    assert response.status_code == 409
+    rows = domain.db.all("SELECT * FROM story_records")
+    assert len(rows) == 1 and rows[0]["id"] == saved["id"] and rows[0]["revision"] == 0
+    assert json.loads(rows[0]["payload"])["aliases"] == ["小宁"]
+    assert len(domain.db.all("SELECT * FROM story_record_history")) == 1
 
 
 def test_alias_conflict_rolls_back_entire_batch(client, domain, settings, story, extraction_source):

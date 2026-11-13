@@ -26,6 +26,7 @@ SYSTEM = """你是中文原创小说工作台的执行模块。区分作者指�
 允许角色有依据地误判。叙述应具体，动作有因果，人物声音有区别，避免重复解释与为凑字数重复段落。
 没有证据保留未知。按请求只输出正文、建议或符合指定结构的 JSON，不加 Markdown 代码围栏。
 场景绑定明确故事时点与信息视角；longform.states仅代表该时点和视角的有效状态。采用设定中的未来计划不代表当前能力，未按故事时间整理的旧记录不补作当前知识。
+整章任务若提供chapter_scenes，必须逐场景区分entry与exit的知识、能力和资源，不把后场景状态提前，也不把单个光标状态推广到整章。未绑定范围和未知时点保持未知，候选的新位置须重新确认。
 未采纳候选的审查意见只用于纠错，不代表故事中已经发生的事实。
 频道题材配置只用于当前动作的阅读承诺、叙事重点和审阅提示，不是已发生的故事事实。
 作者明确要求、固定情节和例外优先于频道题材预设；女频不等于必须恋爱，男频不等于必须后宫。
@@ -33,7 +34,7 @@ SYSTEM = """你是中文原创小说工作台的执行模块。区分作者指�
 作者契约中的author_text是作者原话，provenance区分作者确认与AI提案。情绪目标和核心钩子是体验方向，不自行升级成硬性剧情。
 作者已确认的固定结果、禁止项和终局不得被预设或本次模糊指令覆盖。本次明确指令若与作品锁定冲突，应指出冲突并等待作者明确改约，不静默替换锁定。全书结果和终局在全书检查核对，单章只核对禁止项及当前时点明确应发生的结果。
 """
-PROMPT_VERSION = "0.7.0"
+PROMPT_VERSION = "0.8.0"
 
 
 def parse_json(text):
@@ -210,6 +211,13 @@ class Worker:
         while isinstance(source_instruction.get("原始任务"), dict):
             source_instruction = source_instruction["原始任务"]
         action = source_instruction.get("action", source_instruction.get("动作", "unknown"))
+        if (
+            action
+            in {"根据情节补写正文", "按章纲写完整正文", "用局部替换修订正文", "按确认参考应用方案原创试写"}
+            and context
+            and "chapter_scenes" not in context
+        ):
+            context = self.whole_chapter_context(context)
         context = {
             **(context or {}),
             "genre_profile": profile_for_action(profile, action),
@@ -485,6 +493,29 @@ class Worker:
         context["selected_external_references"] = excerpts
         return context
 
+    def whole_chapter_context(self, context):
+        from .scene_time import chapter_context
+
+        chapter = context.get("chapter")
+        if not chapter:
+            return context
+        bundle = chapter_context(self.domain, context["branch"]["id"], chapter["id"])
+        if bundle:
+            if bundle["story_revision"] != context["branch"]["story_revision"]:
+                raise DomainError("story_changed", "场景装配依据的故事版本已改变，停止派发。", 409)
+            context = deepcopy(context)
+            context["chapter_scenes"] = bundle
+            context["longform"] = {
+                "coverage": "整章动作按chapter_scenes逐场景装配，不使用单个光标状态替代整章。",
+                "states": [],
+                "uncertain": [],
+                "conflicts": [],
+                "scene_binding": None,
+            }
+            context["facts"], context["recent"] = [], []
+            context["coverage"] = bundle["coverage"]
+        return context
+
     async def module(self):
         request = self.task["payload"]
         context = self.context(
@@ -496,6 +527,16 @@ class Worker:
             else request.get("context_position", 0),
         )
         action = request["action"]
+        if action in {
+            "writing.expand_plot",
+            "review.chapter",
+            "memory.extract",
+            "revision.targeted",
+            "reference.plan",
+            "reference.draft",
+            "reference.check",
+        }:
+            context = self.whole_chapter_context(context)
         chapter = context["chapter"]
         if chapter and chapter["revision"] != request.get("base_revision"):
             raise DomainError("revision_conflict", "排队后正文已改变，请以新版本重试。", 409)
@@ -597,6 +638,7 @@ class Worker:
                 "targeted_revision": self.task["result"].get("targeted_revision_snapshot"),
                 "reference_session": self.task["result"].get("reference_snapshot"),
                 "scene_binding": context["longform"].get("scene_binding"),
+                "chapter_scenes": context.get("chapter_scenes"),
             },
             self.task["id"],
             self.attempt,
@@ -627,6 +669,7 @@ class Worker:
         raise DomainError("evidence", "两轮引用修正后仍无法回到原文，未采纳或自动推进。")
 
     async def review(self, text, fixed, context, number, instructions=None):
+        context = self.whole_chapter_context(context)
         context = text_context(context, text, "chapter_review")
         # Explicit author prohibitions apply to every chapter. Soft emotion/hook
         # preferences and book-level results never enter these fixed check slots.

@@ -27,6 +27,11 @@ type Context = {
     excluded_legacy_facts?: number
   }
 }
+type Bundle = {
+  scenes: { binding: Row; entry: Context['longform']; exit: Context['longform'] }[]
+  unbound_ranges: { start: number; end: number }[]
+  coverage: string
+}
 const fresh = (chapter: Chapter): Scene => ({
   title: '',
   source_revision: chapter.revision,
@@ -61,6 +66,7 @@ export function SceneTimePanel({
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [history, setHistory] = useState<{ revision: number; payload: Scene; archived: number }[]>([])
+  const [bundle, setBundle] = useState<Bundle>()
   useEffect(() => {
     if (!open) return
     let active = true
@@ -117,6 +123,7 @@ export function SceneTimePanel({
         },
       )
       setData(result)
+      setBundle(undefined)
       const row = result.scenes.find((r) => r.id === editing?.id) || result.scenes.at(-1)
       setEditing(row)
       if (row) setForm(row.payload)
@@ -329,6 +336,53 @@ export function SceneTimePanel({
               <p>正在读取保存稿状态；若有未保存改动，请先保存再核对位置。</p>
             )}
           </section>
+          <details>
+            <summary>整章场景及进入／离开状态</summary>
+            <button
+              disabled={busy}
+              onClick={() => {
+                setBundle(undefined)
+                void api<Bundle | null>(`/branches/${branchId}/chapters/${chapter.id}/scene-context`)
+                  .then((value) => {
+                    if (value) setBundle(value)
+                    else setMessage('本章尚无场景绑定，不能据此宣称已核对故事时点。')
+                  })
+                  .catch(notify)
+              }}
+            >
+              读取整章逐场景状态
+            </button>
+            {bundle && (
+              <section aria-label="整章场景状态清单">
+                <p>{bundle.coverage}</p>
+                {bundle.scenes.map((s) => (
+                  <article key={s.binding.id}>
+                    <h4>
+                      {s.binding.payload.title} · 故事序{s.binding.payload.story_order ?? '未知'}
+                    </h4>
+                    <p>
+                      进入时有效状态 {s.entry.states.length}；离开时有效状态 {s.exit.states.length}
+                    </p>
+                    {s.entry.states.map((v) => (
+                      <p key={v.id}>
+                        进入：{v.payload.title} · {v.payload.value}
+                      </p>
+                    ))}
+                    {s.exit.states.map((v) => (
+                      <p key={v.id}>
+                        离开：{v.payload.title} · {v.payload.value}
+                      </p>
+                    ))}
+                  </article>
+                ))}
+                {bundle.unbound_ranges.map((r, i) => (
+                  <p key={i}>
+                    未绑定范围：{r.start}—{r.end}，时点未知。
+                  </p>
+                ))}
+              </section>
+            )}
+          </details>
         </section>
       )}
     </details>

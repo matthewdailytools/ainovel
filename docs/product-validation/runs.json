@@ -90,7 +90,7 @@
   {
     "id": "scene-time-001",
     "date": "2026-11-13",
-    "commit": "f2bd3df+working-tree",
+    "commit": "82e6832",
     "module": "场景时点",
     "scenario": "范围视角、未来能力隔离、失效复核及日常只读",
     "phase": "stability",
@@ -108,5 +108,16 @@
     "result": "passed",
     "record": "2026-11-13-promise-finalization.md",
     "fix_of": "story-extraction-ci-failed"
+  },
+  {
+    "id": "scene-bundle-record-update-001",
+    "date": "2026-11-13",
+    "commit": "82e6832+working-tree",
+    "module": "整章场景与结构更新",
+    "scenario": "多时点状态、字段比较、混合事务及原稿保留",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-scene-bundle-record-update.md",
+    "fix_of": ""
   }
 ]

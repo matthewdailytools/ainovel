@@ -521,7 +521,7 @@ class Domain:
         )
         definitions = [{**row, "payload": json.loads(row["payload"])} for row in definitions]
         longform = scene_context(self, branch_id, chapter_id, text_position)
-        if longform["scene_binding"] or longform.get("blocked"):
+        if longform["scene_binding"] or longform.get("blocked") or longform.get("unbound_scene_range"):
             longform["excluded_legacy_facts"] = len(facts)
             longform["excluded_recent_chapters"] = len(previous)
             facts, previous = [], []
@@ -536,7 +536,7 @@ class Domain:
             "author_contract": self.author_contract(branch_id, definitions),
             "longform": longform,
             "coverage": "已绑定场景按明确故事时点和信息视角读取有效结构状态；旧式章序事实及近期正文因尚无可靠时点归属而未装入当前知识。"
-            if longform["scene_binding"] or longform.get("blocked")
+            if longform["scene_binding"] or longform.get("blocked") or longform.get("unbound_scene_range")
             else "每类最新采用设定、目标章节之前最近100条有效事实及最近两章；更早原文需主动查询，未知故事时间保留未知。",
         }
 

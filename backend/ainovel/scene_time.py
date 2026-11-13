@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import Field
 
 from .db import DomainError, dumps, uid
-from .story_graph import Strict, query_context
+from .story_graph import Strict, graph, query_context
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scene_times(
@@ -194,10 +194,74 @@ def scene_context(domain, branch_id, chapter_id, position=0):
         position,
     )
     value["scene_binding"] = binding
+    if (
+        not binding
+        and chapter_id
+        and any(not r["archived"] for r in scenes(domain, branch_id, chapter_id)["scenes"])
+    ):
+        value["unbound_scene_range"] = True
+        value["coverage"] += " 当前操作位置位于尚未绑定的场景空缺，故事时点未知，不能按章号补出当前知识。"
     return value
 
 
+def chapter_context(domain, branch_id, chapter_id):
+    """Whole-chapter actions keep each scene's entry/exit knowledge separate."""
+    if not chapter_id:
+        return None
+    value = scenes(domain, branch_id, chapter_id)
+    active = sorted(
+        [r for r in value["scenes"] if not r["archived"]], key=lambda r: (r["payload"]["start"], r["id"])
+    )
+    if not active:
+        return None
+    if any(r["stale"] for r in active):
+        raise DomainError("scene_stale", "整章动作包含未复核的场景绑定，请先核对范围和人物。", 409)
+    entries = []
+    snapshot = graph(domain, branch_id)
+    if snapshot["story_revision"] != value["story_revision"]:
+        raise DomainError("story_changed", "场景装配期间故事已改变，请重新读取。", 409)
+    gaps = []
+    cursor = 0
+    length = len(domain.chapter(chapter_id, branch_id)["content"].encode("utf-16-le")) // 2
+    for row in active:
+        p = row["payload"]
+        if p["start"] < cursor:
+            raise DomainError("scene_overlap", "整章场景范围重叠，请先核对。", 409)
+        if p["start"] > cursor:
+            gaps.append({"start": cursor, "end": p["start"], "status": "unbound"})
+
+        def at(position):
+            return query_context(
+                domain,
+                branch_id,
+                chapter_id,
+                p["story_order"],
+                p["audience"],
+                p["character_id"],
+                position,
+                snapshot=snapshot,
+            )
+
+        entries.append({"binding": row, "entry": at(p["start"]), "exit": at(p["end"])})
+        cursor = max(cursor, p["end"])
+    if cursor < length:
+        gaps.append({"start": cursor, "end": length, "status": "unbound"})
+    return {
+        "chapter_id": chapter_id,
+        "source_revision": value["source_revision"],
+        "story_revision": value["story_revision"],
+        "scenes": entries,
+        "unbound_ranges": gaps,
+        "coverage": "各场景独立使用自己的故事时点与信息视角，entry和exit区分进入／离开时可见的保存稿依据；不能把后场景能力提前。空缺保持未绑定。生成后的新位置须重新确认，旧范围不自动套用新稿。",
+    }
+
+
 def register_routes(app, domain):
+    @app.get("/api/branches/{branch_id}/chapters/{chapter_id}/scene-context")
+    def whole_context(branch_id: str, chapter_id: str):
+        domain.chapter(chapter_id, branch_id)
+        return chapter_context(domain, branch_id, chapter_id)
+
     @app.get("/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/history")
     def history(branch_id: str, chapter_id: str, identifier: str):
         domain.chapter(chapter_id, branch_id)
