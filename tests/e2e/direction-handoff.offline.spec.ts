@@ -148,11 +148,53 @@ test('U01：空白手写、卡点方向、作者选择、补写、拒绝、采�
   expect(submitted.writing_profile).toBe(profile)
   expect(submitted.reference_ids).toEqual([excerpt.id])
   await expect(page.getByRole('button', { name: '采纳到正文', exact: true })).toBeVisible()
+  const comparison = page.getByRole('combobox', { name: '比较候选', exact: true })
+  async function chooseArtifact(id: string) {
+    await expect(comparison.locator(`option[value="${id}"]`)).toBeAttached()
+    if ((await comparison.inputValue()) === id) return
+    await Promise.all([
+      page.waitForEvent('dialog').then(async (dialog) => {
+        expect(dialog.message()).toContain('已载入的作者选定方向')
+        await dialog.accept()
+      }),
+      comparison.selectOption(id),
+    ])
+    await expect(comparison).toHaveValue(id)
+  }
+  const rejectedId = await comparison.inputValue()
+  const beforeReject = await (await page.request.get(`/api/artifacts/${rejectedId}`)).json()
+  expect(beforeReject.kind).toBe('chapter_draft')
+  expect(beforeReject.status).toBe('candidate')
+  expect(beforeReject.chapter_id).toBe(chapter.id)
   expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content).toBe(continued)
   await page.getByRole('button', { name: '拒绝', exact: true }).click()
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/artifacts/${rejectedId}`)).json()).status)
+    .toBe('rejected')
+  // With another pending advice, the list may select it after rejecting a draft.
+  // Inspect this exact rejected artifact, rather than assuming it stays selected.
+  await expect(comparison.locator(`option[value="${rejectedId}"]`)).toContainText('已拒绝')
+  await chooseArtifact(rejectedId)
   await expect(page.getByRole('button', { name: '采纳到正文', exact: true })).toBeDisabled()
+  const disallowed = await page.request.post(`/api/artifacts/${rejectedId}/accept`, {
+    headers,
+    data: { idempotency_key: `rejected-${rejectedId}`, candidate_revision: beforeReject.candidate_revision },
+  })
+  expect(disallowed.status()).toBe(409)
+  expect((await disallowed.json()).code).toBe('candidate_state')
+  expect((await (await page.request.get(`/api/artifacts/${rejectedId}`)).json()).status).toBe('rejected')
   expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content).toBe(continued)
+  const nextTask = page.waitForResponse(
+    (response) => response.url().endsWith('/api/modules') && response.request().method() === 'POST',
+  )
   await page.getByRole('button', { name: '生成候选 →', exact: true }).click()
+  const next = await (await nextTask).json()
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/tasks/${next.id}`)).json()).status)
+    .toBe('succeeded')
+  const finished = await (await page.request.get(`/api/tasks/${next.id}`)).json()
+  expect(finished.result.artifact_id).not.toBe(rejectedId)
+  await chooseArtifact(finished.result.artifact_id)
   await expect(page.getByRole('button', { name: '采纳到正文', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: '采纳到正文', exact: true }).click()
   await expect

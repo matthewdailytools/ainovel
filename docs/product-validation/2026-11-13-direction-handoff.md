@@ -19,7 +19,7 @@
 | TypeScript | 通过 | Node 24 本地工具运行 `tsc -b --pretty false`，退出码 0 |
 | 针对单元测试与反馈回归 | 通过 | `directionHandoff.test.ts` 与 `feedbackRevision.test.ts`：2 文件、5 项通过；覆盖独立作者文本、来源版本、跨作品／版本／章、无目标章、拒绝、旧候选版本及恢复来源解析 |
 | 格式与差异检查 | 通过 | 修改文件 Prettier；`git diff --check` 无空白错误 |
-| 离线无头完整流程 | 通过 | `tests/e2e/direction-handoff.offline.spec.ts`：1 项通过，9.0s；隔离 API / 现有 Worker 路径 / 确定性替身，构建 `index-BUjkOtRc` |
+| 离线无头完整流程 | 通过 | `tests/e2e/direction-handoff.offline.spec.ts`：初轮 1 项通过，9.0s，构建 `index-BUjkOtRc`；全量发现选择器假定后加强判据单独复测通过，9.6s。隔离 API / 现有 Worker 路径 / 确定性替身 |
 | 受影响写作回归 | 通过 | 人工反馈 3.8s、参考完整流程 12.5s、双窗口保存冲突 2.7s、中文 IME 0.94s、任务刷新重连／取消／明确恢复 19.5s，共 5 项通过 |
 | 真实模型语义和文学质量 | 未执行 | 本轮不发付费请求；工程替身结果不能说明生成质量 |
 
@@ -32,6 +32,10 @@
 1. 精确 `getByLabel` 在已有预填 textarea / select 中会把子文本计入 label 匹配，测试超时发生在表单设置阶段，API 尚无模型任务。改按 textbox / combobox 的可访问名称定位，保留业务断言。
 2. 初版测试连续注册 `once(dialog)`，未等待保存后异步弹窗，下一次处理器可能附着到前一弹窗并重复处理。改成各次 `waitForEvent('dialog')` 与操作一同等待，并等待按钮重新可用，保留取消及确认两条路径。
 3. 修正后方向用例通过；本次失败轨迹保留于仓库外 `C:/Users/matth/.ainovel/acceptance/u01-direction-2026-11-13/` 的 `label-selector-failure` 和 `dialog-timing-failure` 子目录。未通过删除断言、提高超时或跳过用例制造通过。
+4. 后续主任务全量 23 项得到 22 项通过、方向用例 1 项失败：拒绝正文候选后，列表自动回到仍待采纳的建议，旧断言假定“采纳到正文”按钮仍挂载且禁用，实际该按钮已随建议类型消失。保存网络轨迹确认拒绝接口 HTTP 200、该正文产物为 `rejected`，正文仍为修订 3 且哈希与作者续写稿相同；没有错误采纳。失败证据及仅含状态／哈希的 `api-summary.json` 保留在上述私有目录的 `full-suite-rejected-selection-failure`。
+5. 测试现在记录确切被拒候选 ID，等候 API `rejected` 和列表“已拒绝”状态，明确选择该产物后仍断言采纳按钮禁用；另请求采纳 API 验证 HTTP 409 `candidate_state`、状态仍拒绝且原稿未变。再次生成后按该任务返回的产物 ID 明确选中后采纳，避免依赖列表默认选中策略。单独复测 1 项通过（9.6s，退出码 0），无需修改生产界面。通过摘要保存为 `rejected-selection-pass.last-run.json`。
+
+最近一次通过时隔离服务打印一条 Windows asyncio Proactor `ConnectionResetError (WinError 10054)` 连接关闭日志，测试退出码仍为 0、所有业务断言通过；这条日志作为观察项保留，不归为真实模型失败或文学质量结论。
 
 ## 证据与交付边界
 
