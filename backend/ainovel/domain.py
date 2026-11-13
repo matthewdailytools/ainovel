@@ -27,7 +27,10 @@ def same_task_payload(left, right):
                 (k in optional and v is None)
                 or (k in {"finding_indices", "story_chapter_ids", "inherit_story_record_ids"} and v == [])
                 or (k == "context_position" and v == 0)
-                or (k == "structured_maintenance" and v is False)
+                or (
+                    k in {"structured_maintenance", "scene_maintenance", "include_scene_ranges"}
+                    and v is False
+                )
             )
         }
 

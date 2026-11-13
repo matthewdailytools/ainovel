@@ -218,5 +218,27 @@
     "result": "passed",
     "record": "2026-11-13-plan-realization.md",
     "fix_of": ""
+  },
+  {
+    "id": "scene-maintenance-browser-failed",
+    "date": "2026-11-13",
+    "commit": "16e317e+working-tree",
+    "module": "场景范围维护",
+    "scenario": "引文定位未限定场景区域，命中多个blockquote",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-scene-maintenance.md",
+    "fix_of": ""
+  },
+  {
+    "id": "scene-maintenance-001",
+    "date": "2026-11-13",
+    "commit": "16e317e+working-tree",
+    "module": "场景范围维护",
+    "scenario": "原文核对、归档确认、事务回滚、时点依据及12条后台路径",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-scene-maintenance.md",
+    "fix_of": "scene-maintenance-browser-failed"
   }
 ]

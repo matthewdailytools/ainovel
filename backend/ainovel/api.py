@@ -445,6 +445,9 @@ def create_app(settings=None, schema_only=False):
     def start_workflow(data: WorkflowInput):
         from .story_inheritance import inherit
 
+        if data.scene_maintenance and not data.structured_maintenance:
+            raise DomainError("scene_policy", "自动场景维护需要同时启用章节结构维护。")
+
         payload = data.model_dump()
         for key in ("genre_profile_basis", "author_contract_basis"):
             if payload[key] is None:
@@ -1148,6 +1151,10 @@ def create_app(settings=None, schema_only=False):
 
     dist = ROOT / "dist"
     if dist.is_dir():
+        if not settings.test_mode and not schema_only:
+            from .ui_snapshot import freeze_ui
+
+            dist = freeze_ui(dist, settings.data_dir)
         app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
 
         @app.get("/", include_in_schema=False)

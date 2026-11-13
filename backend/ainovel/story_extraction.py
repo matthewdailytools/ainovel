@@ -9,6 +9,7 @@ from pydantic import Field
 from .db import DomainError, dumps, uid
 from .evidence import source_units
 from .story_graph import RECORD, Record, Strict, graph, references, sources, validate_record
+from .extraction_scenes import SceneProposal, adopt_scenes, freeze_scenes, normalize_scenes, scene_issues
 
 
 class ProposedRecord(Strict):
@@ -26,7 +27,12 @@ class Extraction(Strict):
     coverage: str = Field(min_length=1, max_length=2000)
 
 
+class ExtractionWithScenes(Extraction):
+    scenes: list[SceneProposal] = Field(min_length=1, max_length=200)
+
+
 class StartExtraction(Strict):
+    include_scene_ranges: bool = False
     base_story_revision: int = Field(ge=0)
     chapter_ids: list[str] = Field(min_length=1, max_length=20)
     account: str
@@ -35,6 +41,8 @@ class StartExtraction(Strict):
 
 
 class AdoptExtraction(Strict):
+    selected_scene_ids: list[str] = Field(default_factory=list, max_length=200)
+    confirm_scene_replacement: bool = False
     base_story_revision: int = Field(ge=0)
     candidate_revision: int = Field(ge=0)
     selected_ids: list[str] = Field(max_length=60)
@@ -56,6 +64,11 @@ def freeze_sources(domain, request):
     return {
         "story_revision": branch["story_revision"],
         "chapters": [{k: c[k] for k in ("id", "title", "position", "revision", "content")} for c in chapters],
+        **(
+            {"scene_replacements": freeze_scenes(domain, chapters)}
+            if request.get("include_scene_ranges")
+            else {}
+        ),
     }
 
 
@@ -89,6 +102,9 @@ async def run_extraction(worker, request, context, snapshot=None):
             for unit in source_units(chapter["content"], f"S{i + 1}P")
         ]
     indexed = {u["source_id"]: u for u in units}
+    with_scenes = request.get("include_scene_ranges", False)
+    if with_scenes and len(units) > 2000:
+        raise DomainError("scene_range", "本批超过2000个原文片段，请缩小章节范围后整理场景。")
     existing = [r for r in graph(worker.domain, request["branch_id"])["records"] if not r["archived"]]
     known = {r["id"] for r in existing}
     by_id = {r["id"]: r for r in existing}
@@ -140,6 +156,8 @@ async def run_extraction(worker, request, context, snapshot=None):
                     source["quote"] = unit["text"]
             if not references(record).issubset(known | set(local)):
                 issues.append("关联只能使用本批local_id或已提供的正式标识。")
+        if with_scenes:
+            issues.extend(scene_issues(value["scenes"], units, by_id, value["records"]))
         return issues
 
     narrow = {
@@ -149,6 +167,13 @@ async def run_extraction(worker, request, context, snapshot=None):
     result = await worker.grounded(
         {
             "动作": "按保存稿反向整理长篇结构候选",
+            **(
+                {
+                    "场景范围要求": "同时输出scenes，按每章原文source_id连续分组，完整覆盖且每段仅一次。不输出自己计算的位置，服务根据冻结原文计算UTF-16范围。人物视角明确character_id，可用本批人物local_id。story_order只采用所覆盖原文中实际事件的已知故事顺序；缺依据使用null和未知说明，不能按章号推断。不将未来计划当实际时点，插叙、倒叙及信息视角分别表达。"
+                }
+                if with_scenes
+                else {}
+            ),
             "可引用原文": units,
             "已有记录索引": [
                 {
@@ -197,7 +222,7 @@ async def run_extraction(worker, request, context, snapshot=None):
             "计划兑现边界": "source_free_plan只表示尚无原文依据的计划，绝不表示实际。仅本批正文明确兑现同一事件、状态或关系且其他断言不变时，才可提案只更新status或truth为actual并提供本批原文。计划值不同或已有历史来源时，不做自动兑现；新建有依据的实际记录或保留为待作者核对的提案。实际状态须关联实际事件，必要时在同批明确提出事件兑现。不改写已发生历史，也不把计划引用当成实际证据。",
             "要求": "仅提取所给正文有依据的人物、事件、状态、关系及伏笔。已有身份用正式id关联，避免重建同一人物；新项使用本批local_id。更新已有项必须指定target_id、target_revision和非空update_fields，只列本批确有新依据的变化字段，未列字段保持原值，不猜测未提供的旧档案。sources默认追加证据；明确需替换时才列sources。状态在更晚事件中变化时新建事件与状态，不把新变化回写成旧事件当时的状态；修改旧状态只作为有明确依据的纠错提案。quote填source_id，其余来源位置由服务复原。档案、作者知识、角色知识及读者知识分开；计划不冒充实际，未知故事时间和冲突保持可见。不确定伏笔只列unknowns。每项解释推导边界，不能改稿或自动采用。",
         },
-        Extraction,
+        ExtractionWithScenes if with_scenes else Extraction,
         narrow,
         validate,
         max_output=request["max_output_tokens"],
@@ -229,11 +254,19 @@ async def run_extraction(worker, request, context, snapshot=None):
         {k: c[k] for k in ("id", "revision", "position", "title")} for c in snapshot["chapters"]
     ]
     result["source_story_revision"] = snapshot["story_revision"]
+    if with_scenes:
+        result["scenes"] = normalize_scenes(result["scenes"], units, snapshot["chapters"], allocated)
+        result["scene_replacements"] = snapshot.get("scene_replacements", [])
+        result["scene_required"] = True
     return "story_extraction", result
 
 
 def adopt(domain, branch_id, artifact_id, data, attempt=None):
     request_signature = data.model_dump()
+    if not data.selected_scene_ids:
+        request_signature.pop("selected_scene_ids")
+    if not data.confirm_scene_replacement:
+        request_signature.pop("confirm_scene_replacement")
     with domain.db.connect(True) as tx:
         artifact = tx.execute(
             "SELECT * FROM artifacts WHERE id=? AND branch_id=? AND kind='story_extraction'",
@@ -258,6 +291,17 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None):
             if prior["artifact_id"] != artifact_id or result.get("request") != request_signature:
                 raise DomainError("idempotency", "确认标识已用于不同选择。", 409)
             return result
+        creator = (
+            tx.execute("SELECT kind FROM tasks WHERE id=?", (artifact["task_id"],)).fetchone()
+            if artifact["task_id"]
+            else None
+        )
+        if creator and creator["kind"] == "workflow" and not maintenance_owner:
+            raise DomainError(
+                "workflow_progress",
+                "结构产物的批次检查点尚未发布或已推进，请刷新后核对；未修改任何记录。",
+                409,
+            )
         payload, basis = json.loads(artifact["payload"]), json.loads(artifact["basis"])
         revision = tx.execute("SELECT story_revision FROM branches WHERE id=?", (branch_id,)).fetchone()[0]
         if artifact["status"] != "candidate" or data.candidate_revision != payload.get(
@@ -267,7 +311,7 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None):
         if revision != data.base_story_revision or revision != basis.get("story_revision"):
             raise DomainError("story_changed", "故事或源稿已改变，请重新整理。", 409)
         indexed = {item["id"]: item for item in payload["records"]}
-        if indexed and not data.selected_ids:
+        if indexed and not data.selected_ids and not data.selected_scene_ids:
             raise DomainError("story_selection", "请选择至少一项，空选择不能确认非空候选。")
         chosen = set(data.selected_ids)
         if len(chosen) != len(data.selected_ids) or not chosen.issubset(indexed):
@@ -319,13 +363,19 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None):
                     "INSERT INTO story_record_dependencies VALUES(?,?,?)",
                     (identifier, parent, parent_revision),
                 )
-        increment = 1 if chosen else 0
+        required = bool(maintenance_owner and payload.get("scene_required"))
+        scene_revisions, archived_scenes = adopt_scenes(
+            tx, branch_id, payload, data.selected_scene_ids, data.confirm_scene_replacement, required
+        )
+        increment = 1 if chosen or scene_revisions else 0
         tx.execute("UPDATE branches SET story_revision=story_revision+? WHERE id=?", (increment, branch_id))
         tx.execute("UPDATE artifacts SET status='accepted' WHERE id=?", (artifact_id,))
         result = {
             "artifact_id": artifact_id,
             "record_ids": data.selected_ids,
             "record_revisions": record_revisions,
+            "scene_revisions": scene_revisions,
+            "archived_scene_ids": archived_scenes,
             "request": request_signature,
             "story_revision": revision + increment,
             "note": "仅所选结构候选已确认；未选项保留在原产物，不影响正文。",
@@ -347,6 +397,8 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None):
                         **source,
                         "record_ids": data.selected_ids,
                         "record_revisions": record_revisions,
+                        "scene_ids": list(scene_revisions),
+                        "scene_revisions": scene_revisions,
                         "policy": "worker_automatic" if attempt else "author_confirmed",
                         "created": time(),
                     }
@@ -389,6 +441,7 @@ def register_routes(app, domain, provider_ready):
             client_request_id=data.client_request_id,
             budget_limit=data.budget_limit,
             story_chapter_ids=data.chapter_ids,
+            include_scene_ranges=data.include_scene_ranges,
         ).model_dump(exclude_none=True)
         request["story_extraction_revision"] = data.base_story_revision
         return domain.queue("module", request)

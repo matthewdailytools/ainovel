@@ -104,8 +104,21 @@ class Model(ReferenceModel):
                                 },
                             }
                         )
+                payload = {"records": records, "unknowns": [], "coverage": "当前章"}
+                if "场景范围要求" in instruction:
+                    payload["scenes"] = [
+                        {
+                            "title": "本章场景",
+                            "source_ids": [u["source_id"] for u in instruction["可引用原文"]],
+                            "story_order": None,
+                            "story_time": "未知",
+                            "audience": "author",
+                            "character_id": None,
+                            "note": "工程替身不推断时点",
+                        }
+                    ]
                 return {
-                    "text": json.dumps({"records": records, "unknowns": [], "coverage": "当前章"}),
+                    "text": json.dumps(payload),
                     "usage": {"input": 1, "output": 1},
                     "call_id": "offline-book-structure",
                 }
@@ -116,7 +129,26 @@ class Model(ReferenceModel):
                 if any(r["kind"] == "character" for r in instruction["已有记录索引"])
                 else ExtractionModel()
             )
-            return await fixture.generate(account, task_id, system, prompt, max_output, **kwargs)
+            result = await fixture.generate(account, task_id, system, prompt, max_output, **kwargs)
+            if "场景范围要求" in instruction:
+                payload = json.loads(result["text"])
+                chapters = dict.fromkeys(u["chapter_id"] for u in instruction["可引用原文"])
+                payload["scenes"] = [
+                    {
+                        "title": "本章场景",
+                        "source_ids": [
+                            u["source_id"] for u in instruction["可引用原文"] if u["chapter_id"] == chapter
+                        ],
+                        "story_order": None,
+                        "story_time": "未知",
+                        "audience": "author",
+                        "character_id": None,
+                        "note": "工程替身不推断时点",
+                    }
+                    for chapter in chapters
+                ]
+                result["text"] = json.dumps(payload)
+            return result
         return await super().generate(account, task_id, system, prompt, max_output, **kwargs)
 
 

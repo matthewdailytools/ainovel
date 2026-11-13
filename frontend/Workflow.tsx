@@ -44,6 +44,7 @@ export function WorkflowPage({
   const [maxChars, setMaxChars] = useState(3500)
   const [adoption, setAdoption] = useState<'manual' | 'automatic'>('manual')
   const [structuredMaintenance, setStructuredMaintenance] = useState(true)
+  const [sceneMaintenance, setSceneMaintenance] = useState(true)
   const [inheritance, setInheritance] = useState<InheritanceSelection>()
   const [profile, setProfile] = useState(
     '第三人称限定视角，克制白话，动作有因果，人物选择遵循当时掌握的信息与资源。',
@@ -195,6 +196,7 @@ export function WorkflowPage({
         account,
         adoption,
         structured_maintenance: structuredMaintenance,
+        scene_maintenance: structuredMaintenance && sceneMaintenance,
         inherit_story_record_ids: inheritance?.selected_ids || [],
         inherit_source_revision: inheritance?.selected_ids.length ? inheritance.source_story_revision : null,
         writing_profile: profile,
@@ -377,6 +379,18 @@ export function WorkflowPage({
                 增加模型调用，计入同一批次及共享预算；人工政策需确认结构，旧事实纠错会停下等待核对。
               </span>
             </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                disabled={!structuredMaintenance}
+                checked={structuredMaintenance && sceneMaintenance}
+                onChange={(e) => setSceneMaintenance(e.target.checked)}
+              />
+              同时维护新正文的场景范围
+            </label>
+            <p className="small">
+              与结构使用同一次整理调用；按新正文重新定位，未知时点明确保留。作者编辑过的旧绑定需核对后替换。
+            </p>
             <label>
               本批次预算（可低于共享总上限）
               <input

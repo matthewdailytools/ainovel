@@ -318,6 +318,7 @@ export function Writing({
       if (action === 'writing.rewrite_selection' && !selection.text)
         throw new Error('请在正文中选择要改写的文字。')
       const data: ModuleInput = {
+        include_scene_ranges: false,
         action,
         novel_id: novel.id,
         branch_id: branch.id,

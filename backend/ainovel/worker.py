@@ -35,7 +35,7 @@ longform.plans单独列出作者维护的未来计划，包含各信息视角的
 作者契约中的author_text是作者原话，provenance区分作者确认与AI提案。情绪目标和核心钩子是体验方向，不自行升级成硬性剧情。
 作者已确认的固定结果、禁止项和终局不得被预设或本次模糊指令覆盖。本次明确指令若与作品锁定冲突，应指出冲突并等待作者明确改约，不静默替换锁定。全书结果和终局在全书检查核对，单章只核对禁止项及当前时点明确应发生的结果。
 """
-PROMPT_VERSION = "0.9.0"
+PROMPT_VERSION = "0.10.0"
 
 
 def parse_json(text):
@@ -134,6 +134,12 @@ class Worker:
                         "blocked_creative",
                         "已维护的伏笔仍有未闭合或失效记录，请先在故事与审阅中核对。",
                     )
+                if self.task["payload"].get("scene_maintenance"):
+                    from .extraction_scenes import coverage
+
+                    result["scene_coverage"] = coverage(db, self.task["branch_id"])
+                    if not result["scene_coverage"]["complete"]:
+                        status, error = "blocked_creative", "新正文场景范围尚未完整核对，不能记录为制作完成。"
             db.execute(
                 "UPDATE tasks SET result=?,status=?,error=?,updated=? WHERE id=? AND attempt=?",
                 (dumps(result), status, error, time(), self.task["id"], self.attempt),

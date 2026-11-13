@@ -18,6 +18,9 @@ type Proposal = {
   previous_record?: { revision: number; record: RecordPayload }
 }
 type ExtractionPayload = {
+  scenes?: { id: string; chapter_id: string; scene: Schemas['SceneTime']; quote?: string }[]
+  scene_required?: boolean
+  scene_replacements?: { id: string; revision: number; chapter_id: string; payload: Schemas['SceneTime'] }[]
   records: Proposal[]
   unknowns: string[]
   coverage: string
@@ -94,6 +97,9 @@ export function StoryExtraction({
   const [artifactId, setArtifactId] = useState('')
   const [artifact, setArtifact] = useState<ExtractionArtifact>()
   const [selected, setSelected] = useState<string[]>([])
+  const [includeScenes, setIncludeScenes] = useState(false)
+  const [selectedScenes, setSelectedScenes] = useState<string[]>([])
+  const [confirmReplacement, setConfirmReplacement] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const pending = useRef<{ signature: string; key: string } | null>(null)
@@ -124,6 +130,8 @@ export function StoryExtraction({
     let active = true
     setArtifact(undefined)
     setSelected([])
+    setSelectedScenes([])
+    setConfirmReplacement(false)
     if (artifactId)
       void api<ExtractionArtifact>(`/artifacts/${artifactId}`)
         .then((a) => {
@@ -198,13 +206,27 @@ export function StoryExtraction({
             </label>
           ))}
         </fieldset>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={includeScenes}
+            disabled={busy}
+            onChange={(e) => setIncludeScenes(e.target.checked)}
+          />
+          同时提议新正文的场景范围
+        </label>
         <button
           disabled={
             busy || !modelReady || !chosenChapters.length || chosenChapters.length > 20 || running.length > 0
           }
           onClick={() =>
             void perform(async () => {
-              const body = { base_story_revision: storyRevision, chapter_ids: chosenChapters, account }
+              const body = {
+                base_story_revision: storyRevision,
+                chapter_ids: chosenChapters,
+                account,
+                include_scene_ranges: includeScenes,
+              }
               const signature = JSON.stringify(body)
               if (pending.current?.signature !== signature)
                 pending.current = { signature, key: crypto.randomUUID() }
@@ -366,13 +388,79 @@ export function StoryExtraction({
                 <p key={i}>{u}</p>
               ))}
             </details>
+            {!!artifact.payload.scenes?.length && (
+              <section aria-label="场景范围候选">
+                <h3>按新正文定位场景</h3>
+                <p>
+                  原文位置由本次保存稿计算。时点未知不等于当前角色已知；需要新人物时，请一并选择上方人物候选。批次继续前须确认完整场景清单。
+                </p>
+                {artifact.payload.scenes.map((s) => (
+                  <article className="fact" key={s.id}>
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        disabled={busy || !!stale || artifact.status !== 'candidate'}
+                        checked={selectedScenes.includes(s.id)}
+                        onChange={(e) =>
+                          setSelectedScenes((old) =>
+                            e.target.checked ? [...old, s.id] : old.filter((id) => id !== s.id),
+                          )
+                        }
+                      />
+                      采用场景：{s.scene.title}
+                    </label>
+                    <p>
+                      {artifact.payload.source_manifest.find((c) => c.id === s.chapter_id)?.title || '本章'} ·
+                      保存稿修订{s.scene.source_revision} · 位置{s.scene.start}—{s.scene.end} · 故事时点
+                      {s.scene.story_order ?? '未知'} · {s.scene.story_time} ·{' '}
+                      {s.scene.audience === 'character'
+                        ? '人物视角'
+                        : s.scene.audience === 'reader'
+                          ? '读者视角'
+                          : '作者视角'}
+                    </p>
+                    {s.scene.note && <p>{s.scene.note}</p>}
+                    {s.quote !== undefined && (
+                      <details>
+                        <summary>核对场景原文</summary>
+                        <blockquote>{s.quote}</blockquote>
+                      </details>
+                    )}
+                  </article>
+                ))}
+                {!!artifact.payload.scene_replacements?.length && (
+                  <>
+                    <details>
+                      <summary>对照将归档的旧场景绑定</summary>
+                      {artifact.payload.scene_replacements.map((s) => (
+                        <p key={s.id}>
+                          {s.payload.title} · 旧稿修订{s.payload.source_revision} · 位置{s.payload.start}—
+                          {s.payload.end} · 绑定修订{s.revision}
+                        </p>
+                      ))}
+                    </details>
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={confirmReplacement}
+                        onChange={(e) => setConfirmReplacement(e.target.checked)}
+                        disabled={busy || artifact.status !== 'candidate'}
+                      />
+                      确认归档旧绑定并采用所选新范围（历史保留）
+                    </label>
+                  </>
+                )}
+              </section>
+            )}
             <button
               className="primary"
               disabled={
                 busy ||
                 !!stale ||
                 artifact.status !== 'candidate' ||
-                (!selected.length && !!artifact.payload.records.length)
+                (!selected.length &&
+                  !selectedScenes.length &&
+                  (!!artifact.payload.records.length || !!artifact.payload.scenes?.length))
               }
               onClick={() =>
                 void perform(async () => {
@@ -380,6 +468,8 @@ export function StoryExtraction({
                     base_story_revision: storyRevision,
                     candidate_revision: artifact.candidate_revision,
                     selected_ids: selected,
+                    selected_scene_ids: selectedScenes,
+                    confirm_scene_replacement: confirmReplacement,
                   }
                   const signature = JSON.stringify({ artifactId, ...body })
                   if (pending.current?.signature !== signature)
@@ -390,7 +480,11 @@ export function StoryExtraction({
                   })
                   pending.current = null
                   setArtifact({ ...artifact, status: 'accepted' })
-                  setMessage('所选结构已采用，未选项保留在原产物，正文未改变。')
+                  setMessage(
+                    selectedScenes.length
+                      ? '所选结构与场景已采用，旧绑定历史保留，正文未改变。'
+                      : '所选结构已采用，未选项保留在原产物，正文未改变。',
+                  )
                   await onAdopted()
                 })
               }

@@ -257,6 +257,7 @@ export function AuthorIntentPanel({
   async function compile() {
     if (!adopted) return
     const payload: ModuleInput = {
+      include_scene_ranges: false,
       action: 'intent.compile',
       context_position: 0,
       novel_id: novelId,

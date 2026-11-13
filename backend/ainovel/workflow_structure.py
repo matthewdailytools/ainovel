@@ -3,6 +3,7 @@
 from .db import DomainError
 from .story_extraction import AdoptExtraction, adopt, freeze_sources, run_extraction
 from .story_graph import metadata_extension
+from .extraction_scenes import can_auto_replace
 
 
 def safe_automatic(item):
@@ -78,6 +79,7 @@ async def maintain(worker, result):
                 "branch_id": worker.task["branch_id"],
                 "story_chapter_ids": [chapter["id"]],
                 "max_output_tokens": 8192,
+                "include_scene_ranges": worker.task["payload"].get("scene_maintenance", False),
             }
             snapshot = freeze_sources(worker.domain, request)
             context = worker.context(worker.task["branch_id"])
@@ -100,6 +102,19 @@ async def maintain(worker, result):
         pending["artifact_id"] = identifier
         worker.checkpoint(result)
     artifact = worker.domain.artifact(identifier)
+
+    def adopted_by_author():
+        fresh = worker.domain.task(worker.task["id"])["result"]
+        if not fresh.get("pending_structure") and any(
+            r.get("artifact_id") == identifier for r in fresh.get("structure_history", [])
+        ):
+            result.clear()
+            result.update(fresh)
+            return True
+        return False
+
+    if artifact["status"] == "accepted" and adopted_by_author():
+        return True
     if worker.domain.task(worker.task["id"])["pause"]:
         worker.checkpoint(result, "paused")
         return False
@@ -107,8 +122,9 @@ async def maintain(worker, result):
     unsafe = [r["id"] for r in records if not safe_automatic(r)]
     if (
         artifact["status"] != "candidate"
-        or (records and worker.task["payload"]["adoption"] == "manual")
+        or ((records or artifact["payload"].get("scenes")) and worker.task["payload"]["adoption"] == "manual")
         or unsafe
+        or not can_auto_replace(worker.domain, artifact["payload"], worker.task)
     ):
         result["waiting_structure"] = identifier
         worker.checkpoint(
@@ -119,11 +135,15 @@ async def maintain(worker, result):
         base_story_revision=result["expected_story_revision"],
         candidate_revision=artifact["candidate_revision"],
         selected_ids=[r["id"] for r in records],
+        selected_scene_ids=[s["id"] for s in artifact["payload"].get("scenes", [])],
+        confirm_scene_replacement=bool(artifact["payload"].get("scene_replacements")),
         idempotency_key="workflow-structure-" + identifier,
     )
     try:
         adopt(worker.domain, worker.task["branch_id"], identifier, data, worker.attempt)
     except DomainError as error:
+        if error.code in {"candidate_changed", "workflow_progress"} and adopted_by_author():
+            return True
         if error.code in {"cancelled", "story_changed", "revision_conflict", "candidate_changed"}:
             raise
         result["waiting_structure"] = identifier

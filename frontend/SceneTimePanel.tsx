@@ -3,6 +3,8 @@ import { api, type Chapter } from './api'
 import type { Notify } from './App'
 
 type Scene = {
+  event_id?: string | null
+  event_revision?: number | null
   title: string
   source_revision: number
   start: number
@@ -241,6 +243,20 @@ export function SceneTimePanel({
               onChange={(e) => setForm({ ...form, story_time: e.target.value })}
             />
           </label>
+          {form.event_id && (
+            <div className="notice">
+              <p>
+                此时点关联实际事件修订{form.event_revision}
+                。事件断言改变后需要重新核对；仅追加来源不会使绑定失效。
+              </p>
+              <button
+                disabled={busy}
+                onClick={() => setForm({ ...form, event_id: null, event_revision: null })}
+              >
+                改为作者手动确认时点（解除事件修订关联）
+              </button>
+            </div>
+          )}
           <label>
             场景信息视角
             <select

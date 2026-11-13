@@ -38,6 +38,7 @@ class AuthorContractBasis(Input):
 
 
 class ModuleInput(Input):
+    include_scene_ranges: bool = False
     client_request_id: str | None = Field(default=None, min_length=8, max_length=128)
     action: Literal[
         "writing.advise",
@@ -124,6 +125,7 @@ class Plot(Input):
 
 
 class WorkflowInput(Input):
+    scene_maintenance: bool = False
     structured_maintenance: bool = False
     inherit_story_record_ids: list[str] = Field(default_factory=list, max_length=300)
     inherit_source_revision: int | None = Field(default=None, ge=0)

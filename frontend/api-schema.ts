@@ -1391,6 +1391,13 @@ export interface components {
     }
     /** AdoptExtraction */
     AdoptExtraction: {
+      /** Selected Scene Ids */
+      selected_scene_ids?: string[]
+      /**
+       * Confirm Scene Replacement
+       * @default false
+       */
+      confirm_scene_replacement: boolean
       /** Base Story Revision */
       base_story_revision: number
       /** Candidate Revision */
@@ -1847,6 +1854,11 @@ export interface components {
     }
     /** ModuleInput */
     ModuleInput: {
+      /**
+       * Include Scene Ranges
+       * @default false
+       */
+      include_scene_ranges: boolean
       /** Client Request Id */
       client_request_id?: string | null
       /**
@@ -2189,6 +2201,10 @@ export interface components {
     }
     /** SceneTime */
     SceneTime: {
+      /** Event Id */
+      event_id?: string | null
+      /** Event Revision */
+      event_revision?: number | null
       /** Title */
       title: string
       /** Source Revision */
@@ -2242,6 +2258,11 @@ export interface components {
     }
     /** StartExtraction */
     StartExtraction: {
+      /**
+       * Include Scene Ranges
+       * @default false
+       */
+      include_scene_ranges: boolean
       /** Base Story Revision */
       base_story_revision: number
       /** Chapter Ids */
@@ -2318,6 +2339,11 @@ export interface components {
     }
     /** WorkflowInput */
     WorkflowInput: {
+      /**
+       * Scene Maintenance
+       * @default false
+       */
+      scene_maintenance: boolean
       /**
        * Structured Maintenance
        * @default false

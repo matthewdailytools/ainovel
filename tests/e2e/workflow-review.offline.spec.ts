@@ -19,6 +19,7 @@ test('人工批次：采用正文、打开结构审阅、采用结构后续跑',
       account: 'offline',
       adoption: 'manual',
       structured_maintenance: true,
+      scene_maintenance: true,
     },
   })
   expect(startedResponse.ok(), await startedResponse.text()).toBeTruthy()
@@ -35,9 +36,10 @@ test('人工批次：采用正文、打开结构审阅、采用结构后续跑',
   await page.getByText('按保存稿整理人物、事件、状态和伏笔候选', { exact: true }).click()
   const panel = page.getByRole('region', { name: '结构化整理与确认', exact: true })
   await panel.getByRole('checkbox', { name: '采用人物：沈砚', exact: true }).check()
+  await panel.getByRole('checkbox', { name: '采用场景：本章场景', exact: true }).check()
   await panel.getByRole('button', { name: '确认采用所选结构（不修改正文）', exact: true }).click()
   await expect(
-    panel.getByText('所选结构已采用，未选项保留在原产物，正文未改变。', { exact: true }),
+    panel.getByText('所选结构与场景已采用，旧绑定历史保留，正文未改变。', { exact: true }),
   ).toBeVisible()
   await page.getByRole('button', { name: '整书创作', exact: true }).click()
   await page.getByRole('button', { name: '从保存的检查点恢复', exact: true }).click()

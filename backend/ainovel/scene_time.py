@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import Field
 
 from .db import DomainError, dumps, uid
-from .story_graph import Strict, graph, query_context
+from .story_graph import Strict, graph, graph_snapshot, metadata_revision_compatible, query_context
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scene_times(
@@ -21,6 +21,8 @@ INSERT OR IGNORE INTO extension_migrations VALUES('scene-time/1',unixepoch());
 
 
 class SceneTime(Strict):
+    event_id: str | None = None
+    event_revision: int | None = Field(default=None, ge=0)
     title: str = Field(min_length=1, max_length=200)
     source_revision: int = Field(ge=0)
     start: int = Field(ge=0)
@@ -37,6 +39,27 @@ class SaveScene(Strict):
     base_revision: int | None = Field(default=None, ge=0)
     scene: SceneTime
     archived: bool = False
+
+
+def event_basis_valid(tx, payload, chapter_id, indexed):
+    if payload.get("event_id") is None and payload.get("event_revision") is None:
+        return True
+    event = indexed.get(payload.get("event_id"))
+    return bool(
+        event
+        and payload.get("event_revision") is not None
+        and event["kind"] == "event"
+        and not event["invalid_reasons"]
+        and event["payload"]["status"] == "actual"
+        and event["payload"]["story_order"] == payload["story_order"]
+        and metadata_revision_compatible(tx, event, payload["event_revision"])
+        and any(
+            s["chapter_id"] == chapter_id
+            and s["revision"] == payload["source_revision"]
+            and max(s["start"], payload["start"]) < min(s["end"], payload["end"])
+            for s in event["payload"]["sources"]
+        )
+    )
 
 
 def scenes(domain, branch_id, chapter_id):
@@ -56,6 +79,12 @@ def scenes(domain, branch_id, chapter_id):
         row["stale"] = row["payload"]["source_revision"] != chapter["revision"] or bool(
             row["payload"]["character_id"] and row["payload"]["character_id"] not in identities
         )
+    if any(r["payload"].get("event_id") or r["payload"].get("event_revision") is not None for r in rows):
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            indexed = {r["id"]: r for r in graph_snapshot(tx, branch_id)["records"]}
+            for row in rows:
+                row["stale"] = row["stale"] or not event_basis_valid(tx, row["payload"], chapter_id, indexed)
     return {
         "chapter_id": chapter_id,
         "source_revision": chapter["revision"],
@@ -95,6 +124,12 @@ def save_scene(domain, branch_id, chapter_id, data, identifier=None):
             raise DomainError("scene_range", "请填写场景名并核对起止位置。")
         if not data.archived:
             utf16_slice(chapter["content"], p["start"], p["end"])
+            if (p["event_id"] is not None or p["event_revision"] is not None) and not event_basis_valid(
+                tx, p, chapter_id, {r["id"]: r for r in graph_snapshot(tx, branch_id)["records"]}
+            ):
+                raise DomainError(
+                    "scene_time_evidence", "事件依据已改变，请重新核对或明确改为作者手动确认时点。", 409
+                )
         if not data.archived and p["audience"] == "character" and not p["character_id"]:
             raise DomainError("scene_viewpoint", "人物视角需要明确人物身份。")
         if not data.archived and p["character_id"]:
@@ -164,7 +199,9 @@ def at_position(domain, branch_id, chapter_id, position=0):
         raise DomainError("scene_overlap", "当前正文位置存在重叠场景，请先核对。", 409)
     if not valid and any(r["stale"] and not r["archived"] for r in value["scenes"]):
         raise DomainError(
-            "scene_stale", "正文或视角人物变化后，场景时点尚待复核，请重新确认范围与身份再调用模型。", 409
+            "scene_stale",
+            "正文、事件依据或视角人物变化后，场景时点尚待复核，请重新确认范围与身份再调用模型。",
+            409,
         )
     return valid[0] if valid else None
 

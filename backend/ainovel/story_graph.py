@@ -157,6 +157,23 @@ def metadata_extension(before, after):
     return {key(s) for s in before["sources"]}.issubset({key(s) for s in after["sources"]})
 
 
+def metadata_revision_compatible(conn, parent, revision):
+    if not parent or parent["archived"] or revision < 0 or revision > parent["revision"]:
+        return False
+    if parent["revision"] == revision:
+        return True
+    chain = [
+        RECORD.validate_json(r["payload"]).model_dump()
+        for r in conn.execute(
+            "SELECT payload FROM story_record_history WHERE record_id=? AND revision>=? AND revision<=? ORDER BY revision",
+            (parent["id"], revision, parent["revision"]),
+        )
+    ]
+    return len(chain) == parent["revision"] - revision + 1 and all(
+        metadata_extension(a, b) for a, b in zip(chain, chain[1:])
+    )
+
+
 def graph(domain, branch_id):
     with domain.db.connect() as conn:
         conn.execute("BEGIN")
@@ -194,18 +211,7 @@ def graph_snapshot(conn, branch_id):
     for dep in dependencies:
         parent = indexed.get(dep["parent_id"])
         if not parent or parent["revision"] != dep["parent_revision"]:
-            compatible = False
-            if parent and not parent["archived"]:
-                chain = [
-                    RECORD.validate_json(r["payload"]).model_dump()
-                    for r in conn.execute(
-                        "SELECT payload FROM story_record_history WHERE record_id=? AND revision>=? AND revision<=? ORDER BY revision",
-                        (parent["id"], dep["parent_revision"], parent["revision"]),
-                    )
-                ]
-                compatible = len(chain) == parent["revision"] - dep["parent_revision"] + 1 and all(
-                    metadata_extension(a, b) for a, b in zip(chain, chain[1:])
-                )
+            compatible = metadata_revision_compatible(conn, parent, dep["parent_revision"])
             if compatible:
                 indexed[dep["record_id"]].setdefault("compatible_dependency_updates", []).append(
                     {
