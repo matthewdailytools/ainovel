@@ -823,5 +823,148 @@
     "result": "passed",
     "record": "2026-11-13-stability-round3.md",
     "fix_of": ""
+  },
+  {
+    "id": "character-semantic-001",
+    "date": "2026-11-13",
+    "commit": "ea7a2ec",
+    "module": "人物档案语义",
+    "scenario": "正式备注将去向未知升级死亡；原文引用匹配但语义不支持，质量阻断",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-structure-semantic-quality.md",
+    "fix_of": ""
+  },
+  {
+    "id": "relationship-identity-001",
+    "date": "2026-11-13",
+    "commit": "ea7a2ec",
+    "module": "关系身份",
+    "scenario": "买卖双方标题与同人物双端点冲突，自动新项放行，历史保留",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-structure-semantic-quality.md",
+    "fix_of": ""
+  },
+  {
+    "id": "relationship-identity-002",
+    "date": "2026-11-13",
+    "commit": "dd41fe6",
+    "module": "关系身份",
+    "scenario": "自动自关联转核对，人工选择保持；46回归及独立审查通过，旧错误未改",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-structure-semantic-quality.md",
+    "fix_of": "relationship-identity-001"
+  },
+  {
+    "id": "memory-single-source-001",
+    "date": "2026-11-13",
+    "commit": "ea7a2ec",
+    "module": "记忆单来源",
+    "scenario": "第7章复合来源编号两轮未改，保留6章和失败输出，未采纳推进",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-memory-single-source.md",
+    "fix_of": ""
+  },
+  {
+    "id": "memory-single-source-002",
+    "date": "2026-11-13",
+    "commit": "8d99f13",
+    "module": "记忆单来源",
+    "scenario": "精确字段/单来源诊断及独立版本，60相关回归和独立12项通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-memory-single-source.md",
+    "fix_of": "memory-single-source-001"
+  },
+  {
+    "id": "author-feedback-001",
+    "date": "2026-11-13",
+    "commit": "8d99f13",
+    "module": "作者盲审偏好",
+    "scenario": "样例01开篇偏好B，自然和细节较好；仅此相对偏好，未自动采用或判整体通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-13-author-review-feedback.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-stability-v1-001",
+    "date": "2026-11-13",
+    "commit": "d52ee21",
+    "module": "人物字段采用门禁",
+    "scenario": "601后端/26无头/27前端；稳定候选、来源哈希、attempt和最终事务绑定",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-character-source-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-gate-real-v1-001",
+    "date": "2026-11-13",
+    "commit": "d52ee21",
+    "module": "原创字段真实门槛",
+    "scenario": "8例9字段、5阻止3采用，原文不变；宽集合匹配不等于精确分类",
+    "phase": "quality",
+    "result": "passed",
+    "record": "2026-11-13-character-semantic-live.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-label-v1-001",
+    "date": "2026-11-13",
+    "commit": "d52ee21",
+    "module": "未知与明确反证",
+    "scenario": "两类仅缺证据被标矛盾，门槛虽正确但精确标签未通过",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-character-semantic-live.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-version-v2-001",
+    "date": "2026-11-13",
+    "commit": "11a8dd6",
+    "module": "人物复核版本兼容",
+    "scenario": "603后端/26无头/28前端通过，旧报告只读历史，不授权v2采用",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-character-source-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-label-ds-v2-001",
+    "date": "2026-11-13",
+    "commit": "11a8dd6",
+    "module": "DeepSeek v2分类",
+    "scenario": "4类各3次，门槛12/12，精确标签6/12未过，CNY0.094490",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-13-character-semantic-live.md",
+    "fix_of": "character-label-v1-001"
+  },
+  {
+    "id": "character-label-openai-v2-001",
+    "date": "2026-11-13",
+    "commit": "11a8dd6",
+    "module": "OpenAI v2限定对照",
+    "scenario": "同12原片段/字段/约束，当前配置12/12吻合，USD0.107326，不外推全书",
+    "phase": "quality",
+    "result": "passed",
+    "record": "2026-11-13-character-semantic-live.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-live-ui-v2-001",
+    "date": "2026-11-13",
+    "commit": "11a8dd6",
+    "module": "真实复核工作台",
+    "scenario": "旧版/DSv2/OAIv2三次无头只读通过，正文候选任务不变，非预期写0",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-character-semantic-live.md",
+    "fix_of": ""
   }
 ]
