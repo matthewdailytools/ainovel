@@ -346,6 +346,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/story-inheritance': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Preview */
+    get: operations['preview_api_branches__branch_id__story_inheritance_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/chapters/{chapter_id}/scene-context': {
     parameters: {
       query?: never
@@ -2306,6 +2323,10 @@ export interface components {
        * @default false
        */
       structured_maintenance: boolean
+      /** Inherit Story Record Ids */
+      inherit_story_record_ids?: string[]
+      /** Inherit Source Revision */
+      inherit_source_revision?: number | null
       /** Client Request Id */
       client_request_id?: string | null
       /** Novel Id */
@@ -3186,6 +3207,37 @@ export interface operations {
         character_id?: string | null
         text_position?: number
       }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_api_branches__branch_id__story_inheritance_get: {
+    parameters: {
+      query?: never
       header?: never
       path: {
         branch_id: string

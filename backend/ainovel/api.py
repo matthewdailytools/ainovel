@@ -371,6 +371,9 @@ def create_app(settings=None, schema_only=False):
     from .story_graph import register_routes as register_story_routes
 
     register_story_routes(app, domain)
+    from .story_inheritance import register_routes as register_inheritance_routes
+
+    register_inheritance_routes(app, domain)
     from .scene_time import register_routes as register_scene_routes
 
     register_scene_routes(app, domain)
@@ -440,6 +443,8 @@ def create_app(settings=None, schema_only=False):
 
     @app.post("/api/workflows", status_code=202)
     def start_workflow(data: WorkflowInput):
+        from .story_inheritance import inherit
+
         payload = data.model_dump()
         for key in ("genre_profile_basis", "author_contract_basis"):
             if payload[key] is None:
@@ -456,6 +461,8 @@ def create_app(settings=None, schema_only=False):
         if data.mode == "automatic" and data.plots:
             raise DomainError("plots", "全自动仅接收简报与粗纲，不复用半自动的章级输入。")
         source = domain.branch(data.source_branch_id, data.novel_id) if data.source_branch_id else None
+        if data.inherit_story_record_ids and (not source or data.inherit_source_revision is None):
+            raise DomainError("story_inheritance", "继承结构需要明确来源工作版本及已读取的故事修订。", 409)
         definitions = domain.context(source["id"])["definitions"] if source else []
         profile = (
             domain.genre_profile(source["id"], definitions)
@@ -516,6 +523,15 @@ def create_app(settings=None, schema_only=False):
                         ),
                         time(),
                     ),
+                )
+            if source:
+                inherit(
+                    tx,
+                    source["id"],
+                    branch_id,
+                    data.novel_id,
+                    data.inherit_story_record_ids,
+                    data.inherit_source_revision,
                 )
         return domain.queue("workflow", payload, branch_id)
 

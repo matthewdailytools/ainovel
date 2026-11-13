@@ -18,13 +18,14 @@ def same_task_payload(left, right):
             "source_review_id",
             "reference_session_id",
             "reference_revision",
+            "inherit_source_revision",
         }
         return {
             k: v
             for k, v in value.items()
             if not (
                 (k in optional and v is None)
-                or (k in {"finding_indices", "story_chapter_ids"} and v == [])
+                or (k in {"finding_indices", "story_chapter_ids", "inherit_story_record_ids"} and v == [])
                 or (k == "context_position" and v == 0)
                 or (k == "structured_maintenance" and v is False)
             )
@@ -574,6 +575,16 @@ class Domain:
         profile = self.genre_profile(branch_id)
         contract = self.author_contract(branch_id)
         initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
+        if kind == "workflow":
+            inherited = self.db.all(
+                "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind='structure_inheritance' AND status='accepted' ORDER BY created DESC LIMIT 1",
+                (branch_id,),
+            )
+            if inherited:
+                initial["structure_inheritance"] = {
+                    "artifact_id": inherited[0]["id"],
+                    **json.loads(inherited[0]["payload"]),
+                }
         if kind == "module" and payload.get("chapter_id"):
             from .scene_time import at_position
 

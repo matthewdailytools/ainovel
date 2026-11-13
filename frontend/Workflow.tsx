@@ -14,6 +14,7 @@ import type { Notify } from './App'
 import story from '../fixtures/original-story.json'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
+import { StoryInheritance, type InheritanceSelection } from './StoryInheritance'
 
 export function WorkflowPage({
   novel,
@@ -43,6 +44,7 @@ export function WorkflowPage({
   const [maxChars, setMaxChars] = useState(3500)
   const [adoption, setAdoption] = useState<'manual' | 'automatic'>('manual')
   const [structuredMaintenance, setStructuredMaintenance] = useState(true)
+  const [inheritance, setInheritance] = useState<InheritanceSelection>()
   const [profile, setProfile] = useState(
     '第三人称限定视角，克制白话，动作有因果，人物选择遵循当时掌握的信息与资源。',
   )
@@ -155,6 +157,8 @@ export function WorkflowPage({
     await perform(async () => {
       if (seenGenre?.branch_id !== branchId) throw new Error('正在读取来源版本的题材配置，请稍后再启动。')
       if (seenContract?.branch_id !== branchId) throw new Error('正在读取本书创作约定，请稍后再启动。')
+      if (inheritance?.selected_ids.length && inheritance.source_branch_id !== branchId)
+        throw new Error('继承来源工作版本已切换，请重新勾选。')
       const parsed =
         mode === 'assisted'
           ? plots
@@ -191,6 +195,8 @@ export function WorkflowPage({
         account,
         adoption,
         structured_maintenance: structuredMaintenance,
+        inherit_story_record_ids: inheritance?.selected_ids || [],
+        inherit_source_revision: inheritance?.selected_ids.length ? inheritance.source_story_revision : null,
         writing_profile: profile,
         author_contract_basis: {
           source_artifact_id: seenContract.source_artifact_id,
@@ -249,6 +255,13 @@ export function WorkflowPage({
               onSettings={onGenreSettings}
               scope="新建半自动／全自动批次的规划、写作、审查与修订"
               onResolved={setSeenGenre}
+            />
+            <StoryInheritance
+              key={branchId}
+              branchId={branchId}
+              busy={busy}
+              notify={notify}
+              onChange={setInheritance}
             />
             <fieldset>
               <legend>创作分工</legend>
@@ -675,6 +688,24 @@ export function WorkflowPage({
                       已完成 {task.result.structure_history.length}{' '}
                       次章节结构维护；完整采用回执保留在检查点报告中。
                     </p>
+                  )}
+                  {task.result.structure_inheritance && (
+                    <details>
+                      <summary>
+                        本批继承的设定与计划 · {task.result.structure_inheritance.records.length}项
+                      </summary>
+                      <p>
+                        来自来源故事修订{task.result.structure_inheritance.source_story_revision}
+                        ；已建立本版独立身份，未复制原稿或实际经历。
+                      </p>
+                      <ul>
+                        {task.result.structure_inheritance.records.map((r) => (
+                          <li key={r.target_id}>
+                            {r.title} · 来源记录修订{r.source_revision}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
                   )}
                   {waiting && !structureWaiting && (
                     <div className="notice">

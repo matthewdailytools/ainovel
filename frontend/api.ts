@@ -118,6 +118,19 @@ export type Task = {
     waiting_structure?: string
     pending_structure?: { chapter_id: string; revision: number; artifact_id?: string }
     structure_history?: { artifact_id: string; policy: string; created: number }[]
+    structure_inheritance?: {
+      artifact_id: string
+      source_branch_id: string
+      source_story_revision: number
+      records: {
+        source_id: string
+        source_revision: number
+        target_id: string
+        kind: string
+        title: string
+      }[]
+      copied_manuscripts: boolean
+    }
     artifact_id?: string
     latest_artifact?: string
     plan?: unknown
