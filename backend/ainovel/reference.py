@@ -330,6 +330,22 @@ async def run_reference(worker, request, context):
         "candidate": request.get("reference_check_candidate"),
         "content_sha256": hashlib.sha256(text.encode()).hexdigest(),
     }
+    if "plot_audit" in checks:
+        from .plot_review import bind_plot_audit
+
+        candidate = request.get("reference_check_candidate")
+        bound = bind_plot_audit(
+            checks["plot_audit"],
+            p["plot"],
+            text,
+            "author_plot",
+            candidate_revision=candidate["revision"] if candidate else 0,
+            target={"kind": "saved_chapter", "chapter_id": chapter["id"], "revision": chapter["revision"]}
+            if action == "reference.check" and candidate is None
+            else None,
+        )
+        checks["plot_audit"] = bound
+        checks["condition_review"]["plot_audit"] = deepcopy(bound)
     if action == "reference.check":
         return "reference_comparison", checks
     review = checks["condition_review"]

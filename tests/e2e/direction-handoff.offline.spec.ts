@@ -219,7 +219,25 @@ test('U01：空白手写、卡点方向、作者选择、补写、拒绝、采�
   await expect(page.getByRole('textbox', { name: '情节或具体要求', exact: true })).toHaveValue(
     '本章独立要求，不能套用上一章方向。',
   )
-  await page.locator('.chapter-list button').filter({ hasText: '空白起笔章' }).click()
+  const returnToSource = page.locator('.chapter-list button').filter({ hasText: '空白起笔章' })
+  await Promise.all([
+    page.waitForEvent('dialog').then(async (dialog) => {
+      expect(dialog.message()).toContain('未提交的写作辅助设置')
+      await dialog.dismiss()
+    }),
+    returnToSource.click(),
+  ])
+  await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue('其他章节')
+  await expect(page.getByRole('textbox', { name: '情节或具体要求', exact: true })).toHaveValue(
+    '本章独立要求，不能套用上一章方向。',
+  )
+  await Promise.all([
+    page.waitForEvent('dialog').then(async (dialog) => {
+      expect(dialog.message()).toContain('未提交的写作辅助设置')
+      await dialog.accept()
+    }),
+    returnToSource.click(),
+  ])
   await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue('空白起笔章')
   await page.getByRole('button', { name: '恢复最近任务的输入', exact: true }).click()
   await expect(page.getByRole('textbox', { name: '情节或具体要求', exact: true })).toHaveValue(chosen)

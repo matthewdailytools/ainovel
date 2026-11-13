@@ -848,6 +848,8 @@ def create_app(settings=None, schema_only=False):
                 raise DomainError("candidate_conflict", "候选已在其他窗口更新，本地编辑请保留并比较。", 409)
             if "review" in payload:
                 payload["previous_review"] = payload.pop("review")
+            if "plot_audit" in payload:
+                payload["previous_plot_audit"] = payload.pop("plot_audit")
             if "reference_comparison" in payload:
                 payload["previous_reference_comparison"] = payload.pop("reference_comparison")
             if "revision_trace" in payload:

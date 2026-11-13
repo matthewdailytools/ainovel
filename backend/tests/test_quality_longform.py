@@ -205,6 +205,57 @@ def test_signed_payload_cannot_silently_disagree_with_frozen_repair_policy(tmp_p
             runner.dispatch("assisted", {"id": "n"})
 
 
+def test_previous_character_only_options_inherit_plot_check_off_without_file_mutation(tmp_path, story):
+    with httpx.Client(base_url="http://127.0.0.1") as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story, character_field_repair=True)
+        runner.record["workflow_options"].pop("plot_contract_check")
+        runner.save()
+        original = runner.path.read_bytes()
+        resumed = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        assert resumed.character_field_repair and not resumed.plot_contract_check
+        with pytest.raises(ValueError, match="Frozen repair policy"):
+            LongformEvaluation(client, tmp_path, RunSpec(), story, plot_contract_check=True)
+        assert runner.path.read_bytes() == original
+
+
+@pytest.mark.parametrize("flag", [0, 1, "true"])
+def test_plot_check_rejects_non_boolean_before_any_request(tmp_path, story, flag):
+    with httpx.Client(base_url="http://127.0.0.1") as client:
+        with pytest.raises(ValueError, match="Invalid frozen workflow options"):
+            LongformEvaluation(client, tmp_path, RunSpec(), story, plot_contract_check=flag)
+    assert not (tmp_path / "run.json").exists()
+
+
+def test_explicit_plot_check_is_frozen_across_response_loss_and_payload_mismatch(tmp_path, story):
+    from ainovel.quality_longform import signature
+
+    requests = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if len(requests) == 1:
+            raise httpx.ReadTimeout("lost workflow response")
+        return httpx.Response(202, json={"id": "plot-task", "branch_id": "plot-branch"})
+
+    with httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(handler)) as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story, plot_contract_check=True)
+        with pytest.raises(httpx.ReadTimeout):
+            runner.dispatch("assisted", {"id": "n"})
+        resumed = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        assert resumed.plot_contract_check
+        assert resumed.dispatch("assisted", {"id": "n"}) == "plot-task"
+        with pytest.raises(ValueError, match="Frozen repair policy"):
+            LongformEvaluation(client, tmp_path, RunSpec(), story, plot_contract_check=False)
+        frozen = resumed.record["workflows"]["assisted"]
+        frozen["payload"].pop("plot_contract_check")
+        frozen["payload_sha256"] = signature(frozen["payload"])
+        with pytest.raises(ValueError, match="plot-check policy"):
+            resumed.dispatch("assisted", {"id": "n"})
+    assert requests[0] == requests[1] and requests[0]["plot_contract_check"] is True
+    assert not requests[0]["character_field_repair"]
+
+
 def task(status="blocked_runtime"):
     return {
         "id": "t",

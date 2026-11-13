@@ -1855,6 +1855,11 @@ export interface components {
     /** ModuleInput */
     ModuleInput: {
       /**
+       * Plot Contract Check
+       * @default false
+       */
+      plot_contract_check: boolean
+      /**
        * Include Scene Ranges
        * @default false
        */
@@ -2344,6 +2349,11 @@ export interface components {
     }
     /** WorkflowInput */
     WorkflowInput: {
+      /**
+       * Plot Contract Check
+       * @default false
+       */
+      plot_contract_check: boolean
       /**
        * Completion Scope
        * @default whole_book

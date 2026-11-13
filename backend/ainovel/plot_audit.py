@@ -7,6 +7,19 @@ from pydantic import Field
 from .evidence import resolve_field, source_schema, source_units
 from .models import Input as StrictModel
 
+VERSION = "author-plot-audit/1"
+
+
+def source_metadata(source_kind):
+    if source_kind is None:
+        # Existing reference tasks retain their frozen prompt/cache identity.
+        return {}
+    return {
+        "情节核对契约版本": VERSION,
+        "情节来源": source_kind,
+        "来源边界": "只解释本次给定的单章情节／指令，不读取全书未来、旧稿意见或候选反推条件。保留原话中的只、仅、不、尚未等范围、否定、接收者与时点限定，不能规范化后丢掉限制。workflow_plan是本批次AI工作章纲，不伪称作者原话、已发生事实或新增作者锁定；其余来源是作者本次明确输入。仅核对该来源明确叙事事件，不把润色、评价等操作要求虚构成剧情；计划安排不是已经发生的事实，歧义保留待核对。",
+    }
+
 
 class PlotItem(StrictModel):
     author_evidence: str = Field(max_length=800)
@@ -56,7 +69,7 @@ class FlowObservations(StrictModel):
     note: str = Field(max_length=2000)
 
 
-async def independent_flows(worker, items, text, checks):
+async def independent_flows(worker, items, text, checks, *, source_label="作者原话"):
     expected = [
         item
         for item in items
@@ -143,7 +156,7 @@ async def independent_flows(worker, items, text, checks):
                 result="fail",
                 observed=f"{item['recipient']}向{item['supplier']}给出/提议给出{item['transfer_object']}",
                 evidence=reverse[0]["evidence"],
-                reason=f"原话解析为{item['supplier']}向{item['recipient']}给出{item['transfer_object']}；本稿观察为{item['recipient']}向{item['supplier']}给出同一物品，方向相反。",
+                reason=f"{source_label}解析为{item['supplier']}向{item['recipient']}给出{item['transfer_object']}；本稿观察为{item['recipient']}向{item['supplier']}给出同一物品，方向相反。",
                 repair="按作者原话核对取得方与给出方，保留原稿，生成待审修订。",
                 guard_override={
                     "code": "reverse_transfer",
@@ -157,7 +170,7 @@ async def independent_flows(worker, items, text, checks):
     return {"status": "observed", "entities": entities, "objects": objects, **observed}
 
 
-async def interpret_plot(worker, author_text):
+async def interpret_plot(worker, author_text, *, source_kind=None):
     if not author_text.strip():
         return {"items": [], "note": "缺少作者情节，不能从候选反推。"}
     author_units = source_units(author_text, "AUTHOR")
@@ -184,24 +197,27 @@ async def interpret_plot(worker, author_text):
                 issues.append("明确交换须给出不同的双方和物品；不能确定时标歧义，不编造流向。")
         return issues
 
+    source_label = "本章工作章纲（AI规划）" if source_kind == "workflow_plan" else "作者原话"
     # No candidate, reference excerpt, application plan or old review reaches this call.
     contract = await worker.grounded(
         {
             "动作": "仅依据作者原话整理本场景情节",
-            "作者原话": author_text,
+            source_label: author_text,
             "可引用原文": author_units,
+            **source_metadata(source_kind),
             "要求": "只整理原话明确给出的事件、行动者、动作、对象、给出与取得方向和结果。每项引用AUTHOR编号；未给出的字段留空。给出/取得须填写supplier（给出方）、recipient（取得方）、transfer_object和transfer_scope：实际发起尝试为attempted，已交付为completed，仅决定/未来安排为planned，无交换传递为none并将direction留空。不能把愿望改成已发生结果；有多种解读标ambiguous并保留歧义。这里只是AI解释提案，不是作者新增锁定项或本书事实。",
         },
         AuthorPlot,
-        {"scope": "仅作者原话，尚未读取候选"},
+        {"scope": f"仅{source_label}，尚未读取候选"},
         validate_author,
         contract=author_contract,
     )
     return contract
 
 
-async def audit_plot(worker, author_text, text, number):
-    contract = await interpret_plot(worker, author_text)
+async def audit_plot(worker, author_text, text, number, *, source_kind=None):
+    source_label = "本章工作章纲（AI规划）" if source_kind == "workflow_plan" else "作者原话"
+    contract = await interpret_plot(worker, author_text, source_kind=source_kind)
     items = [{"id": f"P{index:02}", **item} for index, item in enumerate(contract["items"], 1)]
     if not items:
         return {
@@ -238,10 +254,11 @@ async def audit_plot(worker, author_text, text, number):
     compared = await worker.grounded(
         {
             "动作": "逐项对照作者情节解释与本次正文",
-            "作者原话": author_text,
+            source_label: author_text,
             "独立整理的解释提案": items,
             "本次候选": text,
             "可引用原文": units,
+            **source_metadata(source_kind),
             "要求": "先写本稿实际发生了什么，再逐项比较行动者、对象、流向及结果；不要用候选重新解释作者原话来制造一致。即使交易成败相同，对象或流向反转也应指出。歧义或证据不足标unknown，不能把AI解释升级成作者新条件；偏好不判fail。只能引用PLOT原文编号，不能拿AUTHOR证据作正文证据。",
         },
         PlotAudit,
@@ -249,11 +266,13 @@ async def audit_plot(worker, author_text, text, number):
         validate_checks,
         contract=comparison_contract,
     )
-    direction_guard = await independent_flows(worker, items, text, compared["checks"])
+    direction_guard = await independent_flows(
+        worker, items, text, compared["checks"], source_label=source_label
+    )
     if any(row.get("guard_override") for row in compared["checks"]):
         compared["original_model_summary"] = compared["summary"]
         compared["summary"] = (
-            "独立流向核对发现给出方与取得方反向，已列出作者原话、解释及正文依据，请作者核对后决定修订。"
+            f"独立流向核对发现给出方与取得方反向，已列出{source_label}、解释及正文依据，请作者核对后决定修订。"
         )
     indexed = {item["id"]: item for item in items}
     findings = []
@@ -265,7 +284,7 @@ async def audit_plot(worker, author_text, text, number):
                     "severity": "blocker" if item["certainty"] == "explicit" else "suggestion",
                     "chapter": number,
                     "quote": row["evidence"],
-                    "reason": f"作者原话：{item['author_evidence']}；AI解释（非新增条件）：{item['actor']}／{item['action']}／{item['object']}／{item['direction']}／{item['result']}。本稿观察：{row['observed']}。{row['reason']}",
+                    "reason": f"{source_label}：{item['author_evidence']}；AI解释（非新增条件）：{item['actor']}／{item['action']}／{item['object']}／{item['direction']}／{item['result']}。本稿观察：{row['observed']}。{row['reason']}",
                     "repair": row["repair"],
                 }
             )
@@ -282,5 +301,5 @@ async def audit_plot(worker, author_text, text, number):
         or any(row["result"] == "unknown" for row in compared["checks"])
         else "model_pass",
         "findings": findings,
-        "policy": "解释来自作者原话，仍须作者核对；不写入故事事实，不自动采用候选。",
+        "policy": f"解释来自{source_label}，仍须作者核对；不写入故事事实，不自动采用候选。",
     }

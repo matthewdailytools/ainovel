@@ -35,6 +35,7 @@ def same_task_payload(left, right):
                         "scene_maintenance",
                         "include_scene_ranges",
                         "character_field_repair",
+                        "plot_contract_check",
                     }
                     and v is False
                 )

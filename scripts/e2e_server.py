@@ -25,6 +25,7 @@ from helpers.character_review_fixture import character_review_output  # noqa: E4
 CHARACTER_REPAIR_FIXTURE = "character-field-repair-e2e"
 UNSUPPORTED_CHARACTER_NOTE = "工程替身错误备注：沈砚已经掌握飞行能力。"
 GROUNDED_CHARACTER_NOTE = "沈砚用旧尺测量潮水，留下可以回查的记录。"
+PLOT_UNKNOWN_FIXTURE = "plot-check-e2e-unknown"
 
 
 class Model(ReferenceModel):
@@ -143,6 +144,7 @@ class Model(ReferenceModel):
             }
         while "原始任务" in instruction:
             instruction = instruction["原始任务"]
+        plot_unknown = PLOT_UNKNOWN_FIXTURE in instruction.get("作者原话", "")
         if instruction.get("动作") == "仅依据作者原话整理本场景情节":
             return {
                 "text": json.dumps(
@@ -150,12 +152,12 @@ class Model(ReferenceModel):
                         "items": [
                             {
                                 "author_evidence": "AUTHOR0001",
-                                "actor": "她",
-                                "action": "检查",
-                                "object": "闸门",
+                                "actor": "沈砚" if plot_unknown else "她",
+                                "action": "测量并记录" if plot_unknown else "检查",
+                                "object": "潮水读数" if plot_unknown else "闸门",
                                 "direction": "",
-                                "result": "不修门",
-                                "certainty": "explicit",
+                                "result": "是否公开读数尚未确定" if plot_unknown else "不修门",
+                                "certainty": "ambiguous" if plot_unknown else "explicit",
                             }
                         ],
                         "note": "仅为确定性界面验证",
@@ -171,10 +173,16 @@ class Model(ReferenceModel):
                         "checks": [
                             {
                                 "item_id": "P01",
-                                "result": "pass",
-                                "observed": "保留测量，没有修门",
-                                "evidence": "PLOT001P0001",
-                                "reason": "工程替身结果，不代表模型语义能力",
+                                "result": "unknown" if plot_unknown else "pass",
+                                "observed": "只看到量潮记录，公开安排仍未知"
+                                if plot_unknown
+                                else "保留测量，没有修门",
+                                "evidence": instruction["可引用原文"][0]["source_id"]
+                                if plot_unknown
+                                else "PLOT001P0001",
+                                "reason": "作者情节保留公开安排的歧义，不升级为硬条件"
+                                if plot_unknown
+                                else "工程替身结果，不代表模型语义能力",
                                 "repair": "",
                             }
                         ],

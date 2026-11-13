@@ -3,6 +3,8 @@ import { api, label, type Artifact, type Branch, type Chapter, type Task } from 
 import type { Notify } from './App'
 import { Difference } from './Editor'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
+import { PlotAuditDetails } from './PlotAuditDetails'
+import { readComparisonTarget, usePlotAuditTarget } from './plotAuditTarget'
 
 type Card = {
   id: string
@@ -48,30 +50,8 @@ const editable = (p: ReferencePayload) =>
     p.chapter_id,
   ])
 type Comparison = {
-  plot_audit?: {
-    status: string
-    summary: string
-    policy: string
-    interpretation_note: string
-    items: {
-      id: string
-      author_evidence: string
-      actor: string
-      action: string
-      object: string
-      direction: string
-      result: string
-      certainty: string
-    }[]
-    checks: { item_id: string; result: string; observed: string; evidence: string; reason: string }[]
-  }
-  target?: {
-    kind: string
-    chapter_id: string
-    base_revision: number
-    candidate?: { id: string; revision: number }
-    content_sha256: string
-  }
+  plot_audit?: unknown
+  target?: unknown
   rules: { rule_id: string; result: string; evidence: string; reason: string }[]
   concrete_plot_similarities: string[]
   summary: string
@@ -81,66 +61,61 @@ type Comparison = {
     hits: { quote: string; source_start: number; candidate_start: number; length: number }[]
   }
 }
-export function ReferenceComparison({ value }: { value: unknown }) {
+export function ReferenceComparison({
+  value,
+  candidateText,
+  historical,
+  branchId,
+  candidate,
+}: {
+  value: unknown
+  candidateText?: string
+  historical?: boolean
+  branchId?: string
+  candidate?: Artifact
+}) {
+  const { target: plotTarget, state: currentTarget } = usePlotAuditTarget(
+    value,
+    branchId,
+    candidate,
+    candidateText,
+    historical,
+  )
   if (!value || typeof value !== 'object') return null
   const data = value as Comparison
+  const target = readComparisonTarget(data.target)
   return (
     <section className="notice" aria-label="参考写法对照">
       <h3>参考写法对照 · 等待作者判断</h3>
       <p>{data.summary}</p>
-      {data.plot_audit && (
-        <details>
-          <summary>
-            作者情节逐项核对 ·{' '}
-            {(
-              { model_pass: '模型标通过', failed: '发现不符', unverified: '待核对' } as Record<string, string>
-            )[data.plot_audit.status] || '待核对'}
-          </summary>
-          <p>{data.plot_audit.policy}</p>
-          <p>{data.plot_audit.summary}</p>
-          <p>{data.plot_audit.interpretation_note}</p>
-          {data.plot_audit.items.map((item) => {
-            const check = data.plot_audit?.checks.find((row) => row.item_id === item.id)
-            return (
-              <article className="fact" key={item.id}>
-                <strong>
-                  {item.id} · AI解释{item.certainty === 'ambiguous' ? '（存在歧义）' : '（仍须核对）'}
-                </strong>
-                <blockquote>{item.author_evidence}</blockquote>
-                <p>
-                  {[item.actor, item.action, item.object, item.direction, item.result]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </p>
-                {check && (
-                  <>
-                    <p>本稿观察：{check.observed}</p>
-                    <p>
-                      {
-                        (
-                          { pass: '模型标一致', fail: '模型标不符', unknown: '未能核实' } as Record<
-                            string,
-                            string
-                          >
-                        )[check.result]
-                      }
-                      ：{check.reason}
-                    </p>
-                    <blockquote>{check.evidence}</blockquote>
-                  </>
-                )}
-              </article>
-            )
-          })}
-        </details>
-      )}
-      {data.target && (
+      <PlotAuditDetails
+        value={data.plot_audit}
+        candidateRevision={currentTarget.candidateRevision}
+        candidateText={currentTarget.candidateText}
+        historical={historical}
+        savedChapter={currentTarget.savedChapter}
+        expectSavedChapter={plotTarget?.kind === 'saved_chapter'}
+        baseRevision={plotTarget?.kind === 'saved_chapter' ? plotTarget.revision : undefined}
+        targetStatus={currentTarget.status}
+        targetMessage={currentTarget.message}
+        expectedSha256={plotTarget?.sha256}
+        reportSavedChapter={
+          plotTarget?.kind === 'saved_chapter'
+            ? {
+                chapter_id: plotTarget.chapterId,
+                revision: plotTarget.revision,
+                content_sha256: plotTarget.sha256,
+              }
+            : undefined
+        }
+      />
+      {target && (
         <p className="small muted">
-          检查对象：{data.target.kind} · 原稿基线修订 {data.target.base_revision}
-          {data.target.candidate
-            ? ` · 候选 ${data.target.candidate.id.slice(0, 8)}／修订 ${data.target.candidate.revision}`
+          检查对象：{target.kind} · 原稿基线修订 {target.base_revision}
+          {target.candidate
+            ? ` · 候选 ${target.candidate.id.slice(0, 8)}／修订 ${target.candidate.revision}`
             : ''}{' '}
-          · 内容哈希 {data.target.content_sha256.slice(0, 12)}。此报告仅针对该固定内容。
+          · 内容哈希 {target.content_sha256.slice(0, 12)}。此报告仅针对该固定内容。
         </p>
       )}
       {data.rules?.map((rule) => (
@@ -716,11 +691,17 @@ export function ReferenceWorkspace({
               <summary>对照原稿与候选差异</summary>
               <Difference before={baseline} after={candidateText} beforeLabel="生成时原稿" />
             </details>
-            <ReferenceComparison value={candidate.payload.reference_comparison} />
+            <ReferenceComparison
+              value={candidate.payload.reference_comparison}
+              candidateText={candidateText}
+              historical={candidateText !== candidate.payload.text}
+              candidate={candidate}
+              branchId={row.payload.branch_id || undefined}
+            />
             {!!candidate.payload.previous_reference_comparison && (
               <details>
                 <summary>编辑前的对照结果（已失效）</summary>
-                <ReferenceComparison value={candidate.payload.previous_reference_comparison} />
+                <ReferenceComparison value={candidate.payload.previous_reference_comparison} historical />
               </details>
             )}
             <div className="actions">
@@ -793,7 +774,10 @@ export function ReferenceWorkspace({
         {artifacts.check && (
           <details>
             <summary>独立对照报告（核对固定对象及版本）</summary>
-            <ReferenceComparison value={artifacts.check.payload} />
+            <ReferenceComparison
+              value={artifacts.check.payload}
+              branchId={row.payload.branch_id || undefined}
+            />
           </details>
         )}
         <button onClick={onWriting}>回到写作页继续编辑或恢复版本</button>

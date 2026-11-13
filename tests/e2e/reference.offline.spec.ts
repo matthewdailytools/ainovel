@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test'
+import { createHash } from 'node:crypto'
 
 const SOURCE = '😀渡口掌柜先问用途，又把水路图收回袖中。他只肯给半幅图，却记下了来客的目的地。'
 
-test('书库选段到拆解、方案、试写、对照采纳和历史恢复', async ({ page }) => {
+test('书库选段到拆解、方案、试写、对照采纳和历史恢复', async ({ page }, testInfo) => {
   await page.goto('/')
   const initial = await (await page.request.get('/api/session')).json()
   const novel = await (
@@ -14,7 +15,11 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   await expect(page.getByRole('combobox', { name: '工作版本', exact: true })).not.toHaveValue('')
+  const chapterResponse = page.waitForResponse(
+    (r) => r.url().endsWith(`/api/branches/${novel.branch_id}/chapters`) && r.request().method() === 'POST',
+  )
   await page.getByRole('button', { name: '新建第一章', exact: true }).click()
+  const chapter = await (await chapterResponse).json()
   await page
     .getByRole('textbox', { name: '章节正文', exact: true })
     .fill('原稿：她来到闸门前，准备检查外露结构。')
@@ -103,7 +108,7 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await page.getByRole('button', { name: '重新对照候选', exact: true }).click()
   expect((await auditedRequest).postDataJSON().plot_contract_check).toBe(true)
   await page.getByText('独立对照报告（核对固定对象及版本）', { exact: true }).click()
-  const plotAudit = page.getByText('作者情节逐项核对 · 模型标通过', { exact: true })
+  const plotAudit = page.getByText('情节逐项核对 · 模型标一致，仍须作者核对', { exact: true })
   await expect(plotAudit).toBeVisible()
   await plotAudit.click()
   await expect(page.getByText('本稿观察：保留测量，没有修门', { exact: true })).toBeVisible()
@@ -114,6 +119,79 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await page.evaluate(() => {
     document.documentElement.style.fontSize = ''
   })
+
+  const passedTitle = '情节逐项核对 · 模型标一致，仍须作者核对'
+  const historicalTitle = '情节逐项核对 · 历史报告已失效，不能作为当前稿结论'
+  const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+  const independent = page.getByText('独立对照报告（核对固定对象及版本）', { exact: true }).locator('..')
+  async function showIndependent(title: string) {
+    const outer = independent.locator(':scope > summary')
+    if (!(await independent.evaluate((element) => (element as HTMLDetailsElement).open))) await outer.click()
+    const summary = independent.getByText(title, { exact: true })
+    await expect(summary).toBeVisible()
+    return summary
+  }
+  async function checkReference(button: string, saved: boolean) {
+    await page.getByRole('checkbox', { name: /额外核对情节角色、对象与方向/ }).check()
+    const posted = page.waitForResponse(
+      (r) => r.url().endsWith('/actions') && r.request().method() === 'POST',
+    )
+    await page.getByRole('button', { name: button, exact: true }).click()
+    const response = await posted
+    expect(response.ok(), await response.text()).toBeTruthy()
+    const task = await response.json()
+    expect(task.payload.plot_contract_check).toBe(true)
+    expect(task.payload.action).toBe('reference.check')
+    await expect
+      .poll(async () => (await (await page.request.get(`/api/tasks/${task.id}`)).json()).status)
+      .toBe('succeeded')
+    const finished = await (await page.request.get(`/api/tasks/${task.id}`)).json()
+    const report = await (await page.request.get(`/api/artifacts/${finished.result.artifact_id}`)).json()
+    expect(report.payload.target.kind).toBe(saved ? 'saved_manuscript' : 'candidate')
+    expect(report.payload.plot_audit.version).toBe('author-plot-audit/1')
+    await showIndependent(passedTitle)
+    return report
+  }
+  async function returnToReference() {
+    await page.getByRole('button', { name: '资料书库', exact: true }).click()
+    await page.getByRole('button', { name: /自拟参考.txt · .* · 修订/ }).click()
+    await expect(page.getByLabel('参考试写候选')).toBeVisible()
+  }
+  async function showWritingReport(id: string, title: string) {
+    const select = page.getByRole('combobox', { name: '比较候选', exact: true })
+    await expect(select.locator(`option[value="${id}"]`)).toBeAttached()
+    await select.selectOption(id)
+    await expect(
+      page.getByRole('region', { name: '情节逐项核对', exact: true }).getByText(title, { exact: true }),
+    ).toBeVisible()
+  }
+
+  // Candidate revision is the checked target's revision, not the independent
+  // report artifact's own revision 0. Every write below is an actual UI action.
+  const trial = page.getByLabel('参考试写候选')
+  const revision1 = (await trial.inputValue()) + '\n她把记录收好。'
+  await trial.fill(revision1)
+  await page.getByRole('button', { name: '保存候选编辑（旧检查失效）', exact: true }).click()
+  const checked1 = await checkReference('重新对照候选', false)
+  expect(checked1.candidate_revision).toBe(0)
+  expect(checked1.payload.target.candidate.revision).toBe(1)
+  expect(checked1.payload.plot_audit.candidate_revision).toBe(1)
+  expect(checked1.payload.target.content_sha256).toBe(hash(revision1))
+  expect(checked1.payload.plot_audit.candidate_sha256).toBe(hash(revision1))
+  await page.getByRole('button', { name: '回到写作页继续编辑或恢复版本' }).click()
+  await showWritingReport(checked1.id, passedTitle)
+  await returnToReference()
+  const revision2 = revision1 + '\n她又核对一次笔记。'
+  await page.getByLabel('参考试写候选').fill(revision2)
+  await page.getByRole('button', { name: '保存候选编辑（旧检查失效）', exact: true }).click()
+  await showIndependent(historicalTitle)
+  const stillChecked1 = await (await page.request.get(`/api/artifacts/${checked1.id}`)).json()
+  expect(stillChecked1).toEqual(checked1)
+  const checked2 = await checkReference('重新对照候选', false)
+  expect(checked2.payload.target.candidate.revision).toBe(2)
+  expect(checked2.payload.plot_audit.candidate_revision).toBe(2)
+  expect(checked2.payload.plot_audit.candidate_sha256).toBe(hash(revision2))
+
   await page.getByRole('button', { name: '对照后采纳到目标正文', exact: true }).click()
   await expect(page.getByText('已采纳为新正文修订，原稿历史保留。故事记录可按需整理。')).toBeVisible()
   await page.getByRole('button', { name: '回到写作页继续编辑或恢复版本' }).click()
@@ -124,4 +202,39 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
     .filter({ hasText: '原稿：她来到闸门前，准备检查外露结构。' })
   await originalHistory.locator('summary').click()
   await expect(originalHistory.locator('pre')).toHaveText('原稿：她来到闸门前，准备检查外露结构。')
+
+  await returnToReference()
+  const checkedSaved = await checkReference('对照检查当前已保存手写稿', true)
+  const savedBefore = await (await page.request.get(`/api/chapters/${chapter.id}`)).json()
+  expect(checkedSaved.payload.plot_audit.target).toEqual({
+    kind: 'saved_chapter',
+    chapter_id: chapter.id,
+    revision: savedBefore.revision,
+    content_sha256: hash(savedBefore.content),
+  })
+  expect(checkedSaved.payload.plot_audit.candidate_revision).toBe(0)
+  await page.getByRole('button', { name: '回到写作页继续编辑或恢复版本' }).click()
+  await showWritingReport(checkedSaved.id, passedTitle)
+  const changedSaved = savedBefore.content + '\n作者更改了当前保存稿。'
+  await page.getByRole('textbox', { name: '章节正文', exact: true }).fill(changedSaved)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).revision)
+    .toBe(savedBefore.revision + 1)
+  await expect(
+    page
+      .getByRole('region', { name: '情节逐项核对', exact: true })
+      .getByText(historicalTitle, { exact: true }),
+  ).toBeVisible()
+  await returnToReference()
+  await showIndependent(historicalTitle)
+  expect(await (await page.request.get(`/api/artifacts/${checkedSaved.id}`)).json()).toEqual(checkedSaved)
+  await testInfo.attach('reference-independent-target-bindings.json', {
+    body: JSON.stringify(
+      { candidateRevision1: checked1, candidateRevision2: checked2, saved: checkedSaved },
+      null,
+      2,
+    ),
+    contentType: 'application/json',
+  })
 })

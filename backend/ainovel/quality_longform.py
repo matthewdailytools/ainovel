@@ -58,7 +58,7 @@ class RunSpec:
         return 10 if self.stage == "ten" else 36
 
 
-def workflow_payload(spec, story, novel_id, mode, *, character_field_repair=False):
+def workflow_payload(spec, story, novel_id, mode, *, character_field_repair=False, plot_contract_check=False):
     if len(story["chapters"]) != 36 or [row["number"] for row in story["chapters"]] != list(range(1, 37)):
         raise ValueError("The original 36-chapter fixture must be complete and ordered")
     # A ten-chapter gate is the start of the original novel, not a compressed book.
@@ -81,6 +81,7 @@ def workflow_payload(spec, story, novel_id, mode, *, character_field_repair=Fals
         adoption="automatic",
         structured_maintenance=True,
         character_field_repair=character_field_repair,
+        plot_contract_check=plot_contract_check,
         scene_maintenance=True,
         min_chars=spec.min_chars,
         max_chars=spec.max_chars,
@@ -118,7 +119,17 @@ def read_usage(data_dir, task_ids):
 
 
 class LongformEvaluation:
-    def __init__(self, client, folder, spec, story, data_dir=None, *, character_field_repair=None):
+    def __init__(
+        self,
+        client,
+        folder,
+        spec,
+        story,
+        data_dir=None,
+        *,
+        character_field_repair=None,
+        plot_contract_check=None,
+    ):
         self.client, self.folder, self.spec, self.story = client, folder, spec, story
         self.data_dir = data_dir
         folder.mkdir(parents=True, exist_ok=True)
@@ -151,24 +162,28 @@ class LongformEvaluation:
             raise ValueError("Frozen fixture or evaluation configuration changed; use a new run directory")
         # Keep legacy RunSpec/configuration hashes intact. Missing options on old
         # runs mean disabled, never an invitation to upgrade their frozen policy.
-        options = self.record.get("workflow_options", {"character_field_repair": False})
+        defaults = {"character_field_repair": False, "plot_contract_check": False}
+        explicit = {
+            "character_field_repair": character_field_repair,
+            "plot_contract_check": plot_contract_check,
+        }
+        saved = self.record.get("workflow_options", {})
         if (
-            not isinstance(options, dict)
-            or set(options) != {"character_field_repair"}
-            or type(options["character_field_repair"]) is not bool
-            or (character_field_repair is not None and type(character_field_repair) is not bool)
+            not isinstance(saved, dict)
+            or set(saved) - set(defaults)
+            or any(type(v) is not bool for v in saved.values())
+            or any(v is not None and type(v) is not bool for v in explicit.values())
         ):
             raise ValueError("Invalid frozen workflow options")
+        options = {**defaults, **saved}
         if self.path.exists():
-            if (
-                character_field_repair is not None
-                and character_field_repair != options["character_field_repair"]
-            ):
+            if any(v is not None and v != options[k] for k, v in explicit.items()):
                 raise ValueError("Frozen repair policy changed; use a new run directory")
         else:
-            options = {"character_field_repair": character_field_repair is True}
+            options = {k: v is True for k, v in explicit.items()}
             self.record["workflow_options"] = options
         self.character_field_repair = options["character_field_repair"]
+        self.plot_contract_check = options["plot_contract_check"]
 
     def save(self):
         write_json(self.path, self.record)
@@ -210,6 +225,7 @@ class LongformEvaluation:
                 novel["id"],
                 mode,
                 character_field_repair=self.character_field_repair,
+                plot_contract_check=self.plot_contract_check,
             )
             # No source branch/prose is inherited. Both modes start from the same brief.
             payload["client_request_id"] = uuid4().hex
@@ -224,6 +240,8 @@ class LongformEvaluation:
             raise ValueError("Frozen workflow payload is damaged")
         if entry["payload"].get("character_field_repair", False) is not self.character_field_repair:
             raise ValueError("Frozen payload differs from the evaluation repair policy")
+        if entry["payload"].get("plot_contract_check", False) is not self.plot_contract_check:
+            raise ValueError("Frozen payload differs from the evaluation plot-check policy")
         if "id" not in entry:
             task = self.request("POST", "/workflows", json=entry["payload"]).json()
             entry.update(id=task["id"], branch_id=task["branch_id"])
@@ -381,6 +399,12 @@ def main():
         default=None,
         help="仅新运行显式开启AI新增人物字段最多两轮内容修订；旧运行缺省关闭，续跑继承冻结开关",
     )
+    parser.add_argument(
+        "--plot-contract-check",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="独立解析本章情节并逐项对照正文；增加模型调用，旧运行缺省关闭且不追溯开启",
+    )
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--observe-task", help="只观察既有任务，不启动、恢复、重试或采纳")
@@ -420,6 +444,7 @@ def main():
             story,
             settings.data_dir,
             character_field_repair=args.character_field_repair,
+            plot_contract_check=args.plot_contract_check,
         )
         runner.record.setdefault(
             "source_commit",

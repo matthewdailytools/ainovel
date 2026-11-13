@@ -18,6 +18,8 @@ import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from
 import { StoryInheritance, type InheritanceSelection } from './StoryInheritance'
 import { characterFieldRepairEnabled } from './characterFieldRepair'
 import { CharacterFieldRepairOption, FrozenCharacterFieldRepairPolicy } from './CharacterRepairDetails'
+import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
+import { plotAuditFromPayload } from './plotAudit'
 
 export function WorkflowPage({
   novel,
@@ -50,6 +52,7 @@ export function WorkflowPage({
   const [structuredMaintenance, setStructuredMaintenance] = useState(true)
   const [sceneMaintenance, setSceneMaintenance] = useState(true)
   const [characterFieldRepair, setCharacterFieldRepair] = useState(false)
+  const [plotContractCheck, setPlotContractCheck] = useState(false)
   const [inheritance, setInheritance] = useState<InheritanceSelection>()
   const [profile, setProfile] = useState(
     '第三人称限定视角，克制白话，动作有因果，人物选择遵循当时掌握的信息与资源。',
@@ -86,6 +89,7 @@ export function WorkflowPage({
     structuredMaintenance,
     sceneMaintenance,
     characterFieldRepair,
+    plotContractCheck,
     profile,
     runLimit,
   ])
@@ -123,6 +127,7 @@ export function WorkflowPage({
   const waiting = loadedWaiting?.id === waitingId ? loadedWaiting : undefined
   const structureWaiting = !!task?.result.waiting_structure
   const candidateChanged = !!waiting && incomingWaiting?.id === waiting.id
+  const waitingPlotAudit = plotAuditFromPayload(waiting?.payload || {})
   useEffect(() => {
     setUnknown(false)
     setChanges(false)
@@ -219,6 +224,7 @@ export function WorkflowPage({
         max_chars: maxChars,
         account,
         adoption,
+        plot_contract_check: plotContractCheck,
         structured_maintenance: structuredMaintenance,
         scene_maintenance: structuredMaintenance && sceneMaintenance,
         character_field_repair: characterFieldRepairEnabled(
@@ -450,6 +456,10 @@ export function WorkflowPage({
               busy={busy}
               onChange={setCharacterFieldRepair}
             />
+            <PlotAuditOption checked={plotContractCheck} disabled={busy} onChange={setPlotContractCheck} />
+            {plotContractCheck && mode === 'automatic' && (
+              <p className="small muted">全自动核对来源是AI章纲，不是作者原话或新增硬条件。</p>
+            )}
             <label>
               本批次预算（可低于共享总上限）
               <input
@@ -540,6 +550,10 @@ export function WorkflowPage({
                     <p className="small muted">已承接上次检查点；原稿、费用历史与修订轮次保留。</p>
                   )}
                   <FrozenCharacterFieldRepairPolicy enabled={task.payload.character_field_repair} />
+                  <FrozenPlotAuditPolicy
+                    enabled={task.payload.plot_contract_check}
+                    mode={task.payload.mode}
+                  />
                   <details>
                     <summary>本批次冻结的频道与题材</summary>
                     {task.result.author_contract_snapshot && (
@@ -811,6 +825,12 @@ export function WorkflowPage({
                         </div>
                       )}
                       <pre className="stream">{waiting.payload.text}</pre>
+                      <PlotAuditDetails
+                        value={waitingPlotAudit.value}
+                        candidateRevision={waiting.candidate_revision}
+                        candidateText={waiting.payload.text}
+                        historical={waitingPlotAudit.historical}
+                      />
                       <details>
                         <summary>本章检查</summary>
                         <pre>{JSON.stringify(waiting.payload.review, null, 2)}</pre>

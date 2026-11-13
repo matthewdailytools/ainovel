@@ -20,8 +20,12 @@ export type AuthorContract = {
   story_revision?: number
   legacy_unconfigured?: boolean
 }
-export type ModuleInput = components['schemas']['ModuleInput']
-export type WorkflowInput = components['schemas']['WorkflowInput']
+export type ModuleInput = Omit<components['schemas']['ModuleInput'], 'plot_contract_check'> & {
+  plot_contract_check?: boolean
+}
+export type WorkflowInput = Omit<components['schemas']['WorkflowInput'], 'plot_contract_check'> & {
+  plot_contract_check?: boolean
+}
 export type ContinuationInput = components['schemas']['ContinuationInput']
 export type DefinitionInput = components['schemas']['DefinitionInput']
 export type GenreTopic = {
@@ -154,6 +158,7 @@ export type Task = {
     structured_maintenance?: boolean
     adoption?: 'manual' | 'automatic'
     character_field_repair?: boolean
+    plot_contract_check?: boolean
   }
 }
 export type Account = {

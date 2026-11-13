@@ -1,5 +1,5 @@
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .author_contract import AuthorIntentFields
 
@@ -38,6 +38,7 @@ class AuthorContractBasis(Input):
 
 
 class ModuleInput(Input):
+    plot_contract_check: bool = Field(default=False, strict=True)
     include_scene_ranges: bool = False
     client_request_id: str | None = Field(default=None, min_length=8, max_length=128)
     action: Literal[
@@ -84,6 +85,17 @@ class ModuleInput(Input):
     story_chapter_ids: list[str] = Field(default_factory=list, max_length=20)
     context_position: int = Field(default=0, ge=0)
 
+    @model_validator(mode="after")
+    def plot_check_action(self):
+        if self.plot_contract_check and self.action not in {
+            "writing.expand_plot",
+            "review.chapter",
+            "reference.draft",
+            "reference.check",
+        }:
+            raise ValueError("情节逐项核对仅用于按情节补写、本章审稿及参考试写／对照。")
+        return self
+
 
 class CandidateEdit(Input):
     text: str = Field(max_length=250_000)
@@ -125,6 +137,7 @@ class Plot(Input):
 
 
 class WorkflowInput(Input):
+    plot_contract_check: bool = Field(default=False, strict=True)
     completion_scope: Literal["whole_book", "segment"] = "whole_book"
     scene_maintenance: bool = False
     structured_maintenance: bool = False

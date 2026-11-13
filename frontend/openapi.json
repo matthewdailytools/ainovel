@@ -3197,6 +3197,7 @@
       },
       "ModuleInput": {
         "properties": {
+          "plot_contract_check": { "type": "boolean", "title": "Plot Contract Check", "default": false },
           "include_scene_ranges": { "type": "boolean", "title": "Include Scene Ranges", "default": false },
           "client_request_id": {
             "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 8 }, { "type": "null" }],
@@ -3720,6 +3721,7 @@
       },
       "WorkflowInput": {
         "properties": {
+          "plot_contract_check": { "type": "boolean", "title": "Plot Contract Check", "default": false },
           "completion_scope": {
             "type": "string",
             "enum": ["whole_book", "segment"],

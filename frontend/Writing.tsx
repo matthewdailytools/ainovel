@@ -21,6 +21,8 @@ import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
 import { SceneTimePanel } from './SceneTimePanel'
+import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
+import { plotAuditEnabled, plotAuditFromPayload } from './plotAudit'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
 import {
@@ -94,6 +96,7 @@ export function Writing({
     feedbackHandoff ? 'writing.rewrite_selection' : 'writing.advise',
   )
   const [instruction, setInstruction] = useState(feedbackHandoff?.text || '')
+  const [plotContractCheck, setPlotContractCheck] = useState(false)
   const [designScope, setDesignScope] = useState<'book' | 'chapter'>('book')
   const [directionBasis, setDirectionBasis] = useState<DirectionBasis>()
   const directionForm = useRef({ action, instruction })
@@ -107,6 +110,17 @@ export function Writing({
   const [seenGenre, setSeenGenre] = useState<GenreProfile>()
   const [references, setReferences] = useState<Excerpt[]>([])
   const [selectedRefs, setSelectedRefs] = useState<string[]>([])
+  const assistantFormSignature = JSON.stringify([
+    action,
+    instruction,
+    designScope,
+    fixed,
+    profile,
+    selectedRefs,
+    plotContractCheck,
+  ])
+  const [submittedAssistantForm, setSubmittedAssistantForm] = useState(assistantFormSignature)
+  useLeaveGuard(assistantFormSignature !== submittedAssistantForm, '未提交的写作辅助设置')
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [candidateId, setCandidateId] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
@@ -422,6 +436,7 @@ export function Writing({
         chapter_id: bookDesign ? null : (row?.id ?? null),
         base_revision: bookDesign ? null : (row?.revision ?? null),
         instruction: submittedInstruction,
+        plot_contract_check: plotAuditEnabled(action, plotContractCheck),
         fixed: fixed
           .split('\n')
           .map((v) => v.trim())
@@ -448,6 +463,7 @@ export function Writing({
         pendingRequest.current = { signature, key: crypto.randomUUID() }
       data.client_request_id = pendingRequest.current.key
       const task = await api<Task>('/modules', 'POST', data)
+      setSubmittedAssistantForm(assistantFormSignature)
       setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])
       pendingRequest.current = null
       setStream('')
@@ -876,6 +892,7 @@ export function Writing({
                   setDirectionBasis(restored?.basis)
                   setInstruction(restored?.instruction ?? previous.instruction ?? '')
                   setAction(previous.action || 'writing.advise')
+                  setPlotContractCheck(plotAuditEnabled(previous.action || '', previous.plot_contract_check))
                   if (previous.action && designActions.has(previous.action))
                     setDesignScope(
                       'chapter_id' in previous && typeof previous.chapter_id === 'string'
@@ -899,6 +916,7 @@ export function Writing({
               onChange={(e) => {
                 const next = e.target.value as ModuleInput['action']
                 if (designActions.has(next)) setDesignScope('book')
+                if (!plotAuditEnabled(next, true)) setPlotContractCheck(false)
                 setAction(next)
               }}
             >
@@ -955,6 +973,9 @@ export function Writing({
               placeholder="例如：两人在渡口议价，交易失败且不发生战斗。补足试探和收场。"
             />
           </label>
+          {plotAuditEnabled(action, true) && (
+            <PlotAuditOption checked={plotContractCheck} disabled={busy} onChange={setPlotContractCheck} />
+          )}
           <details>
             <summary>固定条件、写法与资料包</summary>
             <label>
@@ -1037,6 +1058,7 @@ export function Writing({
           <div className="notice" role="status">
             <strong>{label(activeTask.status)}</strong>
             <p>关闭浏览器不取消本机任务。</p>
+            <FrozenPlotAuditPolicy enabled={activeTask.payload.plot_contract_check} />
             {activeTask.result.author_contract_snapshot && (
               <details>
                 <summary>本次任务冻结的创作约定</summary>
@@ -1084,6 +1106,7 @@ export function Writing({
                   {label(task.status)} · {task.id.slice(0, 8)}
                 </strong>
                 <p>{task.error}</p>
+                <FrozenPlotAuditPolicy enabled={task.payload.plot_contract_check} />
                 <button
                   disabled={busy}
                   onClick={() =>
@@ -1258,6 +1281,21 @@ function Candidate({
         edit +
         (baseline || '').slice(artifact.payload.end)
       : edit
+  const plotAudit = plotAuditFromPayload(artifact.payload)
+  const plotAuditHistorical =
+    plotAudit.historical ||
+    candidateChanged ||
+    (artifact.payload.text !== undefined && edit !== artifact.payload.text) ||
+    (artifact.kind === 'review' &&
+      (chapter?.revision !== artifact.base_revision || chapter?.id !== artifact.chapter_id))
+  const auditedText =
+    artifact.kind === 'review'
+      ? chapter?.id === artifact.chapter_id
+        ? chapter.content
+        : undefined
+      : artifact.payload.text === undefined
+        ? undefined
+        : edit
   return (
     <div className="candidate">
       {designKinds.has(artifact.kind) && (
@@ -1364,7 +1402,26 @@ function Candidate({
           <pre className="report">{JSON.stringify(artifact.payload.review, null, 2)}</pre>
         </details>
       )}
-      <ReferenceComparison value={artifact.payload.reference_comparison} />
+      {artifact.kind !== 'reference_comparison' && (
+        <PlotAuditDetails
+          value={plotAudit.value}
+          candidateRevision={artifact.candidate_revision}
+          candidateText={auditedText}
+          historical={plotAuditHistorical}
+          savedChapter={artifact.kind === 'review' ? chapter : undefined}
+          expectSavedChapter={artifact.kind === 'review'}
+          baseRevision={artifact.kind === 'review' ? artifact.base_revision : undefined}
+        />
+      )}
+      <ReferenceComparison
+        value={
+          artifact.kind === 'reference_comparison' ? artifact.payload : artifact.payload.reference_comparison
+        }
+        candidateText={auditedText}
+        historical={plotAuditHistorical}
+        candidate={artifact.kind === 'reference_comparison' ? undefined : artifact}
+        branchId={branchId}
+      />
       {!!artifact.payload.previous_revision_trace && (
         <details>
           <summary>编辑前的原问题复检（已失效）</summary>
