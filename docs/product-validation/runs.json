@@ -416,5 +416,38 @@
     "result": "unverified",
     "record": "2026-11-13-plot-fidelity.md",
     "fix_of": "plot-fidelity-v11"
+  },
+  {
+    "id": "plot-audit-contract-001",
+    "date": "2026-11-13",
+    "commit": "15960c2",
+    "module": "情节忠实性",
+    "scenario": "真实规则加项与非转移说明被拒绝，保留失败费用",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-plot-fidelity.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plot-audit-contract-002",
+    "date": "2026-11-13",
+    "commit": "15960c2",
+    "module": "情节忠实性",
+    "scenario": "契约修复及回归、同任务明确恢复",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-plot-fidelity.md",
+    "fix_of": "plot-audit-contract-001"
+  },
+  {
+    "id": "plot-fidelity-v13",
+    "date": "2026-11-13",
+    "commit": "15960c2",
+    "module": "情节忠实性",
+    "scenario": "原稿反向检出；新试写仍待核对，不宣称质量通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-13-plot-fidelity.md",
+    "fix_of": "plot-fidelity-v12"
   }
 ]
