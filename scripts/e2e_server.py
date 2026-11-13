@@ -31,6 +31,34 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if instruction.get("动作") == "整理作者情绪钩子与方向契约":
+            author_text = instruction["作者原话"]
+            return {
+                "text": json.dumps(
+                    {
+                        "emotion_target": "从疑虑到取得小进展",
+                        "core_hook": "闸门旧账为什么缺页",
+                        "direction": "借尺复测闸门，调查维修记录",
+                        "ending": "",
+                        "fixed_results": [],
+                        "prohibitions": [p for p in ("不修门", "不战斗") if p in author_text],
+                        "open_details": ["公开刻度、借尺对白和记录动作可由作者选择"],
+                    }
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-intent",
+            }
+        designs = {
+            "world.generate": "世界提案：临河小城的旧闸有公开刻度，检查与修理分属不同职责。尚未决定的制度保持待作者补充。",
+            "character.generate": "人物提案：女修城器师林杳会读尺和记录，须借用守闸人的旧尺；没有修门权限，不新增能力。",
+            "outline.plan": "粗纲提案：本章核对公开刻度、借尺复测，只留下读数；下一阶段与终局留待作者决定，不强制填满。",
+        }
+        if instruction.get("action") in designs:
+            return {
+                "text": designs[instruction["action"]],
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-design",
+            }
         if instruction.get("action") == "writing.advise":
             return {
                 "text": "方向一：她先核对公开刻度，再向守闸人借尺复测，暂不修门。\n方向二：改查私藏账簿。\n以上只供作者选择，不代表已经发生。",

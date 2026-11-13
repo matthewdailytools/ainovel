@@ -42,6 +42,8 @@ const actions = [
   ['character.generate', '人物设计'],
   ['world.generate', '世界设定'],
 ] as const
+const designActions = new Set<ModuleInput['action']>(['world.generate', 'character.generate', 'outline.plan'])
+const designKinds = new Set(['world', 'characters', 'outline'])
 const presets = [
   '第三人称限定视角，克制白话，动作有因果，避免重复解释。',
   '对白：人物用词有区别，保留停顿与潜台词，不替人物解释每一句话。',
@@ -92,6 +94,7 @@ export function Writing({
     feedbackHandoff ? 'writing.rewrite_selection' : 'writing.advise',
   )
   const [instruction, setInstruction] = useState(feedbackHandoff?.text || '')
+  const [designScope, setDesignScope] = useState<'book' | 'chapter'>('book')
   const [directionBasis, setDirectionBasis] = useState<DirectionBasis>()
   const directionForm = useRef({ action, instruction })
   directionForm.current = { action, instruction }
@@ -383,6 +386,9 @@ export function Writing({
       if (seenContract?.branch_id !== branch.id) throw new Error('正在读取本版本创作约定，请稍后再生成。')
       if (action === 'writing.rewrite_selection' && !selection.text)
         throw new Error('请在正文中选择要改写的文字。')
+      const bookDesign = designActions.has(action) && designScope === 'book'
+      if (designActions.has(action) && !bookDesign && !row)
+        throw new Error('本章资料需要先打开目标章节；也可以改选本书设定。')
       if (feedbackHandoff) {
         if (action !== 'writing.rewrite_selection')
           throw new Error('反馈修订使用作者选区改写；若要执行其他动作，请先退出反馈修订。')
@@ -413,8 +419,8 @@ export function Writing({
         action,
         novel_id: novel.id,
         branch_id: branch.id,
-        chapter_id: row?.id ?? null,
-        base_revision: row?.revision ?? null,
+        chapter_id: bookDesign ? null : (row?.id ?? null),
+        base_revision: bookDesign ? null : (row?.revision ?? null),
         instruction: submittedInstruction,
         fixed: fixed
           .split('\n')
@@ -432,7 +438,7 @@ export function Writing({
         reference_ids: selectedRefs,
         account,
         max_output_tokens: 8192,
-        context_position: selection.start,
+        context_position: bookDesign ? 0 : selection.start,
         ...(action === 'writing.rewrite_selection'
           ? { selection_start: selection.start, selection_end: selection.end, selection_text: selection.text }
           : {}),
@@ -870,6 +876,12 @@ export function Writing({
                   setDirectionBasis(restored?.basis)
                   setInstruction(restored?.instruction ?? previous.instruction ?? '')
                   setAction(previous.action || 'writing.advise')
+                  if (previous.action && designActions.has(previous.action))
+                    setDesignScope(
+                      'chapter_id' in previous && typeof previous.chapter_id === 'string'
+                        ? 'chapter'
+                        : 'book',
+                    )
                   setFixed(previous.fixed?.join('\n') || '')
                   setProfile(previous.writing_profile || presets[0])
                 } catch (error) {
@@ -882,7 +894,14 @@ export function Writing({
           )}
           <label>
             这次要做什么
-            <select value={action} onChange={(e) => setAction(e.target.value as ModuleInput['action'])}>
+            <select
+              value={action}
+              onChange={(e) => {
+                const next = e.target.value as ModuleInput['action']
+                if (designActions.has(next)) setDesignScope('book')
+                setAction(next)
+              }}
+            >
               {actions.map(([id, title]) => (
                 <option key={id} value={id}>
                   {title}
@@ -890,6 +909,26 @@ export function Writing({
               ))}
             </select>
           </label>
+          {designActions.has(action) && (
+            <>
+              <label>
+                设定作用范围
+                <select
+                  value={designScope}
+                  onChange={(e) => setDesignScope(e.target.value as 'book' | 'chapter')}
+                >
+                  <option value="book">本书设定（采用后供后续任务使用）</option>
+                  <option value="chapter">本章资料（仅保存参考）</option>
+                </select>
+              </label>
+              <p className="small muted">
+                {designScope === 'book'
+                  ? '生成独立的本书设定候选，作者采用后才供当前工作版本的后续任务使用。'
+                  : `生成${chapter ? `“${chapter.title}”的` : '当前章的'}参考资料，采用仅保存在本章，不进入全书设定。`}
+                世界、人物和粗纲都是创作安排，不自动成为已发生的故事事实；已有章级资料不会自动升级为本书设定。
+              </p>
+            </>
+          )}
           {directionBasis && (
             <section className="notice" aria-label="作者选定方向来源">
               <p role="status">方向已载入本章补写表单；载入操作本身未生成或改动正文。可继续编辑情节要求。</p>
@@ -966,7 +1005,12 @@ export function Writing({
               )}
             </fieldset>
           </details>
-          <p className="small muted">发送当前章、有效前文与主动选入的资料；候选与正文分开保存。</p>
+          <p className="small muted">
+            {designActions.has(action) && designScope === 'book'
+              ? '发送已采用本书设定、当前工作版本的有效故事资料及最近正文、主动选入的资料；不限定在当前打开章之前。'
+              : '发送当前章、有效前文与主动选入的资料。'}
+            候选与正文分开保存。
+          </p>
           <button
             className="primary wide"
             disabled={
@@ -1110,7 +1154,7 @@ export function Writing({
                   busy={busy}
                   perform={doAction}
                   onAccept={async () => {
-                    await save()
+                    if (current.current) await save()
                     await api(`/artifacts/${candidate.id}/accept`, 'POST', {
                       idempotency_key: 'manual-' + candidate.id,
                       candidate_revision: candidate.candidate_revision,
@@ -1216,6 +1260,14 @@ function Candidate({
       : edit
   return (
     <div className="candidate">
+      {designKinds.has(artifact.kind) && (
+        <p className="notice" role="status">
+          {artifact.chapter_id
+            ? '本章资料：采用只保存为本章参考，不进入全书设定。'
+            : '本书设定：作者采用后供当前工作版本的后续任务使用。'}
+          这是创作安排，不自动写为已发生的故事事实。
+        </p>
+      )}
       <p className="small muted">
         {label(artifact.status)} · 基线修订 {artifact.base_revision ?? '设定'}。改变原文后采纳会再次校验。
       </p>
@@ -1405,7 +1457,11 @@ function Candidate({
               ? '采纳到故事记录'
               : artifact.kind === 'advice'
                 ? '保存建议供参考'
-                : '采用此结果'}
+                : designKinds.has(artifact.kind)
+                  ? artifact.chapter_id
+                    ? '保存为本章参考'
+                    : '采用为本书设定'
+                  : '采用此结果'}
         </button>
         <button
           disabled={busy || artifact.status !== 'candidate'}
