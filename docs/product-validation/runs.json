@@ -966,5 +966,60 @@
     "result": "passed",
     "record": "2026-11-13-character-semantic-live.md",
     "fix_of": ""
+  },
+  {
+    "id": "character-finite-e2e-first-001",
+    "date": "2026-11-13",
+    "commit": "726f396",
+    "module": "有限修订测试预期",
+    "scenario": "首轮1过1败：场景同时采用的成功提示预期遗漏，原稿/报告/禁选断言保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-character-field-finite-repair.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-finite-e2e-retest-001",
+    "date": "2026-11-13",
+    "commit": "726f396",
+    "module": "有限修订完整界面",
+    "scenario": "两条真实UI/持久Worker替身通过；旧稿只读、不能修订后人工处理、320px/200%及键盘",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-character-field-finite-repair.md",
+    "fix_of": "character-finite-e2e-first-001"
+  },
+  {
+    "id": "character-finite-full-regression-001",
+    "date": "2026-11-13",
+    "commit": "726f396",
+    "module": "全项目有限修订回归",
+    "scenario": "659后端/28全项目无头/45前端/48既有回归及类型、构建、格式通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-character-field-finite-repair.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-finite-rollout-001",
+    "date": "2026-11-13",
+    "commit": "726f396",
+    "module": "有限修订本机更新",
+    "scenario": "无活动任务，备份实际隔离恢复ok，六保护表及全部费用哈希相同，日常只读无头1过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-character-field-finite-repair.md",
+    "fix_of": ""
+  },
+  {
+    "id": "longform-finite-real-001",
+    "date": "2026-11-13",
+    "commit": "726f396",
+    "module": "新十章真实运行",
+    "scenario": "新999a923e仅保存1章2711字；结构场景顺序校验三次未过，字段修订未触发，CNY0.300308",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-13-character-field-finite-repair.md",
+    "fix_of": ""
   }
 ]
