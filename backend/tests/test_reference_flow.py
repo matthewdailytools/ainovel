@@ -68,6 +68,11 @@ class Model:
         elif action == "按确认参考应用方案原创试写":
             return {"text": TEXT, "usage": {"input": 1, "output": 1}, "call_id": "offline"}
         elif action == "参考写法对照检查":
+            expected_ids = [card["id"] for card in task["选定规则"]]
+            contract = kwargs["schema"]
+            assert contract["$defs"]["RuleCheck"]["properties"]["rule_id"]["enum"] == expected_ids
+            assert contract["properties"]["rules"]["minItems"] == len(expected_ids)
+            assert contract["properties"]["rules"]["maxItems"] == len(expected_ids)
             result = {
                 "rules": [
                     {

@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .db import DomainError, dumps, uid
-from .evidence import resolve_field, source_units
+from .evidence import resolve_field, source_schema, source_units
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS extension_migrations(name TEXT PRIMARY KEY,applied REAL NOT NULL);
@@ -184,6 +184,11 @@ async def compare(worker, text, fixed, context, snapshot, number):
     chosen = [c for c in p["cards"] if c["id"] in p["selected_ids"]]
     units = source_units(text, "REFCHECK")
     sources = {u["source_id"]: u for u in units}
+    comparison_contract = source_schema(Comparison.model_json_schema(), units)
+    comparison_contract["properties"]["rules"].update(minItems=len(chosen), maxItems=len(chosen))
+    comparison_contract["$defs"]["RuleCheck"]["properties"]["rule_id"]["enum"] = [
+        card["id"] for card in chosen
+    ]
 
     def validate(value):
         issues = []
@@ -212,6 +217,7 @@ async def compare(worker, text, fixed, context, snapshot, number):
         Comparison,
         text_context(context, text, "reference_comparison"),
         validate,
+        contract=comparison_contract,
     )
     review = await worker.review(text, fixed, context, number, p["plot"])
     plot_audit = None
