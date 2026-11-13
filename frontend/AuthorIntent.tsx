@@ -258,6 +258,7 @@ export function AuthorIntentPanel({
     if (!adopted) return
     const payload: ModuleInput = {
       action: 'intent.compile',
+      context_position: 0,
       novel_id: novelId,
       branch_id: branchId,
       instruction: authorText,

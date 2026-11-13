@@ -707,6 +707,152 @@
         }
       }
     },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/history": {
+      "get": {
+        "summary": "History",
+        "operationId": "history_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__history_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/scene-times": {
+      "get": {
+        "summary": "Get Scenes",
+        "operationId": "get_scenes_api_branches__branch_id__chapters__chapter_id__scene_times_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create",
+        "operationId": "create_api_branches__branch_id__chapters__chapter_id__scene_times_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaveScene" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}": {
+      "put": {
+        "summary": "Update",
+        "operationId": "update_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaveScene" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/import-previews/{identifier}/draft": {
       "patch": {
         "summary": "Save Draft",
@@ -1456,6 +1602,12 @@
             "in": "query",
             "required": false,
             "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Chapter Id" }
+          },
+          {
+            "name": "text_position",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 0, "default": 0, "title": "Text Position" }
           }
         ],
         "responses": {
@@ -3074,7 +3226,8 @@
             "type": "array",
             "maxItems": 20,
             "title": "Story Chapter Ids"
-          }
+          },
+          "context_position": { "type": "integer", "minimum": 0, "title": "Context Position", "default": 0 }
         },
         "additionalProperties": false,
         "type": "object",
@@ -3343,6 +3496,43 @@
         "type": "object",
         "required": ["base_story_revision", "record"],
         "title": "SaveRecord"
+      },
+      "SaveScene": {
+        "properties": {
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "base_revision": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Base Revision"
+          },
+          "scene": { "$ref": "#/components/schemas/SceneTime" },
+          "archived": { "type": "boolean", "title": "Archived", "default": false }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_story_revision", "scene"],
+        "title": "SaveScene"
+      },
+      "SceneTime": {
+        "properties": {
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "source_revision": { "type": "integer", "minimum": 0, "title": "Source Revision" },
+          "start": { "type": "integer", "minimum": 0, "title": "Start" },
+          "end": { "type": "integer", "minimum": 0, "title": "End" },
+          "story_order": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Story Order" },
+          "story_time": { "type": "string", "maxLength": 200, "title": "Story Time", "default": "未知" },
+          "audience": {
+            "type": "string",
+            "enum": ["author", "character", "reader"],
+            "title": "Audience",
+            "default": "character"
+          },
+          "character_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Character Id" },
+          "note": { "type": "string", "maxLength": 2000, "title": "Note", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title", "source_revision", "start", "end"],
+        "title": "SceneTime"
       },
       "Segment": {
         "properties": {

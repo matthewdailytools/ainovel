@@ -346,6 +346,58 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/history': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** History */
+    get: operations['history_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__history_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/scene-times': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Scenes */
+    get: operations['get_scenes_api_branches__branch_id__chapters__chapter_id__scene_times_get']
+    put?: never
+    /** Create */
+    post: operations['create_api_branches__branch_id__chapters__chapter_id__scene_times_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Update */
+    put: operations['update_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/import-previews/{identifier}/draft': {
     parameters: {
       query?: never
@@ -1830,6 +1882,11 @@ export interface components {
       reference_revision?: number | null
       /** Story Chapter Ids */
       story_chapter_ids?: string[]
+      /**
+       * Context Position
+       * @default 0
+       */
+      context_position: number
     }
     /** MoveInput */
     MoveInput: {
@@ -2082,6 +2139,50 @@ export interface components {
        * @default false
        */
       archived: boolean
+    }
+    /** SaveScene */
+    SaveScene: {
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Base Revision */
+      base_revision?: number | null
+      scene: components['schemas']['SceneTime']
+      /**
+       * Archived
+       * @default false
+       */
+      archived: boolean
+    }
+    /** SceneTime */
+    SceneTime: {
+      /** Title */
+      title: string
+      /** Source Revision */
+      source_revision: number
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Story Order */
+      story_order?: number | null
+      /**
+       * Story Time
+       * @default 未知
+       */
+      story_time: string
+      /**
+       * Audience
+       * @default character
+       * @enum {string}
+       */
+      audience: 'author' | 'character' | 'reader'
+      /** Character Id */
+      character_id?: string | null
+      /**
+       * Note
+       * @default
+       */
+      note: string
     }
     /** Segment */
     Segment: {
@@ -3091,6 +3192,144 @@ export interface operations {
       }
     }
   }
+  history_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__history_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_scenes_api_branches__branch_id__chapters__chapter_id__scene_times_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_api_branches__branch_id__chapters__chapter_id__scene_times_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveScene']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveScene']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   save_draft_api_branches__branch_id__import_previews__identifier__draft_patch: {
     parameters: {
       query?: never
@@ -3943,6 +4182,7 @@ export interface operations {
     parameters: {
       query?: {
         chapter_id?: string | null
+        text_position?: number
       }
       header?: never
       path: {

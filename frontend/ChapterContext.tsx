@@ -76,7 +76,9 @@ export function ChapterContext({
               : '本修订的已采用记录可回到原文。'}
             {stale.length ? ` 本章另有 ${stale.length} 条旧记录已失效。` : ''}
           </p>
-          <p className="small muted">{context.coverage} 当前按章序查阅，尚不能按真实故事时间推算人物状态。</p>
+          <p className="small muted">
+            {context.coverage} 此处旧式记录按章序查阅；场景时点以单独绑定的结构化状态为准。
+          </p>
           <button type="button" onClick={onExtract} disabled={!chapter.content.trim()}>
             准备提取本章故事记录
           </button>
@@ -98,7 +100,9 @@ export function ChapterContext({
             </article>
           ))}
           {!current.length && !context.facts.length && (
-            <p className="empty-note">暂无有效故事记录。你仍可继续手写；后续生成也会读取近期正文。</p>
+            <p className="empty-note">
+              暂无有效故事记录，仍可继续手写。未绑定时点时可参考近期正文；绑定场景以相应时点的有效结构化状态为准。
+            </p>
           )}
         </>
       )}

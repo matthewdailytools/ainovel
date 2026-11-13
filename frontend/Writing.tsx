@@ -20,6 +20,7 @@ import { ChapterContext } from './ChapterContext'
 import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
+import { SceneTimePanel } from './SceneTimePanel'
 
 const actions = [
   ['writing.advise', '卡点诊断与方向'],
@@ -60,6 +61,8 @@ export function Writing({
   const [importOpen, setImportOpen] = useState(false)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [loading, setLoading] = useState(true)
+  const [opening, setOpening] = useState(false)
+  const loadSequence = useRef(0)
   const [archived, setArchived] = useState<Chapter[]>([])
   const [archiveConfirmed, setArchiveConfirmed] = useState(false)
   const [chapter, setChapter] = useState<Chapter>()
@@ -104,35 +107,42 @@ export function Writing({
   }, [])
   const refresh = async () => setChapters(await api(`/branches/${branch.id}/chapters`))
   async function loadChapter(id: string, at = 0, authoritative = false) {
-    const row = await api<Chapter>(`/chapters/${id}`)
-    if (authoritative) await writeDraft({ id, base: row.revision, text: row.content, updated: Date.now() })
-    const draft = await readDraft(id)
-    if (!alive.current) return
-    current.current = row
-    setChapter(row)
-    setRename(row.title)
-    setHistory([])
-    setShowHistory(false)
-    setSelection({ start: at, end: at, text: '' })
-    setCursor(at)
-    setCandidateId('')
-    setRecovery(undefined)
-    const recoverable =
-      draft && !draft.fromOtherWindow && draft.text !== row.content && draft.base === row.revision
-    draftText.current = recoverable ? draft.text : row.content
-    setText(draftText.current)
-    setEditorKey(id + ':' + row.revision + ':' + Date.now())
-    if (recoverable) {
-      setSaved('已恢复浏览器草稿，尚未保存到本机服务')
-      setDirty((d) => d + 1)
-    } else if (
-      draft &&
-      draft.text !== row.content &&
-      (draft.base !== row.revision || draft.fromOtherWindow)
-    ) {
-      setRecovery(draft)
-      setSaved('发现不同基线的浏览器草稿，请比较')
-    } else setSaved('已保存')
+    const token = ++loadSequence.current
+    setOpening(true)
+    try {
+      const row = await api<Chapter>(`/chapters/${id}`)
+      if (!alive.current || token !== loadSequence.current) return
+      if (authoritative) await writeDraft({ id, base: row.revision, text: row.content, updated: Date.now() })
+      const draft = await readDraft(id)
+      if (!alive.current || token !== loadSequence.current) return
+      current.current = row
+      setChapter(row)
+      setRename(row.title)
+      setHistory([])
+      setShowHistory(false)
+      setSelection({ start: at, end: at, text: '' })
+      setCursor(at)
+      setCandidateId('')
+      setRecovery(undefined)
+      const recoverable =
+        draft && !draft.fromOtherWindow && draft.text !== row.content && draft.base === row.revision
+      draftText.current = recoverable ? draft.text : row.content
+      setText(draftText.current)
+      setEditorKey(id + ':' + row.revision + ':' + Date.now())
+      if (recoverable) {
+        setSaved('已恢复浏览器草稿，尚未保存到本机服务')
+        setDirty((d) => d + 1)
+      } else if (
+        draft &&
+        draft.text !== row.content &&
+        (draft.base !== row.revision || draft.fromOtherWindow)
+      ) {
+        setRecovery(draft)
+        setSaved('发现不同基线的浏览器草稿，请比较')
+      } else setSaved('已保存')
+    } finally {
+      if (alive.current && token === loadSequence.current) setOpening(false)
+    }
   }
   useEffect(() => {
     let active = true
@@ -330,6 +340,7 @@ export function Writing({
         reference_ids: selectedRefs,
         account,
         max_output_tokens: 8192,
+        context_position: selection.start,
         ...(action === 'writing.rewrite_selection'
           ? { selection_start: selection.start, selection_end: selection.end, selection_text: selection.text }
           : {}),
@@ -656,7 +667,7 @@ export function Writing({
               id={editorKey}
               initial={text}
               cursor={cursor}
-              readOnly={busy}
+              readOnly={busy || opening}
               onChange={change}
               onSelection={setSelection}
             />
@@ -700,6 +711,16 @@ export function Writing({
             )
           }}
         />
+        {chapter && !opening && (
+          <SceneTimePanel
+            key={chapter.id}
+            branchId={branch.id}
+            chapter={chapter}
+            cursor={selection.start}
+            selection={selection}
+            notify={notify}
+          />
+        )}
         <GenreProfileNotice branchId={branch.id} onSettings={onGenreSettings} onResolved={setSeenGenre} />
         <form onSubmit={generate}>
           {tasks[0]?.payload.instruction && actions.some(([id]) => id === tasks[0].payload.action) && (

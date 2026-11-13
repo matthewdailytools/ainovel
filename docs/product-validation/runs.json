@@ -79,12 +79,34 @@
   {
     "id": "promise-finalization-001",
     "date": "2026-11-13",
-    "commit": "71fc44d+working-tree",
+    "commit": "f2bd3df",
     "module": "作者定稿",
     "scenario": "维护伏笔未闭合、保留理由及来源失效",
     "phase": "stability",
     "result": "passed",
     "record": "2026-11-13-promise-finalization.md",
     "fix_of": ""
+  },
+  {
+    "id": "scene-time-001",
+    "date": "2026-11-13",
+    "commit": "f2bd3df+working-tree",
+    "module": "场景时点",
+    "scenario": "范围视角、未来能力隔离、失效复核及日常只读",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-scene-time.md",
+    "fix_of": ""
+  },
+  {
+    "id": "story-extraction-ci-retest",
+    "date": "2026-11-13",
+    "commit": "71fc44d",
+    "module": "持续集成",
+    "scenario": "格式修复后完整CI",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-promise-finalization.md",
+    "fix_of": "story-extraction-ci-failed"
   }
 ]

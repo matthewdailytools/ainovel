@@ -81,6 +81,7 @@ class ModuleInput(Input):
     reference_session_id: str | None = None
     reference_revision: int | None = Field(default=None, ge=0)
     story_chapter_ids: list[str] = Field(default_factory=list, max_length=20)
+    context_position: int = Field(default=0, ge=0)
 
 
 class CandidateEdit(Input):

@@ -371,6 +371,9 @@ def create_app(settings=None, schema_only=False):
     from .story_graph import register_routes as register_story_routes
 
     register_story_routes(app, domain)
+    from .scene_time import register_routes as register_scene_routes
+
+    register_scene_routes(app, domain)
     from .manuscript_import import register_routes as register_import_routes
 
     register_import_routes(app, domain)
@@ -814,8 +817,8 @@ def create_app(settings=None, schema_only=False):
         return domain.artifact(artifact_id)
 
     @app.get("/api/branches/{branch_id}/context")
-    def context(branch_id: str, chapter_id: str | None = None):
-        return domain.context(branch_id, chapter_id)
+    def context(branch_id: str, chapter_id: str | None = None, text_position: int = Query(0, ge=0)):
+        return domain.context(branch_id, chapter_id, text_position)
 
     @app.get("/api/branches/{branch_id}/facts")
     def facts(branch_id: str):

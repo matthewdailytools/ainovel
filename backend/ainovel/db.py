@@ -87,6 +87,9 @@ class Database:
             from .manuscript_import import SCHEMA as IMPORT_SCHEMA
 
             db.executescript(IMPORT_SCHEMA)
+            from .scene_time import SCHEMA as SCENE_SCHEMA
+
+            db.executescript(SCENE_SCHEMA)
             db.execute(
                 """INSERT OR IGNORE INTO revisions(id,chapter_id,revision,content,cause,created)
                 SELECT lower(hex(randomblob(16))),id,0,CASE WHEN revision=0 THEN content ELSE '' END,

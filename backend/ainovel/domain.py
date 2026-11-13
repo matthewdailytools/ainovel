@@ -23,7 +23,9 @@ def same_task_payload(left, right):
             k: v
             for k, v in value.items()
             if not (
-                (k in optional and v is None) or (k in {"finding_indices", "story_chapter_ids"} and v == [])
+                (k in optional and v is None)
+                or (k in {"finding_indices", "story_chapter_ids"} and v == [])
+                or (k == "context_position" and v == 0)
             )
         }
 
@@ -493,11 +495,13 @@ class Domain:
                 "genre_profile_changed", "频道题材配置已在其他窗口改变，请刷新并确认后再生成。", 409
             )
 
-    def context(self, branch_id, chapter_id=None):
-        from .story_graph import query_context
+    def context(self, branch_id, chapter_id=None, text_position=0):
+        from .scene_time import scene_context
 
         branch = self.branch(branch_id)
         chapter = self.chapter(chapter_id, branch_id) if chapter_id else None
+        if chapter:
+            utf16_slice(chapter["content"], 0, text_position)
         position = chapter["position"] if chapter else 1_000_000
         facts = self.db.all(
             """SELECT f.*,c.position,c.title FROM facts f JOIN chapters c ON c.id=f.chapter_id
@@ -516,6 +520,11 @@ class Domain:
             (branch_id,),
         )
         definitions = [{**row, "payload": json.loads(row["payload"])} for row in definitions]
+        longform = scene_context(self, branch_id, chapter_id, text_position)
+        if longform["scene_binding"] or longform.get("blocked"):
+            longform["excluded_legacy_facts"] = len(facts)
+            longform["excluded_recent_chapters"] = len(previous)
+            facts, previous = [], []
         return {
             "novel": self.db.one("SELECT * FROM novels WHERE id=?", (branch["novel_id"],)),
             "branch": branch,
@@ -525,8 +534,10 @@ class Domain:
             "definitions": definitions,
             "genre_profile": self.genre_profile(branch_id, definitions),
             "author_contract": self.author_contract(branch_id, definitions),
-            "longform": query_context(self, branch_id, chapter_id),
-            "coverage": "每类最新采用设定、目标章节之前最近100条有效事实及最近两章；更早原文需主动查询，未知故事时间保留未知。",
+            "longform": longform,
+            "coverage": "已绑定场景按明确故事时点和信息视角读取有效结构状态；旧式章序事实及近期正文因尚无可靠时点归属而未装入当前知识。"
+            if longform["scene_binding"] or longform.get("blocked")
+            else "每类最新采用设定、目标章节之前最近100条有效事实及最近两章；更早原文需主动查询，未知故事时间保留未知。",
         }
 
     def find_request(self, kind, payload):
@@ -554,6 +565,15 @@ class Domain:
         profile = self.genre_profile(branch_id)
         contract = self.author_contract(branch_id)
         initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
+        if kind == "module" and payload.get("chapter_id"):
+            from .scene_time import at_position
+
+            position = (
+                payload.get("selection_start", 0)
+                if payload.get("action") == "writing.rewrite_selection"
+                else payload.get("context_position", 0)
+            )
+            initial["scene_snapshot"] = at_position(self, branch_id, payload["chapter_id"], position or 0)
         if kind == "module" and payload.get("action") == "story.extract":
             from .story_extraction import freeze_sources
 
