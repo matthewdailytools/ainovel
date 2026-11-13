@@ -368,6 +368,9 @@ def create_app(settings=None, schema_only=False):
         return domain.queue("module", {**payload, "module_version": MODULES[data.action].version})
 
     from .reference import register_routes as register_reference_routes
+    from .story_graph import register_routes as register_story_routes
+
+    register_story_routes(app, domain)
 
     @app.get("/api/modules")
     def module_specs():

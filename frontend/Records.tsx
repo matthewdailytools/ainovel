@@ -4,6 +4,7 @@ import type { Notify } from './App'
 import { GenreSettings } from './GenreProfile'
 import { AuthorIntentPanel } from './AuthorIntent'
 import { FinalizationPanel } from './FinalizationPanel'
+import { StoryGraph } from './StoryGraph'
 
 type Completion = {
   chapter_count: number
@@ -133,6 +134,7 @@ export function Records({
         onSaved={refresh}
       />
       <GenreSettings key={branch.id} branchId={branch.id} notify={notify} onSaved={refresh} />
+      <StoryGraph key={'story-' + branch.id} branchId={branch.id} notify={notify} onSaved={refresh} />
       <div className="records-grid">
         <section className="card">
           <h2>故事状态与影响</h2>

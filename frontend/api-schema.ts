@@ -261,6 +261,91 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/story-graph': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Graph */
+    get: operations['get_graph_api_branches__branch_id__story_graph_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/story-records': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Create Record */
+    post: operations['create_record_api_branches__branch_id__story_records_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/story-records/{identifier}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Update Record */
+    put: operations['update_record_api_branches__branch_id__story_records__identifier__put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/story-records/{identifier}/history': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** History */
+    get: operations['history_api_branches__branch_id__story_records__identifier__history_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/story-context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** At Time */
+    get: operations['at_time_api_branches__branch_id__story_context_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/genre-catalog': {
     parameters: {
       query?: never
@@ -1199,6 +1284,37 @@ export interface components {
       /** Title */
       title: string
     }
+    /** Character */
+    Character: {
+      /** Title */
+      title: string
+      /**
+       * Notes
+       * @default
+       */
+      notes: string
+      /** Sources */
+      sources?: components['schemas']['Source'][]
+      /** Depends On */
+      depends_on?: string[]
+      /**
+       * Volume
+       * @default
+       */
+      volume: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: 'character'
+      /** Aliases */
+      aliases?: string[]
+      /**
+       * Profile
+       * @default
+       */
+      profile: string
+    }
     /** ContinuationInput */
     ContinuationInput: {
       /** Client Request Id */
@@ -1296,6 +1412,52 @@ export interface components {
       branch_id?: string | null
       /** Chapter Id */
       chapter_id?: string | null
+    }
+    /** Event */
+    Event: {
+      /** Title */
+      title: string
+      /**
+       * Notes
+       * @default
+       */
+      notes: string
+      /** Sources */
+      sources?: components['schemas']['Source'][]
+      /** Depends On */
+      depends_on?: string[]
+      /**
+       * Volume
+       * @default
+       */
+      volume: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: 'event'
+      /**
+       * Thread
+       * @default 主线
+       */
+      thread: string
+      /** Story Order */
+      story_order?: number | null
+      /**
+       * Story Time
+       * @default 未知
+       */
+      story_time: string
+      /**
+       * Status
+       * @default planned
+       * @enum {string}
+       */
+      status: 'planned' | 'actual' | 'unknown' | 'conflict'
+      /** Participants */
+      participants?: string[]
+      /** After */
+      after?: string[]
     }
     /** ExcerptInput */
     ExcerptInput: {
@@ -1513,6 +1675,54 @@ export interface components {
       /** Fixed */
       fixed?: string[]
     }
+    /** Promise */
+    Promise: {
+      /** Title */
+      title: string
+      /**
+       * Notes
+       * @default
+       */
+      notes: string
+      /** Sources */
+      sources?: components['schemas']['Source'][]
+      /** Depends On */
+      depends_on?: string[]
+      /**
+       * Volume
+       * @default
+       */
+      volume: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: 'promise'
+      /**
+       * Thread
+       * @default 主线
+       */
+      thread: string
+      /** Stages */
+      stages: components['schemas']['PromiseStage'][]
+    }
+    /** PromiseStage */
+    PromiseStage: {
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'planned' | 'planted' | 'reinforced' | 'resolved' | 'retained' | 'abandoned'
+      /** Event Id */
+      event_id?: string | null
+      /** Sources */
+      sources?: components['schemas']['Source'][]
+      /**
+       * Note
+       * @default
+       */
+      note: string
+    }
     /** ReadingInput */
     ReadingInput: {
       /** Chapter Id */
@@ -1582,6 +1792,44 @@ export interface components {
       /** Candidate Id */
       candidate_id?: string | null
     }
+    /** Relationship */
+    Relationship: {
+      /** Title */
+      title: string
+      /**
+       * Notes
+       * @default
+       */
+      notes: string
+      /** Sources */
+      sources?: components['schemas']['Source'][]
+      /** Depends On */
+      depends_on?: string[]
+      /**
+       * Volume
+       * @default
+       */
+      volume: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: 'relationship'
+      /** From Id */
+      from_id: string
+      /** To Id */
+      to_id: string
+      /** Relation */
+      relation: string
+      /** Event Id */
+      event_id?: string | null
+      /**
+       * Truth
+       * @default planned
+       * @enum {string}
+       */
+      truth: 'actual' | 'planned' | 'unknown' | 'conflict'
+    }
     /** RenameInput */
     RenameInput: {
       /** Title */
@@ -1628,6 +1876,88 @@ export interface components {
       base_revision: number
       /** Content */
       content: string
+    }
+    /** SaveRecord */
+    SaveRecord: {
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Base Revision */
+      base_revision?: number | null
+      /** Record */
+      record:
+        | components['schemas']['Character']
+        | components['schemas']['Event']
+        | components['schemas']['State']
+        | components['schemas']['Promise']
+        | components['schemas']['Relationship']
+      /**
+       * Archived
+       * @default false
+       */
+      archived: boolean
+    }
+    /** Source */
+    Source: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Revision */
+      revision: number
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Quote */
+      quote: string
+    }
+    /** State */
+    State: {
+      /** Title */
+      title: string
+      /**
+       * Notes
+       * @default
+       */
+      notes: string
+      /** Sources */
+      sources?: components['schemas']['Source'][]
+      /** Depends On */
+      depends_on?: string[]
+      /**
+       * Volume
+       * @default
+       */
+      volume: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: 'state'
+      /** Character Id */
+      character_id: string
+      /** Event Id */
+      event_id: string
+      /**
+       * Category
+       * @enum {string}
+       */
+      category: 'knowledge' | 'capability' | 'resource' | 'injury' | 'other'
+      /** Key */
+      key: string
+      /** Value */
+      value: string
+      /**
+       * Audience
+       * @enum {string}
+       */
+      audience: 'author' | 'character' | 'reader'
+      /**
+       * Truth
+       * @default actual
+       * @enum {string}
+       */
+      truth: 'actual' | 'planned' | 'unknown' | 'conflict'
+      /** Until Event Id */
+      until_event_id?: string | null
     }
     /** ValidationError */
     ValidationError: {
@@ -2363,6 +2693,177 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_graph_api_branches__branch_id__story_graph_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_record_api_branches__branch_id__story_records_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveRecord']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_record_api_branches__branch_id__story_records__identifier__put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveRecord']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  history_api_branches__branch_id__story_records__identifier__history_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  at_time_api_branches__branch_id__story_context_get: {
+    parameters: {
+      query?: {
+        chapter_id?: string | null
+        story_order?: number | null
+        audience?: 'author' | 'character' | 'reader'
+        character_id?: string | null
+        text_position?: number
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
         headers: {
           [name: string]: unknown
         }

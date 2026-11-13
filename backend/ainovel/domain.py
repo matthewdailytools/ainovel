@@ -488,6 +488,8 @@ class Domain:
             )
 
     def context(self, branch_id, chapter_id=None):
+        from .story_graph import query_context
+
         branch = self.branch(branch_id)
         chapter = self.chapter(chapter_id, branch_id) if chapter_id else None
         position = chapter["position"] if chapter else 1_000_000
@@ -517,6 +519,7 @@ class Domain:
             "definitions": definitions,
             "genre_profile": self.genre_profile(branch_id, definitions),
             "author_contract": self.author_contract(branch_id, definitions),
+            "longform": query_context(self, branch_id, chapter_id),
             "coverage": "每类最新采用设定、目标章节之前最近100条有效事实及最近两章；更早原文需主动查询，未知故事时间保留未知。",
         }
 
@@ -720,6 +723,7 @@ class Domain:
         return task
 
     def completion(self, branch_id):
+        from .story_graph import completion_promises
         from .manual_finalization import finalization_status
 
         branch = self.branch(branch_id)
@@ -747,11 +751,13 @@ class Domain:
             if spec and not spec["min_chars"] <= char_count(c["content"]) <= spec["max_chars"]
         ]
         model_report = production.get("completion", {})
+        promises = completion_promises(self, branch_id)
         complete = (
             bool(chapters)
             and len(chapters) == expected
             and not missing
             and not length_failures
+            and promises["closed"]
             and model_report.get("closed", False)
             and not any(f["severity"] == "blocker" for f in model_report.get("findings", []))
             and workflow[0]["status"] == "production_complete"
@@ -775,6 +781,7 @@ class Domain:
             "author_finalization": finalized,
             "assessments": list(latest.values()),
             "model_report": production.get("completion"),
+            "promises": promises,
             "note": "模型报告与作者验收分别记录；章数完成不等于全书通过。",
         }
 

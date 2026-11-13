@@ -1333,3 +1333,26 @@ summary {
     animation: none !important;
   }
 }
+.story-diagram {
+  overflow: auto;
+  color: #365c4e;
+}
+.story-diagram svg {
+  display: block;
+  min-width: 600px;
+  width: 100%;
+}
+.story-diagram [role='button'] {
+  cursor: pointer;
+}
+.story-diagram [role='button']:focus {
+  outline: 3px solid #a25b16;
+}
+.story-lanes > section {
+  border-top: 1px solid #73867a;
+  padding-block: 12px;
+}
+.table-scroll {
+  max-width: 100%;
+  overflow: auto;
+}

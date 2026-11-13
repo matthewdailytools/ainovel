@@ -20,5 +20,27 @@
     "result": "passed",
     "record": "2026-11-13-reference-first-loop.md",
     "fix_of": "reference-001-failed"
+  },
+  {
+    "id": "longform-001-failed",
+    "date": "2026-11-13",
+    "commit": "09db2d4+working-tree",
+    "module": "长篇人物时点与多线",
+    "scenario": "原文事件、时点状态、图形及日常只读",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-13-longform-records.md",
+    "fix_of": ""
+  },
+  {
+    "id": "longform-002-retest",
+    "date": "2026-11-13",
+    "commit": "09db2d4+working-tree",
+    "module": "长篇人物时点与多线",
+    "scenario": "原文事件、时点状态、图形及日常只读",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-longform-records.md",
+    "fix_of": "longform-001-failed"
   }
 ]

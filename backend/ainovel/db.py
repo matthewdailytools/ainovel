@@ -81,6 +81,9 @@ class Database:
             from .reference import SCHEMA as REFERENCE_SCHEMA
 
             db.executescript(REFERENCE_SCHEMA)
+            from .story_graph import SCHEMA as STORY_SCHEMA
+
+            db.executescript(STORY_SCHEMA)
             db.execute(
                 """INSERT OR IGNORE INTO revisions(id,chapter_id,revision,content,cause,created)
                 SELECT lower(hex(randomblob(16))),id,0,CASE WHEN revision=0 THEN content ELSE '' END,

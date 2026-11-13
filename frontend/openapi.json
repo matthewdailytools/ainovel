@@ -522,6 +522,191 @@
         }
       }
     },
+    "/api/branches/{branch_id}/story-graph": {
+      "get": {
+        "summary": "Get Graph",
+        "operationId": "get_graph_api_branches__branch_id__story_graph_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/story-records": {
+      "post": {
+        "summary": "Create Record",
+        "operationId": "create_record_api_branches__branch_id__story_records_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaveRecord" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/story-records/{identifier}": {
+      "put": {
+        "summary": "Update Record",
+        "operationId": "update_record_api_branches__branch_id__story_records__identifier__put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaveRecord" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/story-records/{identifier}/history": {
+      "get": {
+        "summary": "History",
+        "operationId": "history_api_branches__branch_id__story_records__identifier__history_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/story-context": {
+      "get": {
+        "summary": "At Time",
+        "operationId": "at_time_api_branches__branch_id__story_context_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Chapter Id" }
+          },
+          {
+            "name": "story_order",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Story Order" }
+          },
+          {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": ["author", "character", "reader"],
+              "type": "string",
+              "default": "author",
+              "title": "Audience"
+            }
+          },
+          {
+            "name": "character_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Character Id" }
+          },
+          {
+            "name": "text_position",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 0, "default": 0, "title": "Text Position" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/genre-catalog": {
       "get": {
         "summary": "Genre Catalog",
@@ -2055,6 +2240,32 @@
         "required": ["title"],
         "title": "ChapterInput"
       },
+      "Character": {
+        "properties": {
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "notes": { "type": "string", "maxLength": 4000, "title": "Notes", "default": "" },
+          "sources": {
+            "items": { "$ref": "#/components/schemas/Source" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Sources"
+          },
+          "depends_on": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Depends On"
+          },
+          "volume": { "type": "string", "maxLength": 100, "title": "Volume", "default": "" },
+          "kind": { "type": "string", "const": "character", "title": "Kind" },
+          "aliases": { "items": { "type": "string" }, "type": "array", "maxItems": 30, "title": "Aliases" },
+          "profile": { "type": "string", "maxLength": 8000, "title": "Profile", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title", "kind"],
+        "title": "Character"
+      },
       "ContinuationInput": {
         "properties": {
           "client_request_id": {
@@ -2178,6 +2389,46 @@
         "type": "object",
         "required": ["base_revision", "goal"],
         "title": "EditReference"
+      },
+      "Event": {
+        "properties": {
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "notes": { "type": "string", "maxLength": 4000, "title": "Notes", "default": "" },
+          "sources": {
+            "items": { "$ref": "#/components/schemas/Source" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Sources"
+          },
+          "depends_on": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Depends On"
+          },
+          "volume": { "type": "string", "maxLength": 100, "title": "Volume", "default": "" },
+          "kind": { "type": "string", "const": "event", "title": "Kind" },
+          "thread": { "type": "string", "maxLength": 100, "title": "Thread", "default": "主线" },
+          "story_order": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Story Order" },
+          "story_time": { "type": "string", "maxLength": 200, "title": "Story Time", "default": "未知" },
+          "status": {
+            "type": "string",
+            "enum": ["planned", "actual", "unknown", "conflict"],
+            "title": "Status",
+            "default": "planned"
+          },
+          "participants": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Participants"
+          },
+          "after": { "items": { "type": "string" }, "type": "array", "maxItems": 50, "title": "After" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title", "kind"],
+        "title": "Event"
       },
       "ExcerptInput": {
         "properties": {
@@ -2468,6 +2719,59 @@
         "required": ["number", "title", "plot"],
         "title": "Plot"
       },
+      "Promise": {
+        "properties": {
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "notes": { "type": "string", "maxLength": 4000, "title": "Notes", "default": "" },
+          "sources": {
+            "items": { "$ref": "#/components/schemas/Source" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Sources"
+          },
+          "depends_on": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Depends On"
+          },
+          "volume": { "type": "string", "maxLength": 100, "title": "Volume", "default": "" },
+          "kind": { "type": "string", "const": "promise", "title": "Kind" },
+          "thread": { "type": "string", "maxLength": 100, "title": "Thread", "default": "主线" },
+          "stages": {
+            "items": { "$ref": "#/components/schemas/PromiseStage" },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Stages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title", "kind", "stages"],
+        "title": "Promise"
+      },
+      "PromiseStage": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["planned", "planted", "reinforced", "resolved", "retained", "abandoned"],
+            "title": "Status"
+          },
+          "event_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Event Id" },
+          "sources": {
+            "items": { "$ref": "#/components/schemas/Source" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Sources"
+          },
+          "note": { "type": "string", "maxLength": 2000, "title": "Note", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["status"],
+        "title": "PromiseStage"
+      },
       "ReadingInput": {
         "properties": {
           "chapter_id": { "type": "string", "title": "Chapter Id" },
@@ -2534,6 +2838,40 @@
         "required": ["base_revision", "text"],
         "title": "ReferenceFeedback"
       },
+      "Relationship": {
+        "properties": {
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "notes": { "type": "string", "maxLength": 4000, "title": "Notes", "default": "" },
+          "sources": {
+            "items": { "$ref": "#/components/schemas/Source" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Sources"
+          },
+          "depends_on": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Depends On"
+          },
+          "volume": { "type": "string", "maxLength": 100, "title": "Volume", "default": "" },
+          "kind": { "type": "string", "const": "relationship", "title": "Kind" },
+          "from_id": { "type": "string", "title": "From Id" },
+          "to_id": { "type": "string", "title": "To Id" },
+          "relation": { "type": "string", "maxLength": 500, "minLength": 1, "title": "Relation" },
+          "event_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Event Id" },
+          "truth": {
+            "type": "string",
+            "enum": ["actual", "planned", "unknown", "conflict"],
+            "title": "Truth",
+            "default": "planned"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title", "kind", "from_id", "to_id", "relation"],
+        "title": "Relationship"
+      },
       "RenameInput": {
         "properties": { "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" } },
         "additionalProperties": false,
@@ -2577,6 +2915,94 @@
         "type": "object",
         "required": ["base_revision", "content"],
         "title": "SaveInput"
+      },
+      "SaveRecord": {
+        "properties": {
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "base_revision": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Base Revision"
+          },
+          "record": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/Character" },
+              { "$ref": "#/components/schemas/Event" },
+              { "$ref": "#/components/schemas/State" },
+              { "$ref": "#/components/schemas/Promise" },
+              { "$ref": "#/components/schemas/Relationship" }
+            ],
+            "title": "Record",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "character": "#/components/schemas/Character",
+                "event": "#/components/schemas/Event",
+                "promise": "#/components/schemas/Promise",
+                "relationship": "#/components/schemas/Relationship",
+                "state": "#/components/schemas/State"
+              }
+            }
+          },
+          "archived": { "type": "boolean", "title": "Archived", "default": false }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_story_revision", "record"],
+        "title": "SaveRecord"
+      },
+      "Source": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "start": { "type": "integer", "minimum": 0, "title": "Start" },
+          "end": { "type": "integer", "exclusiveMinimum": 0, "title": "End" },
+          "quote": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Quote" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "revision", "start", "end", "quote"],
+        "title": "Source"
+      },
+      "State": {
+        "properties": {
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "notes": { "type": "string", "maxLength": 4000, "title": "Notes", "default": "" },
+          "sources": {
+            "items": { "$ref": "#/components/schemas/Source" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Sources"
+          },
+          "depends_on": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Depends On"
+          },
+          "volume": { "type": "string", "maxLength": 100, "title": "Volume", "default": "" },
+          "kind": { "type": "string", "const": "state", "title": "Kind" },
+          "character_id": { "type": "string", "title": "Character Id" },
+          "event_id": { "type": "string", "title": "Event Id" },
+          "category": {
+            "type": "string",
+            "enum": ["knowledge", "capability", "resource", "injury", "other"],
+            "title": "Category"
+          },
+          "key": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Key" },
+          "value": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Value" },
+          "audience": { "type": "string", "enum": ["author", "character", "reader"], "title": "Audience" },
+          "truth": {
+            "type": "string",
+            "enum": ["actual", "planned", "unknown", "conflict"],
+            "title": "Truth",
+            "default": "actual"
+          },
+          "until_event_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Until Event Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title", "kind", "character_id", "event_id", "category", "key", "value", "audience"],
+        "title": "State"
       },
       "ValidationError": {
         "properties": {

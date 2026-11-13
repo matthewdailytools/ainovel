@@ -229,6 +229,7 @@ export function App() {
               <select
                 value={novelId}
                 onChange={(e) => {
+                  if (e.target.value === novelId) return
                   setBranches([])
                   setBranchId('')
                   setNovelId(e.target.value)
