@@ -33,7 +33,9 @@ test('反向整理：原文候选、依赖提示、作者采用且原稿不改',
   expect(before.records).toHaveLength(0)
   await panel.getByRole('checkbox', { name: '采用时点状态：暗号认知', exact: true }).check()
   await panel.getByRole('button', { name: '确认采用所选结构（不修改正文）', exact: true }).click()
-  await expect(panel.getByRole('status')).toContainText('未选择的人物或事件')
+  await expect(panel.getByRole('status').filter({ hasText: '未选择的人物或事件' })).toBeVisible()
+  const rejected = await (await page.request.get(`/api/branches/${novel.branch_id}/story-graph`)).json()
+  expect(rejected.records).toHaveLength(0)
   for (const box of await panel.locator('article input[type=checkbox]').all()) await box.check()
   await panel.getByRole('button', { name: '确认采用所选结构（不修改正文）', exact: true }).click()
   await expect(

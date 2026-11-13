@@ -308,8 +308,9 @@ class Worker:
             "仅依据作者原话整理本场景情节",
             "逐项对照作者情节解释与本次正文",
             "只从本次正文独立提取物品与信息流向",
+            "独立核对人物自由文本的本项来源蕴含",
         }:
-            # These source-isolated stages must not reinterpret chapter intent
+            # These source-isolated stages must not reinterpret source claims
             # through other adopted settings, genre preferences or old prose.
             context = deepcopy(context or {})
         else:

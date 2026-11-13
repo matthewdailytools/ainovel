@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend/tests"))
 from test_reference_flow import Model as ReferenceModel  # noqa: E402
 from test_story_extraction import ExtractionModel, UpdateModel  # noqa: E402
 from test_workflow_scope import SegmentModel as BookModel  # noqa: E402
+from helpers.character_review_fixture import character_review_output  # noqa: E402
 
 
 class Model(ReferenceModel):
@@ -31,6 +32,13 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        character_review = character_review_output(instruction)
+        if character_review is not None:
+            return {
+                "text": json.dumps(character_review),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-character-review",
+            }
         if instruction.get("动作") == "整理作者情绪钩子与方向契约":
             author_text = instruction["作者原话"]
             return {

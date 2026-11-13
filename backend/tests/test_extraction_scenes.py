@@ -10,6 +10,7 @@ from ainovel.story_extraction import AdoptExtraction, adopt
 from ainovel.worker import Worker
 from ainovel.workflow_structure import maintain
 from ainovel.story_graph import SaveRecord, graph, save_record
+from helpers.character_review_fixture import CHARACTER_REVIEW_VERSION
 from test_story_extraction import ExtractionModel
 
 
@@ -17,6 +18,8 @@ class SceneModel(ExtractionModel):
     async def generate(self, *args, **kwargs):
         result = await super().generate(*args, **kwargs)
         value = json.loads(result["text"])
+        if value.get("version") == CHARACTER_REVIEW_VERSION:
+            return result
         instruction = self.calls[-1]["任务"]
         while "原始任务" in instruction:
             instruction = instruction["原始任务"]

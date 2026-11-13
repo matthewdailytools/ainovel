@@ -343,7 +343,7 @@ async def run_extraction(worker, request, context, snapshot=None):
     return "story_extraction", result
 
 
-def adopt(domain, branch_id, artifact_id, data, attempt=None):
+def adopt(domain, branch_id, artifact_id, data, attempt=None, character_review_token=None):
     request_signature = data.model_dump()
     if not data.selected_scene_ids:
         request_signature.pop("selected_scene_ids")
@@ -392,6 +392,15 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None):
             raise DomainError("candidate_changed", "候选已改变或已处理。", 409)
         if revision != data.base_story_revision or revision != basis.get("story_revision"):
             raise DomainError("story_changed", "故事或源稿已改变，请重新整理。", 409)
+        if attempt and maintenance_owner:
+            from .character_review import validate_adoption_review
+
+            validate_adoption_review(
+                tx,
+                {**dict(artifact), "payload": payload, "basis": basis},
+                maintenance_owner["id"],
+                character_review_token,
+            )
         indexed = {item["id"]: item for item in payload["records"]}
         if indexed and not data.selected_ids and not data.selected_scene_ids:
             raise DomainError("story_selection", "请选择至少一项，空选择不能确认非空候选。")

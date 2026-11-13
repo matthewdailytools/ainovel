@@ -7,6 +7,7 @@ import pytest
 
 from ainovel.db import DomainError, dumps
 from ainovel.worker import Worker
+from helpers.character_review_fixture import character_review_output
 
 
 class ExtractionModel:
@@ -18,8 +19,14 @@ class ExtractionModel:
         value = json.loads(prompt.split("\n只返回")[0])
         self.calls.append(value)
         instruction = value["任务"]
-        if "原始任务" in instruction:
+        while "原始任务" in instruction:
             instruction = instruction["原始任务"]
+        if (review := character_review_output(instruction)) is not None:
+            return {
+                "text": dumps(review),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-character-review",
+            }
         units = instruction["可引用原文"]
         unit = units[0]
         source = {k: unit[k] for k in ("chapter_id", "revision", "start", "end")}

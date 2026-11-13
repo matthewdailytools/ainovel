@@ -11,6 +11,7 @@ from ainovel.story_extraction import promise_stage_issues
 from ainovel.story_graph import RECORD, SaveRecord, save_record
 from ainovel.worker import Worker
 from ainovel.workflow_structure import maintain
+from helpers.character_review_fixture import CHARACTER_REVIEW_ACTION, CHARACTER_REVIEW_VERSION
 from test_extraction_scenes import SceneModel
 from test_story_extraction import ExtractionModel, adoption, produce
 
@@ -24,6 +25,8 @@ class StageRepairModel(SceneModel):
     async def generate(self, *args, **kwargs):
         result = await super().generate(*args, **kwargs)
         value = json.loads(result["text"])
+        if value.get("version") == CHARACTER_REVIEW_VERSION:
+            return result
         instruction = self.calls[-1]["任务"]
         promise = next(item for item in value["records"] if item["local_id"] == "p")
         stage = promise["record"]["stages"][0]
@@ -83,7 +86,10 @@ def test_stage_feedback_repairs_then_maintains_atomically(settings, domain, stor
     model = StageRepairModel(status, defect)
     worker, progress, task, chapter = pending_workflow(settings, domain, story, model)
     assert asyncio.run(maintain(worker, progress))
-    assert len(model.calls) == 2
+    # The repaired extraction is followed by one review of both character profiles.
+    assert len(model.calls) == 3
+    assert model.calls[2]["任务"]["动作"] == CHARACTER_REVIEW_ACTION
+    assert [target["field"] for target in model.calls[2]["任务"]["人物字段"]] == ["profile", "profile"]
     assert model.calls[0]["任务"]["阶段证据契约版本"] == "promise-stage-grounding/2"
     feedback = model.calls[1]["任务"]["定位错误"]
     location = f"records[4](local_id=p).record.stages[0]({status}).{field}"

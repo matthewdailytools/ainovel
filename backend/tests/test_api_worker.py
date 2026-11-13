@@ -7,6 +7,7 @@ import pytest
 from ainovel.db import DomainError, dumps
 from ainovel.models import WorkflowInput
 from ainovel.worker import PROMPT_VERSION, Worker
+from helpers.character_review_fixture import character_review_output
 
 
 def create(client):
@@ -121,7 +122,9 @@ class FakeModel:
         instruction = data["任务"]
         action = instruction.get("动作")
         text = "沈砚用旧尺测量潮水，留下可以回查的记录。" * 15
-        if action == "全书滚动规划":
+        if (review := character_review_output(instruction)) is not None:
+            output = review
+        elif action == "全书滚动规划":
             self.plan_context = data["上下文"]
             output = {
                 "chapters": [

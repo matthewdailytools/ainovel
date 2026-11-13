@@ -3,6 +3,12 @@ import { api, label, type Artifact, type Chapter } from './api'
 import type { components } from './api-schema'
 import type { Notify } from './App'
 import { Difference } from './Editor'
+import {
+  characterReviewState,
+  createExtractionRequestGuard,
+  extractionSourcesStale,
+  type CharacterReviewResult,
+} from './characterSemanticReview'
 
 type Schemas = components['schemas']
 type RecordPayload =
@@ -73,6 +79,76 @@ function describe(value: unknown, nameFor: (id: string) => string): string {
   return typeof value === 'string' ? nameFor(value) : String(value)
 }
 
+const reviewResults: Record<CharacterReviewResult, string> = {
+  supported: '来源支持',
+  unknown: '依据不足，待核对',
+  contradicted: '与来源矛盾，待核对',
+}
+
+export function CharacterSemanticReview({
+  value,
+  candidateRevision,
+  sourceStale,
+  nameFor,
+  chapterNameFor,
+}: {
+  value: unknown
+  candidateRevision: number
+  sourceStale: boolean
+  nameFor: (id: string) => string
+  chapterNameFor: (id: string) => string
+}) {
+  const { report, state } = characterReviewState(value, candidateRevision, sourceStale)
+  const states = {
+    missing: '尚无人物字段复核报告，不能视为来源支持；人工整理请直接核对原文，自动批次完成复核后可刷新查看。',
+    invalid: '人物字段复核报告格式无法核对，请刷新重试；不能视为来源支持。',
+    historical: '历史报告已失效：报告与当前候选修订不符，需重新核对。',
+    stale: '来源正文或故事已变化或待复检，需重新核对；下方仅为历史报告。',
+    needs_review: '人物字段待核对：仍有依据不足、矛盾或报告待核对项。',
+    supported: '模型复核：本报告的人物字段均有来源支持。',
+    not_required: '本报告没有需复核的人物说明或档案字段。',
+  }
+  return (
+    <section aria-label="人物字段来源复核" style={{ overflowWrap: 'anywhere' }}>
+      <h3>人物字段来源复核</h3>
+      <p role="status">{states[state]}</p>
+      <p>模型辅助核对新增或实际变化的人物说明、档案，不等于作者认可；作者仍可明确选择采用。</p>
+      {sourceStale && state !== 'stale' && <p>来源正文或故事已变化或待复检，需重新核对。</p>}
+      {report && (
+        <details>
+          <summary>查看字段结论、理由与来源（{report.results.length}项）</summary>
+          <p>
+            报告候选修订{report.candidate_revision}；当前候选修订{candidateRevision}。
+          </p>
+          <p>
+            模型：{report.reviewer.provider || '未记录服务商'} / {report.reviewer.model || '未记录模型'}；
+            账户：{report.reviewer.account || '未记录'}；版本：{report.version}；
+            {new Date(report.created * 1000).toLocaleString()}。
+          </p>
+          {report.results.map((item, index) => (
+            <article className="fact" key={`${item.record_id}/${item.field}/${index}`}>
+              <h4>
+                {nameFor(item.record_id)} · {fieldNames[item.field]}：{reviewResults[item.result]}
+              </h4>
+              <p>{item.reason || '报告未提供理由，请结合原文核对。'}</p>
+              {!item.evidence.length && <p>未提供原文证据。</p>}
+              {item.evidence.map((source, i) => (
+                <div key={i}>
+                  <p>
+                    {chapterNameFor(source.chapter_id)} · 保存稿修订{source.revision} · 位置{source.start}—
+                    {source.end}
+                  </p>
+                  <blockquote>{source.quote}</blockquote>
+                </div>
+              ))}
+            </article>
+          ))}
+        </details>
+      )}
+    </section>
+  )
+}
+
 export function StoryExtraction({
   branchId,
   storyRevision,
@@ -94,16 +170,26 @@ export function StoryExtraction({
 }) {
   const [chosenChapters, setChosenChapters] = useState<string[]>([])
   const [history, setHistory] = useState<History>({ tasks: [], artifacts: [] })
-  const [artifactId, setArtifactId] = useState('')
-  const [artifact, setArtifact] = useState<ExtractionArtifact>()
+  const [artifactSelection, setArtifactSelection] = useState({ branchId, id: '' })
+  const artifactId = artifactSelection.branchId === branchId ? artifactSelection.id : ''
+  const [loadedArtifact, setLoadedArtifact] = useState<{ branchId: string; value: ExtractionArtifact }>()
   const [selected, setSelected] = useState<string[]>([])
   const [includeScenes, setIncludeScenes] = useState(false)
   const [selectedScenes, setSelectedScenes] = useState<string[]>([])
   const [confirmReplacement, setConfirmReplacement] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [loadingArtifact, setLoadingArtifact] = useState(false)
+  const [artifactError, setArtifactError] = useState('')
   const pending = useRef<{ signature: string; key: string } | null>(null)
   const alive = useRef(true)
+  const artifactRequests = useRef(createExtractionRequestGuard())
+  const currentTarget = useRef({ branchId, artifactId })
+  currentTarget.current = { branchId, artifactId }
+  const artifact =
+    loadedArtifact?.branchId === branchId && loadedArtifact.value.id === artifactId
+      ? loadedArtifact.value
+      : undefined
   useEffect(() => {
     alive.current = true
     let active = true
@@ -112,7 +198,10 @@ export function StoryExtraction({
         const h = await api<History>(`/branches/${branchId}/story-extractions`)
         if (active) {
           setHistory(h)
-          setArtifactId((id) => id || h.artifacts[0]?.id || '')
+          setArtifactSelection((selection) => ({
+            branchId,
+            id: (selection.branchId === branchId && selection.id) || h.artifacts[0]?.id || '',
+          }))
         }
       } catch (e) {
         if (active) notify(e)
@@ -128,20 +217,61 @@ export function StoryExtraction({
   }, [branchId, notify])
   useEffect(() => {
     let active = true
-    setArtifact(undefined)
+    const isLatest = artifactRequests.current.begin()
+    setLoadedArtifact(undefined)
     setSelected([])
     setSelectedScenes([])
     setConfirmReplacement(false)
+    setArtifactError('')
+    setLoadingArtifact(!!artifactId)
+    const isCurrent = () =>
+      active &&
+      isLatest() &&
+      currentTarget.current.branchId === branchId &&
+      currentTarget.current.artifactId === artifactId
     if (artifactId)
       void api<ExtractionArtifact>(`/artifacts/${artifactId}`)
         .then((a) => {
-          if (active) setArtifact(a)
+          if (isCurrent()) setLoadedArtifact({ branchId, value: a })
         })
-        .catch(notify)
+        .catch((e: unknown) => {
+          if (isCurrent()) {
+            setArtifactError('候选读取失败，请刷新重试。')
+            notify(e)
+          }
+        })
+        .finally(() => {
+          if (isCurrent()) setLoadingArtifact(false)
+        })
     return () => {
       active = false
+      artifactRequests.current.invalidate()
     }
-  }, [artifactId, notify])
+  }, [artifactId, branchId, notify])
+  async function refreshArtifact() {
+    const isLatest = artifactRequests.current.begin()
+    const isCurrent = () =>
+      alive.current &&
+      isLatest() &&
+      currentTarget.current.branchId === branchId &&
+      currentTarget.current.artifactId === artifactId
+    setLoadingArtifact(true)
+    setArtifactError('')
+    try {
+      const next = await api<ExtractionArtifact>(`/artifacts/${artifactId}`)
+      if (isCurrent()) {
+        setLoadedArtifact({ branchId, value: next })
+        setMessage('候选与复核报告已刷新，当前选择和输入保留，请核对最新内容。')
+      }
+    } catch (e) {
+      if (isCurrent()) {
+        setArtifactError('刷新失败，已保留候选、选择和输入，请重试。')
+        notify(e)
+      }
+    } finally {
+      if (isCurrent()) setLoadingArtifact(false)
+    }
+  }
   async function perform(fn: () => Promise<void>) {
     if (busy) return
     setBusy(true)
@@ -156,6 +286,8 @@ export function StoryExtraction({
   }
   const running = history.tasks.filter((t) => ['queued', 'running'].includes(t.status))
   const stale = artifact && artifact.payload.source_story_revision !== storyRevision
+  const reviewSourceStale =
+    !!stale || !!(artifact && extractionSourcesStale(artifact.payload.source_manifest, chapters))
   const nameFor = (id: string | null | undefined) =>
     id
       ? artifact?.payload.records.find((r) => r.id === id)?.record.title || recordNames[id] || id
@@ -261,7 +393,11 @@ export function StoryExtraction({
         ))}
         <label>
           保存的结构候选
-          <select value={artifactId} onChange={(e) => setArtifactId(e.target.value)}>
+          <select
+            value={artifactId}
+            disabled={busy}
+            onChange={(e) => setArtifactSelection({ branchId, id: e.target.value })}
+          >
             <option value="">请选择</option>
             {history.artifacts.map((a) => (
               <option key={a.id} value={a.id}>
@@ -270,6 +406,13 @@ export function StoryExtraction({
             ))}
           </select>
         </label>
+        <button
+          disabled={busy || loadingArtifact || !artifactId}
+          onClick={() => void perform(refreshArtifact)}
+        >
+          {loadingArtifact ? '正在读取候选与复核报告…' : '刷新候选与复核报告'}
+        </button>
+        <p role="status">{artifactError}</p>
         {artifact && (
           <>
             <p>
@@ -287,6 +430,15 @@ export function StoryExtraction({
                 </p>
               ))}
             </details>
+            <CharacterSemanticReview
+              value={artifact.payload.character_semantic_review}
+              candidateRevision={artifact.candidate_revision}
+              sourceStale={reviewSourceStale}
+              nameFor={nameFor}
+              chapterNameFor={(id) =>
+                artifact.payload.source_manifest.find((chapter) => chapter.id === id)?.title || id
+              }
+            />
             {artifact.payload.records.map((p) => (
               <article className="fact" key={p.id}>
                 <label className="check">
@@ -479,7 +631,7 @@ export function StoryExtraction({
                     idempotency_key: pending.current.key,
                   })
                   pending.current = null
-                  setArtifact({ ...artifact, status: 'accepted' })
+                  setLoadedArtifact({ branchId, value: { ...artifact, status: 'accepted' } })
                   setMessage(
                     selectedScenes.length
                       ? '所选结构与场景已采用，旧绑定历史保留，正文未改变。'
@@ -498,7 +650,7 @@ export function StoryExtraction({
                   await api(`/artifacts/${artifact.id}/reject`, 'POST', {
                     candidate_revision: artifact.candidate_revision,
                   })
-                  setArtifact({ ...artifact, status: 'rejected' })
+                  setLoadedArtifact({ branchId, value: { ...artifact, status: 'rejected' } })
                   setMessage('已拒绝整批候选，正式记录和原稿保持。')
                 })
               }
