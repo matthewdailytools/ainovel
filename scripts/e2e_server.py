@@ -30,6 +30,12 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if instruction.get("action") == "writing.rewrite_selection":
+            return {
+                "text": "她先核对刻度，再记录读数。",
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline",
+            }
         while "原始任务" in instruction:
             instruction = instruction["原始任务"]
         if instruction.get("动作") == "仅依据作者原话整理本场景情节":

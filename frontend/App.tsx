@@ -5,6 +5,7 @@ import { LibraryPage } from './Library'
 import { WorkflowPage } from './Workflow'
 import { Records } from './Records'
 import { confirmLeave } from './leaveGuard'
+import type { FeedbackHandoff } from './feedbackRevision'
 
 export type Notify = (error: unknown) => void
 export function App() {
@@ -20,6 +21,7 @@ export function App() {
     selection.current = { novelId, branchId, generation: selection.current.generation + 1 }
   const selectionGeneration = selection.current.generation
   const [page, setPage] = useState('writing')
+  const [feedbackHandoff, setFeedbackHandoff] = useState<FeedbackHandoff>()
   const [account, setAccount] = useState('openai_1')
   const [title, setTitle] = useState('')
   const [creating, setCreating] = useState(false)
@@ -340,6 +342,8 @@ export function App() {
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
                     onGenreSettings={() => navigate('records')}
+                    feedbackHandoff={feedbackHandoff?.branch_id === branch.id ? feedbackHandoff : undefined}
+                    onClearFeedback={() => setFeedbackHandoff(undefined)}
                   />
                 )}
                 {page === 'library' && (
@@ -374,6 +378,11 @@ export function App() {
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
+                    onReviseFeedback={(feedback) => {
+                      if (!confirmLeave()) return
+                      setFeedbackHandoff(feedback)
+                      setPage('writing')
+                    }}
                   />
                 )}
               </>

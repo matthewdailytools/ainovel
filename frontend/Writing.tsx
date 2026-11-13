@@ -22,6 +22,7 @@ import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
 import { SceneTimePanel } from './SceneTimePanel'
 import { confirmLeave } from './leaveGuard'
+import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
 
 const actions = [
   ['writing.advise', '卡点诊断与方向'],
@@ -51,6 +52,8 @@ export function Writing({
   modelReady,
   notify,
   onGenreSettings,
+  feedbackHandoff,
+  onClearFeedback,
 }: {
   novel: Novel
   branch: Branch
@@ -58,6 +61,8 @@ export function Writing({
   modelReady: boolean
   notify: Notify
   onGenreSettings: () => void
+  feedbackHandoff?: FeedbackHandoff
+  onClearFeedback: () => void
 }) {
   const [importOpen, setImportOpen] = useState(false)
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -76,8 +81,11 @@ export function Writing({
   const [note, setNote] = useState('')
   const reading = useRef({ revision: 0 })
   const [recovery, setRecovery] = useState<Draft>()
-  const [action, setAction] = useState<ModuleInput['action']>('writing.advise')
-  const [instruction, setInstruction] = useState('')
+  const [action, setAction] = useState<ModuleInput['action']>(
+    feedbackHandoff ? 'writing.rewrite_selection' : 'writing.advise',
+  )
+  const [instruction, setInstruction] = useState(feedbackHandoff?.text || '')
+  const [confirmedFeedbackRevision, setConfirmedFeedbackRevision] = useState<number | null>(null)
   const [fixed, setFixed] = useState('')
   const [profile, setProfile] = useState(presets[0])
   const [seenContract, setSeenContract] = useState<AuthorContract>()
@@ -162,7 +170,12 @@ export function Writing({
         setNote(state.note)
         reading.current.revision = state.revision
         if (rows.length)
-          await loadChapter(rows.find((c) => c.id === state.chapter_id)?.id || rows[0].id, state.cursor)
+          await loadChapter(
+            rows.find((c) => c.id === feedbackHandoff?.chapter_id)?.id ||
+              rows.find((c) => c.id === state.chapter_id)?.id ||
+              rows[0].id,
+            feedbackHandoff ? 0 : state.cursor,
+          )
       } catch (e) {
         if (active) notify(e)
       } finally {
@@ -319,6 +332,22 @@ export function Writing({
       if (seenContract?.branch_id !== branch.id) throw new Error('正在读取本版本创作约定，请稍后再生成。')
       if (action === 'writing.rewrite_selection' && !selection.text)
         throw new Error('请在正文中选择要改写的文字。')
+      if (feedbackHandoff) {
+        if (action !== 'writing.rewrite_selection')
+          throw new Error('反馈修订使用作者选区改写；若要执行其他动作，请先退出反馈修订。')
+        if (!row) throw new Error('请先打开反馈对应章节。')
+        checkFeedbackTarget(feedbackHandoff, {
+          branchId: branch.id,
+          chapterId: row.id,
+          revision: row.revision,
+          confirmedRevision: confirmedFeedbackRevision,
+        })
+      }
+      const submittedInstruction = feedbackHandoff
+        ? feedbackRevisionInstruction(feedbackHandoff, instruction)
+        : instruction
+      if (submittedInstruction.length > 20_000)
+        throw new Error('反馈与本次修订要求合计过长，请缩短本次要求后再生成。')
       const data: ModuleInput = {
         include_scene_ranges: false,
         action,
@@ -326,7 +355,7 @@ export function Writing({
         branch_id: branch.id,
         chapter_id: row?.id ?? null,
         base_revision: row?.revision ?? null,
-        instruction,
+        instruction: submittedInstruction,
         fixed: fixed
           .split('\n')
           .map((v) => v.trim())
@@ -725,6 +754,38 @@ export function Writing({
           />
         )}
         <GenreProfileNotice branchId={branch.id} onSettings={onGenreSettings} onResolved={setSeenGenre} />
+        {feedbackHandoff && (
+          <section className="notice" aria-label="手动反馈局部修订">
+            <h3>手动反馈 → 作者选区修订</h3>
+            <p>
+              {feedbackHandoff.category} · {feedbackHandoff.title} · 来源修订{' '}
+              {feedbackHandoff.source_revision}
+            </p>
+            <p>
+              这是人工意见，未作为独立模型审稿结论。请核对原反馈，亲自在正文选择修订范围并确认要求；生成结果仍是待采用候选。
+            </p>
+            <p>{feedbackHandoff.text}</p>
+            <blockquote>{feedbackHandoff.source_quote || '原反馈没有引用，请自行定位。'}</blockquote>
+            {chapter?.id !== feedbackHandoff.chapter_id ? (
+              <p role="alert">当前不是反馈对应章节，请从目录回到“{feedbackHandoff.title}”。</p>
+            ) : chapter.revision !== feedbackHandoff.source_revision ? (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={confirmedFeedbackRevision === chapter.revision}
+                  onChange={(e) => setConfirmedFeedbackRevision(e.target.checked ? chapter.revision : null)}
+                />
+                我已核对当前保存稿修订 {chapter.revision}，并将重新选择范围；旧反馈引用不代表当前正文
+              </label>
+            ) : (
+              <p>当前稿与反馈来源修订一致，仍需亲自选择范围。</p>
+            )}
+            <p>
+              当前选区：{selection.start}—{selection.end}（UTF-16）。仅所选文字可被候选替换。
+            </p>
+            <button onClick={onClearFeedback}>退出反馈修订，保留正文</button>
+          </section>
+        )}
         <form onSubmit={generate}>
           {tasks[0]?.payload.instruction && actions.some(([id]) => id === tasks[0].payload.action) && (
             <button

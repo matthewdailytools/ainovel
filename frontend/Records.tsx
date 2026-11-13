@@ -5,6 +5,7 @@ import { GenreSettings } from './GenreProfile'
 import { AuthorIntentPanel } from './AuthorIntent'
 import { FinalizationPanel } from './FinalizationPanel'
 import { StoryGraph } from './StoryGraph'
+import { type FeedbackHandoff } from './feedbackRevision'
 
 type Completion = {
   chapter_count: number
@@ -22,6 +23,7 @@ type Completion = {
 type Feedback = {
   id: string
   title: string
+  chapter_id: string
   source_revision: number
   category: string
   text: string
@@ -32,11 +34,13 @@ export function Records({
   account,
   modelReady,
   notify,
+  onReviseFeedback,
 }: {
   branch: Branch
   account: string
   modelReady: boolean
   notify: Notify
+  onReviseFeedback: (feedback: FeedbackHandoff) => void
 }) {
   const [facts, setFacts] = useState<Fact[]>([])
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -415,7 +419,7 @@ export function Records({
             </button>
           </form>
           <p className="small muted">
-            反馈不会自动改动作者方向。复制修订要求后，可在写作页按作者选定的范围生成候选。
+            反馈不会自动改动作者方向。可带入写作页核对来源版本，再亲自选择范围、编辑要求并生成候选。
           </p>
           {feedback.map((f) => (
             <article className="fact" key={f.id}>
@@ -424,6 +428,9 @@ export function Records({
               </strong>
               <blockquote>{f.source_quote}</blockquote>
               <p>{f.text}</p>
+              <button disabled={busy} onClick={() => onReviseFeedback({ ...f, branch_id: branch.id })}>
+                打开此反馈的局部修订
+              </button>
               <button
                 onClick={() =>
                   void perform(async () => {
