@@ -233,12 +233,23 @@
   {
     "id": "scene-maintenance-001",
     "date": "2026-11-13",
-    "commit": "16e317e+working-tree",
+    "commit": "3a576a3",
     "module": "场景范围维护",
     "scenario": "原文核对、归档确认、事务回滚、时点依据及12条后台路径",
     "phase": "stability",
     "result": "passed",
     "record": "2026-11-13-scene-maintenance.md",
     "fix_of": "scene-maintenance-browser-failed"
+  },
+  {
+    "id": "scene-maintenance-live-001",
+    "date": "2026-11-13",
+    "commit": "3a576a3",
+    "module": "本机更新与场景维护",
+    "scenario": "实际恢复、六表一致、3条只读路径及真实HTTP页面隔离",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-13-scene-maintenance.md",
+    "fix_of": ""
   }
 ]
