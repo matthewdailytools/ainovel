@@ -3320,5 +3320,27 @@
     "result": "unverified",
     "record": "2026-11-15-assisted-candidate-recheck.md",
     "fix_of": "assisted-minimal-real-recheck-001"
+  },
+  {
+    "id": "candidate-final-restored-content-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "最终修订候选及整书档案恢复",
+    "scenario": "原评测run登记干预/新子任务/费用并新增独立capture；f124备份实际恢复ok，副本逐字读出两修订1、原修订0完整事件、绑定报告及子任务成功，正式第二章仍空，稿件/步骤/费用相同，0采纳",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "candidate-live-original-preservation-001"
+  },
+  {
+    "id": "assisted-recheck-code-ci-success-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "半自动复检源码双CI完成",
+    "scenario": "main43615287220及分支43615260105均completed/success，1330后端719.28/594.97秒、192前端、48无头/48既有及类型/格式/生成API/构建/静态审阅通过；旧失败保留，无重跑/取消",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "assisted-recheck-final-full-001"
   }
 ]
