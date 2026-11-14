@@ -59,4 +59,28 @@ export async function manuscriptImportFlow(page: Page) {
   await workspace.getByText('已保存预览与导入回执', { exact: true }).click()
   await workspace.getByRole('button', { name: /自拟旧稿.txt · 已导入/ }).click()
   await expect(workspace.getByRole('heading', { name: '导入回执', exact: true })).toBeVisible()
+  const history = await (await page.request.get(`/api/branches/${novel.branch_id}/import-previews`)).json()
+  const preview = await (
+    await page.request.get(`/api/branches/${novel.branch_id}/import-previews/${history[0].id}`)
+  ).json()
+  const fingerprint = workspace.getByText(`原文件SHA-256：${preview.raw_hash}`, { exact: true })
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.evaluate(() => (document.documentElement.style.fontSize = '200%'))
+  await expect(fingerprint).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(321)
+  expect(
+    await fingerprint.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      return [...range.getClientRects()].every(
+        (rect) => rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1,
+      )
+    }),
+  ).toBe(true)
+  const close = workspace.getByRole('button', { name: '关闭导入工作区', exact: true })
+  await close.focus()
+  await expect(close).toBeFocused()
+  await close.press('Enter')
+  await expect(workspace).toHaveCount(0)
 }

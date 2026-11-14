@@ -135,7 +135,7 @@ export function ManuscriptImport({
     setMappings((old) => old.map((m, i) => (i === selected ? { ...m, ...values } : m)))
   }
   return (
-    <section className="card" aria-label="长篇拆章导入">
+    <section className="card manuscript-import" aria-label="长篇拆章导入">
       <h2>长篇拆章导入</h2>
       <button
         disabled={busy}
