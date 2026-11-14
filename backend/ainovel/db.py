@@ -81,13 +81,16 @@ class Database:
             from .story_graph import SCHEMA as STORY_SCHEMA
             from .manuscript_import import SCHEMA as IMPORT_SCHEMA
             from .scene_time import SCHEMA as SCENE_SCHEMA
+            from .runtime import SCHEMA as RUNTIME_SCHEMA
 
             # executescript commits an existing transaction. Begin inside this single
             # script so every extension and the subsequent backfill commit together.
             try:
                 db.executescript(
                     "BEGIN IMMEDIATE;\n"
-                    + "\n".join((SCHEMA, REFERENCE_SCHEMA, STORY_SCHEMA, IMPORT_SCHEMA, SCENE_SCHEMA))
+                    + "\n".join(
+                        (SCHEMA, REFERENCE_SCHEMA, STORY_SCHEMA, IMPORT_SCHEMA, SCENE_SCHEMA, RUNTIME_SCHEMA)
+                    )
                 )
                 db.execute(
                     """INSERT OR IGNORE INTO revisions(id,chapter_id,revision,content,cause,created)

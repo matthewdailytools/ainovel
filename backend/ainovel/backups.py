@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 from time import time
 from zipfile import ZipFile, ZIP_DEFLATED
 
-from .db import DomainError, uid
+from .db import Database, DomainError, uid
 
 
 def digest(path):
@@ -116,17 +116,27 @@ def verify_backup(path):
 
 
 def restore_backup(settings, database, path):
-    from .runtime import alive
+    from .runtime import restore_process_active
 
-    if any(alive(row["pid"]) for row in database.all("SELECT pid FROM processes")):
+    if any(
+        restore_process_active(row)
+        for row in database.all(
+            "SELECT p.pid,p.role,p.started,i.birth_id FROM processes p "
+            "LEFT JOIN process_identities i ON i.token=p.token"
+        )
+    ):
         raise DomainError(
-            "service_active", "请先停止本机 API 与 Worker，再执行正式恢复；可在页面继续进行隔离恢复演练。"
+            "service_active",
+            "请先停止本机 API 与 Worker，或核对无法确认的进程身份；可在页面继续进行隔离恢复演练。",
         )
     if database.all("SELECT id FROM tasks WHERE status='running' AND lease_until>?", (time(),)):
         raise DomainError("worker_active", "请先停止本机服务和 Worker，等待租约到期后恢复。")
     with TemporaryDirectory(dir=settings.data_dir) as scratch:
         scratch = Path(scratch)
         counts = unpack_verified(path, scratch)
+        # Apply the same additive migrations as startup before touching the
+        # target. An older backup must remain registerable after restoration.
+        Database(scratch / "manuscripts.sqlite")
         before = create_backup(settings, database)
         # Sources are immutable and UUID-named; only add missing originals.
         for source in (scratch / "sources").glob("*"):
