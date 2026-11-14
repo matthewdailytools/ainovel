@@ -40,6 +40,7 @@ from .settings import ROOT, Settings
 from .modules import MODULES, public_modules
 from .manual_finalization import register_routes as register_finalization_routes
 from .targeted_revision import validate_targeted_revision
+from .candidate_recheck import CandidateRecheckInput, sha as candidate_sha
 
 
 class ReadingInput(Input):
@@ -834,6 +835,22 @@ def create_app(settings=None, schema_only=False):
     def artifact(artifact_id: str):
         return domain.artifact(artifact_id)
 
+    @app.get("/api/artifacts/{artifact_id}/history")
+    def candidate_history(artifact_id: str, offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0):
+        """分页返回候选编辑与复检前的只读快照；旧事件缺失的内容不推造。"""
+        source = domain.artifact(artifact_id)
+        rows = db.all(
+            "SELECT id,kind,payload,created FROM task_events WHERE task_id=? "
+            "AND kind IN ('candidate_edited','candidate_rechecked') "
+            "AND json_extract(payload,'$.artifact_id')=? ORDER BY id DESC LIMIT 21 OFFSET ?",
+            (source["task_id"], artifact_id, offset),
+        )
+        return {
+            "artifact_id": artifact_id,
+            "items": [{**row, "payload": json.loads(row["payload"])} for row in rows[:20]],
+            "next_offset": offset + 20 if len(rows) > 20 else None,
+        }
+
     @app.patch("/api/artifacts/{artifact_id}")
     def edit_candidate(artifact_id: str, data: CandidateEdit):
         with db.connect(True) as tx:
@@ -846,6 +863,7 @@ def create_app(settings=None, schema_only=False):
             current_revision = payload.get("_candidate_revision", 0)
             if current_revision != data.candidate_revision:
                 raise DomainError("candidate_conflict", "候选已在其他窗口更新，本地编辑请保留并比较。", 409)
+            previous_candidate = json.loads(dumps(payload))
             if "review" in payload:
                 payload["previous_review"] = payload.pop("review")
             if "plot_audit" in payload:
@@ -867,6 +885,8 @@ def create_app(settings=None, schema_only=False):
                         "artifact_id": artifact_id,
                         "candidate_revision": current_revision + 1,
                         "previous_revision": current_revision,
+                        "previous_content_sha256": candidate_sha(previous_candidate["text"]),
+                        "previous_candidate": previous_candidate,
                     },
                 )
         return domain.artifact(artifact_id)
@@ -875,8 +895,29 @@ def create_app(settings=None, schema_only=False):
     def accept_candidate(artifact_id: str, data: AcceptInput):
         return domain.accept(artifact_id, data.idempotency_key, candidate_revision=data.candidate_revision)
 
+    @app.post("/api/artifacts/{artifact_id}/recheck", status_code=202)
+    def recheck_candidate(artifact_id: str, data: CandidateRecheckInput):
+        """按原写前冻结契约复检待审候选，不重新解释情节、不采纳或恢复原流程。"""
+        source = domain.artifact(artifact_id)
+        payload = {
+            **data.model_dump(),
+            "source_candidate_id": artifact_id,
+            "plot_contract_check": True,
+            "novel_id": source["novel_id"],
+            "branch_id": source["branch_id"],
+            "chapter_id": source["chapter_id"],
+            "base_revision": source["base_revision"],
+        }
+        previous = domain.find_request("candidate_recheck", payload)
+        if previous:
+            return previous
+        provider_ready(data.account)
+        return domain.queue("candidate_recheck", payload)
+
     @app.post("/api/artifacts/{artifact_id}/reject")
     def reject(artifact_id: str, data: CandidateVersionInput | None = None):
+        if domain.artifact(artifact_id)["kind"] == "candidate_recheck":
+            raise DomainError("candidate_recheck_readonly", "候选复检报告只读，原报告及关联保持。", 409)
         with db.connect(True) as tx:
             row = tx.execute("SELECT status,payload FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
             if not row:

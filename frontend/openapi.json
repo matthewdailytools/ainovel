@@ -1578,6 +1578,39 @@
         }
       }
     },
+    "/api/artifacts/{artifact_id}/history": {
+      "get": {
+        "summary": "Candidate History",
+        "description": "分页返回候选编辑与复检前的只读快照；旧事件缺失的内容不推造。",
+        "operationId": "candidate_history_api_artifacts__artifact_id__history_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "maximum": 1000000, "minimum": 0, "default": 0, "title": "Offset" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/artifacts/{artifact_id}/accept": {
       "post": {
         "summary": "Accept Candidate",
@@ -1596,6 +1629,39 @@
         },
         "responses": {
           "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}/recheck": {
+      "post": {
+        "summary": "Recheck Candidate",
+        "description": "按原写前冻结契约复检待审候选，不重新解释情节、不采纳或恢复原流程。",
+        "operationId": "recheck_candidate_api_artifacts__artifact_id__recheck_post",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CandidateRecheckInput" } }
+          }
+        },
+        "responses": {
+          "202": {
             "description": "Successful Response",
             "content": { "application/json": { "schema": {} } }
           },
@@ -2765,6 +2831,26 @@
         "type": "object",
         "required": ["text"],
         "title": "CandidateEdit"
+      },
+      "CandidateRecheckInput": {
+        "properties": {
+          "candidate_revision": { "type": "integer", "minimum": 0, "title": "Candidate Revision" },
+          "account": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["candidate_revision", "account", "client_request_id"],
+        "title": "CandidateRecheckInput"
       },
       "CandidateVersionInput": {
         "properties": {

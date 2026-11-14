@@ -166,7 +166,7 @@ class Domain:
         )
         return self.save(chapter_id, base_revision, revision["content"], "恢复历史为新版本")
 
-    def stage(self, request, kind, payload, basis, task_id=None, attempt=None):
+    def stage(self, request, kind, payload, basis, task_id=None, attempt=None, *, on_stage=None):
         artifact_id = uid()
         with self.db.connect(True) as db:
             if attempt:
@@ -228,6 +228,8 @@ class Domain:
                     "UPDATE reference_sessions SET payload=?,updated=? WHERE id=?",
                     (dumps(state), time(), reference["id"]),
                 )
+            if on_stage is not None:
+                on_stage(db, artifact_id)
         return self.artifact(artifact_id)
 
     @staticmethod
@@ -337,6 +339,10 @@ class Domain:
                     "reference_confirmation_required",
                     "参考分析和方案请在参考工作区核对后保存为本次采用内容；此动作不采纳正文。",
                     409,
+                )
+            if artifact["kind"] == "candidate_recheck":
+                raise DomainError(
+                    "candidate_recheck_readonly", "候选复检报告只读，请回到其目标候选决定是否采纳。", 409
                 )
             if require_review and not payload.get("review_passed"):
                 raise DomainError("review_required", "候选尚未通过本轮检查，不能自动采纳。", 409)
@@ -593,6 +599,17 @@ class Domain:
         profile = self.genre_profile(branch_id)
         contract = self.author_contract(branch_id)
         initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
+        if kind == "candidate_recheck":
+            from .candidate_recheck import VERSION, freeze
+
+            snapshot = freeze(self, payload)
+            initial.update(
+                candidate_recheck_version=VERSION,
+                candidate_recheck_snapshot=snapshot,
+                genre_profile_snapshot=snapshot["genre_profile_snapshot"],
+                author_contract_snapshot=snapshot["author_contract_snapshot"],
+                plot_contract_version="author-plot-audit/2",
+            )
         if (
             kind == "module"
             and payload.get("action") == "story.extract"
@@ -689,6 +706,11 @@ class Domain:
                 self.check_targeted_source_tx(db, selection)
                 if selection["story_revision"] != revision:
                     raise DomainError("story_changed", "选择问题的故事版本已改变，请重新审查。", 409)
+            if selection := initial.get("candidate_recheck_snapshot"):
+                from .candidate_recheck import freeze
+
+                if freeze(self, payload) != selection:
+                    raise DomainError("candidate_changed", "复检来源在排队时改变，未创建任务。", 409)
             db.execute(
                 "INSERT INTO tasks(id,kind,novel_id,branch_id,status,payload,result,created,updated) VALUES(?,?,?,?,?,?,?,?,?)",
                 (

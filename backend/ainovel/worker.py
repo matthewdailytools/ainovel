@@ -262,6 +262,10 @@ class Worker:
         provider = self.settings.providers[payload["account"]]
         if self.cancelled():
             raise DomainError("cancelled", "已取消。", 409)
+        if self.task["kind"] == "candidate_recheck":
+            from .candidate_recheck import validate
+
+            validate(self)
         if payload.get("action") == "revision.targeted":
             selection = validate_targeted_revision(self.domain, payload, context or {})
             frozen_selection = self.task["result"].get("targeted_revision_snapshot")
@@ -1584,6 +1588,10 @@ class Worker:
         try:
             if task["kind"] == "module":
                 await self.module()
+            elif task["kind"] == "candidate_recheck":
+                from .candidate_recheck import run
+
+                await run(self)
             else:
                 await self.workflow()
         except Exception as error:
@@ -1606,7 +1614,7 @@ class Worker:
                 )
             with self.db.connect(True) as db:
                 changed = db.execute(
-                    "UPDATE tasks SET status=?,error=?,updated=? WHERE id=? AND attempt=?",
+                    "UPDATE tasks SET status=?,error=?,updated=? WHERE id=? AND attempt=? AND status='running'",
                     (state, message, time(), task["id"], self.attempt),
                 )
                 if changed.rowcount:

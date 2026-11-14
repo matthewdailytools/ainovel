@@ -808,6 +808,26 @@ export interface paths {
     patch: operations['edit_candidate_api_artifacts__artifact_id__patch']
     trace?: never
   }
+  '/api/artifacts/{artifact_id}/history': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Candidate History
+     * @description 分页返回候选编辑与复检前的只读快照；旧事件缺失的内容不推造。
+     */
+    get: operations['candidate_history_api_artifacts__artifact_id__history_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/artifacts/{artifact_id}/accept': {
     parameters: {
       query?: never
@@ -819,6 +839,26 @@ export interface paths {
     put?: never
     /** Accept Candidate */
     post: operations['accept_candidate_api_artifacts__artifact_id__accept_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/artifacts/{artifact_id}/recheck': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Recheck Candidate
+     * @description 按原写前冻结契约复检待审候选，不重新解释情节、不采纳或恢复原流程。
+     */
+    post: operations['recheck_candidate_api_artifacts__artifact_id__recheck_post']
     delete?: never
     options?: never
     head?: never
@@ -1517,6 +1557,17 @@ export interface components {
        * @default 0
        */
       candidate_revision: number
+    }
+    /** CandidateRecheckInput */
+    CandidateRecheckInput: {
+      /** Candidate Revision */
+      candidate_revision: number
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
     }
     /** CandidateVersionInput */
     CandidateVersionInput: {
@@ -4327,6 +4378,39 @@ export interface operations {
       }
     }
   }
+  candidate_history_api_artifacts__artifact_id__history_get: {
+    parameters: {
+      query?: {
+        offset?: number
+      }
+      header?: never
+      path: {
+        artifact_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   accept_candidate_api_artifacts__artifact_id__accept_post: {
     parameters: {
       query?: never
@@ -4344,6 +4428,41 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  recheck_candidate_api_artifacts__artifact_id__recheck_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        artifact_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CandidateRecheckInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
         headers: {
           [name: string]: unknown
         }

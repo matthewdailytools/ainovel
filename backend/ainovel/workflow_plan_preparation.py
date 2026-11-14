@@ -239,6 +239,10 @@ def stop(worker, row, reason):
 
 def frozen_contract(worker, author_text, number, supplied):
     """Only the server's pre-prose receipt may skip reinterpreting a work plan."""
+    if worker.task["kind"] == "candidate_recheck":
+        from .candidate_recheck import verified_contract
+
+        return verified_contract(worker, author_text, number, supplied)
     if not enabled(worker):
         raise DomainError("plan_preparation_version", "旧任务未冻结写前解释，不能补盖准备记录。", 409)
     row = worker.task["result"].get("plot_preparations", {}).get(str(number))

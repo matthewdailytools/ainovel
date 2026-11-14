@@ -23,6 +23,7 @@ import { ManuscriptImport } from './ManuscriptImport'
 import { SceneTimePanel } from './SceneTimePanel'
 import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
 import { plotAuditEnabled, plotAuditFromPayload } from './plotAudit'
+import { CandidateHistory, CandidateRecheckAction, CandidateRecheckReport } from './candidateRecheck'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
 import {
@@ -1084,11 +1085,18 @@ export function Writing({
         </form>
         {activeTask && (
           <div className="notice" role="status">
-            <strong>{label(activeTask.status)}</strong>
+            <strong>
+              {activeTask.kind === 'candidate_recheck' ? '候选复检 · ' : ''}
+              {label(activeTask.status)}
+            </strong>
             <p>关闭浏览器不取消本机任务。</p>
+            {activeTask.kind === 'candidate_recheck' && (
+              <p>正在按原任务冻结契约复核候选，不自动改稿、采纳或继续整书。</p>
+            )}
             <FrozenPlotAuditPolicy
               enabled={activeTask.payload.plot_contract_check}
               version={activeTask.result.plot_contract_version}
+              mode={activeTask.kind === 'candidate_recheck' ? 'automatic' : undefined}
             />
             {activeTask.result.author_contract_snapshot && (
               <details>
@@ -1140,6 +1148,7 @@ export function Writing({
                 <FrozenPlotAuditPolicy
                   enabled={task.payload.plot_contract_check}
                   version={task.result.plot_contract_version}
+                  mode={task.kind === 'candidate_recheck' ? 'automatic' : undefined}
                 />
                 <button
                   disabled={busy}
@@ -1184,12 +1193,34 @@ export function Writing({
                 >
                   {visibleArtifacts.map((a, i) => (
                     <option key={a.id} value={a.id}>
-                      候选 {visibleArtifacts.length - i} · {a.kind} · {label(a.status)}
+                      候选 {visibleArtifacts.length - i} ·{' '}
+                      {a.kind === 'candidate_recheck' ? '候选复检报告' : a.kind} · {label(a.status)}
                     </option>
                   ))}
                 </select>
               </label>
-              {candidate && (
+              {candidate?.kind === 'candidate_recheck' ? (
+                <CandidateRecheckReport
+                  key={candidate.id}
+                  artifact={candidate}
+                  branchId={branch.id}
+                  disabled={busy || opening}
+                  onTarget={(target) => {
+                    void doAction(async () => {
+                      if (!confirmLeave() || !target.chapter_id) return
+                      if (current.current?.id !== target.chapter_id) {
+                        if (current.current) await save()
+                        await loadChapter(target.chapter_id)
+                      }
+                      if (current.current?.id !== target.chapter_id) return
+                      setArtifacts((rows) =>
+                        rows.some((row) => row.id === target.id) ? rows : [target, ...rows],
+                      )
+                      setCandidateId(target.id)
+                    })
+                  }}
+                />
+              ) : candidate ? (
                 <Candidate
                   key={candidate.id}
                   artifact={candidate}
@@ -1200,6 +1231,8 @@ export function Writing({
                   account={account}
                   modelReady={modelReady}
                   revisionDisabled={!!activeTask || busy}
+                  recheckDisabled={!!activeTask || opening}
+                  manuscriptUnsaved={text !== chapter?.content || !!recovery}
                   directionDisabled={!!activeTask || busy || opening || !!feedbackHandoff}
                   onDirection={loadAdviceDirection}
                   notify={notify}
@@ -1222,7 +1255,7 @@ export function Writing({
                   }}
                   onUpdate={async () => setArtifacts(await api(`/artifacts?branch_id=${branch.id}`))}
                 />
-              )}
+              ) : null}
             </>
           ) : (
             <p className="empty-note">有想法时亲自写。需要帮助时，再生成一份候选。</p>
@@ -1237,6 +1270,8 @@ function Candidate({
   artifact,
   onIntentSettings,
   revisionDisabled,
+  recheckDisabled,
+  manuscriptUnsaved,
   novelId,
   branchId,
   chapter,
@@ -1255,6 +1290,8 @@ function Candidate({
   artifact: Artifact
   onIntentSettings: () => void
   revisionDisabled: boolean
+  recheckDisabled: boolean
+  manuscriptUnsaved: boolean
   novelId: string
   branchId: string
   chapter?: Chapter
@@ -1435,6 +1472,23 @@ function Candidate({
           <summary>查看本章检查依据</summary>
           <pre className="report">{JSON.stringify(artifact.payload.review, null, 2)}</pre>
         </details>
+      )}
+      {artifact.kind === 'chapter_draft' && (
+        <CandidateRecheckAction
+          artifact={artifact}
+          chapter={chapter}
+          branchId={branchId}
+          account={account}
+          modelReady={modelReady}
+          disabled={recheckDisabled}
+          busy={busy}
+          unsaved={manuscriptUnsaved || candidateChanged || edit !== (artifact.payload.text || '')}
+          perform={perform}
+          onStarted={onStarted}
+        />
+      )}
+      {['text_patch', 'chapter_draft'].includes(artifact.kind) && (
+        <CandidateHistory artifactId={artifact.id} />
       )}
       {artifact.kind !== 'reference_comparison' && (
         <PlotAuditDetails
