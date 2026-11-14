@@ -3683,5 +3683,115 @@
     "result": "passed",
     "record": "2026-11-15-longform-import-and-reverse.md",
     "fix_of": "import-fingerprint-local-full-001"
+  },
+  {
+    "id": "scene-guidance-local-full-001",
+    "date": "2026-11-15",
+    "commit": "277cd38",
+    "module": "冻结场景字段提示",
+    "scenario": "新增21项，88相关；1382完整后端337.52秒、51全项目无头263.204秒；API/类型/Ruff通过，旧版本及校验结果保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-scene-order-guidance.md",
+    "fix_of": "import-boundary-low-scene-stop-001"
+  },
+  {
+    "id": "scene-guidance-controlled-runtime-001",
+    "date": "2026-11-15",
+    "commit": "277cd38",
+    "module": "场景提示受控更新",
+    "scenario": "91b74a备份实恢，出生身份核实后更新，六保护表/全部费用/两父任务/六账户配置相同，Cf界面保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-scene-order-guidance.md",
+    "fix_of": "scene-guidance-local-full-001"
+  },
+  {
+    "id": "scene-guidance-live-output-stop-001",
+    "date": "2026-11-15",
+    "commit": "277cd38",
+    "module": "同两章真实提示复测",
+    "scenario": "9591489同low/两章/16384/场景/CNY2；145来源单元、原快照相同；三次均截断，JSON未完整，CNY0.548754全结、0采用，不证明语义改善",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-15-scene-order-guidance.md",
+    "fix_of": "scene-guidance-controlled-runtime-001"
+  },
+  {
+    "id": "scene-guidance-three-stops-restored-001",
+    "date": "2026-11-15",
+    "commit": "277cd38",
+    "module": "三次失败与长稿恢复",
+    "scenario": "728866备份实恢：旧219章/431修订/822事实/367产物/305结构/113场景/1337步骤保持，36新章和原字节/回执恢复；旧费用哈希相同，13调用CNY2.300252全结，稿件ZIP不回滚费用",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-scene-order-guidance.md",
+    "fix_of": "scene-guidance-live-output-stop-001"
+  },
+  {
+    "id": "scene-guidance-code-ci-success-001",
+    "date": "2026-11-15",
+    "commit": "277cd38",
+    "module": "场景提示源码双CI",
+    "scenario": "43629575811/43630412902均success；1382后端738.80/631.79秒、208前端、51无头4.7/4.9分钟，其他既有/API/类型/格式/构建通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-scene-order-guidance.md",
+    "fix_of": "scene-guidance-local-full-001"
+  },
+  {
+    "id": "source-ids-new-fixture-first-001",
+    "date": "2026-11-15",
+    "commit": "16327ed",
+    "module": "来源编号新增夹具",
+    "scenario": "18新增首轮16通过/2夹具失败：UTF16手写13实际12，pending误写而项目为candidate；修正断言，不改生产采纳或证据校验",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-extraction-source-ids.md",
+    "fix_of": "scene-guidance-live-output-stop-001"
+  },
+  {
+    "id": "source-ids-fixed-source-full-001",
+    "date": "2026-11-15",
+    "commit": "16327ed",
+    "module": "来源编号完整回归",
+    "scenario": "124相关、1400完整后端355.85秒、51全项目无头266.829秒；206/255源码构建清单保持并逐文件绑定提交；API/类型/Ruff/三结构严格wire审计通过，未知来源仍停供",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-extraction-source-ids.md",
+    "fix_of": "source-ids-new-fixture-first-001"
+  },
+  {
+    "id": "source-ids-controlled-runtime-001",
+    "date": "2026-11-15",
+    "commit": "16327ed",
+    "module": "来源编号日常更新",
+    "scenario": "无活动任务，728866备份先实恢；核实19624出生身份后关闭、62084自然退出，30296新API；六保护表/完整费用/两父任务/六账户相同，Cf界面和其他端口保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-extraction-source-ids.md",
+    "fix_of": "source-ids-fixed-source-full-001"
+  },
+  {
+    "id": "source-ids-complete-reference-stop-001",
+    "date": "2026-11-15",
+    "commit": "16327ed",
+    "module": "来源精简同条件真实复测",
+    "scenario": "ad7e22f三次完整JSON，8095/11633/12140输出Token、CNY0.429738全结；最终32记录/13场景/98逐字来源/145段覆盖，仍有2个participants非法引用，14事件无已知时点/13unknown场景及人物合并待核；拒绝发布、0采用",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-15-extraction-source-ids.md",
+    "fix_of": "scene-guidance-live-output-stop-001"
+  },
+  {
+    "id": "source-ids-final-restored-failures-001",
+    "date": "2026-11-15",
+    "commit": "16327ed",
+    "module": "四轮长稿试验最终恢复",
+    "scenario": "24289e实恢36新章/原字节/回执/四终态，旧219章/431修订/822事实/367产物/305结构/113场景/1337步骤相同，仅增6被拒缓存；旧费用哈希保持，16调用CNY2.729990全结、0新未知，不回滚费用",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-extraction-source-ids.md",
+    "fix_of": "source-ids-complete-reference-stop-001"
   }
 ]
