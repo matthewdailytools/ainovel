@@ -207,6 +207,24 @@ async def run_extraction(worker, request, context, snapshot=None):
                     issues.append("更新须明确update_fields，仅能修改该记录已定义字段，kind不可变。")
             elif proposal["update_fields"] or proposal["target_revision"] is not None:
                 issues.append("新记录不能指定更新字段或目标修订。")
+            if record["kind"] == "character":
+                # Validate the names that adoption would actually apply. Unselected
+                # update fields retain their existing values, including aliases.
+                effective = {
+                    key: target["payload"][key]
+                    if target and target["kind"] == "character" and key not in proposal["update_fields"]
+                    else record[key]
+                    for key in ("title", "aliases")
+                }
+                names = [effective["title"], *effective["aliases"]]
+                if any(not name.strip() or len(name) > 200 for name in names) or len(set(names)) != len(
+                    names
+                ):
+                    issues.append(
+                        f"{path}.title/aliases 姓名和别名须非空、每项不超过200字且不重复；"
+                        "aliases不得重复本名。只依据本项原文更正，不改名编造身份或合并人物；"
+                        "不能确定的称谓保留unknowns。"
+                    )
             if proposal["append_stages"]:
                 if (
                     not target
@@ -283,6 +301,8 @@ async def run_extraction(worker, request, context, snapshot=None):
         {
             "动作": "按保存稿反向整理长篇结构候选",
             "阶段证据契约版本": PROMISE_STAGE_GROUNDING_VERSION,
+            "身份格式契约版本": "character-name-format/1",
+            "人物称谓格式": "title是本项人物的一个来源支持称谓；aliases仅列其他有依据的称谓，不得重复title、重复列表项、使用空白或超过200字的名称。不为避开冲突改造姓名或合并身份；已有身份继续使用正式id，身份不明列unknowns。更新仅按update_fields应用，其余沿用正式值。",
             **(
                 {
                     "人物自由字段契约版本": REPAIR_V2,
