@@ -230,7 +230,7 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
     return {"status": "observed", "entities": entities, "objects": objects, **observed}
 
 
-async def interpret_plot(worker, author_text, *, source_kind=None):
+async def interpret_plot(worker, author_text, *, source_kind=None, preparation=None):
     if not author_text.strip():
         return {"items": [], "note": "缺少作者情节，不能从候选反推。"}
     author_units = source_units(author_text, "AUTHOR")
@@ -245,6 +245,9 @@ async def interpret_plot(worker, author_text, *, source_kind=None):
 
     def validate_author(value):
         issues = []
+        if preparation is not None and preparation.get("item_count") is not None:
+            if len(value["items"]) != preparation["item_count"]:
+                issues.append("写前复解释必须按原P编号顺序逐项保留全部事项，不得删除、合并或遗漏歧义项。")
         for item in value["items"]:
             resolve_field(item, "author_evidence", author_sources)
             if not item["author_evidence"] or item["author_evidence"] not in author_text:
@@ -281,10 +284,19 @@ async def interpret_plot(worker, author_text, *, source_kind=None):
     # No candidate, reference excerpt, application plan or old review reaches this call.
     contract = await worker.grounded(
         {
-            "动作": "仅依据作者原话整理本场景情节",
+            "动作": "写前解释AI工作章纲" if preparation is not None else "仅依据作者原话整理本场景情节",
             source_label: author_text,
             "可引用原文": author_units,
             **source_metadata(source_kind, version),
+            **(
+                {
+                    "写前准备契约版本": preparation["version"],
+                    "写前准备契约": preparation,
+                    "执行明确性": "certainty表示执行安排是否明确，而非剧情谜底是否已知。明确保留多种可能、尚未认定、继续调查，属于explicit的保留未知安排，绝不能为消除歧义提前解谜。真正未确定的行动细节保留ambiguous，不自行选定。若提供原始事项，按原P编号顺序一一解释相同事项，不删项、不合并；附注只能明确开放细节，不能改变原事件、阶段、否定、只/仅范围或作者条件。",
+                }
+                if preparation is not None
+                else {}
+            ),
             "要求": "只整理原话明确给出的事件、行动者、动作、对象、给出与取得方向和结果。每项引用AUTHOR编号；未给出的字段留空。给出/取得须填写supplier（给出方）、recipient（取得方）、transfer_object和transfer_scope：实际发起尝试为attempted，已交付为completed，仅决定/未来安排为planned，无交换传递为none并将direction留空。不能把愿望改成已发生结果；有多种解读标ambiguous并保留歧义。这里只是AI解释提案，不是作者新增锁定项或本书事实。",
         },
         schema,
@@ -295,10 +307,17 @@ async def interpret_plot(worker, author_text, *, source_kind=None):
     return contract
 
 
-async def audit_plot(worker, author_text, text, number, *, source_kind=None):
+async def audit_plot(worker, author_text, text, number, *, source_kind=None, prepared_contract=None):
     version = execution_version(worker) if source_kind is not None else LEGACY_VERSION
     source_label = "本章工作章纲（AI规划）" if source_kind == "workflow_plan" else "作者原话"
-    contract = await interpret_plot(worker, author_text, source_kind=source_kind)
+    if prepared_contract is None:
+        contract = await interpret_plot(worker, author_text, source_kind=source_kind)
+    else:
+        from .workflow_plan_preparation import frozen_contract
+
+        if source_kind != "workflow_plan":
+            raise DomainError("plan_preparation_version", "冻结工作章纲解释不能替代作者情节解释。", 409)
+        contract = frozen_contract(worker, author_text, number, prepared_contract)
     items = [{"id": f"P{index:02}", **item} for index, item in enumerate(contract["items"], 1)]
     if not items:
         return {

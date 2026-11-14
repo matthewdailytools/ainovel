@@ -312,6 +312,9 @@ class Worker:
             "只从本次正文独立提取物品与信息流向",
             "独立核对人物自由文本的本项来源蕴含",
             "修正未采纳人物自由文本字段",
+            "写前解释AI工作章纲",
+            "写前明确AI工作章纲开放细节",
+            "独立核对AI工作章纲保持",
         }:
             # These source-isolated stages must not reinterpret source claims
             # through other adopted settings, genre preferences or old prose.
@@ -405,12 +408,20 @@ class Worker:
         if epoch := self.task["result"].get("generation_epoch"):
             cache_basis.append(epoch)
         fingerprint = hashlib.sha256(dumps(cache_basis).encode()).hexdigest()
+        replay_owner = getattr(self, "_workflow_plan_replay", None)
         previous = self.db.all(
-            "SELECT result FROM task_steps WHERE task_id=? AND fingerprint=?", (self.task["id"], fingerprint)
+            "SELECT result FROM task_steps WHERE task_id=? AND fingerprint=?",
+            (replay_owner or self.task["id"], fingerprint),
         )
         if previous:
             saved = json.loads(previous[0]["result"])
             return await validated(saved)
+        if replay_owner is not None:
+            raise DomainError(
+                "plan_preparation_unknown",
+                "写前准备已开始但完整结果无法从原步骤核实，未自动重发；请核对步骤和费用。",
+                409,
+            )
         if schema and provider.kind == "openai":
             # Keep completed semantic-cache reuse ahead of wire compatibility
             # checks, but never record an unsupported schema as dispatched.
@@ -452,6 +463,11 @@ class Worker:
                     **(
                         {"scene_grounding_version": source_instruction["场景证据契约版本"]}
                         if "场景证据契约版本" in source_instruction
+                        else {}
+                    ),
+                    **(
+                        {"workflow_plan_preparation_version": source_instruction["写前准备契约版本"]}
+                        if "写前准备契约版本" in source_instruction
                         else {}
                     ),
                     **(
@@ -1223,6 +1239,9 @@ class Worker:
 
     async def workflow(self):
         payload, result = self.task["payload"], self.task["result"]
+        from .workflow_plan_preparation import enabled as preparation_enabled, prepare
+
+        prepare_plans = preparation_enabled(self)
         segment = payload.get("completion_scope", "whole_book") == "segment"
         branch_id = self.task["branch_id"]
         current_revision = self.domain.branch(branch_id)["story_revision"]
@@ -1308,6 +1327,12 @@ class Worker:
                     "chapter_id": chapter["id"],
                     "base_revision": chapter["revision"],
                 }
+                prepared_contract = None
+                if prepare_plans:
+                    prepared = await prepare(self, plot, chapter)
+                    if prepared is None:
+                        return
+                    plot, prepared_contract = prepared
                 context = self.context(branch_id, chapter["id"])
                 fixed = payload["fixed"] + [item for item in plot["fixed"] if item not in payload["fixed"]]
                 findings = [
@@ -1399,7 +1424,17 @@ class Worker:
                         else:
                             source_text, source_kind = plot["plot"], "workflow_plan"
                         review = await attach_plot_review(
-                            self, review, source_text, text, number, source_kind
+                            self,
+                            review,
+                            source_text,
+                            text,
+                            number,
+                            source_kind,
+                            **(
+                                {"prepared_contract": prepared_contract}
+                                if prepared_contract is not None
+                                else {}
+                            ),
                         )
                     length_ok = payload["min_chars"] <= char_count(text) <= payload["max_chars"]
                     passed = not pending and length_ok and review_passed(review)
@@ -1436,7 +1471,13 @@ class Worker:
                 if not passed or payload["adoption"] == "manual":
                     result["waiting_artifact"] = artifact["id"]
                     self.checkpoint(
-                        result, "needs_review", "本章需作者审阅。" if passed else "有限修订后仍有未通过项。"
+                        result,
+                        "needs_review",
+                        "本章需作者审阅。"
+                        if passed
+                        else "正文核对仍有未知，未自动修订；请核对原稿与记录。"
+                        if repair == 0 and unresolved_without_blocker(review)
+                        else "有限修订后仍有未通过项。",
                     )
                     return
                 self.domain.accept(

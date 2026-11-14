@@ -21,11 +21,13 @@ from test_reference_flow import Model as ReferenceModel  # noqa: E402
 from test_story_extraction import ExtractionModel, UpdateModel  # noqa: E402
 from test_workflow_scope import SegmentModel as BookModel  # noqa: E402
 from helpers.character_review_fixture import character_review_output  # noqa: E402
+from helpers.plan_execution_fixture import plan_execution_output  # noqa: E402
 
 CHARACTER_REPAIR_FIXTURE = "character-field-repair-e2e"
 UNSUPPORTED_CHARACTER_NOTE = "工程替身错误备注：沈砚已经掌握飞行能力。"
 GROUNDED_CHARACTER_NOTE = "沈砚用旧尺测量潮水，留下可以回查的记录。"
 PLOT_UNKNOWN_FIXTURE = "plot-check-e2e-unknown"
+PLAN_PREPARATION_FIXTURE = "plan-preparation-e2e"
 PLOT_EXCLUSIVE_FIXTURE = "plot-scope-exclusive-e2e"
 EXCLUSIVE_BODY = (
     "沈砚回到修船铺，把记录本摊在师傅面前。他把已经核对过的潮水读数完整告诉师傅，"
@@ -46,6 +48,7 @@ class Model(ReferenceModel):
         self.book_model = BookModel()
         self.character_repair_tasks = {}
         self.exclusive_plot_tasks = set()
+        self.plan_preparation_tasks = {}
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
@@ -66,6 +69,28 @@ class Model(ReferenceModel):
                 "call_id": "offline-exclusive-body",
             }
         brief = source_instruction.get("作品简报", "")
+        if PLAN_PREPARATION_FIXTURE in brief:
+            self.plan_preparation_tasks[task_id] = "unresolved" if "fixture-unresolved" in brief else "ready"
+        plan_fixture = self.plan_preparation_tasks.get(task_id)
+        if plan_fixture and source_instruction.get("动作") in {"阶段批次规划", "全书滚动规划"}:
+            result = await self.book_model.generate(account, task_id, system, prompt, max_output, **kwargs)
+            plan = json.loads(result["text"])
+            plan["chapters"][0]["plot"] = "测量并记录，保留三种待验原因；登记记录的具体细节尚未指定。"
+            result["text"] = json.dumps(plan)
+            self.book_tasks.add(task_id)
+            return result
+        plan_response = plan_execution_output(source_instruction)
+        if plan_response is not None:
+            if source_instruction.get("动作") == "写前解释AI工作章纲":
+                baseline = source_instruction["写前准备契约"].get("原始事项")
+                if plan_fixture and (not baseline or plan_fixture == "unresolved"):
+                    for item in plan_response["items"]:
+                        item["certainty"] = "ambiguous"
+            return {
+                "text": json.dumps(plan_response),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-plan-preparation",
+            }
         if CHARACTER_REPAIR_FIXTURE in brief:
             self.character_repair_tasks[task_id] = "cannot" if "fixture-cannot-repair" in brief else "repair"
         fixture = self.character_repair_tasks.get(task_id)
@@ -221,9 +246,7 @@ class Model(ReferenceModel):
                                 else "只看到量潮记录，公开安排仍未知"
                                 if plot_unknown
                                 else "保留测量，没有修门",
-                                "evidence": instruction["可引用原文"][0]["source_id"]
-                                if plot_unknown
-                                else "PLOT001P0001",
+                                "evidence": instruction["可引用原文"][0]["source_id"],
                                 "reason": "作者情节保留公开安排的歧义，不升级为硬条件"
                                 if plot_unknown
                                 else "工程替身结果，不代表模型语义能力",

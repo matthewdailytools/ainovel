@@ -21,6 +21,7 @@ import { CharacterFieldRepairOption, FrozenCharacterFieldRepairPolicy } from './
 import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
 import { plotAuditFromPayload } from './plotAudit'
 import { FrozenStructureOutputPolicy, StructureOutputSettings } from './StructureOutputSettings'
+import { PlanPreparationDetails, planPreparationNeedsReview } from './PlanPreparationDetails'
 import {
   DEFAULT_STRUCTURE_OUTPUT_TOKENS,
   workflowStructureOutput,
@@ -138,6 +139,16 @@ export function WorkflowPage({
   const structureWaiting = !!task?.result.waiting_structure
   const candidateChanged = !!waiting && incomingWaiting?.id === waiting.id
   const waitingPlotAudit = plotAuditFromPayload(waiting?.payload || {})
+  const planWaiting =
+    task?.status === 'needs_review' &&
+    task.payload.mode === 'automatic' &&
+    task.payload.plot_contract_check === true &&
+    !waitingId &&
+    planPreparationNeedsReview(
+      task.result.workflow_plan_preparation_version,
+      task.result.plot_preparations,
+      task.result.next_chapter,
+    )
   useEffect(() => {
     setUnknown(false)
     setChanges(false)
@@ -476,7 +487,10 @@ export function WorkflowPage({
             />
             <PlotAuditOption checked={plotContractCheck} disabled={busy} onChange={setPlotContractCheck} />
             {plotContractCheck && mode === 'automatic' && (
-              <p className="small muted">全自动核对来源是AI章纲，不是作者原话或新增硬条件。</p>
+              <p className="small muted">
+                全自动会在写正文前明确自己的AI章纲，必要时最多两轮选择本章开放细节并核对，增加模型调用和费用。
+                原章纲、你的固定条件和剧情中尚未解开的疑问保持；未能明确时停止，不先写正文。AI选择不是作者新增锁定。
+              </p>
             )}
             <label>
               本批次预算（可低于共享总上限）
@@ -577,6 +591,13 @@ export function WorkflowPage({
                     mode={task.payload.mode}
                     version={task.result.plot_contract_version}
                   />
+                  <PlanPreparationDetails
+                    mode={task.payload.mode}
+                    enabled={task.payload.plot_contract_check}
+                    version={task.result.workflow_plan_preparation_version}
+                    value={task.result.plot_preparations}
+                    taskStatus={task.status}
+                  />
                   <details>
                     <summary>本批次冻结的频道与题材</summary>
                     {task.result.author_contract_snapshot && (
@@ -675,6 +696,7 @@ export function WorkflowPage({
                   <button
                     disabled={
                       busy ||
+                      planWaiting ||
                       (task.status === 'needs_review' &&
                         !!waitingId &&
                         (!waiting || candidateChanged || (structureWaiting && !regenerate))) ||
@@ -701,6 +723,11 @@ export function WorkflowPage({
                   >
                     从保存的检查点恢复
                   </button>
+                  {planWaiting && (
+                    <p role="status">
+                      章纲准备尚未通过，请核对执行记录。可在上方调整简报后创建独立批次，本批记录和原稿保留；恢复不会重置开放选择轮次。
+                    </p>
+                  )}
                   {['paused', 'blocked_runtime', 'blocked_creative', 'cancelled'].includes(task.status) &&
                     !waitingId && (
                       <details>

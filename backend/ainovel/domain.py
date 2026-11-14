@@ -607,6 +607,10 @@ class Domain:
             from .plot_audit import VERSION as PLOT_CONTRACT_VERSION
 
             initial["plot_contract_version"] = PLOT_CONTRACT_VERSION
+            if kind == "workflow" and payload.get("mode") == "automatic":
+                from .workflow_plan_preparation import VERSION as PLAN_PREPARATION_VERSION
+
+                initial["workflow_plan_preparation_version"] = PLAN_PREPARATION_VERSION
         if kind == "workflow":
             inherited = self.db.all(
                 "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind='structure_inheritance' AND status='accepted' ORDER BY created DESC LIMIT 1",
@@ -743,6 +747,21 @@ class Domain:
                 raise DomainError("idempotency", "该续跑标识已用于其他检查点或决定。", 409)
             return previous
         self.check_genre_snapshot(current["branch_id"], current["result"].get("genre_profile_snapshot"))
+        if "workflow_plan_preparation_version" in current["result"]:
+            from .workflow_plan_preparation import VERSION as PLAN_PREPARATION_VERSION
+
+            if current["result"]["workflow_plan_preparation_version"] != PLAN_PREPARATION_VERSION:
+                raise DomainError("continuation", "章纲准备政策无法确认，未创建续跑任务。", 409)
+            if any(
+                "response" not in phase and phase.get("status") != "not_sent"
+                for row in current["result"].get("plot_preparations", {}).values()
+                for phase in row.get("phases", {}).values()
+            ):
+                raise DomainError(
+                    "continuation",
+                    "章纲准备步骤尚无完整回执，请先在原账户核对并恢复已有步骤；完整回执或明确未发送后才可换账户。未创建续跑任务。",
+                    409,
+                )
         self.check_author_contract_snapshot(
             current["branch_id"], current["result"].get("author_contract_snapshot")
         )

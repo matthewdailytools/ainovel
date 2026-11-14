@@ -145,6 +145,8 @@ export type Task = {
     genre_profile_snapshot?: GenreProfile
     character_field_repairs?: unknown
     plot_contract_version?: string
+    workflow_plan_preparation_version?: string
+    plot_preparations?: unknown
   }
   payload: {
     completion_scope?: 'whole_book' | 'segment'

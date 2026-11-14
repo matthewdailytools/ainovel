@@ -154,6 +154,11 @@ def test_workflow_unverified_does_not_force_revision_and_plan_origin_remains_exp
     if mode == "assisted":
         request["plots"][0]["plot"] = AUTHOR
     queued = domain.queue("workflow", request, story["branch_id"])
+    if mode == "automatic":
+        # Frozen pre-preparation tasks retain the exact post-draft audit path.
+        legacy = {k: v for k, v in queued["result"].items() if k != "workflow_plan_preparation_version"}
+        with domain.db.connect(True) as tx:
+            tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(legacy), queued["id"]))
     model = PlotModel(verdict, certainty)
 
     async def unexpected(*args, **kwargs):
@@ -163,6 +168,7 @@ def test_workflow_unverified_does_not_force_revision_and_plan_origin_remains_exp
     asyncio.run(Worker(settings, model).run_once())
     task = domain.task(queued["id"])
     assert task["status"] == "needs_review", task["error"]
+    assert "未自动修订" in task["error"] and "有限修订" not in task["error"]
     saved = domain.artifact(task["result"]["waiting_artifact"])
     assert not saved["payload"]["review_passed"]
     assert saved["payload"]["plot_audit"]["status"] == "unverified"
@@ -265,6 +271,10 @@ def test_automatic_failure_report_names_workflow_plan_instead_of_author_lock(
     request = workflow_payload(story, mode="automatic")
     request["plot_contract_check"] = True
     queued = domain.queue("workflow", request, story["branch_id"])
+    # This test is the old frozen workflow/report compatibility contract.
+    legacy = {k: v for k, v in queued["result"].items() if k != "workflow_plan_preparation_version"}
+    with domain.db.connect(True) as tx:
+        tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(legacy), queued["id"]))
     model = PlotModel()
 
     async def unchanged(self, text, *args):

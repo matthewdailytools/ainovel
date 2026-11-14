@@ -77,11 +77,20 @@ def bind_plot_audit(audit, author_text, text, source_kind, *, candidate_revision
     return bound
 
 
-async def attach_plot_review(worker, review, author_text, text, number, source_kind, *, target=None):
+async def attach_plot_review(
+    worker, review, author_text, text, number, source_kind, *, target=None, prepared_contract=None
+):
     """Keep the original review; an AI interpretation never creates author facts."""
     result = deepcopy(review)
     audit = bind_plot_audit(
-        await audit_plot(worker, author_text, text, number, source_kind=source_kind),
+        await audit_plot(
+            worker,
+            author_text,
+            text,
+            number,
+            source_kind=source_kind,
+            **({"prepared_contract": prepared_contract} if prepared_contract is not None else {}),
+        ),
         author_text,
         text,
         source_kind,
