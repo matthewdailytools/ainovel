@@ -19,6 +19,186 @@ async function setup(page: import('@playwright/test').Page, title: string, conte
   return { novel, chapter, headers }
 }
 
+function barrier() {
+  let release = () => {}
+  const promise = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { promise, release }
+}
+
+for (const target of ['chapter', 'novel'] as const) {
+  test(`生成中切${target === 'chapter' ? '章' : '作品'}：回执或完成候选晚返回不覆盖新目标`, async ({
+    page,
+  }) => {
+    const original = '甲章原稿😀𠮷。\n这段只属于原目标。'
+    const otherOriginal = '乙章原稿。\n这段只属于新目标。'
+    const otherEdited = '乙章新写的正文😀𠮷。\n切换后仍能继续亲自写作。'
+    const { novel, chapter, headers } = await setup(page, `后台验证 · 生成中切${target}`, original)
+    const otherNovel =
+      target === 'novel'
+        ? await (
+            await page.request.post('/api/novels', { headers, data: { title: '后台验证 · 新目标作品' } })
+          ).json()
+        : novel
+    const otherChapter = await (
+      await page.request.post(`/api/branches/${otherNovel.branch_id}/chapters`, {
+        headers,
+        data: { title: '乙章独立目标' },
+      })
+    ).json()
+    expect(
+      (
+        await page.request.put(`/api/chapters/${otherChapter.id}`, {
+          headers,
+          data: { base_revision: 0, content: otherOriginal },
+        })
+      ).ok(),
+    ).toBeTruthy()
+    await page.reload()
+    await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+    const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
+    await expect(editor.locator('.cm-line')).toHaveText(original.split('\n'))
+    await editor.focus()
+    await editor.press('ControlOrMeta+Home')
+    await editor.press('Shift+End')
+    await page
+      .getByRole('combobox', { name: '这次要做什么', exact: true })
+      .selectOption('writing.rewrite_selection')
+    await page
+      .getByRole('textbox', { name: '情节或具体要求', exact: true })
+      .fill('后台故障演练：慢速可取消。仅改甲章选句。')
+    const entered = barrier()
+    const release = barrier()
+    let taskId = ''
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    // Hold the actual POST receipt to exercise an unmounted workbench. A
+    // same-workbench chapter change waits for submission to finish, then runs
+    // while the Worker is still generating its delayed candidate.
+    await page.route('**/api/modules', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue()
+      const response = await route.fetch()
+      expect(response.ok()).toBeTruthy()
+      taskId = (await response.json()).id
+      entered.release()
+      await release.promise
+      await route.fulfill({ response })
+    })
+    try {
+      const lateResponse = page.waitForResponse(
+        (response) => response.url().endsWith('/api/modules') && response.request().method() === 'POST',
+      )
+      await page.getByRole('button', { name: '生成候选 →', exact: true }).click()
+      await entered.promise
+      await expect
+        .poll(async () => (await (await page.request.get(`/api/tasks/${taskId}`)).json()).status)
+        .toBe('running')
+      if (target === 'chapter') {
+        release.release()
+        await (await lateResponse).finished()
+        await expect(page.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
+      }
+      let confirmation = ''
+      page.once('dialog', async (dialog) => {
+        confirmation = dialog.message()
+        await dialog.accept()
+      })
+      if (target === 'novel')
+        await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(otherNovel.id)
+      else await page.locator('.chapter-list button').filter({ hasText: '乙章独立目标' }).click()
+      if (target === 'novel') expect(confirmation).toContain('未提交的写作辅助设置')
+      else expect(confirmation).toBe('')
+      await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue('乙章独立目标')
+      await expect(editor.locator('.cm-line')).toHaveText(otherOriginal.split('\n'))
+      await editor.fill(otherEdited)
+      release.release()
+      await (await lateResponse).finished()
+      await page.getByRole('button', { name: '保存', exact: true }).click()
+      await expect
+        .poll(async () => (await (await page.request.get(`/api/chapters/${otherChapter.id}`)).json()).content)
+        .toBe(otherEdited)
+      await expect
+        .poll(async () => (await (await page.request.get(`/api/tasks/${taskId}`)).json()).status, {
+          timeout: 30_000,
+        })
+        .toBe(target === 'chapter' ? 'blocked_runtime' : 'succeeded')
+      await expect
+        .poll(
+          async () =>
+            (await (await page.request.get(`/api/artifacts?branch_id=${novel.branch_id}`)).json()).length,
+        )
+        .toBe(target === 'chapter' ? 0 : 1)
+      const visiblePoll = await page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/api/artifacts?branch_id=${otherNovel.branch_id}`) &&
+          response.request().method() === 'GET',
+      )
+      expect(await visiblePoll.json()).toEqual([])
+      await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue('乙章独立目标')
+      await expect(editor.locator('.cm-line')).toHaveText(otherEdited.split('\n'))
+      await expect(page.getByRole('button', { name: '采纳到正文', exact: true })).toHaveCount(0)
+      // Refresh both task/artifact polling paths once the old result exists.
+      // The current target must still render its own saved manuscript.
+      await page.reload()
+      await expect(page.getByRole('combobox', { name: '作品', exact: true })).toHaveValue(otherNovel.id)
+      await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue('乙章独立目标')
+      await expect(editor.locator('.cm-line')).toHaveText(otherEdited.split('\n'))
+      await expect(page.getByRole('button', { name: '采纳到正文', exact: true })).toHaveCount(0)
+      expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content).toBe(original)
+      const artifacts = await (await page.request.get(`/api/artifacts?branch_id=${novel.branch_id}`)).json()
+      if (target === 'novel') {
+        expect(artifacts[0]).toMatchObject({
+          task_id: taskId,
+          chapter_id: chapter.id,
+          base_revision: 1,
+          status: 'candidate',
+        })
+        expect(await (await page.request.get(`/api/tasks?branch_id=${otherNovel.branch_id}`)).json()).toEqual(
+          [],
+        )
+        expect(
+          await (await page.request.get(`/api/artifacts?branch_id=${otherNovel.branch_id}`)).json(),
+        ).toEqual([])
+        await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+      } else {
+        const stopped = await (await page.request.get(`/api/tasks/${taskId}`)).json()
+        expect(stopped.error).toBe('生成期间故事版本改变，旧步骤结果保留但不作为当前候选。')
+        const transcript = await (await page.request.get(`/api/tasks/${taskId}/transcript`)).json()
+        expect(transcript.steps).toHaveLength(1)
+        expect(transcript.steps[0].result.text).toBe('她先核对刻度，再记录读数。')
+        expect(artifacts).toEqual([])
+      }
+      await page.locator('.chapter-list button').filter({ hasText: '工程测试章' }).click()
+      await expect(editor.locator('.cm-line')).toHaveText(original.split('\n'))
+      if (target === 'novel') {
+        await expect(page.getByRole('button', { name: '采纳到正文', exact: true })).toBeEnabled()
+        await page.getByRole('button', { name: '拒绝', exact: true }).click()
+        await expect
+          .poll(
+            async () => (await (await page.request.get(`/api/artifacts/${artifacts[0].id}`)).json()).status,
+          )
+          .toBe('rejected')
+      } else await expect(page.getByRole('button', { name: '采纳到正文', exact: true })).toHaveCount(0)
+      expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).revision).toBe(1)
+      expect((await (await page.request.get(`/api/chapters/${otherChapter.id}`)).json()).content).toBe(
+        otherEdited,
+      )
+      const tasks = await (await page.request.get(`/api/tasks?branch_id=${novel.branch_id}`)).json()
+      expect(tasks).toHaveLength(1)
+      expect(tasks[0].id).toBe(taskId)
+      expect(errors).toEqual([])
+    } finally {
+      release.release()
+      if (taskId) {
+        const state = await (await page.request.get(`/api/tasks/${taskId}`)).json()
+        if (['queued', 'running'].includes(state.status))
+          await page.request.post(`/api/tasks/${taskId}/cancel`, { headers })
+      }
+    }
+  })
+}
+
 test('中文组合输入：浏览器IME组合与Enter不触发生成、不插入额外换行，提交后逐字保存', async ({ page }) => {
   const { novel, chapter } = await setup(page, '后台验证 · 中文IME组合事件')
   const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
