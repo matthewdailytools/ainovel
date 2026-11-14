@@ -2418,5 +2418,137 @@
     "result": "unverified",
     "record": "2026-11-14-real-epub.md",
     "fix_of": "real-multipage-epub-ui-001"
+  },
+  {
+    "id": "revision-length-full-regression-001",
+    "date": "2026-11-14",
+    "commit": "efeee60",
+    "module": "篇幅诊断完整回归",
+    "scenario": "1219后端325.72s/墙328.033s，186源码/dist清单稳定；Ruff116文件；220历史行222链接与组合筛选/修复链/320px200%无头通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-revision-length-diagnostics.md",
+    "fix_of": "revision-length-targeted-001"
+  },
+  {
+    "id": "revision-length-real-json-stop-001",
+    "date": "2026-11-14",
+    "commit": "efeee60",
+    "module": "篇幅诊断真实复跑",
+    "scenario": "0464备份验证与六表/usage一致后部署；新增3次CNY0.119458，首个根外reason后两次缺reason，尚未通过JSON，原章空；累计17次CNY0.549324/未知0",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-14-required-json-fields.md",
+    "fix_of": "fixed-review-real-resume-length-stop-001"
+  },
+  {
+    "id": "required-json-fields-targeted-001",
+    "date": "2026-11-14",
+    "commit": "working-tree",
+    "module": "格式修正完整必填字段",
+    "scenario": "3新增及4文件相关62项13.32s通过；完整根对象及missing字段提示，JSON行列偏移无原文、终态不回显字段值/未知名，有限次数不变；全量及真实复跑待验证",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-required-json-fields.md",
+    "fix_of": "revision-length-real-json-stop-001"
+  },
+  {
+    "id": "books-independent-automatic-start-001",
+    "date": "2026-11-14",
+    "commit": "efeee60",
+    "module": "另一独立全自动36章启动",
+    "scenario": "bb34/19b9同简报空白reader来源，plots为空无正文继承，CNY30；显式记录半自动未通过前先独立观察的顺序干预，仅queued/running不判产出完成",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-books-coldstart.md",
+    "fix_of": "revision-length-real-json-stop-001"
+  },
+  {
+    "id": "required-json-fields-full-regression-001",
+    "date": "2026-11-14",
+    "commit": "working-tree",
+    "module": "JSON必填诊断完整回归",
+    "scenario": "1222后端322.35s/墙324.895s，186源码/dist清单前后稳定；新增未知覆盖修复尚未包含，不混成同一轮",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-required-json-fields.md",
+    "fix_of": "required-json-fields-targeted-001"
+  },
+  {
+    "id": "books-independent-auto-structure-stop-001",
+    "date": "2026-11-14",
+    "commit": "efeee60",
+    "module": "新自动首章结构停止",
+    "scenario": "bb34自动形成36章计划、首章2597字rev1；next2仅待下一章，正式结构/场景0；11次CNY0.438264/未知0，多顺序事件依据三次未核实，未改原稿",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-14-scene-unknown-coverage.md",
+    "fix_of": "books-independent-automatic-start-001"
+  },
+  {
+    "id": "scene-unknown-coverage-bug-before-001",
+    "date": "2026-11-14",
+    "commit": "efeee60",
+    "module": "混合未知时点确定性首败",
+    "scenario": "离线原实现覆盖[3,null]但仅引3可得无问题/精确3，候选与正式审计均存在忽略未知风险；与真实多已知顺序停止不同",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-14-scene-unknown-coverage.md",
+    "fix_of": ""
+  },
+  {
+    "id": "scene-unknown-existing-impact-001",
+    "date": "2026-11-14",
+    "commit": "efeee60",
+    "module": "已有场景只读影响核查",
+    "scenario": "49条活动event_refs场景/1工作版本，按当前有效实际事件及原文重合检查，命中0；已完成自动十章亦0，无写入/模型，不代表全部语义通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-scene-unknown-coverage.md",
+    "fix_of": "scene-unknown-coverage-bug-before-001"
+  },
+  {
+    "id": "scene-unknown-coverage-targeted-001",
+    "date": "2026-11-14",
+    "commit": "working-tree",
+    "module": "未知覆盖与具体顺序诊断",
+    "scenario": "新增5边界，相关4文件75项8.24s通过；候选/采纳/读取均保留null检查，未知需模型明确理由，不代选；完整组合回归待完成",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-scene-unknown-coverage.md",
+    "fix_of": "scene-unknown-coverage-bug-before-001"
+  },
+  {
+    "id": "daily-origin-token-secret-boundaries-001",
+    "date": "2026-11-14",
+    "commit": "efeee60",
+    "module": "日常写权限与配置脱敏",
+    "scenario": "自有空章：不可信Origin+有效token及缺token均403；空稿rev0不变。公开配置与3已配密钥逐值核对无暴露，零模型/其他目标。首脚本status_code误作函数后先核原稿再修正统计，非产品失败",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-scene-unknown-coverage.md",
+    "fix_of": ""
+  },
+  {
+    "id": "json-and-scene-combined-regression-001",
+    "date": "2026-11-14",
+    "commit": "working-tree",
+    "module": "JSON与未知覆盖组合全量",
+    "scenario": "1227后端326.94s/墙329.39s，45无头report237.239s/墙239.884s，0失败/跳过/flaky与errors空；186/233源码/dist清单分别稳定，Ruff116文件与230历史/232链接通过；尚非真实模型通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-scene-unknown-coverage.md",
+    "fix_of": "scene-unknown-coverage-bug-before-001"
+  },
+  {
+    "id": "revision-length-ci-efeee60-main-001",
+    "date": "2026-11-14",
+    "commit": "efeee60",
+    "module": "篇幅诊断主分支CI",
+    "scenario": "43593980317主分支completed/success，同SHA核实；隔离分支43593965848当次仍运行，未冒充两组都成功",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-revision-length-diagnostics.md",
+    "fix_of": "revision-length-full-regression-001"
   }
 ]

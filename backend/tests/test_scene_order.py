@@ -15,6 +15,8 @@ from ainovel.scene_order import (
     effective_records,
     execution_version,
     linked_scene_issues,
+    audit_valid,
+    adopted_audit,
     make_audit,
     payload_sha,
 )
@@ -57,6 +59,9 @@ def row(record, identifier="existing", revision=0, invalid=None):
         ((3, 4), ["event-0"], None, False, None),
         ((3, 4), ["event-0", "event-1"], None, False, None),
         ((None,), ["event-0"], None, False, None),
+        ((3, None), ["event-0"], None, False, None),
+        ((3, None), ["event-0", "event-1"], None, False, None),
+        ((3, None), ["event-0", "event-1"], "覆盖事件中有时点未确认，不能取已知值代表全场景", True, None),
         ((3, 4), ["event-0", "event-1"], "同一回忆范围出现两个实际时点，尚不能确定当前时点", True, None),
         ((3, 4), [], "尚未核实时点，覆盖不是时点认定", True, None),
         ((3,), ["event-0", "event-0"], None, False, None),
@@ -102,6 +107,46 @@ def test_refs_require_current_actual_source_even_for_unknown(damage):
     known = {"existing": row(event, invalid=["正文失效"] if damage == "invalid" else [])}
     for reason in (None, "引用本身仍须有效"):
         assert linked_scene_issues([scene(units, ["existing"], reason)], units, known, [])
+
+
+def test_order_mismatch_diagnostic_explains_coverage_without_changing_decision():
+    units = units_for("第一段观察。\n第二段事件时点未确认。")
+    items = proposals(units, (3, None))
+    value = scene(units, ["event-0"])
+    before = deepcopy(value)
+    issues = linked_scene_issues([value], units, {}, items)
+    assert len(issues) == 1
+    assert "有效引用order=[3]" in issues[0] and "全部覆盖order=[3, null]" in issues[0]
+    assert "不能忽略" in issues[0]
+    assert all(unit["text"] not in issues[0] for unit in units)
+    assert value == before
+
+
+def test_old_known_scene_audit_with_unknown_covered_event_is_invalid_without_rewriting():
+    units = units_for("已知事件。\n实际事件的时点未知。")
+    items = proposals(units, (3, None))
+    indexed = {item["local_id"]: row(item["record"], item["local_id"]) for item in items}
+    event = items[0]["record"]
+    witness = {
+        "ref": "event-0",
+        "event_id": "event-0",
+        "event_revision": 0,
+        "story_order": 3,
+        "record_sha256": payload_sha(event),
+    }
+    payload = {
+        "source_revision": units[0]["revision"],
+        "start": units[0]["start"],
+        "end": units[-1]["end"],
+        "story_order": 3,
+        "order_basis": {"version": VERSION, "kind": "event_refs", "refs": [witness], "covered_events": []},
+    }
+    before = deepcopy(payload)
+    assert not audit_valid(None, payload, units[0]["chapter_id"], indexed)
+    assert not audit_valid(None, payload, units[0]["chapter_id"], indexed, adopting=True)
+    with pytest.raises(DomainError, match="未采用"):
+        adopted_audit(None, payload, units[0]["chapter_id"], indexed)
+    assert payload == before
 
 
 def test_new_schema_rejects_redundant_scalar_while_legacy_schema_stays_scalar():

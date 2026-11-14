@@ -211,10 +211,16 @@ def resolve_basis(scene, selected, nodes):
             issues.append("unknown须明确非空理由，不能自动清空时点以通过。")
     else:
         orders = {node["record"]["story_order"] for _, node in resolved}
-        coverage_orders = {node["record"]["story_order"] for node in covered.values()} - {None}
+        coverage_orders = {node["record"]["story_order"] for node in covered.values()}
         if not resolved or None in orders or len(orders) != 1 or orders != coverage_orders:
+
+            def preview(values):
+                return json.dumps(sorted(values, key=lambda value: (value is None, value or 0))[:8])
+
             issues.append(
                 "event_refs与全部覆盖实际事件须精确对应唯一已知order；多顺序须有依据拆分或明确unknown及理由。"
+                f"有效引用order={preview(orders)}，全部覆盖order={preview(coverage_orders)}（各最多8项）；"
+                "null也是未确认边界，不能忽略、任取一个已知值或改写事件以通过。"
             )
         elif not issues:
             order = next(iter(orders))
@@ -317,7 +323,7 @@ def audit_valid(tx, payload, chapter_id, indexed, *, adopting=False):
             and overlaps(
                 event["payload"], chapter_id, payload["source_revision"], [(payload["start"], payload["end"])]
             )
-        } - {None}
+        }
         if orders != {payload["story_order"]}:
             return False
     return True

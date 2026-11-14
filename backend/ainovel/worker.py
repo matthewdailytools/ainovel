@@ -40,13 +40,23 @@ longform.plans单独列出作者维护的未来计划，包含各信息视角的
 作者已确认的固定结果、禁止项和终局不得被预设或本次模糊指令覆盖。本次明确指令若与作品锁定冲突，应指出冲突并等待作者明确改约，不静默替换锁定。全书结果和终局在全书检查核对，单章只核对禁止项及当前时点明确应发生的结果。
 """
 PROMPT_VERSION = "0.13.0"
-STRUCTURE_REPAIR_VERSION = "2"
+STRUCTURE_REPAIR_VERSION = "3"
 REVIEW_CHECK_VERSION = "fixed-check-shape/1"
 REVISION_LENGTH_VERSION = "replacement-length-diagnostics/1"
 
 
 def structure_issues(error):
     if not hasattr(error, "errors"):
+        cause = error.__cause__
+        if isinstance(cause, json.JSONDecodeError):
+            return [
+                {
+                    "type": "invalid_json",
+                    "line": cause.lineno,
+                    "column": cause.colno,
+                    "offset": cause.pos,
+                }
+            ]
         return [{"type": "invalid_json"}]
     issues = []
     for item in error.errors():
@@ -376,7 +386,8 @@ class Worker:
                             "原始任务": instruction,
                             "原始输出": result["text"],
                             "错误字段": issues,
-                            "要求": "严格遵守各字段枚举，按错误字段中的actual与allowed核对；不能把相邻字段的取值混用。不新增或改变事实。回到任务正文校验逐字引文。",
+                            "根对象必填字段": schema.model_json_schema().get("required", []),
+                            "要求": "返回包含全部根对象必填字段的完整JSON对象，不只返回修改片段。missing表示字段缺失，须补回相应字段；不得为修复JSON括号而丢掉reason等其他必填字段。只返回一个根对象，不在根对象闭合后追加字段。严格遵守各字段枚举，按错误字段中的actual与allowed核对；不能把相邻字段的取值混用。不新增或改变事实。回到任务正文校验逐字引文。",
                             **(
                                 {
                                     "事实字段说明": "kind是领域类别，只能event/knowledge/capability/resource/relationship/promise/world；truth是真实性标记，只能fact/belief/uncertain/plan。belief、uncertain、plan不是kind。角色误信仍保留truth=belief，不升级为作者事实。"
@@ -392,8 +403,17 @@ class Worker:
                         structure_repairs - 1,
                         contract,
                     )
+                details = []
+                for issue in issues[:6]:
+                    field = (
+                        "未声明字段"
+                        if issue["type"] == "extra_forbidden"
+                        else ".".join(str(part) for part in issue.get("field", []))[:120] or "JSON"
+                    )
+                    details.append(f"{field} ({issue['type']})")
                 raise DomainError(
-                    "invalid_structure", "结构化产物在两轮格式修正后仍未通过契约，未采纳。"
+                    "invalid_structure",
+                    "结构化产物在两轮格式修正后仍未通过契约，未采纳。 字段诊断：" + "；".join(details),
                 ) from error
 
         # Lossless wire aliases must not discard a paid, completed generation
