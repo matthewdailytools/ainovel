@@ -1036,7 +1036,10 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** Books */
+    /**
+     * Books
+     * @description 返回导入时资料记录；file_hash是导入文件SHA，原件变化不会自动重读。同名再导入建立独立资料。
+     */
     get: operations['books_api_library_books_get']
     put?: never
     post?: never
@@ -1070,7 +1073,10 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** Search */
+    /**
+     * Search
+     * @description 只检索导入时正文快照；命中file_hash为导入文件身份，不表示已核对当前磁盘原件。
+     */
     get: operations['search_api_library_search_get']
     put?: never
     post?: never
@@ -1087,7 +1093,10 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** Units */
+    /**
+     * Units
+     * @description 返回导入时正文快照的单元目录，不因外部原件变化自动重解析。
+     */
     get: operations['units_api_library_books__book_id__units_get']
     put?: never
     post?: never
@@ -1104,7 +1113,10 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** Unit */
+    /**
+     * Unit
+     * @description content是导入时正文快照，file_hash是导入文件SHA；不保证当前原件仍存在或未改变。
+     */
     get: operations['unit_api_library_units__unit_id__get']
     put?: never
     post?: never

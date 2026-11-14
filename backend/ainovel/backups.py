@@ -12,10 +12,47 @@ from time import time
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from .db import Database, DomainError, uid
+from .library import MAX_FILE
+
+COPY_BLOCK = 64 * 1024
 
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_entry(archive, name, path, book=None):
+    """Hash the exact streamed bytes being archived, never reopen after checking."""
+    checksum, size = hashlib.sha256(), 0
+    try:
+        source = path.open("rb")
+    except FileNotFoundError:
+        if not book:
+            raise
+        raise DomainError(
+            "backup_source_missing",
+            f"资料原件缺失：{book['title']}。导入快照仍保留，请恢复原件后再备份。",
+            409,
+        ) from None
+    with source, archive.open(name, "w", force_zip64=True) as dest:
+        while chunk := source.read(COPY_BLOCK):
+            size += len(chunk)
+            if book and size > MAX_FILE:
+                raise DomainError(
+                    "backup_source_changed",
+                    f"资料原件已变化：{book['title']}。导入快照仍保留，请核对原件后再备份。",
+                    409,
+                )
+            checksum.update(chunk)
+            dest.write(chunk)
+    result = checksum.hexdigest()
+    if book and result != book["file_hash"]:
+        raise DomainError(
+            "backup_source_changed",
+            f"资料原件已变化：{book['title']}。导入快照仍保留，请核对原件后再备份。",
+            409,
+        )
+    return result
 
 
 def create_backup(settings, database):
@@ -29,11 +66,13 @@ def create_backup(settings, database):
         with database.connect() as source, closing(sqlite3.connect(manuscript)) as dest:
             source.backup(dest)
         files = {"manuscripts.sqlite": manuscript}
+        books = {}
         with closing(sqlite3.connect(manuscript)) as snapshot:
-            for (filename,) in snapshot.execute("SELECT filename FROM books"):
+            for filename, checksum, title in snapshot.execute("SELECT filename,file_hash,title FROM books"):
                 if Path(filename).name != filename:
                     raise DomainError("backup_path", "资料路径无效，备份停止。")
                 files["sources/" + filename] = settings.data_dir / "sources" / filename
+                books["sources/" + filename] = {"title": title, "file_hash": checksum}
         if (settings.data_dir / "usage.sqlite").exists():
             with (
                 closing(sqlite3.connect(settings.data_dir / "usage.sqlite")) as source,
@@ -41,12 +80,21 @@ def create_backup(settings, database):
             ):
                 source.backup(dest)
             files["usage-evidence.sqlite"] = scratch / "usage.sqlite"
-        manifest = {name: digest(path) for name, path in files.items()}
-        with ZipFile(target.with_suffix(".partial"), "x", ZIP_DEFLATED) as archive:
-            archive.writestr("manifest.json", json.dumps({"schema": 1, "created": time(), "files": manifest}))
-            for name, path in files.items():
-                archive.write(path, name)
-        target.with_suffix(".partial").replace(target)
+        partial = target.with_suffix(".partial")
+        owns_partial = False
+        try:
+            with ZipFile(partial, "x", ZIP_DEFLATED) as archive:
+                owns_partial = True
+                manifest = {
+                    name: write_entry(archive, name, path, books.get(name)) for name, path in files.items()
+                }
+                archive.writestr(
+                    "manifest.json", json.dumps({"schema": 1, "created": time(), "files": manifest})
+                )
+            partial.replace(target)
+        finally:
+            if owns_partial:
+                partial.unlink(missing_ok=True)
     return {
         "id": backup_id,
         "path": str(target),

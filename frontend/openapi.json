@@ -1956,6 +1956,7 @@
     "/api/library/books": {
       "get": {
         "summary": "Books",
+        "description": "返回导入时资料记录；file_hash是导入文件SHA，原件变化不会自动重读。同名再导入建立独立资料。",
         "operationId": "books_api_library_books_get",
         "responses": {
           "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
@@ -1991,6 +1992,7 @@
     "/api/library/search": {
       "get": {
         "summary": "Search",
+        "description": "只检索导入时正文快照；命中file_hash为导入文件身份，不表示已核对当前磁盘原件。",
         "operationId": "search_api_library_search_get",
         "parameters": [
           { "name": "q", "in": "query", "required": true, "schema": { "type": "string", "title": "Q" } },
@@ -2030,6 +2032,7 @@
     "/api/library/books/{book_id}/units": {
       "get": {
         "summary": "Units",
+        "description": "返回导入时正文快照的单元目录，不因外部原件变化自动重解析。",
         "operationId": "units_api_library_books__book_id__units_get",
         "parameters": [
           {
@@ -2056,6 +2059,7 @@
     "/api/library/units/{unit_id}": {
       "get": {
         "summary": "Unit",
+        "description": "content是导入时正文快照，file_hash是导入文件SHA；不保证当前原件仍存在或未改变。",
         "operationId": "unit_api_library_units__unit_id__get",
         "parameters": [
           {

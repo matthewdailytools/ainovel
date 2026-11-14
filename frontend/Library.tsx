@@ -172,6 +172,9 @@ export function LibraryPage({
           <span className="eyebrow">资料，回到原文</span>
           <h1>资料书库</h1>
           <p>找书、阅读、搜索，再把有出处的片段带回创作。</p>
+          <p className="small muted">
+            阅读与搜索使用导入时正文快照，外部原件变化不会自动重读；同名重新导入会建立独立资料，旧摘录与参考保持原快照。
+          </p>
         </div>
         <details className="card import-card">
           <summary>＋ 导入本地资料</summary>
@@ -408,7 +411,7 @@ export function LibraryPage({
             <details>
               <summary>来源与处理范围 · {label(book.status)}</summary>
               <p>{book.source}</p>
-              <p className="small">SHA-256：{book.file_hash}</p>
+              <p className="small">导入文件 SHA-256：{book.file_hash}</p>
               <pre>{book.coverage}</pre>
             </details>
           )}

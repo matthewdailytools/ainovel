@@ -26,6 +26,12 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByText('已保存', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '资料书库', exact: true }).click()
+  await expect(
+    page.getByText(
+      '阅读与搜索使用导入时正文快照，外部原件变化不会自动重读；同名重新导入会建立独立资料，旧摘录与参考保持原快照。',
+      { exact: true },
+    ),
+  ).toBeVisible()
   // Import through the real authenticated API, then exercise reading/selection in UI.
   const session = await (await page.request.get('/api/session')).json()
   const response = await page.request.post('/api/library/import', {
@@ -37,6 +43,10 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await page.getByRole('button', { name: '资料书库', exact: true }).click()
   await page.getByText('自拟参考.txt', { exact: false }).first().click()
   await expect(page.getByRole('textbox', { name: '资料原文' })).toHaveValue(SOURCE)
+  await page.getByText(/来源与处理范围 ·/).click()
+  await expect(
+    page.getByText(`导入文件 SHA-256：${createHash('sha256').update(SOURCE).digest('hex')}`, { exact: true }),
+  ).toBeVisible()
   const reader = page.getByRole('textbox', { name: '资料原文' })
   await reader.focus()
   await reader.press('ControlOrMeta+A')

@@ -1035,6 +1035,7 @@ def create_app(settings=None, schema_only=False):
 
     @app.get("/api/library/books")
     def books():
+        """返回导入时资料记录；file_hash是导入文件SHA，原件变化不会自动重读。同名再导入建立独立资料。"""
         return db.all("SELECT * FROM books ORDER BY created DESC")
 
     @app.post("/api/library/import", status_code=201)
@@ -1046,10 +1047,12 @@ def create_app(settings=None, schema_only=False):
 
     @app.get("/api/library/search")
     def search(q: str, book_id: str | None = None, novel_id: str | None = None, offset: int = 0):
+        """只检索导入时正文快照；命中file_hash为导入文件身份，不表示已核对当前磁盘原件。"""
         return library.search(q, book_id, novel_id, offset)
 
     @app.get("/api/library/books/{book_id}/units")
     def units(book_id: str):
+        """返回导入时正文快照的单元目录，不因外部原件变化自动重解析。"""
         return db.all(
             "SELECT id,book_id,position,title,length(content) AS chars FROM source_units WHERE book_id=? ORDER BY position",
             (book_id,),
@@ -1057,6 +1060,7 @@ def create_app(settings=None, schema_only=False):
 
     @app.get("/api/library/units/{unit_id}")
     def unit(unit_id: str):
+        """content是导入时正文快照，file_hash是导入文件SHA；不保证当前原件仍存在或未改变。"""
         return db.one(
             "SELECT u.*,b.title AS book_title,b.source,b.file_hash FROM source_units u JOIN books b ON b.id=u.book_id WHERE u.id=?",
             (unit_id,),
