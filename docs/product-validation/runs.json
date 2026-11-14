@@ -3551,5 +3551,137 @@
     "result": "passed",
     "record": "2026-11-15-source-identity-context.md",
     "fix_of": "source-identity-ci-import-first-001"
+  },
+  {
+    "id": "long-import-live-selector-first-001",
+    "date": "2026-11-15",
+    "commit": "a4fd5e7",
+    "module": "长稿日常脚本控件名失败",
+    "scenario": "编码控件误写原文编码，实际文件编码；上传前30秒超时，已建测试作品仍0章/0预览/0模型，复用同创建回执，不重复建作品",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": ""
+  },
+  {
+    "id": "long-import-real-36-preserved-001",
+    "date": "2026-11-15",
+    "commit": "a4fd5e7",
+    "module": "历史36章真实导入及来源保护",
+    "scenario": "116679字符原稿生成UTF16含BOM234784字节文件，含表情/扩展汉字；40段预览不改章，草稿刷新恢复，明确追加36/跳过4/替换0，36段哈希及原文件字节/回执匹配，旧219章等逐行不变",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "long-import-live-selector-first-001"
+  },
+  {
+    "id": "long-import-live-overflow-first-001",
+    "date": "2026-11-15",
+    "commit": "a4fd5e7",
+    "module": "日常原文件指纹溢出",
+    "scenario": "36章导入成功后320px/根字号200%失败：页面457px，原文件SHA连续文本宽440/容器286，原稿安全；保留首次截图与源参数",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "long-import-real-36-preserved-001"
+  },
+  {
+    "id": "import-fingerprint-old-build-repro-001",
+    "date": "2026-11-15",
+    "commit": "78ea8df前快照",
+    "module": "旧构建指纹换行回归",
+    "scenario": "给既有完整导入路径追加完整SHA/文字行范围/窄屏/键盘断言，旧BRH构建实测453px而失败，保留trace及截图",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "long-import-live-overflow-first-001"
+  },
+  {
+    "id": "import-fingerprint-local-full-001",
+    "date": "2026-11-15",
+    "commit": "78ea8df",
+    "module": "指纹修复与完整前端回归",
+    "scenario": "仅导入面板复用anywhere换行，不隐藏或截断；目标1项2.1秒/总6.3秒通过，208前端/类型/格式/48既有/构建通过，51全项目无头墙263.402秒、0失败/跳过/flaky、251清单相同",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "import-fingerprint-old-build-repro-001"
+  },
+  {
+    "id": "import-build-only-rollout-first-001",
+    "date": "2026-11-15",
+    "commit": "78ea8df",
+    "module": "前端快照更新判断错误",
+    "scenario": "首次仅构建后检查失败：生产freeze_ui固定启动快照，8766仍正常提供旧BRH而新资产404；未改快照机制、无稿件/费用变化，改按既有受控重启流程",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "import-fingerprint-local-full-001"
+  },
+  {
+    "id": "import-fingerprint-controlled-runtime-001",
+    "date": "2026-11-15",
+    "commit": "78ea8df",
+    "module": "指纹修复受控更新日常",
+    "scenario": "3de备份实际隔离恢复；无活动任务，原生出生身份核验API11768/Worker12696后重启且Worker自然退出，8766提供Cf/新CSS，六保护表/全部费用/两任务/六账户相同，用户已有差异精确保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "import-build-only-rollout-first-001"
+  },
+  {
+    "id": "import-fingerprint-live-readonly-001",
+    "date": "2026-11-15",
+    "commit": "78ea8df",
+    "module": "日常长稿回执与字号复测",
+    "scenario": "同36章回执/完整SHA回读，320px根字号200%页面320、所有哈希行在容器内；另逐个渲染元素字号乘二，SHA实际24px仍完整，键盘Enter关闭通过，0正文写/模型/页面错误",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "import-fingerprint-controlled-runtime-001"
+  },
+  {
+    "id": "import-boundary-high-output-stop-001",
+    "date": "2026-11-15",
+    "commit": "78ea8df",
+    "module": "两章反向整理high输出边界",
+    "scenario": "副本12/13同完整场景范围，CNY2/16384显式上限；c83三次均输出16384仍不完整，已结CNY0.497214未知0，blocked_runtime、无候选，正文/正式图谱保持",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "long-import-real-36-preserved-001"
+  },
+  {
+    "id": "import-boundary-low-scene-stop-001",
+    "date": "2026-11-15",
+    "commit": "78ea8df",
+    "module": "两章反向整理low场景边界",
+    "scenario": "新任务显式同密钥low，其余两章/完整场景/16384/子预算保持；7次全结CNY1.254284、无未知，两轮语义修正仍把多顺序合成精确场景，拒绝发布，3份完整拒绝JSON与片段保留、0采用",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "import-boundary-high-output-stop-001"
+  },
+  {
+    "id": "long-import-final-restored-stops-001",
+    "date": "2026-11-15",
+    "commit": "78ea8df",
+    "module": "导入与评测失败实际恢复",
+    "scenario": "cd2d备份实际恢复读回36新章/UTF16原字节/40段回执/两终态，原219章/431修订/822事实/367产物/305结构/113场景/1337步骤不变，仅增36章72修订3缓存；原1380调用/1236元数据哈希相同各追加10，CNY1.751498全结",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "import-boundary-low-scene-stop-001"
+  },
+  {
+    "id": "import-fingerprint-code-ci-success-001",
+    "date": "2026-11-15",
+    "commit": "78ea8df",
+    "module": "指纹修复源码双CI",
+    "scenario": "main43625727420/分支43625473447均completed/success；1361后端622.65/845.88秒、208前端、51无头及48既有/类型/API生成/格式/构建通过。a4文档双CI另成功，不清除前面实际失败",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-longform-import-and-reverse.md",
+    "fix_of": "import-fingerprint-local-full-001"
   }
 ]

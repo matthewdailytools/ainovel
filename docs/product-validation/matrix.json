@@ -112,13 +112,16 @@
     "pain": "已有稿件难以恢复工作",
     "scenarios": "编码、章界、映射、重复、回执、反向整理",
     "stability": "unverified",
-    "quality": "not_run",
+    "quality": "unverified",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
-    "quality_scope": "工程导入与范围边界已有证据，真实既有长稿导入后反向整理的整体语义质量仍未完整评估。"
+    "latest_regression_evidence": "2026-11-15-longform-import-and-reverse.md",
+    "quality_scope": "完整36章历史副本已导入并核对，12/13两配置实际反向整理均受阻，尚无可采用结构，整体语义/作者认可待验。",
+    "quality_evidence": [
+      "2026-11-15-longform-import-and-reverse.md"
+    ]
   },
   {
     "id": "PV08",
@@ -204,7 +207,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "latest_regression_evidence": "2026-11-15-longform-import-and-reverse.md",
     "quality_scope": "工程中文/键盘/缩放已有范围；真实作者输入法、辅助技术和体验评估不能由替身事件推定。"
   }
 ]
