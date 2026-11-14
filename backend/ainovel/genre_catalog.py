@@ -182,6 +182,7 @@ _ACTIONS = {
     "character.generate": "character",
     "world.generate": "world",
     "ideation.explore": "ideation",
+    "ideation.structure": "ideation",
     "全书滚动规划": "planning",
     "阶段批次规划": "planning",
     "根据情节补写正文": "scene",

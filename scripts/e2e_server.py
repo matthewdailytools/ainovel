@@ -22,6 +22,7 @@ from test_story_extraction import ExtractionModel, UpdateModel  # noqa: E402
 from test_workflow_scope import SegmentModel as BookModel  # noqa: E402
 from helpers.character_review_fixture import character_review_output  # noqa: E402
 from helpers.plan_execution_fixture import plan_execution_output  # noqa: E402
+from helpers.ideation_fixture import complete_idea_output  # noqa: E402
 
 CHARACTER_REPAIR_FIXTURE = "character-field-repair-e2e"
 CHARACTER_LATE_FIELD_FIXTURE = "fixture-late-character-field"
@@ -167,9 +168,10 @@ class Model(ReferenceModel):
                 "usage": {"input": 1, "output": 1},
                 "call_id": "offline-intent",
             }
-        if instruction.get("action") == "ideation.explore" and "后台慢速构思" in instruction.get(
-            "作者要求", ""
-        ):
+        if instruction.get("action") in {
+            "ideation.explore",
+            "ideation.structure",
+        } and "后台慢速构思" in instruction.get("作者想法", instruction.get("作者要求", "")):
             partial = "尚未完成的构思片段：学徒听见了旧匣里的求救声。"
             if kwargs.get("on_text"):
                 await kwargs["on_text"](partial)
@@ -179,6 +181,12 @@ class Model(ReferenceModel):
                     error = DomainError("cancelled", "构思已取消，已有片段保留。", 409)
                     error.partial_text = partial
                     raise error
+        if instruction.get("action") == "ideation.structure":
+            return {
+                "text": json.dumps(complete_idea_output(), ensure_ascii=False),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-complete-idea",
+            }
         designs = {
             "ideation.explore": "一句话故事：修补旧物的学徒发现失主遗失的记忆。\n主角目标：找回师父的往事。\n主要阻力：每次修补都会失去自己的一段记忆。\n开篇：一只旧木匣带回陌生人的求救声。\n后续建议：沿着旧物追查，是否公开真相留待作者决定。",
             "world.generate": "世界提案：临河小城的旧闸有公开刻度，检查与修理分属不同职责。尚未决定的制度保持待作者补充。",

@@ -8,6 +8,7 @@ from ainovel.author_contract import AuthorIntentFields, assemble_contract, autho
 from ainovel.db import DomainError, dumps
 from ainovel.models import DefinitionInput, ModuleInput, WorkflowInput
 from ainovel.worker import Worker
+from helpers.ideation_fixture import complete_idea_output
 
 
 TEXT = "林舟用旧尺测量潮水，把两次读数记在纸上。" * 15
@@ -67,7 +68,9 @@ class ContractModel:
         self.requests.append({**data, "system": system})
         task = data["任务"]
         action = task.get("动作", task.get("action"))
-        if action == "整理作者情绪钩子与方向契约":
+        if action == "构思结构完整的小说":
+            output = complete_idea_output()
+        elif action == "整理作者情绪钩子与方向契约":
             output = deepcopy(FIELDS)
             if self.invalid_lock and not self.failed:
                 self.failed = True

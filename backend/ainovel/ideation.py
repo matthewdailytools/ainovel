@@ -50,7 +50,8 @@ def adopt_idea(domain, branch_id, data):
                 or source["chapter_id"] is not None
                 or source["kind"] != "advice"
                 or source["status"] == "rejected"
-                or json.loads(source["request"] or "{}").get("action") != "ideation.explore"
+                or json.loads(source["request"] or "{}").get("action")
+                not in {"ideation.explore", "ideation.structure"}
             ):
                 raise DomainError("idea_source", "请使用当前工作版本的小说构思候选。", 409)
             if json.loads(source["payload"]).get("_candidate_revision", 0) != data.candidate_revision:

@@ -48,12 +48,25 @@ test('一句想法生成、编辑、刷新恢复、采用并去写作；保留�
   const request = page.waitForRequest((r) => r.url().endsWith('/api/modules') && r.method() === 'POST')
   await page.keyboard.press('Enter')
   const payload = (await request).postDataJSON()
-  expect(payload.action).toBe('ideation.explore')
+  expect(payload.action).toBe('ideation.structure')
+  expect(payload.max_output_tokens).toBe(8192)
   expect(payload.chapter_id).toBeUndefined()
   expect(payload.instruction).toBe(idea)
   expect(payload.reference_ids).toBeUndefined()
   const plan = page.getByRole('textbox', { name: '修改构思方案', exact: true })
   await expect(plan).toHaveValue(/一句话故事：修补旧物/)
+  for (const part of [
+    '人物目标与动机',
+    '核心矛盾与风险',
+    '开端',
+    '发展',
+    '转折',
+    '高潮',
+    '结局与人物变化',
+    '主要伏笔与承诺回收',
+  ]) {
+    expect(await plan.inputValue()).toContain(part)
+  }
   expect(
     (await (await page.request.get(`/api/branches/${novel.branch_id}/author-contract`)).json())
       .intent_contract.direction,
@@ -70,6 +83,19 @@ test('一句想法生成、编辑、刷新恢复、采用并去写作；保留�
   expect(contract.intent_contract).toEqual({ ...fields, direction: edited })
   expect(contract.author_text).toBe('作者原话应保留。')
   expect(contract.provenance.source_candidate_id).toBeTruthy()
+  const originalCandidate = await (
+    await page.request.get(`/api/artifacts/${contract.provenance.source_candidate_id}`)
+  ).json()
+  expect(originalCandidate.payload.idea_structure_version).toBe('1.0.0')
+  expect(originalCandidate.payload.idea_structure.beats.map((beat: { stage: string }) => beat.stage)).toEqual(
+    ['开端', '发展', '转折', '高潮', '结局'],
+  )
+  const fresh = await page.context().newPage()
+  await fresh.goto('/')
+  await fresh.getByRole('button', { name: '小说构思', exact: true }).click()
+  await expect(fresh.getByRole('textbox', { name: '修改构思方案', exact: true })).toHaveValue(edited)
+  await expect(fresh.getByRole('button', { name: '已采用', exact: true })).toBeDisabled()
+  await fresh.close()
   expect(await (await page.request.get(`/api/branches/${novel.branch_id}/chapters`)).json()).toHaveLength(0)
   await page.screenshot({ path: testInfo.outputPath('ideation-desktop.png'), fullPage: true })
   await page.setViewportSize({ width: 320, height: 850 })
@@ -178,6 +204,22 @@ test('取消构思后保留想法及中断片段；不产生采用设定', async
   await page.getByText('中断的构思', { exact: true }).click()
   await page.getByRole('button', { name: '查看保留的生成片段', exact: true }).click()
   await expect(page.locator('pre.stream')).toContainText('学徒听见了旧匣里的求救声')
+  expect(
+    (await (await page.request.get(`/api/branches/${novel.branch_id}/author-contract`)).json()).configured,
+  ).toBe(false)
+})
+
+test('生成中刷新后继续等待完整方案，新候选不会显示为已采用', async ({ page }) => {
+  const { novel } = await openIdea(page, '后台验证 · 完整构思刷新续看')
+  await page.getByRole('textbox', { name: '你的想法', exact: true }).fill('后台慢速构思：' + idea)
+  await page.getByRole('button', { name: '帮我展开', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('执行中')
+  await page.reload()
+  await page.getByRole('button', { name: '小说构思', exact: true }).click()
+  const plan = page.getByRole('textbox', { name: '修改构思方案', exact: true })
+  await expect(plan).toHaveValue(/结局与人物变化/, { timeout: 20000 })
+  await expect(page.getByRole('button', { name: '采用构思', exact: true })).toBeEnabled()
+  await expect(page.getByRole('heading', { name: '构思方案', exact: true })).toBeVisible()
   expect(
     (await (await page.request.get(`/api/branches/${novel.branch_id}/author-contract`)).json()).configured,
   ).toBe(false)
