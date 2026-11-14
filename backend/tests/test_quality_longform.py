@@ -1,11 +1,19 @@
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import sqlite3
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from ainovel.quality_longform import LongformEvaluation, RunSpec, read_usage, workflow_payload
+from ainovel.quality_longform import (
+    LongformEvaluation,
+    RunSpec,
+    main,
+    read_usage,
+    signature,
+    workflow_payload,
+)
 from ainovel.settings import ROOT
 
 
@@ -254,6 +262,248 @@ def test_explicit_plot_check_is_frozen_across_response_loss_and_payload_mismatch
             resumed.dispatch("assisted", {"id": "n"})
     assert requests[0] == requests[1] and requests[0]["plot_contract_check"] is True
     assert not requests[0]["character_field_repair"]
+
+
+@pytest.mark.parametrize("mode", ["assisted", "automatic"])
+@pytest.mark.parametrize("limit", [64, 8192, 16384])
+def test_structure_output_limit_reaches_both_workflow_modes_without_changing_runspec(story, mode, limit):
+    spec = RunSpec()
+    assert asdict(spec) == {
+        "stage": "ten",
+        "account": "deepseek",
+        "modes": ("assisted",),
+        "min_chars": 2500,
+        "max_chars": 3500,
+        "run_limit": 10,
+    }
+    payload = workflow_payload(spec, story, "n", mode, structure_max_output_tokens=limit)
+    assert payload["structure_max_output_tokens"] == limit
+    assert workflow_payload(spec, story, "n", mode)["structure_max_output_tokens"] == 8192
+
+
+@pytest.mark.parametrize("limit", [True, False, 0, 63, 16385, 8192.0, "8192"])
+def test_structure_output_limit_rejects_invalid_explicit_values_without_request(tmp_path, story, limit):
+    def unexpected(request):
+        pytest.fail("Invalid configuration must not make an HTTP request")
+
+    with httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(unexpected)) as client:
+        with pytest.raises(ValueError, match="Invalid frozen workflow options"):
+            LongformEvaluation(client, tmp_path, RunSpec(), story, structure_max_output_tokens=limit)
+    with pytest.raises(ValueError):
+        workflow_payload(RunSpec(), story, "n", "assisted", structure_max_output_tokens=limit)
+    assert not (tmp_path / "run.json").exists()
+
+
+@pytest.mark.parametrize("limit", [None, True, False, 0, 63, 16385, 8192.0, "8192"])
+def test_structure_output_limit_rejects_invalid_saved_values_without_rewriting(tmp_path, story, limit):
+    with httpx.Client(base_url="http://127.0.0.1") as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        runner.record["workflow_options"]["structure_max_output_tokens"] = limit
+        runner.save()
+        original = runner.path.read_bytes()
+        with pytest.raises(ValueError, match="Invalid frozen workflow options"):
+            LongformEvaluation(client, tmp_path, RunSpec(), story)
+    assert runner.path.read_bytes() == original
+
+
+@pytest.mark.parametrize("options", [None, {"character_field_repair": True}, {"plot_contract_check": True}])
+def test_legacy_options_and_signed_payload_keep_missing_structure_limit_and_nonce(tmp_path, story, options):
+    def unexpected(request):
+        pytest.fail("A saved task ID must not be dispatched again")
+
+    with httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(unexpected)) as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        if options is None:
+            runner.record.pop("workflow_options")
+        else:
+            runner.record["workflow_options"] = options
+        payload = workflow_payload(RunSpec(), story, "n", "assisted", **(options or {}))
+        payload.pop("structure_max_output_tokens")
+        payload["client_request_id"] = "legacy-frozen-nonce"
+        runner.record["workflows"]["assisted"] = {
+            "payload": payload,
+            "payload_sha256": signature(payload),
+            "id": "legacy-task",
+        }
+        runner.save()
+        original = runner.path.read_bytes()
+        resumed = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        assert resumed.structure_max_output_tokens == 8192
+        assert resumed.dispatch("assisted", {"id": "n"}) == "legacy-task"
+        with pytest.raises(ValueError, match="Frozen structure output limit"):
+            LongformEvaluation(client, tmp_path, RunSpec(), story, structure_max_output_tokens=16384)
+    assert resumed.record == runner.record
+    assert runner.path.read_bytes() == original
+
+
+def test_legacy_unsent_payload_retains_missing_limit_hash_and_nonce_on_replay(tmp_path, story):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(202, json={"id": "old-task", "branch_id": "old-branch"})
+
+    with httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(handler)) as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        runner.record.pop("workflow_options")
+        payload = workflow_payload(RunSpec(), story, "n", "assisted")
+        payload.pop("structure_max_output_tokens")
+        payload["client_request_id"] = "old-unknown-response-nonce"
+        original_hash = signature(payload)
+        runner.record["workflows"]["assisted"] = {"payload": payload, "payload_sha256": original_hash}
+        runner.save()
+        resumed = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        assert resumed.dispatch("assisted", {"id": "n"}) == "old-task"
+    assert requests == [payload]
+    assert "structure_max_output_tokens" not in requests[0]
+    assert resumed.record["workflows"]["assisted"]["payload_sha256"] == original_hash
+    assert "workflow_options" not in resumed.record
+
+
+def test_new_structure_limit_is_frozen_through_response_loss_and_omitted_resume_flag(tmp_path, story):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            raise httpx.ReadTimeout("lost workflow response")
+        return httpx.Response(202, json={"id": "large-structure-task", "branch_id": "large-branch"})
+
+    with httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(handler)) as client:
+        runner = LongformEvaluation(client, tmp_path, RunSpec(), story, structure_max_output_tokens=16384)
+        with pytest.raises(httpx.ReadTimeout):
+            runner.dispatch("assisted", {"id": "n"})
+        original_hash = runner.record["workflows"]["assisted"]["payload_sha256"]
+        resumed = LongformEvaluation(client, tmp_path, RunSpec(), story)
+        assert resumed.structure_max_output_tokens == 16384
+        assert resumed.dispatch("assisted", {"id": "n"}) == "large-structure-task"
+        assert resumed.record["workflows"]["assisted"]["payload_sha256"] == original_hash
+        assert "structure_max_output_tokens" not in resumed.record["configuration"]
+        with pytest.raises(ValueError, match="Frozen structure output limit"):
+            LongformEvaluation(client, tmp_path, RunSpec(), story, structure_max_output_tokens=8192)
+    assert requests[0] == requests[1]
+    assert requests[0]["structure_max_output_tokens"] == 16384
+
+
+@pytest.mark.parametrize("has_task_id", [False, True])
+@pytest.mark.parametrize(
+    "frozen_limit,payload_limit",
+    [(8192, 16384), (16384, None), (8192, 8192.0), (8192, True), (8192, "8192")],
+)
+def test_signed_structure_limit_conflict_is_rejected_before_reuse_or_dispatch(
+    tmp_path, story, frozen_limit, payload_limit, has_task_id
+):
+    def unexpected(request):
+        pytest.fail("A mismatched signed payload must not be sent")
+
+    with httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(unexpected)) as client:
+        runner = LongformEvaluation(
+            client, tmp_path, RunSpec(), story, structure_max_output_tokens=frozen_limit
+        )
+        payload = workflow_payload(RunSpec(), story, "n", "assisted")
+        if payload_limit is None:
+            payload.pop("structure_max_output_tokens")
+        else:
+            payload["structure_max_output_tokens"] = payload_limit
+        entry = {"payload": payload, "payload_sha256": signature(payload)}
+        if has_task_id:
+            entry["id"] = "existing-task"
+        runner.record["workflows"]["assisted"] = entry
+        runner.save()
+        original = runner.path.read_bytes()
+        with pytest.raises(ValueError, match="differs from the evaluation structure output limit"):
+            runner.dispatch("assisted", {"id": "n"})
+    assert runner.path.read_bytes() == original
+
+
+@pytest.mark.parametrize("argument", ["63", "16385", "8192.0", "true"])
+def test_cli_invalid_structure_limit_exits_before_settings_or_http(monkeypatch, capsys, argument):
+    monkeypatch.setattr(
+        "sys.argv", ["quality_longform", "--execute", "--structure-max-output-tokens", argument]
+    )
+    monkeypatch.setattr(
+        "ainovel.quality_longform.Settings.load", lambda: pytest.fail("Invalid CLI must not load settings")
+    )
+    with pytest.raises(SystemExit) as stopped:
+        main()
+    assert stopped.value.code == 2
+    assert "64 to 16384" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argument,expected", [(None, 8192), ("64", 64), ("16384", 16384)])
+def test_cli_structure_limit_is_frozen_and_sent_via_mock_transport(
+    tmp_path_factory, monkeypatch, argument, expected
+):
+    # Keep the CLI's UUID directory and atomic-save filename below Windows MAX_PATH.
+    tmp_path = tmp_path_factory.mktemp("cli")
+    original_client = httpx.Client
+    requests = []
+
+    def handler(request):
+        if request.url.path == "/api/session":
+            return httpx.Response(200, json={"csrf": "offline-test-session"})
+        assert request.method == "POST" and request.url.path == "/api/workflows"
+        requests.append(json.loads(request.content))
+        return httpx.Response(202, json={"id": "offline-task", "branch_id": "offline-branch"})
+
+    def client_factory(*args, **kwargs):
+        return original_client(*args, **kwargs, transport=httpx.MockTransport(handler))
+
+    argv = ["quality_longform", "--execute"]
+    if argument is not None:
+        argv += ["--structure-max-output-tokens", argument]
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr("ainovel.quality_longform.Settings.load", lambda: SimpleNamespace(data_dir=tmp_path))
+    monkeypatch.setattr("ainovel.quality_longform.httpx.Client", client_factory)
+    monkeypatch.setattr(
+        "ainovel.quality_longform.subprocess.check_output", lambda *a, **k: "offline-commit\n"
+    )
+    monkeypatch.setattr(LongformEvaluation, "run", lambda self: self.dispatch("assisted", {"id": "n"}))
+    main()
+    assert len(requests) == 1 and requests[0]["structure_max_output_tokens"] == expected
+    saved = json.loads(next((tmp_path / "acceptance/longform-quality").glob("*/run.json")).read_text("utf-8"))
+    assert saved["workflow_options"]["structure_max_output_tokens"] == expected
+    assert "structure_max_output_tokens" not in saved["configuration"]
+
+
+@pytest.mark.parametrize("argument", [None, "8192"])
+def test_cli_resume_omission_inherits_16k_and_explicit_conflict_preserves_file(
+    tmp_path, story, monkeypatch, argument
+):
+    folder = tmp_path / "acceptance/longform-quality/frozen-run"
+    original_client = httpx.Client
+    with original_client(base_url="http://127.0.0.1") as client:
+        runner = LongformEvaluation(client, folder, RunSpec(), story, structure_max_output_tokens=16384)
+        runner.save()
+        original = runner.path.read_bytes()
+    observed = []
+
+    def handler(request):
+        assert request.method == "GET" and request.url.path == "/api/session"
+        return httpx.Response(200, json={"csrf": "offline-test-session"})
+
+    def client_factory(*args, **kwargs):
+        return original_client(*args, **kwargs, transport=httpx.MockTransport(handler))
+
+    argv = ["quality_longform", "--execute", "--resume", str(folder)]
+    if argument is not None:
+        argv += ["--structure-max-output-tokens", argument]
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr("ainovel.quality_longform.Settings.load", lambda: SimpleNamespace(data_dir=tmp_path))
+    monkeypatch.setattr("ainovel.quality_longform.httpx.Client", client_factory)
+    monkeypatch.setattr(
+        "ainovel.quality_longform.subprocess.check_output", lambda *a, **k: "offline-commit\n"
+    )
+    monkeypatch.setattr(
+        LongformEvaluation, "run", lambda self: observed.append(self.structure_max_output_tokens)
+    )
+    if argument is None:
+        main()
+        assert observed == [16384]
+    else:
+        with pytest.raises(ValueError, match="Frozen structure output limit"):
+            main()
+        assert not observed and runner.path.read_bytes() == original
 
 
 def task(status="blocked_runtime"):

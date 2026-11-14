@@ -12,6 +12,9 @@ import {
 import { characterRepairAccess, currentRepairTasks } from './characterFieldRepair'
 import { CharacterFieldRepair } from './CharacterRepairDetails'
 import { SceneOrderBasisDetails } from './SceneOrderBasisDetails'
+import { useLeaveGuard } from './leaveGuard'
+import { StructureOutputSettings } from './StructureOutputSettings'
+import { DEFAULT_STRUCTURE_OUTPUT_TOKENS, type StructureOutputChoice } from './structureOutput'
 
 type Schemas = components['schemas']
 type RecordPayload =
@@ -179,6 +182,9 @@ export function StoryExtraction({
   const [loadedArtifact, setLoadedArtifact] = useState<{ branchId: string; value: ExtractionArtifact }>()
   const [selected, setSelected] = useState<string[]>([])
   const [includeScenes, setIncludeScenes] = useState(false)
+  const [maxOutputTokens, setMaxOutputTokens] = useState<StructureOutputChoice>(
+    DEFAULT_STRUCTURE_OUTPUT_TOKENS,
+  )
   const [selectedScenes, setSelectedScenes] = useState<string[]>([])
   const [confirmReplacement, setConfirmReplacement] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -198,6 +204,9 @@ export function StoryExtraction({
   const repairRequests = useRef(createExtractionRequestGuard())
   const currentTarget = useRef({ branchId, artifactId })
   currentTarget.current = { branchId, artifactId }
+  const inputSignature = JSON.stringify({ chosenChapters, includeScenes, maxOutputTokens })
+  const [submittedInput, setSubmittedInput] = useState(inputSignature)
+  useLeaveGuard(inputSignature !== submittedInput, '结构整理设置')
   const artifact =
     loadedArtifact?.branchId === branchId && loadedArtifact.value.id === artifactId
       ? loadedArtifact.value
@@ -427,17 +436,19 @@ export function StoryExtraction({
           />
           同时提议新正文的场景范围
         </label>
+        <StructureOutputSettings value={maxOutputTokens} disabled={busy} onChange={setMaxOutputTokens} />
         <button
           disabled={
             busy || !modelReady || !chosenChapters.length || chosenChapters.length > 20 || running.length > 0
           }
           onClick={() =>
             void perform(async () => {
-              const body = {
+              const body: Omit<Schemas['StartExtraction'], 'client_request_id'> = {
                 base_story_revision: storyRevision,
                 chapter_ids: chosenChapters,
                 account,
                 include_scene_ranges: includeScenes,
+                max_output_tokens: maxOutputTokens,
               }
               const signature = JSON.stringify(body)
               if (pending.current?.signature !== signature)
@@ -446,6 +457,7 @@ export function StoryExtraction({
                 ...body,
                 client_request_id: pending.current.key,
               })
+              setSubmittedInput(inputSignature)
               pending.current = null
               setHistory(await api(`/branches/${branchId}/story-extractions`))
               setMessage('整理任务已提交，正文和正式故事记录尚未改变。')

@@ -47,6 +47,7 @@ class ExtractionWithLinkedScenes(Extraction):
 
 
 class StartExtraction(Strict):
+    max_output_tokens: int = Field(default=8192, ge=64, le=16_384, strict=True)
     include_scene_ranges: bool = False
     base_story_revision: int = Field(ge=0)
     chapter_ids: list[str] = Field(min_length=1, max_length=20)
@@ -358,7 +359,7 @@ async def run_extraction(worker, request, context, snapshot=None):
         ExtractionWithLinkedScenes if linked_scenes else ExtractionWithScenes if with_scenes else Extraction,
         narrow,
         validate,
-        max_output=request["max_output_tokens"],
+        max_output=request.get("max_output_tokens", 8192),
     )
     allocated = {r["local_id"]: r["target_id"] or uid() for r in result["records"]}
     scene_nodes = (
@@ -609,6 +610,7 @@ def register_routes(app, domain, provider_ready):
             account=data.account,
             client_request_id=data.client_request_id,
             budget_limit=data.budget_limit,
+            max_output_tokens=data.max_output_tokens,
             story_chapter_ids=data.chapter_ids,
             include_scene_ranges=data.include_scene_ranges,
         ).model_dump(exclude_none=True)

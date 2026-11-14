@@ -3678,6 +3678,13 @@
       },
       "StartExtraction": {
         "properties": {
+          "max_output_tokens": {
+            "type": "integer",
+            "maximum": 16384,
+            "minimum": 64,
+            "title": "Max Output Tokens",
+            "default": 8192
+          },
           "include_scene_ranges": { "type": "boolean", "title": "Include Scene Ranges", "default": false },
           "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
           "chapter_ids": {
@@ -3763,6 +3770,13 @@
       },
       "WorkflowInput": {
         "properties": {
+          "structure_max_output_tokens": {
+            "type": "integer",
+            "maximum": 16384,
+            "minimum": 64,
+            "title": "Structure Max Output Tokens",
+            "default": 8192
+          },
           "plot_contract_check": { "type": "boolean", "title": "Plot Contract Check", "default": false },
           "completion_scope": {
             "type": "string",

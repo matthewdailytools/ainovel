@@ -157,6 +157,7 @@ export type Task = {
     writing_profile?: string
     budget_limit?: number | null
     structured_maintenance?: boolean
+    structure_max_output_tokens?: number
     adoption?: 'manual' | 'automatic'
     character_field_repair?: boolean
     plot_contract_check?: boolean

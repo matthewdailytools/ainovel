@@ -58,7 +58,16 @@ class RunSpec:
         return 10 if self.stage == "ten" else 36
 
 
-def workflow_payload(spec, story, novel_id, mode, *, character_field_repair=False, plot_contract_check=False):
+def workflow_payload(
+    spec,
+    story,
+    novel_id,
+    mode,
+    *,
+    character_field_repair=False,
+    plot_contract_check=False,
+    structure_max_output_tokens=8192,
+):
     if len(story["chapters"]) != 36 or [row["number"] for row in story["chapters"]] != list(range(1, 37)):
         raise ValueError("The original 36-chapter fixture must be complete and ordered")
     # A ten-chapter gate is the start of the original novel, not a compressed book.
@@ -82,6 +91,7 @@ def workflow_payload(spec, story, novel_id, mode, *, character_field_repair=Fals
         structured_maintenance=True,
         character_field_repair=character_field_repair,
         plot_contract_check=plot_contract_check,
+        structure_max_output_tokens=structure_max_output_tokens,
         scene_maintenance=True,
         min_chars=spec.min_chars,
         max_chars=spec.max_chars,
@@ -129,6 +139,7 @@ class LongformEvaluation:
         *,
         character_field_repair=None,
         plot_contract_check=None,
+        structure_max_output_tokens=None,
     ):
         self.client, self.folder, self.spec, self.story = client, folder, spec, story
         self.data_dir = data_dir
@@ -161,29 +172,45 @@ class LongformEvaluation:
         if self.record["configuration"] != configuration or self.record["fixture_sha256"] != fixture:
             raise ValueError("Frozen fixture or evaluation configuration changed; use a new run directory")
         # Keep legacy RunSpec/configuration hashes intact. Missing options on old
-        # runs mean disabled, never an invitation to upgrade their frozen policy.
-        defaults = {"character_field_repair": False, "plot_contract_check": False}
+        # runs retain disabled checks and the former 8192-token structure limit.
+        defaults = {
+            "character_field_repair": False,
+            "plot_contract_check": False,
+            "structure_max_output_tokens": 8192,
+        }
         explicit = {
             "character_field_repair": character_field_repair,
             "plot_contract_check": plot_contract_check,
+            "structure_max_output_tokens": structure_max_output_tokens,
         }
+
+        def valid_option(key, value):
+            if key == "structure_max_output_tokens":
+                return type(value) is int and 64 <= value <= 16384
+            return type(value) is bool
+
         saved = self.record.get("workflow_options", {})
         if (
             not isinstance(saved, dict)
             or set(saved) - set(defaults)
-            or any(type(v) is not bool for v in saved.values())
-            or any(v is not None and type(v) is not bool for v in explicit.values())
+            or any(not valid_option(k, v) for k, v in saved.items())
+            or any(v is not None and not valid_option(k, v) for k, v in explicit.items())
         ):
             raise ValueError("Invalid frozen workflow options")
         options = {**defaults, **saved}
         if self.path.exists():
-            if any(v is not None and v != options[k] for k, v in explicit.items()):
-                raise ValueError("Frozen repair policy changed; use a new run directory")
+            for key, value in explicit.items():
+                if value is not None and value != options[key]:
+                    policy = (
+                        "structure output limit" if key == "structure_max_output_tokens" else "repair policy"
+                    )
+                    raise ValueError(f"Frozen {policy} changed; use a new run directory")
         else:
-            options = {k: v is True for k, v in explicit.items()}
+            options = {k: defaults[k] if v is None else v for k, v in explicit.items()}
             self.record["workflow_options"] = options
         self.character_field_repair = options["character_field_repair"]
         self.plot_contract_check = options["plot_contract_check"]
+        self.structure_max_output_tokens = options["structure_max_output_tokens"]
 
     def save(self):
         write_json(self.path, self.record)
@@ -226,6 +253,7 @@ class LongformEvaluation:
                 mode,
                 character_field_repair=self.character_field_repair,
                 plot_contract_check=self.plot_contract_check,
+                structure_max_output_tokens=self.structure_max_output_tokens,
             )
             # No source branch/prose is inherited. Both modes start from the same brief.
             payload["client_request_id"] = uuid4().hex
@@ -242,6 +270,9 @@ class LongformEvaluation:
             raise ValueError("Frozen payload differs from the evaluation repair policy")
         if entry["payload"].get("plot_contract_check", False) is not self.plot_contract_check:
             raise ValueError("Frozen payload differs from the evaluation plot-check policy")
+        structure_limit = entry["payload"].get("structure_max_output_tokens", 8192)
+        if type(structure_limit) is not int or structure_limit != self.structure_max_output_tokens:
+            raise ValueError("Frozen payload differs from the evaluation structure output limit")
         if "id" not in entry:
             task = self.request("POST", "/workflows", json=entry["payload"]).json()
             entry.update(id=task["id"], branch_id=task["branch_id"])
@@ -382,6 +413,18 @@ class LongformEvaluation:
         self.save()
 
 
+def structure_output_limit(value):
+    try:
+        limit = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "Structure output limit must be an integer from 64 to 16384"
+        ) from None
+    if not 64 <= limit <= 16384:
+        raise argparse.ArgumentTypeError("Structure output limit must be an integer from 64 to 16384")
+    return limit
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -404,6 +447,15 @@ def main():
         action=argparse.BooleanOptionalAction,
         default=None,
         help="独立解析本章情节并逐项对照正文；增加模型调用，旧运行缺省关闭且不追溯开启",
+    )
+    parser.add_argument(
+        "--structure-max-output-tokens",
+        type=structure_output_limit,
+        default=None,
+        help=(
+            "首轮结构维护输出上限，64..16384整数；新运行默认8192，续跑省略时继承冻结值；"
+            "已知截断有限修正最高16384，仍受原预算保护"
+        ),
     )
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--resume", type=Path)
@@ -445,6 +497,7 @@ def main():
             settings.data_dir,
             character_field_repair=args.character_field_repair,
             plot_contract_check=args.plot_contract_check,
+            structure_max_output_tokens=args.structure_max_output_tokens,
         )
         runner.record.setdefault(
             "source_commit",

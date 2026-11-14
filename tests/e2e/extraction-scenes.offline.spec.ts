@@ -50,11 +50,16 @@ test('场景候选：原文核对、明确归档作者旧绑定、历史与正�
   const panel = page.getByRole('region', { name: '结构化整理与确认', exact: true })
   await panel.getByRole('checkbox', { name: '1 · 渡口问话', exact: true }).check()
   await panel.getByRole('checkbox', { name: '同时提议新正文的场景范围', exact: true }).check()
+  await panel.getByText('结构整理的输出设置', { exact: true }).click()
+  const outputLimit = panel.getByRole('combobox', { name: '首轮结构输出上限（tokens）', exact: true })
+  await expect(outputLimit).toHaveValue('8192')
+  await outputLimit.selectOption('16384')
   const dispatched = page.waitForResponse(
     (r) => r.url().endsWith('/story-extractions') && r.request().method() === 'POST',
   )
   await panel.getByRole('button', { name: '从所选保存稿生成结构候选', exact: true }).click()
   const extraction = await (await dispatched).json()
+  expect(extraction.payload.max_output_tokens).toBe(16384)
   expect(extraction.result.scene_contract_version).toBe('scene-event-refs/2')
   await panel.getByRole('checkbox', { name: '采用人物：宁禾', exact: true }).check()
   await panel.getByRole('checkbox', { name: '采用场景：本章场景', exact: true }).check()

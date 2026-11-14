@@ -35,6 +35,10 @@ for (const mode of ['半自动', '全自动']) {
         .fill('量潮 | 用旧尺测量潮水\n核验 | 公开测量记录并收束')
     await page.getByRole('combobox', { name: '采纳政策', exact: true }).selectOption('automatic')
     await expect(page.getByRole('checkbox', { name: '每章采用后整理人物、时点、事件和伏笔' })).toBeChecked()
+    await page.getByText('结构整理的输出设置', { exact: true }).click()
+    const outputLimit = page.getByRole('combobox', { name: '首轮结构输出上限（tokens）', exact: true })
+    await expect(outputLimit).toHaveValue('8192')
+    await outputLimit.selectOption('16384')
     const responsePromise = page.waitForResponse(
       (r) => r.url().endsWith('/api/workflows') && r.request().method() === 'POST',
     )
@@ -52,6 +56,10 @@ for (const mode of ['半自动', '全自动']) {
       page.getByText('已完成 2 次章节结构维护；完整采用回执保留在检查点报告中。', { exact: true }),
     ).toBeVisible()
     const task = await (await page.request.get(`/api/tasks/${started.id}`)).json()
+    expect(task.payload.structure_max_output_tokens).toBe(16384)
+    await expect(page.getByLabel('本批次结构输出政策', { exact: true })).toContainText('16384 tokens')
+    await outputLimit.selectOption('8192')
+    await expect(page.getByLabel('本批次结构输出政策', { exact: true })).toContainText('16384 tokens')
     expect(task.result.pending_structure).toBeUndefined()
     expect(task.result.structure_history).toHaveLength(2)
     const graph = await (await page.request.get(`/api/branches/${started.branch_id}/story-graph`)).json()

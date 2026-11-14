@@ -20,6 +20,12 @@ import { characterFieldRepairEnabled } from './characterFieldRepair'
 import { CharacterFieldRepairOption, FrozenCharacterFieldRepairPolicy } from './CharacterRepairDetails'
 import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
 import { plotAuditFromPayload } from './plotAudit'
+import { FrozenStructureOutputPolicy, StructureOutputSettings } from './StructureOutputSettings'
+import {
+  DEFAULT_STRUCTURE_OUTPUT_TOKENS,
+  workflowStructureOutput,
+  type StructureOutputChoice,
+} from './structureOutput'
 
 export function WorkflowPage({
   novel,
@@ -50,6 +56,9 @@ export function WorkflowPage({
   const [maxChars, setMaxChars] = useState(3500)
   const [adoption, setAdoption] = useState<'manual' | 'automatic'>('manual')
   const [structuredMaintenance, setStructuredMaintenance] = useState(true)
+  const [structureMaxOutputTokens, setStructureMaxOutputTokens] = useState<StructureOutputChoice>(
+    DEFAULT_STRUCTURE_OUTPUT_TOKENS,
+  )
   const [sceneMaintenance, setSceneMaintenance] = useState(true)
   const [characterFieldRepair, setCharacterFieldRepair] = useState(false)
   const [plotContractCheck, setPlotContractCheck] = useState(false)
@@ -87,6 +96,7 @@ export function WorkflowPage({
     maxChars,
     adoption,
     structuredMaintenance,
+    structureMaxOutputTokens,
     sceneMaintenance,
     characterFieldRepair,
     plotContractCheck,
@@ -226,6 +236,7 @@ export function WorkflowPage({
         adoption,
         plot_contract_check: plotContractCheck,
         structured_maintenance: structuredMaintenance,
+        structure_max_output_tokens: workflowStructureOutput(structureMaxOutputTokens, structuredMaintenance),
         scene_maintenance: structuredMaintenance && sceneMaintenance,
         character_field_repair: characterFieldRepairEnabled(
           characterFieldRepair,
@@ -437,6 +448,13 @@ export function WorkflowPage({
                 增加模型调用，计入同一批次及共享预算；人工政策需确认结构，旧事实纠错会停下等待核对。
               </span>
             </label>
+            {structuredMaintenance && (
+              <StructureOutputSettings
+                value={structureMaxOutputTokens}
+                disabled={busy}
+                onChange={setStructureMaxOutputTokens}
+              />
+            )}
             <label className="check">
               <input
                 type="checkbox"
@@ -550,6 +568,10 @@ export function WorkflowPage({
                     <p className="small muted">已承接上次检查点；原稿、费用历史与修订轮次保留。</p>
                   )}
                   <FrozenCharacterFieldRepairPolicy enabled={task.payload.character_field_repair} />
+                  <FrozenStructureOutputPolicy
+                    value={task.payload.structure_max_output_tokens}
+                    maintenance={task.payload.structured_maintenance === true}
+                  />
                   <FrozenPlotAuditPolicy
                     enabled={task.payload.plot_contract_check}
                     mode={task.payload.mode}

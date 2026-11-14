@@ -28,6 +28,13 @@ def same_task_payload(left, right):
                 or (k in {"finding_indices", "story_chapter_ids", "inherit_story_record_ids"} and v == [])
                 or (k == "context_position" and v == 0)
                 or (k == "completion_scope" and v == "whole_book")
+                or (k == "structure_max_output_tokens" and type(v) is int and v == 8192)
+                or (
+                    k == "max_output_tokens"
+                    and value.get("action") == "story.extract"
+                    and type(v) is int
+                    and v == 8192
+                )
                 or (
                     k
                     in {
@@ -714,6 +721,19 @@ class Domain:
         return self.task(task_id)
 
     def continue_workflow(self, current, payload, request):
+        frozen_output = current["payload"].get("structure_max_output_tokens", 8192)
+        if "structure_max_output_tokens" in payload and (
+            type(payload["structure_max_output_tokens"]) is not int
+            or payload["structure_max_output_tokens"] != frozen_output
+        ):
+            raise DomainError(
+                "continuation", "续跑须保留原任务冻结的结构整理首轮输出上限；调整时请新建任务。", 409
+            )
+        if "structure_max_output_tokens" not in current["payload"]:
+            # A default supplied by a newer caller does not rewrite old policy.
+            payload = {key: value for key, value in payload.items() if key != "structure_max_output_tokens"}
+        elif "structure_max_output_tokens" not in payload:
+            payload = {**payload, "structure_max_output_tokens": frozen_output}
         previous = self.find_request("workflow", payload)
         if previous:
             if (

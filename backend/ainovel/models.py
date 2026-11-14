@@ -137,6 +137,7 @@ class Plot(Input):
 
 
 class WorkflowInput(Input):
+    structure_max_output_tokens: int = Field(default=8192, ge=64, le=16_384, strict=True)
     plot_contract_check: bool = Field(default=False, strict=True)
     completion_scope: Literal["whole_book", "segment"] = "whole_book"
     scene_maintenance: bool = False

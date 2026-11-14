@@ -2308,6 +2308,11 @@ export interface components {
     /** StartExtraction */
     StartExtraction: {
       /**
+       * Max Output Tokens
+       * @default 8192
+       */
+      max_output_tokens: number
+      /**
        * Include Scene Ranges
        * @default false
        */
@@ -2388,6 +2393,11 @@ export interface components {
     }
     /** WorkflowInput */
     WorkflowInput: {
+      /**
+       * Structure Max Output Tokens
+       * @default 8192
+       */
+      structure_max_output_tokens: number
       /**
        * Plot Contract Check
        * @default false

@@ -116,7 +116,7 @@ async def maintain(worker, result):
                 "novel_id": worker.task["novel_id"],
                 "branch_id": worker.task["branch_id"],
                 "story_chapter_ids": [chapter["id"]],
-                "max_output_tokens": 8192,
+                "max_output_tokens": worker.task["payload"].get("structure_max_output_tokens", 8192),
                 "include_scene_ranges": worker.task["payload"].get("scene_maintenance", False),
             }
             snapshot = freeze_sources(worker.domain, request)
