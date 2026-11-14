@@ -185,7 +185,7 @@ class ReviewCheck(Input):
     condition: str
     result: Literal["pass", "fail", "unknown"]
     evidence: str = Field(
-        description="有可引用原文时优先只填source_id编号，由后端回填原文；否则仅填连续逐字原文。未知时为空。"
+        description="pass必须引用本章一个合法source_id编号或含实际文字的连续逐字原文，不能空或纯空白。无法定位合适依据时填unknown且evidence为空，在summary按项解释；不能为通过检查编造引文或提前兑现未来条件。"
     )
 
 

@@ -191,9 +191,9 @@ async def _recheck(worker, text, selection, context):
             issues.append("results必须对每个原问题index恰好复检一次，不能漏项、重复或追加。")
         for row in report["results"]:
             resolve_field(row, "evidence", sources)
-            if row["evidence"] and row["evidence"] not in text:
+            if row["evidence"] and (not row["evidence"].strip() or row["evidence"] not in text):
                 issues.append("复检证据必须来自本次候选正文。")
-            if row["result"] == "pass" and not row["evidence"]:
+            if row["result"] == "pass" and not row["evidence"].strip():
                 issues.append("通过结论需要本次候选的原文依据；缺证据标unknown。")
         return issues
 

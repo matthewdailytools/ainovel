@@ -1,6 +1,103 @@
 import { expect, test } from '@playwright/test'
 import { createHash } from 'node:crypto'
 
+test('旧列表到达后重新选择读取已保存候选，另一窗口变更仍保留未保存编辑', async ({ page }) => {
+  await page.goto('/')
+  const session = await (await page.request.get('/api/session')).json()
+  const headers = { 'X-Ainovel-CSRF': session.csrf }
+  const novel = await (
+    await page.request.post('/api/novels', { headers, data: { title: '后台验证 · 候选读取版本' } })
+  ).json()
+  const response = await page.request.post('/api/workflows', {
+    headers,
+    data: {
+      novel_id: novel.id,
+      source_branch_id: novel.branch_id,
+      mode: 'automatic',
+      brief: 'plan-preparation-e2e：只测量记录，疑点仍待查证。',
+      chapters: 1,
+      min_chars: 200,
+      max_chars: 600,
+      account: 'offline',
+      adoption: 'manual',
+      completion_scope: 'segment',
+      plot_contract_check: true,
+    },
+  })
+  expect(response.status(), await response.text()).toBe(202)
+  const workflow = await response.json()
+  const readTask = async (id: string) => (await page.request.get(`/api/tasks/${id}`)).json()
+  await expect
+    .poll(async () => (await readTask(workflow.id)).status, { timeout: 30_000 })
+    .toBe('needs_review')
+  const stopped = await readTask(workflow.id)
+  const sourceId = stopped.result.waiting_artifact as string
+  const source = await (await page.request.get(`/api/artifacts/${sourceId}`)).json()
+  const recheckResponse = await page.request.post(`/api/artifacts/${sourceId}/recheck`, {
+    headers,
+    data: {
+      candidate_revision: source.candidate_revision,
+      account: 'offline',
+      client_request_id: crypto.randomUUID(),
+    },
+  })
+  expect(recheckResponse.status(), await recheckResponse.text()).toBe(202)
+  const task = await recheckResponse.json()
+  await expect.poll(async () => (await readTask(task.id)).status, { timeout: 25_000 }).toBe('succeeded')
+  const reportId = (await readTask(task.id)).result.artifact_id as string
+  const listUrl = `/api/artifacts?branch_id=${workflow.branch_id}`
+  const staleList = await (await page.request.get(listUrl)).json()
+  const savedText = source.payload.text + '\n最新保存：记录与推测分开。😀𠮷'
+  const saved = await page.request.patch(`/api/artifacts/${sourceId}`, {
+    headers,
+    data: {
+      text: savedText,
+      candidate_revision: source.candidate_revision,
+    },
+  })
+  expect(saved.ok(), await saved.text()).toBeTruthy()
+  const savedCandidate = await saved.json()
+  let freeze = true,
+    staleReads = 0
+  await page.route(new RegExp(`/api/artifacts\\?branch_id=${workflow.branch_id}$`), async (route) => {
+    if (!freeze) return route.continue()
+    staleReads++
+    await route.fulfill({ json: staleList })
+  })
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+  await page.getByRole('combobox', { name: '工作版本', exact: true }).selectOption(workflow.branch_id)
+  await page.getByRole('button', { name: '写作', exact: true }).click()
+  const options = page.getByRole('combobox', { name: '比较候选', exact: true })
+  await options.selectOption(reportId)
+  await expect(page.getByText('历史报告：目标候选已变化，不能作为当前结论。', { exact: true })).toBeVisible()
+  await options.selectOption(sourceId)
+  const candidate = page.getByRole('textbox', { name: '候选内容', exact: true })
+  await expect(candidate).toHaveValue(savedText)
+  const reads = staleReads
+  await expect.poll(() => staleReads).toBeGreaterThan(reads)
+  await expect(candidate).toHaveValue(savedText)
+  const recheck = page.getByRole('button', { name: '重新核对候选（额外模型费用）', exact: true })
+  await expect(recheck).toBeEnabled()
+
+  const localDraft = savedText + '\n本窗口尚未保存的修改。'
+  await candidate.fill(localDraft)
+  const remoteText = savedText + '\n另一窗口已保存的修改。'
+  const remote = await page.request.patch(`/api/artifacts/${sourceId}`, {
+    headers,
+    data: {
+      candidate_revision: savedCandidate.candidate_revision,
+      text: remoteText,
+    },
+  })
+  expect(remote.ok(), await remote.text()).toBeTruthy()
+  freeze = false
+  await expect(page.getByRole('button', { name: '载入已保存候选', exact: true })).toBeVisible()
+  await expect(candidate).toHaveValue(localDraft)
+  await expect(recheck).toBeDisabled()
+  expect((await (await page.request.get(`/api/chapters/${source.chapter_id}`)).json()).content).toBe('')
+})
+
 test('候选编辑、同契约复检、再次复检与历史回看，作者采用后明确续跑', async ({ page }, info) => {
   await page.goto('/')
   const session = await (await page.request.get('/api/session')).json()

@@ -196,9 +196,9 @@ async def compare(worker, text, fixed, context, snapshot, number):
             issues.append("必须对每条选定规则恰好核对一次。")
         for row in value["rules"]:
             resolve_field(row, "evidence", sources)
-            if row["evidence"] and row["evidence"] not in text:
+            if row["evidence"] and (not row["evidence"].strip() or row["evidence"] not in text):
                 issues.append("写法依据必须来自本次候选正文。")
-            if row["result"] == "pass" and not row["evidence"]:
+            if row["result"] == "pass" and not row["evidence"].strip():
                 issues.append("通过须有原文依据，缺证据标unknown。")
         return issues
 
@@ -264,7 +264,7 @@ async def run_reference(worker, request, context):
             issues = []
             for card in value["cards"]:
                 resolve_field(card, "evidence", sources)
-                if card["evidence"] not in p["source"]["quote"]:
+                if not card["evidence"].strip() or card["evidence"] not in p["source"]["quote"]:
                     issues.append("拆解卡依据必须来自所选逐字原文，不得补写未提供的前后文。")
             return issues
 
@@ -464,7 +464,7 @@ def register_routes(app, domain, provider_ready):
                 or not set(data.selected_ids).issubset(ids)
             ):
                 raise DomainError("reference_rules", "写法标识须唯一，选中规则必须存在。")
-            if any(c["evidence"] not in p["source"]["quote"] for c in cards):
+            if any(not c["evidence"].strip() or c["evidence"] not in p["source"]["quote"] for c in cards):
                 raise DomainError("evidence", "手动修改的证据仍须来自所选原文。")
             p.setdefault("history", []).append(
                 {

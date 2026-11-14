@@ -138,9 +138,9 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
                 flow[key] not in {*entities, "unknown"} for key in ("supplier_id", "recipient_id")
             ):
                 issues.append("仅使用提供的实体/物品编号，不明时标unknown或other。")
-            if flow["evidence"] and flow["evidence"] not in text:
+            if flow["evidence"] and (not flow["evidence"].strip() or flow["evidence"] not in text):
                 issues.append("流向观察只能引用本次正文。")
-            if flow["certainty"] == "explicit" and not flow["evidence"]:
+            if flow["certainty"] == "explicit" and not flow["evidence"].strip():
                 issues.append("明确流向必须有逐字正文依据。")
         return issues
 
@@ -344,9 +344,9 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
             issues.append("每项情节解释必须恰好核对一次，不得漏项或重复。")
         for row in value["checks"]:
             resolve_field(row, "evidence", sources)
-            if row["evidence"] and row["evidence"] not in text:
+            if row["evidence"] and (not row["evidence"].strip() or row["evidence"] not in text):
                 issues.append("正文证据必须来自本次候选连续原文。")
-            if row["result"] != "unknown" and not row["evidence"]:
+            if row["result"] != "unknown" and not row["evidence"].strip():
                 issues.append("通过或不符均须有正文依据，不能定位时标unknown。")
             if not row["reason"].strip() or (row["result"] != "unknown" and not row["observed"].strip()):
                 issues.append("须说明理由；通过或不符还须写出本稿实际发生了什么。")

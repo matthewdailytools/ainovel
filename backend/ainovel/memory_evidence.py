@@ -19,7 +19,7 @@ def memory_evidence_issues(result, text, sources):
     for index, fact in enumerate(result["facts"]):
         resolve_field(fact, "evidence", sources)
         value = fact["evidence"]
-        if value and value in text:
+        if value.strip() and value in text:
             continue
         location = f"facts[{index}].evidence"
         if len(re.findall(r"\bMEM[0-9]+\b", value)) > 1:

@@ -25,6 +25,7 @@ import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './Plot
 import { plotAuditEnabled, plotAuditFromPayload } from './plotAudit'
 import { CandidateHistory, CandidateRecheckAction, CandidateRecheckReport } from './candidateRecheck'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
+import { latestArtifact, refreshArtifactList } from './artifactRefresh'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
 import {
   adviceDirectionBasis,
@@ -134,6 +135,7 @@ export function Writing({
   const [showHistory, setShowHistory] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
   const historyRequest = useRef(0)
+  const candidateRequest = useRef(0)
   const [rename, setRename] = useState('')
   const current = useRef<Chapter | undefined>(undefined)
   const draftText = useRef('')
@@ -315,7 +317,7 @@ export function Writing({
           api<Excerpt[]>(`/library/excerpts?novel_id=${novel.id}`),
         ])
         if (active) {
-          setArtifacts(a)
+          setArtifacts((rows) => refreshArtifactList(rows, a))
           setTasks(t)
           setReferences(r)
         }
@@ -352,6 +354,30 @@ export function Writing({
     } finally {
       setBusy(false)
     }
+  }
+  function openCandidate(id: string) {
+    if (!confirmLeave()) return
+    const request = ++candidateRequest.current
+    const chapterId = current.current?.id
+    const chapterRequest = loadSequence.current
+    void doAction(async () => {
+      const target = await api<Artifact>(`/artifacts/${id}`)
+      if (
+        !alive.current ||
+        request !== candidateRequest.current ||
+        chapterRequest !== loadSequence.current ||
+        chapterId !== current.current?.id
+      )
+        return
+      if (target.branch_id !== branch.id || (target.chapter_id && target.chapter_id !== chapterId))
+        throw new Error('候选目标已变化，请在对应章节重新选择。')
+      setArtifacts((rows) =>
+        rows.some((row) => row.id === target.id)
+          ? rows.map((row) => (row.id === target.id ? latestArtifact(row, target) : row))
+          : [target, ...rows],
+      )
+      setCandidateId(target.id)
+    })
   }
   async function toggleHistory() {
     if (busy || opening || historyLoading || !current.current) return
@@ -1187,9 +1213,8 @@ export function Writing({
                 比较候选
                 <select
                   value={candidate?.id || ''}
-                  onChange={(e) => {
-                    if (confirmLeave()) setCandidateId(e.target.value)
-                  }}
+                  disabled={busy || opening}
+                  onChange={(e) => openCandidate(e.target.value)}
                 >
                   {visibleArtifacts.map((a, i) => (
                     <option key={a.id} value={a.id}>
@@ -1214,7 +1239,9 @@ export function Writing({
                       }
                       if (current.current?.id !== target.chapter_id) return
                       setArtifacts((rows) =>
-                        rows.some((row) => row.id === target.id) ? rows : [target, ...rows],
+                        rows.some((row) => row.id === target.id)
+                          ? rows.map((row) => (row.id === target.id ? latestArtifact(row, target) : row))
+                          : [target, ...rows],
                       )
                       setCandidateId(target.id)
                     })
@@ -1250,10 +1277,14 @@ export function Writing({
                       candidate_revision: candidate.candidate_revision,
                     })
                     if (chapter) await loadChapter(chapter.id, 0, true)
-                    setArtifacts(await api(`/artifacts?branch_id=${branch.id}`))
+                    const latest = await api<Artifact[]>(`/artifacts?branch_id=${branch.id}`)
+                    setArtifacts((rows) => refreshArtifactList(rows, latest))
                     await refresh()
                   }}
-                  onUpdate={async () => setArtifacts(await api(`/artifacts?branch_id=${branch.id}`))}
+                  onUpdate={async () => {
+                    const latest = await api<Artifact[]>(`/artifacts?branch_id=${branch.id}`)
+                    setArtifacts((rows) => refreshArtifactList(rows, latest))
+                  }}
                 />
               ) : null}
             </>

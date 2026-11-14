@@ -92,6 +92,18 @@ def test_segment_plot_evidence_must_be_unambiguous_and_belong_to_target_chapter(
         assert worker.issues
 
 
+@pytest.mark.parametrize("quote", [" ", "\n"])
+def test_completion_cannot_be_passed_by_a_whitespace_source_match(quote):
+    worker = Capture(lambda units: quote)
+    with pytest.raises(DomainError, match="原文依据"):
+        asyncio.run(
+            worker.completion_report(
+                chapters("她整理行囊。", "交易失败。" + quote), PAYLOAD, PLAN, "本次批次"
+            )
+        )
+    assert worker.issues and any("只有空白" in issue for issue in worker.issues)
+
+
 def test_segment_aggregation_preserves_verified_chapter_when_quotations_are_equal():
     worker = Capture(lambda units: next(unit["source_id"] for unit in units if unit["chapter"] == 2))
     frozen = chapters("她记下读数。", "她记下读数。")

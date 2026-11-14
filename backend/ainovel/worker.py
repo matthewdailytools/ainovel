@@ -41,7 +41,7 @@ longform.plans单独列出作者维护的未来计划，包含各信息视角的
 """
 PROMPT_VERSION = "0.13.0"
 STRUCTURE_REPAIR_VERSION = "3"
-REVIEW_CHECK_VERSION = "fixed-check-shape/1"
+REVIEW_CHECK_VERSION = "fixed-check-shape/2"
 REVISION_LENGTH_VERSION = "replacement-length-diagnostics/1"
 
 
@@ -482,6 +482,11 @@ class Worker:
                     "semantic_prompt_sha256": hashlib.sha256(semantic_prompt.encode()).hexdigest(),
                     "prompt_utf8_bytes": len(prompt.encode()),
                     "max_output_tokens": max_output,
+                    **(
+                        {"review_check_version": source_instruction["固定条件检查格式版本"]}
+                        if "固定条件检查格式版本" in source_instruction
+                        else {}
+                    ),
                     **(
                         {"plot_contract_version": source_instruction["情节核对契约版本"]}
                         if "情节核对契约版本" in source_instruction
@@ -952,11 +957,26 @@ class Worker:
                         )
             for index, check in enumerate(result["checks"]):
                 resolve_field(check, "evidence", sources)
-                if check["result"] == "pass" and (not check["evidence"] or check["evidence"] not in text):
-                    issues.append(f"checks[{index}].evidence 不在本章逐字原文中")
+                if check["result"] == "pass":
+                    if not check["evidence"].strip():
+                        issues.append(
+                            f"checks[{index}].evidence为空或纯空白，但result为pass。"
+                            "pass须引用本次正文一个合法source_id或含实际文字的连续原文；"
+                            "无法核实，或条件未触发且没有合适代表段时，应由模型填unknown、evidence空，"
+                            "并在summary按项说明。不得用空白、条件原话或旧稿补证，也不得强迫未来情节提前发生。"
+                        )
+                    elif check["evidence"] not in text:
+                        issues.append(
+                            f"checks[{index}].evidence 不在本章逐字原文中；"
+                            "请用本次合法source_id或连续逐字原文，不能概括或借用旧稿。"
+                        )
             for index, finding in enumerate(result["findings"]):
                 resolve_field(finding, "quote", sources)
-                if not finding["quote"] or finding["quote"] not in text or finding["chapter"] != number:
+                if (
+                    not finding["quote"].strip()
+                    or finding["quote"] not in text
+                    or finding["chapter"] != number
+                ):
                     issues.append(f"findings[{index}] 引文或章节号无效")
             return issues
 
@@ -1223,7 +1243,7 @@ class Worker:
                 cited = next((c for c in chapters if c["position"] == finding["chapter"]), None)
                 if selected and selected["chapter"] != finding["chapter"]:
                     issues.append(f"findings[{index}].chapter 与所选编号不一致")
-                if not cited or not finding["quote"] or finding["quote"] not in cited["content"]:
+                if not cited or not finding["quote"].strip() or finding["quote"] not in cited["content"]:
                     issues.append(f"findings[{index}] 引文或章节无效")
                 elif segment:
                     if selected:
@@ -1234,8 +1254,10 @@ class Worker:
                         verified_findings[index] = quoted_source(cited, finding["quote"])
             for index, promise in enumerate(report["promises"]):
                 selected = resolve_field(promise, "evidence", sources)
+                if promise["evidence"] and not promise["evidence"].strip():
+                    issues.append(f"promises[{index}] 原文依据不能只有空白")
                 expected = condition_chapters.get(promise["condition"])
-                if expected is not None and promise["evidence"]:
+                if expected is not None and promise["evidence"].strip():
                     if selected:
                         if selected["chapter"] != expected:
                             issues.append(f"promises[{index}] 引用编号不属于约定的第{expected}章")
@@ -1257,7 +1279,8 @@ class Worker:
                 elif segment and selected:
                     verified_evidence[index] = source_metadata(selected)
                 if promise["result"] == "pass" and (
-                    not promise["evidence"] or not any(promise["evidence"] in c["content"] for c in chapters)
+                    not promise["evidence"].strip()
+                    or not any(promise["evidence"] in c["content"] for c in chapters)
                 ):
                     issues.append(f"promises[{index}] 没有本次版本原文依据")
             return issues
