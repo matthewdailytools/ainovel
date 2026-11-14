@@ -3056,5 +3056,148 @@
     "result": "passed",
     "record": "2026-11-14-ideation-real-candidate-review.md",
     "fix_of": "ideation-boundary-ci-first-failure-001"
+  },
+  {
+    "id": "review-whitespace-before-fix-001",
+    "date": "2026-11-14",
+    "commit": "c3ffea9（修复前）",
+    "module": "审查空白引文有效性",
+    "scenario": "8个回归均失败：原文实际有空格/换行/制表/全角空格时可误作pass或finding依据；原失败保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-14-review-evidence-and-whitespace.md",
+    "fix_of": ""
+  },
+  {
+    "id": "review-whitespace-full-retest-001",
+    "date": "2026-11-14",
+    "commit": "05d5efb",
+    "module": "审查证据与跨模块全量复测",
+    "scenario": "109相关及108跨模块相关各自通过且范围重叠；完整1318后端504.75秒/墙507.279秒通过，1既有警告；随后123后端文件逐项哈希保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-review-evidence-and-whitespace.md",
+    "fix_of": "review-whitespace-before-fix-001"
+  },
+  {
+    "id": "candidate-cache-first-full-failure-001",
+    "date": "2026-11-14",
+    "commit": "c3ffea9＋审查修复工作快照",
+    "module": "全项目无头首次候选复检失败",
+    "scenario": "45/46，第三次复检禁用；trace证明修订2已保存但切回从缓存1初始化，后轮询被误判为未保存冲突，非数据丢失",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-14-candidate-cache-race.md",
+    "fix_of": ""
+  },
+  {
+    "id": "candidate-cache-old-build-repro-001",
+    "date": "2026-11-14",
+    "commit": "bd0b749（旧UI）",
+    "module": "候选缓存竞态确定性复现",
+    "scenario": "独立回归冻结旧轮询并外部保存，旧编译UI实际无法载入最新候选；先前未配置账户夹具400另保留，不作产品复现",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-14-candidate-cache-race.md",
+    "fix_of": "candidate-cache-first-full-failure-001"
+  },
+  {
+    "id": "candidate-recheck-self-cancel-first-001",
+    "date": "2026-11-14",
+    "commit": "05d5efb前工作快照",
+    "module": "复检动作自身忙碌误作目标失效",
+    "scenario": "缓存回归过、既有路径超时：父busy进入目标失效造成自取消，保留失败后区分两个状态，未删原路径断言",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-14-candidate-cache-race.md",
+    "fix_of": "candidate-cache-old-build-repro-001"
+  },
+  {
+    "id": "candidate-cache-final-full-retest-001",
+    "date": "2026-11-14",
+    "commit": "05d5efb",
+    "module": "候选缓存修复与全项目无头",
+    "scenario": "61相关/两条候选E2E21.5秒通过；最终190前端/类型/格式/48既有/静态审阅通过，全项目47无头墙249.097秒、0失败/跳过/flaky/错误，241文件前后相同",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-candidate-cache-race.md",
+    "fix_of": "candidate-recheck-self-cancel-first-001"
+  },
+  {
+    "id": "review-evidence-runtime-rollout-001",
+    "date": "2026-11-14",
+    "commit": "05d5efb",
+    "module": "日常受控更新及费用原稿保护",
+    "scenario": "27089一致性备份实际恢复ok；无活动任务，原生出生身份校验API/Worker自然退出；8766新UI Dw8，六稿件表/全usage/两任务/六账户配置逐项一致，无迁移/改配置",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-review-evidence-and-whitespace.md",
+    "fix_of": "review-whitespace-full-retest-001"
+  },
+  {
+    "id": "review-evidence-daily-readonly-ui-001",
+    "date": "2026-11-15",
+    "commit": "05d5efb",
+    "module": "日常真实候选只读预览",
+    "scenario": "新UI Dw8载入原构思候选逐字相同、未采用；目标上下文/任务/产物完整值相同，320px/200%/键盘通过，0模型/写请求/页面错误",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-review-evidence-and-whitespace.md",
+    "fix_of": "review-evidence-runtime-rollout-001"
+  },
+  {
+    "id": "assisted-second-review-candidate-v2-001",
+    "date": "2026-11-15",
+    "commit": "05d5efb",
+    "module": "半自动第二章真实待审候选",
+    "scenario": "原任务新增8次全结CNY0.570794；2968字候选10pass/1unknown，情节6pass/1unknown，needs_review，正式第二章空修订0；母亲本章未涉及借尺身份未核实，不作质量通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-second-chapter-review-candidates.md",
+    "fix_of": "assisted-second-evidence-stop-001"
+  },
+  {
+    "id": "automatic-second-review-candidate-v2-001",
+    "date": "2026-11-15",
+    "commit": "05d5efb",
+    "module": "全自动第二章真实待审候选",
+    "scenario": "原任务新增13次全结CNY1.062616；2910字候选10pass/2unknown、情节7pass，母亲及终局未涉仍unknown；正式第二章空修订0，不自动采用或记整书通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-second-chapter-review-candidates.md",
+    "fix_of": "automatic-second-evidence-stop-001"
+  },
+  {
+    "id": "second-chapter-local-minimal-proposals-001",
+    "date": "2026-11-15",
+    "commit": "05d5efb",
+    "module": "两模式第二章最小修订建议",
+    "scenario": "完整读取本次两稿及报告；半自动7处2968→2929、自动3处2910→2916，保存原稿/diff/UTF-16/条件及来源哈希；0API写/模型/采纳，尚未载入工作台/复检，不称修复验收通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-second-chapter-review-candidates.md",
+    "fix_of": "assisted-second-review-candidate-v2-001"
+  },
+  {
+    "id": "second-chapter-original-data-audit-001",
+    "date": "2026-11-15",
+    "commit": "05d5efb",
+    "module": "真实复检后原稿费用与来源核对",
+    "scenario": "从27089备份磁盘副本逐行核对219章/431修订/822事实/362旧产物/305结构/113场景均原值保持，仅新2候选；原writer步骤未重发，条件逐字/有效引文相同，DeepSeek22.303094已结未知0",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-second-chapter-review-candidates.md",
+    "fix_of": "review-evidence-runtime-rollout-001"
+  },
+  {
+    "id": "review-candidate-code-ci-success-001",
+    "date": "2026-11-15",
+    "commit": "05d5efb",
+    "module": "审查与候选缓存双CI",
+    "scenario": "main43611897372及分支43611844903均completed/success；日志1318后端分别662.58/601.52秒、190前端、47无头及既有48通过；未重跑/取消，不清除旧失败",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-candidate-cache-race.md",
+    "fix_of": "candidate-cache-final-full-retest-001"
   }
 ]
