@@ -110,6 +110,72 @@ def test_real_adapter_sse_contract(settings, account):
     assert ledger.report()[1 if deepseek else 0]["reserved_unknown"] == 0
 
 
+@pytest.mark.parametrize("effort", [None, "", "none", "low", "high", "max"])
+def test_deepseek_explicit_thinking_wire_usage_and_public_mode(settings, effort):
+    provider = replace(settings.providers["deepseek"], reasoning=effort)
+    settings.providers["deepseek"] = provider
+    enabled = effort in ("low", "high", "max")
+    deltas = []
+    events = [
+        {"choices": [{"delta": {"reasoning_content": "内部推理不作为正文返回"}}]},
+        {"choices": [{"delta": {"content": "只返回最终正文😀"}, "finish_reason": "stop"}]},
+        {
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 20,
+                "completion_tokens": 30,
+                "completion_tokens_details": {"reasoning_tokens": 23},
+            },
+        },
+    ]
+
+    def handler(request):
+        body = json.loads(request.content)
+        assert body["thinking"] == {"type": "enabled" if enabled else "disabled"}
+        assert body.get("reasoning_effort") == (effort if enabled else None)
+        assert body["max_tokens"] == 4096
+        assert "temperature" not in body and "tools" not in body
+        return httpx.Response(200, content=stream(events, True))
+
+    async def on_text(value):
+        deltas.append(value)
+
+    ledger = Budget(settings)
+    result = asyncio.run(
+        ModelClient(settings, ledger, httpx.MockTransport(handler)).generate(
+            "deepseek", "thinking-usage", "系统", "正文", 4096, on_text=on_text
+        )
+    )
+    assert result["text"] == "只返回最终正文😀" and deltas == ["只返回最终正文😀"]
+    assert result["usage"] == {"input": 20, "output": 30}
+    assert ledger.report()[1]["settled"] == pytest.approx((20 * 2 + 30 * 8) / 1_000_000)
+    public = provider.public()
+    assert "test-not-real" not in json.dumps(public)
+    if enabled:
+        assert public["thinking_mode"] == "enabled" and public["reasoning_effort"] == effort
+    else:
+        assert "thinking_mode" not in public and "reasoning_effort" not in public
+
+
+@pytest.mark.parametrize("effort", ["medium", "typo", True, 4])
+def test_deepseek_unknown_thinking_effort_is_rejected_before_usage(settings, effort):
+    ledger = Budget(settings)
+    before = ledger.report()
+    with pytest.raises(ValueError, match="reasoning_effort"):
+        replace(settings.providers["deepseek"], reasoning=effort)
+    assert ledger.report() == before
+
+
+def test_deepseek_thinking_alias_uses_existing_shared_budget(settings):
+    ledger = Budget(settings)
+    provider = replace(settings.providers["deepseek"], input_rate=Decimal("40000000"))
+    first = ledger.reserve(provider, "original-deepseek", 1, 1)
+    ledger.settle(first)
+    with pytest.raises(DomainError, match="共享预算"):
+        ledger.reserve(replace(provider, id="deepseek_thinking", reasoning="high"), "thinking", 2, 1)
+    assert ledger.report()[1]["limit"] == "80"
+
+
 @pytest.mark.parametrize("code", [401, 429, 500])
 def test_provider_errors_never_retry_or_switch(settings, code):
     seen = []
@@ -201,7 +267,9 @@ def test_provider_failed_event_keeps_sanitized_reason_and_does_not_retry(setting
     assert ledger.report()[0]["reserved_unknown"] > 0
 
 
-def test_unknown_timeout_is_not_repairable_or_retried(settings):
+@pytest.mark.parametrize("account,effort", [("openai_1", "none"), ("deepseek", "none"), ("deepseek", "high")])
+def test_unknown_timeout_is_not_repairable_or_retried(settings, account, effort):
+    settings.providers[account] = replace(settings.providers[account], reasoning=effort)
     calls = []
 
     def handler(request):
@@ -212,8 +280,61 @@ def test_unknown_timeout_is_not_repairable_or_retried(settings):
     with pytest.raises(DomainError) as caught:
         asyncio.run(
             ModelClient(settings, ledger, httpx.MockTransport(handler)).generate(
-                "openai_1", "unknown-timeout", "system", "prompt"
+                account, "unknown-timeout", "system", "prompt"
             )
         )
     assert caught.value.code == "unknown_timeout"
-    assert len(calls) == 1 and ledger.report()[0]["reserved_unknown"] > 0
+    assert len(calls) == 1 and ledger.report()[int(account == "deepseek")]["reserved_unknown"] > 0
+
+
+def test_thinking_only_output_limit_settles_usage_without_returning_internal_text(settings):
+    settings.providers["deepseek"] = replace(settings.providers["deepseek"], reasoning="high")
+    ledger = Budget(settings)
+    events = [
+        {
+            "choices": [
+                {"delta": {"reasoning_content": "内部文本不得进正文或异常片段"}, "finish_reason": "length"}
+            ],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 30},
+        }
+    ]
+    with pytest.raises(DomainError) as caught:
+        asyncio.run(
+            ModelClient(
+                settings,
+                ledger,
+                httpx.MockTransport(lambda _: httpx.Response(200, content=stream(events, True))),
+            ).generate("deepseek", "thinking-length", "系统", "正文", 30)
+        )
+    assert caught.value.code == "incomplete" and caught.value.known_usage and caught.value.repairable
+    assert not getattr(caught.value, "partial_text", "")
+    assert "内部文本" not in str(caught.value)
+    assert ledger.report()[1]["reserved_unknown"] == 0 and ledger.report()[1]["settled"] > 0
+
+
+def test_same_deepseek_key_can_be_configured_as_explicit_separate_thinking_account(tmp_path, monkeypatch):
+    config = tmp_path / "thinking.toml"
+    config.write_text(
+        """[accounts.deepseek]
+kind="deepseek"
+key_env="DEEPSEEK_API_KEY"
+model="test-model"
+reasoning_effort="none"
+[accounts.deepseek_thinking]
+kind="deepseek"
+key_env="DEEPSEEK_API_KEY"
+model="test-model"
+reasoning_effort="high"
+[pricing."test-model"]
+currency="CNY"
+input_per_million="2"
+output_per_million="8"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AINOVEL_CONFIG", str(config))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "offline-duplicate-key")
+    loaded = Settings.load(tmp_path)
+    original, thinking = (loaded.providers[name] for name in ("deepseek", "deepseek_thinking"))
+    assert original.key == thinking.key and original.reasoning == "none" and thinking.reasoning == "high"
+    assert original.kind == thinking.kind == "deepseek" and loaded.limits["deepseek"] == Decimal("80")

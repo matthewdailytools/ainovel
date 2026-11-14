@@ -30,6 +30,8 @@ class Provider:
     context_source: str = ""
 
     def __post_init__(self):
+        if self.kind == "deepseek" and self.reasoning not in (None, "", "none", "low", "high", "max"):
+            raise ValueError("DeepSeek reasoning_effort 仅支持 none、low、high、max。")
         if type(self.max_input_bytes) is not int or self.max_input_bytes <= 0:
             raise ValueError("max_input_bytes 必须为正整数。")
         if self.context_window_tokens is not None and (
@@ -64,6 +66,11 @@ class Provider:
             "output_rate": str(self.output_rate),
             "price_source": self.price_source,
             "limits": self.limits(),
+            **(
+                {"reasoning_effort": self.reasoning, "thinking_mode": "enabled"}
+                if self.kind == "deepseek" and self.reasoning in ("low", "high", "max")
+                else {}
+            ),
         }
 
 

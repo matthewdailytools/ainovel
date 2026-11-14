@@ -2550,5 +2550,71 @@
     "result": "passed",
     "record": "2026-11-14-revision-length-diagnostics.md",
     "fix_of": "revision-length-full-regression-001"
+  },
+  {
+    "id": "json-scene-rollout-e95c5be-001",
+    "date": "2026-11-14",
+    "commit": "e95c5be",
+    "module": "JSON与未知覆盖实际部署",
+    "scenario": "12927792备份实际隔离验证，六保护表及全usage不变；两任务已付费步骤不变，原十章56场景/失效标记不变，UI仍C7kMoqmf",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-scene-unknown-coverage.md",
+    "fix_of": "json-and-scene-combined-regression-001"
+  },
+  {
+    "id": "required-json-fields-real-candidate-001",
+    "date": "2026-11-14",
+    "commit": "e95c5be",
+    "module": "半自动实际修订成候选",
+    "scenario": "原f39越过JSON/长度停点，2795字候选60e0未采用，情节模型pass/普通10pass1未来unknown；空原稿rev0保持，29次CNY0.959730/未知0，非首章或整书通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-required-json-fields.md",
+    "fix_of": "revision-length-real-json-stop-001"
+  },
+  {
+    "id": "scene-real-unknown-ref-stop-001",
+    "date": "2026-11-14",
+    "commit": "e95c5be",
+    "module": "自动具体诊断复跑仍停止",
+    "scenario": "原bb34新增2次CNY0.158400后把事件清null却仍用event_refs，被正确阻止；原2597字保持，正式结构/场景0，总13次CNY0.596664/未知0，不把模型失败当工程通过",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-14-scene-unknown-coverage.md",
+    "fix_of": "books-independent-auto-structure-stop-001"
+  },
+  {
+    "id": "deepseek-thinking-related-001",
+    "date": "2026-11-14",
+    "commit": "working-tree",
+    "module": "DeepSeek显式思考接入",
+    "scenario": "原适配器硬禁用与配置不一致；新显式none/low/high/max、只最终正文与完整用量、别名共CNY80。相关137项7.87s及既有48通过；首命令路径错误0执行保留，全量和付费思考待验",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-deepseek-thinking.md",
+    "fix_of": "scene-real-unknown-ref-stop-001"
+  },
+  {
+    "id": "deepseek-thinking-full-backend-001",
+    "date": "2026-11-14",
+    "commit": "working-tree",
+    "module": "DeepSeek显式思考完整后端",
+    "scenario": "1242项325.68s/墙327.948s通过，186源码/dist清单稳定，1既有警告；API生成无差异/类型/Ruff通过，48既有另验；非思考兼容保持，真实思考尚未执行",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-deepseek-thinking.md",
+    "fix_of": "deepseek-thinking-related-001"
+  },
+  {
+    "id": "json-scene-ci-e95c5be-001",
+    "date": "2026-11-14",
+    "commit": "e95c5be",
+    "module": "JSON与场景同源码CI",
+    "scenario": "main43595654339及隔离分支43595629044均completed/success，同SHA核实、未重跑/取消；不混成后续思考模式1242本机结果",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-scene-unknown-coverage.md",
+    "fix_of": "json-and-scene-combined-regression-001"
   }
 ]

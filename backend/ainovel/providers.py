@@ -81,6 +81,9 @@ class ModelClient:
                 thinking={"type": "disabled"},
                 stream_options={"include_usage": True},
             )
+            if provider.reasoning in ("low", "high", "max"):
+                body["thinking"] = {"type": "enabled"}
+                body["reasoning_effort"] = provider.reasoning
             endpoint = provider.base_url + "/chat/completions"
             if schema:
                 body["response_format"] = {"type": "json_object"}

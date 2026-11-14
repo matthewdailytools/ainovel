@@ -25,3 +25,7 @@ JSON语法错误只给行、列、偏移，不回显原文。两轮仍失败时�
 私有证据：acceptance/review-fixed-checks-20261114/length-runtime、structure-v3-related.log、structure-v3-final、independent-automatic及原longform-quality运行目录。真实稿、完整诊断与费用细节不进入公开仓库。
 
 全自动随后自然停止：36章计划、首章2597字修订1已保存；首章结构时点多顺序未核实，正式记录／场景0、共11次CNY0.438264／未知0。独立发现的[混合未知时点缺陷](2026-11-14-scene-unknown-coverage.md)须修复并通过稳定性，再恢复两模式实际质量验证。
+
+## 真实复跑结果
+
+e95c5be实际备份部署后，原半自动任务越过格式修正及篇幅校验，形成2795字未采用候选60e063bf…；情节逐项模型pass，普通11项10pass／1unknown，因未来有效观测未触发而needs_review。原稿仍空修订0，累计29次已结CNY0.959730／未知0；本次新增12次CNY0.410406。JSON修正通过不是首章已采用或整书通过，未知项与完整修订链保留。

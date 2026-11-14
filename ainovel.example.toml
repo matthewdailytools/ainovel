@@ -25,6 +25,8 @@ key_env = "OPENAI_API_KEY_2"
 [accounts.deepseek]
 kind = "deepseek"
 key_env = "DEEPSEEK_API_KEY"
+# 仅工作台：none（默认）、low、high、max；显式开启才发送思考参数。
+# reasoning_effort = "none"
 # 可选长篇配置：2026-11-13 官方页列 deepseek-flash 为
 # DeepSeek-V4.1-Flash-1017，窗口 1M tokens。仅核实窗口，不自动改变本例单价。
 # model = "deepseek-flash"
@@ -32,6 +34,16 @@ key_env = "DEEPSEEK_API_KEY"
 # context_window_tokens = 1000000
 # context_source = "https://api-docs.deepseek.com/quick_start/pricing/"
 # 发送前同时核对字节上限与：实际请求体字节数 + max_output + 4096 <= 窗口。
+
+# 可选：保留原账户，另配同一密钥的思考模式，仍共用 CNY80 账本。
+# [accounts.deepseek_thinking]
+# kind = "deepseek"
+# key_env = "DEEPSEEK_API_KEY"
+# model = "deepseek-flash"
+# reasoning_effort = "high"
+# max_input_bytes = 512000
+# context_window_tokens = 1000000
+# context_source = "https://api-docs.deepseek.com/quick_start/pricing/"
 
 # 2026-11-12 核对的保守计价；不计缓存折扣，OpenAI 使用长上下文上界，
 # DeepSeek 使用高峰上界。界面显示配置单价估算，不冒充服务商账单。
