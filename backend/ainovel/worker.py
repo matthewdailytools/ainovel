@@ -756,7 +756,11 @@ class Worker:
             "情节保持": "作者明确给出的行动者、动作对象、给出与取得的方向、前提和结果均须保持，不能仅保留结局而反转过程。指令有歧义时保留待核对，不自行把另一种解释写成既定安排。",
         }
         kind = "advice"
-        if action == "story.extract":
+        if action == "ideation.structure":
+            from .ideation_structure import generate_structure
+
+            payload = await generate_structure(self, request, context)
+        elif action == "story.extract":
             from .story_extraction import run_extraction
 
             kind, payload = await run_extraction(self, request, context)

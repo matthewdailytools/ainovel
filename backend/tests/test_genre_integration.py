@@ -6,6 +6,7 @@ import pytest
 from ainovel.db import dumps
 from ainovel.models import ModuleInput, Plan, WorkflowInput
 from ainovel.worker import Worker
+from helpers.ideation_fixture import complete_idea_output
 
 
 TEXT = "林舟用旧尺测量潮水，把两次读数记在纸上。" * 15
@@ -41,7 +42,9 @@ class CaptureModel:
         self.requests.append({**data, "system": system})
         instruction = data["任务"]
         action = instruction.get("动作", instruction.get("action"))
-        if action == "全书滚动规划":
+        if action == "构思结构完整的小说":
+            output = complete_idea_output()
+        elif action == "全书滚动规划":
             output = {
                 "chapters": [
                     {"number": i, "title": f"第{i}章", "plot": "交易失败后核对证据", "fixed": []}

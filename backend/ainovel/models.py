@@ -52,6 +52,7 @@ class ModuleInput(Input):
         "character.generate",
         "world.generate",
         "ideation.explore",
+        "ideation.structure",
         "intent.compile",
         "revision.targeted",
         "reference.analyze",

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ValidationError
 import pytest
 
 from ainovel.author_contract import AuthorIntentFields
+from ainovel.ideation_structure import CompleteIdea
 from ainovel.budget import Budget
 from ainovel.character_repair import CharacterRepair
 from ainovel.character_review import CharacterReview
@@ -54,6 +55,7 @@ def nodes(schema):
 # All schemas passed to Worker.call/grounded in the current implementation.
 GROUNDED = [
     AuthorIntentFields,
+    CompleteIdea,
     Plan,
     Review,
     Memory,

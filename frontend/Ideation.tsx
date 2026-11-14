@@ -12,7 +12,7 @@ import {
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 
 const profile =
-  '小说构思工具/1.0.0。围绕作者的想法，给出一个可继续写的原创故事方案，约400至700字。用简短小标题说明：一句话故事、主角想要什么、主要阻力与代价、开篇怎么写、后续发展与可选结局。保留作者明确要求和已采用约定；没有确定的内容标为建议，不擅自锁定。直接给方案，不寒暄，不写正文，不罗列百科。'
+  '小说构思工具/2.0.0。一个结构完整、因果连贯的小说方案，保留作者约定；补充细节与建议结局可由作者修改，不生成正文。'
 type Draft = {
   idea: string
   text: string
@@ -57,6 +57,8 @@ export function Ideation({
 }) {
   const storageKey = 'ainovel-ideation-' + branch.id
   const [draft, setDraft] = useState<Draft>(empty)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
   const [initialized, setInitialized] = useState(false)
   const [snapshot, setSnapshot] = useState<Snapshot>()
   const [tasks, setTasks] = useState<Task[]>([])
@@ -94,7 +96,9 @@ export function Ideation({
       api<Artifact[]>(`/artifacts?branch_id=${branch.id}`),
     ])
     const ideas = rows.filter(
-      (row) => row.payload.action === 'ideation.explore' && row.payload.writing_profile === profile,
+      (row) =>
+        (row.payload.action === 'ideation.structure' || row.payload.action === 'ideation.explore') &&
+        row.payload.writing_profile?.startsWith('小说构思工具/'),
     )
     const saved = candidates.filter((a) => ideas.some((t) => t.id === a.task_id))
     const latestId = ideas[0]?.result.artifact_id
@@ -121,8 +125,36 @@ export function Ideation({
         setTasks(history.ideas)
         setArtifacts(history.candidates)
         setTask(history.ideas[0])
-        if (!restored.dirty && restored.text === value.contract.intent_contract?.direction) setAdopted(true)
-        if ((!restored.idea && !restored.text) || (!restored.dirty && restored.pendingTaskId)) {
+        const adoptedText = value.contract.intent_contract?.direction || ''
+        const provenance =
+          value.contract.provenance && typeof value.contract.provenance === 'object'
+            ? (value.contract.provenance as Record<string, unknown>)
+            : {}
+        if (adoptedText && !draftRef.current.dirty && !restored.dirty && restored.text === adoptedText)
+          setAdopted(true)
+        if (
+          !draftRef.current.dirty &&
+          !restored.idea &&
+          !restored.text &&
+          adoptedText &&
+          provenance.origin === 'author_adopted_idea'
+        ) {
+          setDraft({
+            idea:
+              typeof provenance.author_idea === 'string'
+                ? provenance.author_idea
+                : value.contract.author_text,
+            text: adoptedText,
+            sourceId:
+              typeof provenance.source_candidate_id === 'string' ? provenance.source_candidate_id : null,
+            revision:
+              typeof provenance.source_candidate_revision === 'number'
+                ? provenance.source_candidate_revision
+                : 0,
+            dirty: false,
+          })
+          setAdopted(true)
+        } else if ((!restored.idea && !restored.text) || (!restored.dirty && restored.pendingTaskId)) {
           const latest = history.candidates.find(
             (a) =>
               a.status !== 'rejected' && (!restored.pendingTaskId || a.task_id === restored.pendingTaskId),
@@ -172,6 +204,7 @@ export function Ideation({
           setTasks(history.ideas)
           setArtifacts(history.candidates)
           const result = history.candidates.find((a) => a.id === row.result.artifact_id)
+          if (result) setAdopted(false)
           if (result)
             setDraft((current) =>
               current.dirty
@@ -225,13 +258,13 @@ export function Ideation({
     )
       return
     const payload: ModuleInput = {
-      action: 'ideation.explore',
+      action: 'ideation.structure',
       novel_id: branch.novel_id,
       branch_id: branch.id,
       instruction: draft.idea.trim(),
       writing_profile: profile,
       account,
-      max_output_tokens: 2048,
+      max_output_tokens: 8192,
       include_scene_ranges: false,
       context_position: 0,
       author_contract_basis: {
@@ -290,7 +323,7 @@ export function Ideation({
         <div>
           <span className="eyebrow">从一句想法开始</span>
           <h1>小说构思</h1>
-          <p>写下脑洞，得到一个可以继续写的故事。</p>
+          <p>写下一句想法，展开从起因、发展到高潮与结局的完整故事。</p>
         </div>
       </div>
       <section className="card">
@@ -345,6 +378,9 @@ export function Ideation({
               </button>
             )}
           </div>
+          <p className="small muted">
+            AI方案包含人物动机、核心矛盾、发展转折、高潮结局与伏笔回收。直接采用只记录你自己的想法。
+          </p>
           <p className="small muted">
             {modelReady
               ? `生成使用 ${account}，计入现有共享预算。`
@@ -412,6 +448,9 @@ export function Ideation({
       {draft.text && (
         <section className="card">
           <h2>{adopted ? '已采用的构思' : '构思方案'}</h2>
+          <p className="small muted">
+            核对主角每一步为何行动、结果怎样引出后续，以及主冲突和主要伏笔如何收束。编辑后请重新核对这些衔接。
+          </p>
           <label>
             修改构思方案
             <textarea
