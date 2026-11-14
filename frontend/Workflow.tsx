@@ -63,6 +63,7 @@ export function WorkflowPage({
   const [sceneMaintenance, setSceneMaintenance] = useState(true)
   const [characterFieldRepair, setCharacterFieldRepair] = useState(false)
   const [plotContractCheck, setPlotContractCheck] = useState(false)
+  const [sourceIdentityContext, setSourceIdentityContext] = useState(false)
   const [inheritance, setInheritance] = useState<InheritanceSelection>()
   const [profile, setProfile] = useState(
     '第三人称限定视角，克制白话，动作有因果，人物选择遵循当时掌握的信息与资源。',
@@ -101,6 +102,7 @@ export function WorkflowPage({
     sceneMaintenance,
     characterFieldRepair,
     plotContractCheck,
+    sourceIdentityContext,
     profile,
     runLimit,
   ])
@@ -246,6 +248,7 @@ export function WorkflowPage({
         account,
         adoption,
         plot_contract_check: plotContractCheck,
+        source_identity_context: plotContractCheck && sourceIdentityContext,
         structured_maintenance: structuredMaintenance,
         structure_max_output_tokens: workflowStructureOutput(structureMaxOutputTokens, structuredMaintenance),
         scene_maintenance: structuredMaintenance && sceneMaintenance,
@@ -485,7 +488,13 @@ export function WorkflowPage({
               busy={busy}
               onChange={setCharacterFieldRepair}
             />
-            <PlotAuditOption checked={plotContractCheck} disabled={busy} onChange={setPlotContractCheck} />
+            <PlotAuditOption
+              checked={plotContractCheck}
+              disabled={busy}
+              onChange={setPlotContractCheck}
+              identityChecked={sourceIdentityContext}
+              onIdentityChange={setSourceIdentityContext}
+            />
             {plotContractCheck && mode === 'automatic' && (
               <p className="small muted">
                 全自动会在写正文前明确自己的AI章纲，必要时最多两轮选择本章开放细节并核对，增加模型调用和费用。
@@ -591,6 +600,8 @@ export function WorkflowPage({
                   />
                   <FrozenPlotAuditPolicy
                     enabled={task.payload.plot_contract_check}
+                    identityEnabled={task.payload.source_identity_context}
+                    identityVersion={task.result.source_identity_context_version}
                     mode={task.payload.mode}
                     version={task.result.plot_contract_version}
                   />

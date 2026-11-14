@@ -23,6 +23,7 @@ from test_workflow_scope import SegmentModel as BookModel  # noqa: E402
 from helpers.character_review_fixture import character_review_output  # noqa: E402
 from helpers.plan_execution_fixture import plan_execution_output  # noqa: E402
 from helpers.ideation_fixture import complete_idea_output  # noqa: E402
+from helpers.source_identity_fixture import source_identity_output  # noqa: E402
 
 CHARACTER_REPAIR_FIXTURE = "character-field-repair-e2e"
 CHARACTER_LATE_FIELD_FIXTURE = "fixture-late-character-field"
@@ -59,6 +60,17 @@ class Model(ReferenceModel):
         source_instruction = instruction
         while "原始任务" in source_instruction:
             source_instruction = source_instruction["原始任务"]
+        identity_response = source_identity_output(source_instruction)
+        if identity_response is not None:
+            if source_instruction.get("动作") in {"阶段批次规划", "全书滚动规划", "按章纲写完整正文"}:
+                self.book_tasks.add(task_id)
+            return {
+                "text": json.dumps(identity_response, ensure_ascii=False)
+                if isinstance(identity_response, dict)
+                else identity_response,
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-source-identity",
+            }
         if source_instruction.get(
             "动作"
         ) == "按章纲写完整正文" and PLOT_EXCLUSIVE_FIXTURE in source_instruction.get("本章", {}).get(

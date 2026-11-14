@@ -1,3 +1,4 @@
+import { readSourceIdentityContext, type SourceIdentityContext } from './sourceIdentity'
 export const PLOT_AUDIT_VERSION = 'author-plot-audit/2'
 export const PLOT_AUDIT_V1_VERSION = 'author-plot-audit/1'
 export const isBoundPlotAuditVersion = (value: unknown) =>
@@ -31,6 +32,7 @@ type PlotGuard = {
   policy?: string
 }
 export type PlotAudit = {
+  source_identity_context?: SourceIdentityContext
   status: 'model_pass' | 'failed' | 'unverified'
   summary: string
   policy: string
@@ -296,7 +298,19 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
       candidate_revision: value.candidate_revision,
     }
   }
+  let identity: SourceIdentityContext | undefined
+  if (object(value.direction_guard) && value.direction_guard.source_identity_context !== undefined) {
+    identity = readSourceIdentityContext(value.direction_guard.source_identity_context)
+    if (
+      !identity ||
+      !binding ||
+      identity.source_sha256 !== binding.source.text_sha256 ||
+      (identity.unverified_ids.length > 0 && value.status === 'model_pass')
+    )
+      return undefined
+  }
   return {
+    ...(identity ? { source_identity_context: identity } : {}),
     status: value.status,
     summary: String(value.summary),
     policy: String(value.policy),

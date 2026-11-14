@@ -16,6 +16,7 @@ VERSION = "candidate-recheck/1"
 
 
 class CandidateRecheckInput(Input):
+    source_identity_context: bool = Field(default=False, strict=True)
     candidate_revision: int = Field(ge=0, strict=True)
     account: str = Field(min_length=1, max_length=100)
     client_request_id: str = Field(min_length=8, max_length=128)
@@ -73,6 +74,7 @@ def assisted_contract(source, parent, plot):
 
 def freeze(domain, request):
     from .plot_audit import VERSION as PLOT_VERSION
+    from .plot_identity_context import VERSION as IDENTITY_VERSION
     from .workflow_plan_preparation import VERSION as PREPARATION_VERSION, frozen_contract
 
     source = domain.artifact(request["source_candidate_id"])
@@ -157,6 +159,11 @@ def freeze(domain, request):
         "source_progress_sha256": sha(progress),
         "plot": effective_plot,
         "prepared_contract": contract,
+        **(
+            {"source_identity_context_version": IDENTITY_VERSION}
+            if request.get("source_identity_context") is True
+            else {}
+        ),
         **({"source_kind": "author_plot"} if mode == "assisted" else {}),
         "fixed": fixed,
         "genre_profile_snapshot": deepcopy(progress["genre_profile_snapshot"]),

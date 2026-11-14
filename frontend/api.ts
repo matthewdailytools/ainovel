@@ -20,11 +20,19 @@ export type AuthorContract = {
   story_revision?: number
   legacy_unconfigured?: boolean
 }
-export type ModuleInput = Omit<components['schemas']['ModuleInput'], 'plot_contract_check'> & {
+export type ModuleInput = Omit<
+  components['schemas']['ModuleInput'],
+  'plot_contract_check' | 'source_identity_context'
+> & {
   plot_contract_check?: boolean
+  source_identity_context?: boolean
 }
-export type WorkflowInput = Omit<components['schemas']['WorkflowInput'], 'plot_contract_check'> & {
+export type WorkflowInput = Omit<
+  components['schemas']['WorkflowInput'],
+  'plot_contract_check' | 'source_identity_context'
+> & {
   plot_contract_check?: boolean
+  source_identity_context?: boolean
 }
 export type ContinuationInput = components['schemas']['ContinuationInput']
 export type DefinitionInput = components['schemas']['DefinitionInput']
@@ -146,6 +154,8 @@ export type Task = {
     character_field_repairs?: unknown
     character_field_repair_version?: string
     plot_contract_version?: string
+    source_identity_context_version?: string
+    candidate_recheck_snapshot?: unknown
     workflow_plan_preparation_version?: string
     plot_preparations?: unknown
   }
@@ -164,6 +174,7 @@ export type Task = {
     adoption?: 'manual' | 'automatic'
     character_field_repair?: boolean
     plot_contract_check?: boolean
+    source_identity_context?: boolean
   }
 }
 export type Account = {

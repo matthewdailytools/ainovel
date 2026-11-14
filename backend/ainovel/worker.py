@@ -327,6 +327,8 @@ class Worker:
             "仅依据作者原话整理本场景情节",
             "逐项对照作者情节解释与本次正文",
             "只从本次正文独立提取物品与信息流向",
+            "仅从情节原话补全角色称谓限定",
+            "独立核对原话角色称谓限定",
             "独立核对人物自由文本的本项来源蕴含",
             "修正未采纳人物自由文本字段",
             "写前解释AI工作章纲",
@@ -482,6 +484,11 @@ class Worker:
                     "semantic_prompt_sha256": hashlib.sha256(semantic_prompt.encode()).hexdigest(),
                     "prompt_utf8_bytes": len(prompt.encode()),
                     "max_output_tokens": max_output,
+                    **(
+                        {"source_identity_context_version": source_instruction["角色限定版本"]}
+                        if "角色限定版本" in source_instruction
+                        else {}
+                    ),
                     **(
                         {"review_check_version": source_instruction["固定条件检查格式版本"]}
                         if "固定条件检查格式版本" in source_instruction

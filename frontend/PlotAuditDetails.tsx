@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react'
 import { isBoundPlotAuditVersion, PLOT_AUDIT_V1_VERSION, plotAuditState, readPlotAudit } from './plotAudit'
+import { SourceIdentityDetails, SourceIdentityOption, SOURCE_IDENTITY_VERSION } from './sourceIdentity'
 
 export function PlotAuditOption({
   checked,
   disabled,
   onChange,
+  identityChecked = false,
+  onIdentityChange,
 }: {
   checked: boolean
   disabled?: boolean
   onChange: (value: boolean) => void
+  identityChecked?: boolean
+  onIdentityChange?: (value: boolean) => void
 }) {
   return (
     <div>
@@ -24,6 +29,13 @@ export function PlotAuditOption({
       <p className="small muted">
         通常增加解析和对照两步模型调用；物品或信息流向可能再增加一次，格式或引用修正也可能增加调用，每轮复检均增加费用。歧义或未知保留待核对，模型解释不形成作者新条件，手动采用仍由作者决定。
       </p>
+      {onIdentityChange && (
+        <SourceIdentityOption
+          checked={identityChecked}
+          disabled={disabled || !checked}
+          onChange={onIdentityChange}
+        />
+      )}
     </div>
   )
 }
@@ -32,10 +44,14 @@ export function FrozenPlotAuditPolicy({
   enabled,
   mode,
   version,
+  identityEnabled,
+  identityVersion,
 }: {
   enabled: unknown
   mode?: string
   version?: unknown
+  identityEnabled?: unknown
+  identityVersion?: unknown
 }) {
   const actualVersion = version === undefined ? PLOT_AUDIT_V1_VERSION : version
   return (
@@ -51,6 +67,12 @@ export function FrozenPlotAuditPolicy({
         (isBoundPlotAuditVersion(actualVersion)
           ? `冻结版本：${String(actualVersion)}。${actualVersion === PLOT_AUDIT_V1_VERSION ? '未含限定接收者补充。' : ''}`
           : '冻结版本无法确认，待核对。')}
+      {enabled === true &&
+        (identityEnabled === true
+          ? identityVersion === SOURCE_IDENTITY_VERSION
+            ? '已开启原话角色限定补充与独立核对（额外模型费用），版本source-identity-context/1。'
+            : '角色限定补充的冻结版本无法确认，待核对。'
+          : '未额外补充原话角色限定，旧任务不自动升级。')}
     </p>
   )
 }
@@ -176,6 +198,7 @@ export function PlotAuditDetails({
           </details>
         )}
         <p>{audit.interpretation_note}</p>
+        {audit.source_identity_context && <SourceIdentityDetails value={audit.source_identity_context} />}
         {audit.binding?.version === PLOT_AUDIT_V1_VERSION && (
           <p>此v1报告未含限定接收者补充；可按原有范围核对绑定内容，未执行v2补充核对。</p>
         )}

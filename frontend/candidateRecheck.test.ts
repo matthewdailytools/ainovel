@@ -17,6 +17,7 @@ import {
   readCandidateRecheckReceipt,
   recheckNonce,
   recheckRequestSignature,
+  candidateRecheckSourceMode,
 } from './candidateRecheck'
 
 const text = '沈砚只把旧尺还给老陈😀𠮷，未交给旁人。'
@@ -336,6 +337,8 @@ test('同输入失败重发复用持久nonce，输入变化更换且保留旧输
 test('请求签名覆盖真实内容、身份、修订、基线、账户及预算', () => {
   const artifact = candidate()
   const initial = recheckRequestSignature(artifact, 'account-1', 0.4)
+  expect(recheckRequestSignature(artifact, 'account-1', 0.4, false)).toBe(initial)
+  expect(recheckRequestSignature(artifact, 'account-1', 0.4, true)).not.toBe(initial)
   for (const change of [
     { id: 'other' },
     { candidate_revision: 4 },
@@ -348,6 +351,17 @@ test('请求签名覆盖真实内容、身份、修订、基线、账户及预�
   expect(recheckRequestSignature(artifact, 'account-2', 0.4)).not.toBe(initial)
   expect(recheckRequestSignature(artifact, 'account-1', 0.8)).not.toBe(initial)
   expect(recheckRequestSignature(structuredClone(artifact), 'account-1', 0.4)).toBe(initial)
+})
+
+test('待审任务来源按冻结解释识别，半自动不标成AI章纲', () => {
+  const task = source()
+  task.kind = 'candidate_recheck'
+  task.result.candidate_recheck_snapshot = { source_kind: 'author_plot', prepared_contract: {} }
+  expect(candidateRecheckSourceMode(task)).toBe('assisted')
+  task.result.candidate_recheck_snapshot = { prepared_contract: {} }
+  expect(candidateRecheckSourceMode(task)).toBe('automatic')
+  task.result.candidate_recheck_snapshot = { source_kind: 'unsupported' }
+  expect(candidateRecheckSourceMode(task)).toBeUndefined()
 })
 
 test('存储不可用时同输入仍复用memory nonce，预算只接受有限正数', () => {
@@ -557,6 +571,47 @@ function recheckReceipt(clientRequestId: string) {
     },
   }
 }
+
+test('角色限定选项绑定回执与冻结版本，不与普通复检混用', () => {
+  const base = recheckReceipt('identity-context-nonce')
+  const expected = {
+    artifact: candidate(),
+    account: 'account-1',
+    clientRequestId: 'identity-context-nonce',
+    sourceIdentityContext: true,
+  }
+  const version = 'source-identity-context/1'
+  const receipt = {
+    ...base,
+    payload: { ...base.payload, source_identity_context: true },
+    result: {
+      ...base.result,
+      source_identity_context_version: version,
+      candidate_recheck_snapshot: {
+        ...base.result.candidate_recheck_snapshot,
+        source_identity_context_version: version,
+      },
+    },
+  }
+  expect(readCandidateRecheckReceipt(receipt, expected)).toBeDefined()
+  expect(readCandidateRecheckReceipt(base, expected)).toBeUndefined()
+  expect(
+    readCandidateRecheckReceipt(
+      { ...receipt, result: { ...receipt.result, source_identity_context_version: 'future' } },
+      expected,
+    ),
+  ).toBeUndefined()
+  expect(
+    readCandidateRecheckReceipt(
+      {
+        ...receipt,
+        result: { ...receipt.result, candidate_recheck_snapshot: base.result.candidate_recheck_snapshot },
+      },
+      expected,
+    ),
+  ).toBeUndefined()
+  expect(readCandidateRecheckReceipt(receipt, { ...expected, sourceIdentityContext: false })).toBeUndefined()
+})
 
 test('确认有效202回执后同输入可分配新nonce，重复旧确认不能删除新nonce', () => {
   const values = new Map<string, string>()

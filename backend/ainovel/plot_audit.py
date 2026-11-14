@@ -98,7 +98,9 @@ class FlowObservations(StrictModel):
     note: str = Field(max_length=2000)
 
 
-async def independent_flows(worker, items, text, checks, *, source_label="作者原话", version=LEGACY_VERSION):
+async def independent_flows(
+    worker, items, text, checks, *, source_label="作者原话", version=LEGACY_VERSION, source_text=None
+):
     expected = [
         item
         for item in items
@@ -122,6 +124,16 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
     }
     entity_ids = {name: identifier for identifier, name in entities.items()}
     object_ids = {name: identifier for identifier, name in objects.items()}
+    from .plot_identity_context import enabled, source_identity_context
+
+    identity_context = None
+    if enabled(worker):
+        if version != VERSION:
+            raise DomainError(
+                "source_identity_version", "角色限定核对需要本次v2情节来源，未升级旧报告。", 409
+            )
+        identity_context = await source_identity_context(worker, source_text or "", entities)
+        entities = identity_context["entities"]
     units = source_units(text, "FLOW")
     sources = {unit["source_id"]: unit for unit in units}
     schema = source_schema(FlowObservations.model_json_schema(), units)
@@ -152,6 +164,7 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
             "待识别物品名称": objects,
             "可引用原文": units,
             **({"情节核对契约版本": VERSION} if version == VERSION else {}),
+            **({"角色限定版本": identity_context["version"]} if identity_context else {}),
             "要求": "只提取正文实际给出、索取、交换、借还或传递的方向，不判断是否符合任何作者要求。supplier是给出方，recipient是取得方；交易失败也须区分原本提议的方向。offered/requested是当前提出的方向，completed是已交付，未来计划为planned，拒绝项为refused。只能据原文明确信息映射实体编号；不能映射则unknown，其他物品为other。引用FLOW编号。",
         },
         FlowObservations,
@@ -182,6 +195,17 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
         ]
         row = rows[item["id"]]
         original_check = deepcopy(row) if version == VERSION else None
+        if identity_context and any(
+            entity_ids[item[key]] in identity_context["unverified_ids"] for key in ("supplier", "recipient")
+        ):
+            if row["result"] == "pass":
+                row.update(
+                    result="unknown",
+                    reason="情节原话中的角色身份限定尚未独立核实，不能凭同称谓或候选反推身份。",
+                    repair="先核对原话角色限定，保留正文和原解释。",
+                )
+                row.setdefault("original_model_check", original_check)
+            continue
         extra = [
             flow
             for flow in relevant
@@ -227,7 +251,13 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
             row.update(result="unknown", reason="未获得独立且同向的正文流向证据，不能仅凭模型结论标通过。")
         if version == VERSION and row != original_check:
             row.setdefault("original_model_check", original_check)
-    return {"status": "observed", "entities": entities, "objects": objects, **observed}
+    return {
+        "status": "observed",
+        "entities": entities,
+        "objects": objects,
+        **observed,
+        **({"source_identity_context": identity_context} if identity_context else {}),
+    }
 
 
 def author_contract_issues(value, author_text, *, scoped):
@@ -384,7 +414,13 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
         {row["item_id"]: deepcopy(row) for row in compared["checks"]} if version == VERSION else {}
     )
     direction_guard = await independent_flows(
-        worker, items, text, compared["checks"], source_label=source_label, version=version
+        worker,
+        items,
+        text,
+        compared["checks"],
+        source_label=source_label,
+        version=version,
+        source_text=author_text,
     )
     if version == VERSION:
         for row in compared["checks"]:

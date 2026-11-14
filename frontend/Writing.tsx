@@ -23,7 +23,12 @@ import { ManuscriptImport } from './ManuscriptImport'
 import { SceneTimePanel } from './SceneTimePanel'
 import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
 import { plotAuditEnabled, plotAuditFromPayload } from './plotAudit'
-import { CandidateHistory, CandidateRecheckAction, CandidateRecheckReport } from './candidateRecheck'
+import {
+  CandidateHistory,
+  CandidateRecheckAction,
+  CandidateRecheckReport,
+  candidateRecheckSourceMode,
+} from './candidateRecheck'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { latestArtifact, refreshArtifactList } from './artifactRefresh'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
@@ -99,6 +104,7 @@ export function Writing({
   )
   const [instruction, setInstruction] = useState(feedbackHandoff?.text || '')
   const [plotContractCheck, setPlotContractCheck] = useState(false)
+  const [sourceIdentityContext, setSourceIdentityContext] = useState(false)
   const [designScope, setDesignScope] = useState<'book' | 'chapter'>('book')
   const [directionBasis, setDirectionBasis] = useState<DirectionBasis>()
   const directionForm = useRef({ action, instruction })
@@ -120,6 +126,7 @@ export function Writing({
     profile,
     selectedRefs,
     plotContractCheck,
+    sourceIdentityContext,
   ])
   const [submittedAssistantForm, setSubmittedAssistantForm] = useState(assistantFormSignature)
   useLeaveGuard(assistantFormSignature !== submittedAssistantForm, '未提交的写作辅助设置')
@@ -497,6 +504,7 @@ export function Writing({
         base_revision: bookDesign ? null : (row?.revision ?? null),
         instruction: submittedInstruction,
         plot_contract_check: plotAuditEnabled(action, plotContractCheck),
+        source_identity_context: plotAuditEnabled(action, plotContractCheck) && sourceIdentityContext,
         fixed: fixed
           .split('\n')
           .map((v) => v.trim())
@@ -948,6 +956,7 @@ export function Writing({
                   setInstruction(restored?.instruction ?? previous.instruction ?? '')
                   setAction(previous.action || 'writing.advise')
                   setPlotContractCheck(plotAuditEnabled(previous.action || '', previous.plot_contract_check))
+                  setSourceIdentityContext(previous.source_identity_context === true)
                   if (previous.action && designActions.has(previous.action))
                     setDesignScope(
                       'chapter_id' in previous && typeof previous.chapter_id === 'string'
@@ -1029,7 +1038,13 @@ export function Writing({
             />
           </label>
           {plotAuditEnabled(action, true) && (
-            <PlotAuditOption checked={plotContractCheck} disabled={busy} onChange={setPlotContractCheck} />
+            <PlotAuditOption
+              checked={plotContractCheck}
+              disabled={busy}
+              onChange={setPlotContractCheck}
+              identityChecked={sourceIdentityContext}
+              onIdentityChange={setSourceIdentityContext}
+            />
           )}
           <details>
             <summary>固定条件、写法与资料包</summary>
@@ -1121,8 +1136,10 @@ export function Writing({
             )}
             <FrozenPlotAuditPolicy
               enabled={activeTask.payload.plot_contract_check}
+              identityEnabled={activeTask.payload.source_identity_context}
+              identityVersion={activeTask.result.source_identity_context_version}
               version={activeTask.result.plot_contract_version}
-              mode={activeTask.kind === 'candidate_recheck' ? 'automatic' : undefined}
+              mode={candidateRecheckSourceMode(activeTask)}
             />
             {activeTask.result.author_contract_snapshot && (
               <details>
@@ -1173,8 +1190,10 @@ export function Writing({
                 <p>{task.error}</p>
                 <FrozenPlotAuditPolicy
                   enabled={task.payload.plot_contract_check}
+                  identityEnabled={task.payload.source_identity_context}
+                  identityVersion={task.result.source_identity_context_version}
                   version={task.result.plot_contract_version}
-                  mode={task.kind === 'candidate_recheck' ? 'automatic' : undefined}
+                  mode={candidateRecheckSourceMode(task)}
                 />
                 <button
                   disabled={busy}

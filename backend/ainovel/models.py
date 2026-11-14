@@ -39,6 +39,7 @@ class AuthorContractBasis(Input):
 
 class ModuleInput(Input):
     plot_contract_check: bool = Field(default=False, strict=True)
+    source_identity_context: bool = Field(default=False, strict=True)
     include_scene_ranges: bool = False
     client_request_id: str | None = Field(default=None, min_length=8, max_length=128)
     action: Literal[
@@ -88,6 +89,8 @@ class ModuleInput(Input):
 
     @model_validator(mode="after")
     def plot_check_action(self):
+        if self.source_identity_context and not self.plot_contract_check:
+            raise ValueError("角色限定核对需要同时开启情节逐项核对。")
         if self.plot_contract_check and self.action not in {
             "writing.expand_plot",
             "review.chapter",
@@ -140,6 +143,7 @@ class Plot(Input):
 class WorkflowInput(Input):
     structure_max_output_tokens: int = Field(default=8192, ge=64, le=16_384, strict=True)
     plot_contract_check: bool = Field(default=False, strict=True)
+    source_identity_context: bool = Field(default=False, strict=True)
     completion_scope: Literal["whole_book", "segment"] = "whole_book"
     scene_maintenance: bool = False
     structured_maintenance: bool = False
@@ -164,6 +168,12 @@ class WorkflowInput(Input):
     budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     genre_profile_basis: GenreProfileBasis | None = None
     author_contract_basis: AuthorContractBasis | None = None
+
+    @model_validator(mode="after")
+    def identity_context_requires_plot_check(self):
+        if self.source_identity_context and not self.plot_contract_check:
+            raise ValueError("角色限定核对需要同时开启情节逐项核对。")
+        return self
 
 
 class FeedbackInput(Input):

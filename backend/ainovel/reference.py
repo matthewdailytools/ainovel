@@ -7,7 +7,7 @@ import json
 from time import time
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .db import DomainError, dumps, uid
 from .evidence import resolve_field, source_schema, source_units
@@ -84,6 +84,7 @@ class EditReference(StrictModel):
 
 class ReferenceAction(StrictModel):
     plot_contract_check: bool = False
+    source_identity_context: bool = Field(default=False, strict=True)
     base_revision: int = Field(ge=0)
     action: Literal["analyze", "plan", "draft", "check"]
     account: str
@@ -91,6 +92,14 @@ class ReferenceAction(StrictModel):
     budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     candidate_id: str | None = None
     check_saved: bool = False
+
+    @model_validator(mode="after")
+    def identity_context_requires_plot_check(self):
+        if self.source_identity_context and (
+            not self.plot_contract_check or self.action not in {"draft", "check"}
+        ):
+            raise ValueError("角色限定核对仅用于已开启情节核对的参考试写／对照。")
+        return self
 
 
 class ReferenceFeedback(StrictModel):
@@ -524,6 +533,8 @@ def register_routes(app, domain, provider_ready):
         ).model_dump(exclude_none=True)
         if data.plot_contract_check:
             request["plot_contract_check"] = True
+        if data.source_identity_context:
+            request["source_identity_context"] = True
         if data.action == "check":
             if data.check_saved:
                 request["reference_check_text"] = chapter["content"]

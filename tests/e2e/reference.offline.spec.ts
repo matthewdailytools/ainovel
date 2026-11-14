@@ -111,6 +111,12 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await expect(plotOption).toBeFocused()
   await plotOption.press('Space')
   await expect(plotOption).toBeChecked()
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('未提交的参考核对设置')
+    await dialog.dismiss()
+  })
+  await page.getByRole('button', { name: '返回资料书库', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '参考仿写工作区', exact: true })).toBeVisible()
   await page.setViewportSize({ width: 1280, height: 900 })
   const auditedRequest = page.waitForRequest(
     (request) => request.url().endsWith('/actions') && request.method() === 'POST',
@@ -143,6 +149,7 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   }
   async function checkReference(button: string, saved: boolean) {
     await page.getByRole('checkbox', { name: /额外核对情节角色、对象与方向/ }).check()
+    await page.getByRole('checkbox', { name: '按原话补充角色限定', exact: true }).check()
     const posted = page.waitForResponse(
       (r) => r.url().endsWith('/actions') && r.request().method() === 'POST',
     )
@@ -151,6 +158,8 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
     expect(response.ok(), await response.text()).toBeTruthy()
     const task = await response.json()
     expect(task.payload.plot_contract_check).toBe(true)
+    expect(task.payload.source_identity_context).toBe(true)
+    expect(task.result.source_identity_context_version).toBe('source-identity-context/1')
     expect(task.payload.action).toBe('reference.check')
     await expect
       .poll(async () => (await (await page.request.get(`/api/tasks/${task.id}`)).json()).status)

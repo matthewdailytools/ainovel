@@ -4,6 +4,7 @@ import type { Notify } from './App'
 import { Difference } from './Editor'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { PlotAuditDetails } from './PlotAuditDetails'
+import { SourceIdentityOption } from './sourceIdentity'
 import { readComparisonTarget, usePlotAuditTarget } from './plotAuditTarget'
 
 type Card = {
@@ -178,6 +179,9 @@ export function ReferenceWorkspace({
   const [historical, setHistorical] = useState<Artifact>()
   const [busy, setBusy] = useState(false)
   const [plotContractCheck, setPlotContractCheck] = useState(false)
+  const [sourceIdentityContext, setSourceIdentityContext] = useState(false)
+  const checkSettings = JSON.stringify([plotContractCheck, sourceIdentityContext])
+  const [submittedCheckSettings, setSubmittedCheckSettings] = useState(checkSettings)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [feedback, setFeedback] = useState('')
@@ -342,6 +346,8 @@ export function ReferenceWorkspace({
       account,
       check_saved: checkSaved,
       plot_contract_check: plotContractCheck && (name === 'draft' || name === 'check'),
+      source_identity_context:
+        plotContractCheck && sourceIdentityContext && (name === 'draft' || name === 'check'),
       candidate_id: name === 'check' && !checkSaved ? candidate?.id : null,
     }
     const signature = JSON.stringify(values)
@@ -352,14 +358,18 @@ export function ReferenceWorkspace({
     })
     if (!mounted.current) return
     setTask(result)
+    if (name === 'draft' || name === 'check') setSubmittedCheckSettings(checkSettings)
     pending.current = null
     setMessage('任务已提交；阶段与费用单独记录，生成不会自动采纳。')
   }
   const dirty = !!row && !!draft && editable(draft) !== editable(row.payload)
   const candidateDirty =
     !!candidate && candidate.status === 'candidate' && candidateText !== candidate.payload.text
-  const unsaved = dirty || candidateDirty || !!feedback.trim()
-  useLeaveGuard(unsaved, '参考规则、方案、候选或反馈')
+  const contentUnsaved = dirty || candidateDirty || !!feedback.trim()
+  const settingsUnsaved = checkSettings !== submittedCheckSettings
+  const unsaved = contentUnsaved || settingsUnsaved
+  useLeaveGuard(contentUnsaved, '参考规则、方案、候选或反馈')
+  useLeaveGuard(settingsUnsaved, '未提交的参考核对设置')
   function back() {
     if (!unsaved || confirmLeave()) onBack()
   }
@@ -628,6 +638,11 @@ export function ReferenceWorkspace({
           />
           试写／对照时额外核对情节角色、对象与方向（增加解析与核对调用，仍受预算保护）
         </label>
+        <SourceIdentityOption
+          checked={sourceIdentityContext}
+          disabled={busy || running || !plotContractCheck}
+          onChange={setSourceIdentityContext}
+        />
         <button
           disabled={!canRun || !draft.chapter_id || !draft.selected_ids.length || !draft.plot.trim()}
           onClick={() => void perform(() => action('plan'))}

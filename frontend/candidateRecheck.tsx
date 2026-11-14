@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Artifact, type Chapter, type Task } from './api'
 import { PlotAuditDetails } from './PlotAuditDetails'
+import { SourceIdentityOption, SOURCE_IDENTITY_VERSION } from './sourceIdentity'
 
 const VERSION = 'candidate-recheck/1'
 const PLOT_VERSION = 'author-plot-audit/2'
@@ -17,6 +18,15 @@ function nonempty(value: unknown): value is string {
 }
 function hash(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)
+}
+
+export function candidateRecheckSourceMode(task: Task): 'assisted' | 'automatic' | undefined {
+  if (task.kind !== 'candidate_recheck') return undefined
+  const snapshot = task.result.candidate_recheck_snapshot
+  if (!object(snapshot)) return undefined
+  if (snapshot.source_kind === 'author_plot') return 'assisted'
+  if (snapshot.source_kind === undefined && object(snapshot.prepared_contract)) return 'automatic'
+  return undefined
 }
 
 export type CandidateRecheckReportData = {
@@ -152,7 +162,12 @@ export function parseRecheckBudget(value: string): { value?: number; error?: str
   return { value: parsed }
 }
 
-export function recheckRequestSignature(artifact: Artifact, account: string, budgetLimit?: number) {
+export function recheckRequestSignature(
+  artifact: Artifact,
+  account: string,
+  budgetLimit?: number,
+  sourceIdentityContext = false,
+) {
   return JSON.stringify([
     artifact.id,
     artifact.candidate_revision,
@@ -163,6 +178,7 @@ export function recheckRequestSignature(artifact: Artifact, account: string, bud
     artifact.task_id,
     account,
     budgetLimit ?? null,
+    ...(sourceIdentityContext ? [SOURCE_IDENTITY_VERSION] : []),
   ])
 }
 
@@ -220,7 +236,13 @@ export function acknowledgeRecheckNonce(
 
 export function readCandidateRecheckReceipt(
   value: unknown,
-  expected: { artifact: Artifact; account: string; clientRequestId: string; budgetLimit?: number },
+  expected: {
+    artifact: Artifact
+    account: string
+    clientRequestId: string
+    budgetLimit?: number
+    sourceIdentityContext?: boolean
+  },
 ): Task | undefined {
   const { artifact } = expected
   if (
@@ -243,12 +265,16 @@ export function readCandidateRecheckReceipt(
     value.payload.account !== expected.account ||
     value.payload.client_request_id !== expected.clientRequestId ||
     (value.payload.budget_limit ?? undefined) !== expected.budgetLimit ||
+    (value.payload.source_identity_context ?? false) !== (expected.sourceIdentityContext ?? false) ||
     !object(value.result) ||
     value.result.candidate_recheck_version !== VERSION ||
     !object(value.result.candidate_recheck_snapshot) ||
     value.result.candidate_recheck_snapshot.artifact_id !== artifact.id ||
     value.result.candidate_recheck_snapshot.candidate_revision !== artifact.candidate_revision ||
-    value.result.candidate_recheck_snapshot.source_workflow_id !== artifact.task_id
+    value.result.candidate_recheck_snapshot.source_workflow_id !== artifact.task_id ||
+    (expected.sourceIdentityContext === true &&
+      (value.result.source_identity_context_version !== SOURCE_IDENTITY_VERSION ||
+        value.result.candidate_recheck_snapshot.source_identity_context_version !== SOURCE_IDENTITY_VERSION))
   )
     return undefined
   // The response was returned successfully by the 202 endpoint; runtime checks
@@ -361,8 +387,9 @@ export function CandidateRecheckAction({
   onStarted: (task: Task) => void
 }) {
   const [budget, setBudget] = useState('')
+  const [sourceIdentityContext, setSourceIdentityContext] = useState(false)
   const parsedBudget = parseRecheckBudget(budget)
-  const signature = recheckRequestSignature(artifact, account, parsedBudget.value)
+  const signature = recheckRequestSignature(artifact, account, parsedBudget.value, sourceIdentityContext)
   const [source, setSource] = useState<{ key: string; task?: Task; error?: string }>()
   const sourceKey = JSON.stringify([
     artifact.id,
@@ -422,8 +449,13 @@ export function CandidateRecheckAction({
     <section aria-label="重新核对候选">
       <h4>保存后重新核对</h4>
       <p className="small muted">
-        按原任务冻结的本章工作章纲和约定，重新检查已保存候选。会产生额外模型费用；不改候选正文，不自动采纳或继续整书任务。旧报告和本次独立报告均保留。
+        按原任务冻结的本章情节来源和约定，重新检查已保存候选。会产生额外模型费用；不改候选正文，不自动采纳或继续整书任务。旧报告和本次独立报告均保留。
       </p>
+      <SourceIdentityOption
+        checked={sourceIdentityContext}
+        disabled={disabled || busy}
+        onChange={setSourceIdentityContext}
+      />
       <details>
         <summary>本次复检费用设置</summary>
         <label>
@@ -481,6 +513,7 @@ export function CandidateRecheckAction({
                 candidate_revision: artifact.candidate_revision,
                 account,
                 client_request_id: nonce,
+                ...(sourceIdentityContext ? { source_identity_context: true } : {}),
                 ...(parsedBudget.value === undefined ? {} : { budget_limit: parsedBudget.value }),
               },
             )
@@ -489,6 +522,7 @@ export function CandidateRecheckAction({
               account,
               clientRequestId: nonce,
               budgetLimit: parsedBudget.value,
+              sourceIdentityContext,
             })
             if (!started) throw new Error('复检任务回执无法核对，已保留本次请求标识；请核查任务后重试。')
             acknowledgeRecheckNonce(requestHash, nonce, storage)

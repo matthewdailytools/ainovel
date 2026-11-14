@@ -43,6 +43,7 @@ def same_task_payload(left, right):
                         "include_scene_ranges",
                         "character_field_repair",
                         "plot_contract_check",
+                        "source_identity_context",
                     }
                     and v is False
                 )
@@ -624,6 +625,10 @@ class Domain:
             from .plot_audit import VERSION as PLOT_CONTRACT_VERSION
 
             initial["plot_contract_version"] = PLOT_CONTRACT_VERSION
+            if payload.get("source_identity_context") is True:
+                from .plot_identity_context import VERSION as IDENTITY_CONTEXT_VERSION
+
+                initial["source_identity_context_version"] = IDENTITY_CONTEXT_VERSION
             if kind == "workflow" and payload.get("mode") == "automatic":
                 from .workflow_plan_preparation import VERSION as PLAN_PREPARATION_VERSION
 

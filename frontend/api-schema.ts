@@ -1577,6 +1577,11 @@ export interface components {
     }
     /** CandidateRecheckInput */
     CandidateRecheckInput: {
+      /**
+       * Source Identity Context
+       * @default false
+       */
+      source_identity_context: boolean
       /** Candidate Revision */
       candidate_revision: number
       /** Account */
@@ -1971,6 +1976,11 @@ export interface components {
        */
       plot_contract_check: boolean
       /**
+       * Source Identity Context
+       * @default false
+       */
+      source_identity_context: boolean
+      /**
        * Include Scene Ranges
        * @default false
        */
@@ -2151,6 +2161,11 @@ export interface components {
        * @default false
        */
       plot_contract_check: boolean
+      /**
+       * Source Identity Context
+       * @default false
+       */
+      source_identity_context: boolean
       /** Base Revision */
       base_revision: number
       /**
@@ -2502,6 +2517,11 @@ export interface components {
        * @default false
        */
       plot_contract_check: boolean
+      /**
+       * Source Identity Context
+       * @default false
+       */
+      source_identity_context: boolean
       /**
        * Completion Scope
        * @default whole_book
