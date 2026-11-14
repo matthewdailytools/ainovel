@@ -3199,5 +3199,126 @@
     "result": "passed",
     "record": "2026-11-14-candidate-cache-race.md",
     "fix_of": "candidate-cache-final-full-retest-001"
+  },
+  {
+    "id": "assisted-recheck-before-source-001",
+    "date": "2026-11-15",
+    "commit": "bfceabc（修复前）",
+    "module": "半自动复检入口缺口复现",
+    "scenario": "真实领域隔离夹具：编辑半自动待审候选后申请复检返回409；新作者任务用例1项失败，不借已有全自动入口冒称支持",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted-recheck-type-first-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb前工作快照",
+    "module": "新增前端夹具类型检查失败",
+    "scenario": "56项前端通过但tsc报TS2698，新增测试展开unknown对象；改用明确类型夹具对象，不加any/忽略或删除断言",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "assisted-recheck-before-source-001"
+  },
+  {
+    "id": "assisted-recheck-final-full-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "半自动原来源复检全项目验证",
+    "scenario": "105相关46.66秒；完整1330后端382.02秒/墙385.436秒，195清单相同；192前端/类型/格式/48既有/静态审阅及48全项目无头墙268.977秒通过，243清单稳定、无失败/跳过/flaky",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "assisted-recheck-type-first-001"
+  },
+  {
+    "id": "assisted-recheck-runtime-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "半自动复检受控更新日常",
+    "scenario": "47f27备份实际恢复ok；出生身份校验API71352、Worker58120自然退出，无活动任务；8766新UI 8T4，六稿件表/全usage/两原任务/六配置相同，无迁移/改配置",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "assisted-recheck-final-full-001"
+  },
+  {
+    "id": "assisted-minimal-real-recheck-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "半自动修订1原来源真实复检",
+    "scenario": "7处最小建议已保存修订1，4次全结CNY0.292784；原解释7项保持，10pass/1unknown、情节6pass/1unknown；物品已映射但修船匠角色含混，保留原检查且未采纳/续跑",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "assisted-second-review-candidate-v2-001"
+  },
+  {
+    "id": "automatic-minimal-real-recheck-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "全自动修订1原契约真实复检",
+    "scenario": "3处最小建议已保存修订1，3次全结CNY0.299296；原契约保持，11pass/1unknown、情节7pass，母亲本章未涉仍未知；原正式第二章空修订0，不将报告succeeded当整书通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "automatic-second-review-candidate-v2-001"
+  },
+  {
+    "id": "candidate-live-ui-immediate-first-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "日常候选脚本就绪断言失败",
+    "scenario": "验证脚本在来源任务异步读取前立即isEnabled而失败；候选文本已精确载入。保留原失败，改等待就绪的明确条件，未改产品代码或延长正式E2E超时",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "assisted-recheck-runtime-001"
+  },
+  {
+    "id": "candidate-live-ui-history-selector-first-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "日常历史脚本标签选择失败",
+    "scenario": "候选载入/来源就绪验证通过后追加历史路径，精确标签漏了summary实际日期后缀而30秒超时；修正为真实标签前缀，不删除历史断言",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "candidate-live-ui-immediate-first-001"
+  },
+  {
+    "id": "candidate-live-ui-history-final-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "日常两份真实修订及历史回源",
+    "scenario": "后台载入两份真实修订1逐字相同，展开编辑/复检历史、打开独立报告并键盘回到目标；320px/200%/无溢出通过，原候选/正式章/父任务保持，0模型/写请求/页面错误",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "candidate-live-ui-history-selector-first-001"
+  },
+  {
+    "id": "candidate-live-original-preservation-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "真实改候选后原稿与全费用核对",
+    "scenario": "47f27副本逐行：219章/431修订/822事实/305结构/113场景/1324旧步骤保持；原364产物仅选定2候选改修订1且旧完整payload精确可回读，新增2报告/7步骤，原1367调用/1223元数据保持、仅追加7，0采纳",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "assisted-recheck-runtime-001"
+  },
+  {
+    "id": "candidate-role-binding-quality-gap-001",
+    "date": "2026-11-15",
+    "commit": "3d05feb",
+    "module": "原角色限定词与独立流向身份",
+    "scenario": "原作者解释把渡口修船匠简化成修船匠，独立提取映射师傅、老吴为unknown；根因已取证，未改原解释或绕过门禁。后续仅原话解释修正须独立设计/实现/验证，不能按候选倒推",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-assisted-candidate-recheck.md",
+    "fix_of": "assisted-minimal-real-recheck-001"
   }
 ]
