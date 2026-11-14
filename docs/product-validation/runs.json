@@ -3045,5 +3045,16 @@
     "result": "failed",
     "record": "2026-11-14-ideation-real-candidate-review.md",
     "fix_of": "ideation-boundary-browser-first-001"
+  },
+  {
+    "id": "ideation-boundary-ci-retest-success-001",
+    "date": "2026-11-14",
+    "commit": "bd0b749",
+    "module": "构思边界同源码双CI复测",
+    "scenario": "main43606224290与隔离43606176316均completed/success；1296后端分别615.34/552.95秒、46全项目无头及48既有通过。原3b失败保留，未重跑/取消；归档929仅文档且产品字节相同",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-ideation-real-candidate-review.md",
+    "fix_of": "ideation-boundary-ci-first-failure-001"
   }
 ]
