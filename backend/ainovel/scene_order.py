@@ -178,7 +178,7 @@ def overlaps(record, chapter_id, revision, ranges):
     )
 
 
-def resolve_basis(scene, selected, nodes, *, guidance=False):
+def resolve_basis(scene, selected, nodes, *, guidance=False, range_context=None):
     """Never choose an order or convert a failed event decision to unknown."""
     basis = scene["order_basis"]
     issues, resolved = [], []
@@ -189,9 +189,17 @@ def resolve_basis(scene, selected, nodes, *, guidance=False):
     for ref in basis["refs"]:
         node = nodes.get(ref)
         if not node or node["record"]["kind"] != "event" or node["archived"] or node["invalid"]:
-            issues.append(f"refs[{ref}]不是当前有效的事件。")
+            issues.append(
+                range_context.failure(ref, node, selected)
+                if range_context
+                else f"refs[{ref}]不是当前有效的事件。"
+            )
         elif node["record"]["status"] != "actual" or not overlaps(node["record"], chapter, revision, ranges):
-            issues.append(f"refs[{ref}]须为本场景原文支持的实际事件，不得借计划或其它章节。")
+            issues.append(
+                range_context.failure(ref, node, selected)
+                if range_context
+                else f"refs[{ref}]须为本场景原文支持的实际事件，不得借计划或其它章节。"
+            )
         else:
             resolved.append((ref, node))
     if len({node["id"] for _, node in resolved}) != len(resolved):
@@ -231,9 +239,12 @@ def resolve_basis(scene, selected, nodes, *, guidance=False):
     return issues, order, resolved, list(covered.values())
 
 
-def linked_scene_issues(scenes, units, known, proposals, domain=None, branch_id=None, *, guidance=False):
+def linked_scene_issues(
+    scenes, units, known, proposals, domain=None, branch_id=None, *, guidance=False, range_guidance=False
+):
     # Reuse legacy coverage/viewpoint checks without supplying any guessed scalar.
     from .extraction_scenes import scene_issues
+    from .scene_range_guidance import RangeEvidence
 
     issues = scene_issues(
         [{**{k: v for k, v in s.items() if k != "order_basis"}, "story_order": None} for s in scenes],
@@ -242,12 +253,15 @@ def linked_scene_issues(scenes, units, known, proposals, domain=None, branch_id=
         proposals,
     )
     nodes = effective_records(known, proposals, domain, branch_id)
+    range_context = RangeEvidence(units) if range_guidance else None
     indexed = {u["source_id"]: u for u in units}
     for index, scene in enumerate(scenes):
         selected = [indexed.get(ref) for ref in scene["source_ids"]]
         if not selected or any(s is None for s in selected) or len({s["chapter_id"] for s in selected}) != 1:
             continue
-        errors, _, _, _ = resolve_basis(scene, selected, nodes, guidance=guidance)
+        errors, _, _, _ = resolve_basis(
+            scene, selected, nodes, guidance=guidance, range_context=range_context
+        )
         issues.extend(f"scenes[{index}].order_basis: {message}" for message in errors)
     return issues
 

@@ -21,6 +21,7 @@ from .extraction_sources import (
 from .story_graph import RECORD, Record, Strict, graph, references, validate_record
 from .extraction_scenes import SceneProposal, adopt_scenes, freeze_scenes, normalize_scenes, scene_issues
 from .scene_guidance import INSTRUCTION as SCENE_GUIDANCE, frozen_version as scene_guidance_version
+from .scene_range_guidance import INSTRUCTION as RANGE_GUIDANCE, frozen_version as range_guidance_version
 from .scene_order import (
     VERSION as LINKED_SCENE_VERSION,
     LinkedSceneProposal,
@@ -185,8 +186,11 @@ async def run_extraction(worker, request, context, snapshot=None):
     with_scenes = request.get("include_scene_ranges", False)
     linked_scenes = with_scenes and execution_version(worker.task) == LINKED_SCENE_VERSION
     guidance = scene_guidance_version(worker.task)
+    range_guidance = range_guidance_version(worker.task)
     if guidance and not linked_scenes:
         raise DomainError("scene_guidance_version", "场景时点提示缺少原显式事件契约，未派发。", 409)
+    if range_guidance and not linked_scenes:
+        raise DomainError("scene_range_guidance_version", "场景来源范围提示缺少原显式事件契约，未派发。", 409)
     if with_scenes and len(units) > 2000:
         raise DomainError("scene_range", "本批超过2000个原文片段，请缩小章节范围后整理场景。")
     existing = [r for r in graph(worker.domain, request["branch_id"])["records"] if not r["archived"]]
@@ -322,6 +326,7 @@ async def run_extraction(worker, request, context, snapshot=None):
                     worker.domain,
                     request["branch_id"],
                     guidance=guidance is not None,
+                    range_guidance=range_guidance is not None,
                 )
                 if linked_scenes
                 else scene_issues(value["scenes"], units, by_id, value["records"])
@@ -369,12 +374,22 @@ async def run_extraction(worker, request, context, snapshot=None):
                 {
                     "场景证据契约版本": LINKED_SCENE_VERSION,
                     **(
+                        {"场景范围提示版本": range_guidance, "场景直接依据与相关事件": RANGE_GUIDANCE}
+                        if range_guidance
+                        else {}
+                    ),
+                    **(
                         {"场景时点提示版本": guidance, "精确场景点与事件事实": SCENE_GUIDANCE}
                         if guidance
                         else {}
                     ),
                     "场景范围要求": "输出scenes，按每章source_id连续分组，完整覆盖且每段仅一次；不输出位置或story_order，服务计算UTF-16范围。人物视角须明确本批人物local_id或已有身份。",
-                    "场景顺序语义": "order_basis须显式选择{kind:event_refs,refs:[事件local_id或已有event正式id]}，或{kind:unknown,reason:具体未知边界,refs:可选相关事件id列表}。event_refs必须来自本场景原文支持的有效actual事件，服务按引用的有效字段精确联接唯一故事顺序，并核对全部覆盖实际事件；不得重复输出scalar或把场景编号、章号当事件顺序。多个不同顺序（包括回忆）须有依据合理拆分，或明确unknown及原因；没有依据同样明确unknown。不得删事件、改来源、借planned或其它章、任取一个值或自动清空时点以通过。未知可保存但不代表时点已验证；相关refs仍须有效。",
+                    "场景顺序语义": "order_basis须显式选择{kind:event_refs,refs:[事件local_id或已有event正式id]}，或{kind:unknown,reason:具体未知边界,refs:可选相关事件id列表}。event_refs必须来自本场景原文支持的有效actual事件，服务按引用的有效字段精确联接唯一故事顺序，并核对全部覆盖实际事件；不得重复输出scalar或把场景编号、章号当事件顺序。多个不同顺序（包括回忆）须有依据合理拆分，或明确unknown及原因；没有依据同样明确unknown。不得删事件、改来源、借planned或其它章、任取一个值或自动清空时点以通过。未知可保存但不代表时点已验证；相关refs仍须有效。".replace(
+                        "refs:可选相关事件id列表",
+                        "refs:可选且须有本场景直接原文依据的actual事件id列表"
+                        if range_guidance
+                        else "refs:可选相关事件id列表",
+                    ),
                 }
                 if linked_scenes
                 else {}

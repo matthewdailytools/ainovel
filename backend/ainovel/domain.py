@@ -628,9 +628,11 @@ class Domain:
         ):
             from .scene_order import VERSION as SCENE_CONTRACT_VERSION
             from .scene_guidance import VERSION as SCENE_GUIDANCE_VERSION
+            from .scene_range_guidance import KEY as RANGE_KEY, VERSION as RANGE_VERSION
 
             initial["scene_contract_version"] = SCENE_CONTRACT_VERSION
             initial["scene_order_guidance_version"] = SCENE_GUIDANCE_VERSION
+            initial[RANGE_KEY] = RANGE_VERSION
         if payload.get("plot_contract_check") is True:
             from .plot_audit import VERSION as PLOT_CONTRACT_VERSION
 

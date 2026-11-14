@@ -485,6 +485,11 @@ class Worker:
                     "prompt_utf8_bytes": len(prompt.encode()),
                     "max_output_tokens": max_output,
                     **(
+                        {"scene_range_guidance_version": source_instruction["场景范围提示版本"]}
+                        if "场景范围提示版本" in source_instruction
+                        else {}
+                    ),
+                    **(
                         {"extraction_reference_version": source_instruction["关联核对契约版本"]}
                         if "关联核对契约版本" in source_instruction
                         else {}
