@@ -1615,5 +1615,115 @@
     "result": "unverified",
     "record": "2026-11-14-new-automatic-ten.md",
     "fix_of": ""
+  },
+  {
+    "id": "automatic-plan-preflight-001",
+    "date": "2026-11-14",
+    "commit": "00bc762",
+    "module": "写前章纲准备专项",
+    "scenario": "最终新准备+共享79过25.13秒；较早12文件242过66.39秒不含最后3版本配对，不相加；初34/1位置门禁和71/1缺import留档，目标stdout仅工具摘要转录",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-automatic-plan-preparation.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-plan-browser-first-001",
+    "date": "2026-11-14",
+    "commit": "73b00ff+工作区",
+    "module": "写前准备目标无头替身首败",
+    "scenario": "首轮1过1失败：第2章替身硬编码PLOT001P0001，生产引用门禁正确阻断；保留原报告，不计生产校验错误",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-14-automatic-plan-preparation.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-plan-browser-retest-001",
+    "date": "2026-11-14",
+    "commit": "00bc762",
+    "module": "写前准备目标无头复测",
+    "scenario": "替身改当前source_id、明确segment且精确expect segment_complete；两条过10.107秒(report9.629)，320px/200%/键盘/旧稿保留，后端8SHA未变",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-automatic-plan-preparation.md",
+    "fix_of": "automatic-plan-browser-first-001"
+  },
+  {
+    "id": "automatic-plan-full-regression-001",
+    "date": "2026-11-14",
+    "commit": "00bc762",
+    "module": "写前章纲准备完整整合",
+    "scenario": "1019后端pytest286.84秒/墙289.544秒、1既有warning/0fail/skip，127前端/36无头171.245秒(report170.633)/48Node全过；213源码前后相同，type/build/format/API一致、Ruff108过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-automatic-plan-preparation.md",
+    "fix_of": "automatic-plan-clarification-in-progress-001"
+  },
+  {
+    "id": "automatic-plan-rollout-001",
+    "date": "2026-11-14",
+    "commit": "00bc762",
+    "module": "写前准备推送与本机更新",
+    "scenario": "15文件源码提交推送00bc762；备份09efbaab实际隔离restoreok，六表与全usage哈希同，日常UI BMhy-zN6；旧967仍needs_review且无新marker",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-automatic-plan-preparation.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-plan-live-smoke-first-001",
+    "date": "2026-11-14",
+    "commit": "00bc762",
+    "module": "写前策略冒烟脚本地址受阻",
+    "scenario": "独立APIRequestContext用相对API但无baseURL报ERR_INVALID_URL；脚本配置失败，0写入/模型，首脚本及诊断保留",
+    "phase": "stability",
+    "result": "blocked",
+    "record": "2026-11-14-automatic-plan-preparation.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-plan-live-smoke-retest-001",
+    "date": "2026-11-14",
+    "commit": "00bc762",
+    "module": "日常写前策略只读冒烟",
+    "scenario": "r2绝对回环API URL后通过；320px/200%/键盘、旧任务保持、0POST/模型/界面错误，未用生产修改掩盖启动器问题",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-automatic-plan-preparation.md",
+    "fix_of": "automatic-plan-live-smoke-first-001"
+  },
+  {
+    "id": "automatic-plan-ci-pending-001",
+    "date": "2026-11-14",
+    "commit": "00bc762",
+    "module": "写前准备远端CI进行中",
+    "scenario": "CI43570380915进行中，推送/本机回归/部署不等于远端完成，等待真实结论",
+    "phase": "stability",
+    "result": "unverified",
+    "record": "2026-11-14-automatic-plan-preparation.md",
+    "fix_of": ""
+  },
+  {
+    "id": "validation-baseline-ci-success-003",
+    "date": "2026-11-14",
+    "commit": "b152",
+    "module": "首章停点文档基线CI",
+    "scenario": "文档基线b152的CI43568059566已success，原967停点保留，不借此推定新feature CI成功",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-automatic-plan-preparation.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-ten-prepared-start-001",
+    "date": "2026-11-14",
+    "commit": "00bc762",
+    "module": "写前准备后新独立自动十章启动",
+    "scenario": "新run2749d868/d500a3e0/分支9d4354ec running；原自动10章2500-3500字、人物修订+plot核对+结构场景维护/首轮16k/USD5.5，无旧正文或resume；仅启动未验证",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-automatic-plan-preparation.md",
+    "fix_of": ""
   }
 ]
