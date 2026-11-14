@@ -1,6 +1,12 @@
 import type { Artifact, Task } from './api'
 
 export const CHARACTER_FIELD_REPAIR_VERSION = 'character-field-repair/1'
+export const CHARACTER_FIELD_REPAIR_V2_VERSION = 'character-field-repair/2'
+type CharacterRepairVersion = typeof CHARACTER_FIELD_REPAIR_VERSION | typeof CHARACTER_FIELD_REPAIR_V2_VERSION
+
+function repairVersion(value: unknown): value is CharacterRepairVersion {
+  return value === CHARACTER_FIELD_REPAIR_VERSION || value === CHARACTER_FIELD_REPAIR_V2_VERSION
+}
 export type CharacterFieldDiff = {
   record_id: string
   field: 'notes' | 'profile'
@@ -10,7 +16,7 @@ export type CharacterFieldDiff = {
   reason: string
 }
 export type CharacterRepairBasis = {
-  version: typeof CHARACTER_FIELD_REPAIR_VERSION
+  version: CharacterRepairVersion
   root_artifact_id: string
   parent_artifact_id: string
   round: number
@@ -18,6 +24,7 @@ export type CharacterRepairBasis = {
   diff: CharacterFieldDiff[]
 }
 type RepairChain = {
+  version: CharacterRepairVersion
   root_artifact_id: string
   current_artifact_id: string
   rounds: { round: number; parent_artifact_id: string; child_artifact_id?: string }[]
@@ -47,7 +54,7 @@ export function characterFieldRepairEnabled(value: unknown, adoption: unknown, m
 export function readCharacterRepairBasis(value: unknown): CharacterRepairBasis | undefined {
   if (
     !object(value) ||
-    value.version !== CHARACTER_FIELD_REPAIR_VERSION ||
+    !repairVersion(value.version) ||
     !text(value.root_artifact_id) ||
     !text(value.parent_artifact_id) ||
     !round(value.round) ||
@@ -106,7 +113,7 @@ function readChains(value: unknown): RepairChain[] | undefined {
     if (
       !text(key) ||
       !object(raw) ||
-      raw.version !== CHARACTER_FIELD_REPAIR_VERSION ||
+      !repairVersion(raw.version) ||
       raw.root_artifact_id !== key ||
       !text(raw.current_artifact_id) ||
       raw.max_rounds !== 2 ||
@@ -134,7 +141,12 @@ function readChains(value: unknown): RepairChain[] | undefined {
       else if (index !== raw.rounds.length - 1) return undefined
     }
     if (raw.current_artifact_id !== expectedParent) return undefined
-    chains.push({ root_artifact_id: key, current_artifact_id: raw.current_artifact_id, rounds })
+    chains.push({
+      version: raw.version,
+      root_artifact_id: key,
+      current_artifact_id: raw.current_artifact_id,
+      rounds,
+    })
   }
   return chains
 }
@@ -176,6 +188,13 @@ export function characterRepairAccess(
     currentId: chain.current_artifact_id,
     parentId: basis?.parent_artifact_id,
   }
+  const frozenVersion = task.result.character_field_repair_version ?? CHARACTER_FIELD_REPAIR_VERSION
+  if (
+    !repairVersion(frozenVersion) ||
+    chain.version !== frozenVersion ||
+    (basis && basis.version !== chain.version)
+  )
+    return { ...unavailable, ...location }
   if (
     basis &&
     !chain.rounds.some(

@@ -8,7 +8,7 @@ from .story_extraction import AdoptExtraction, adopt, freeze_sources, run_extrac
 from .story_graph import metadata_extension
 from .extraction_scenes import can_auto_replace
 from .character_review import ensure_character_review
-from .character_repair import ensure_candidate_review, origin, repair_fields
+from .character_repair import ensure_candidate_review, execution_version, origin, repair_fields
 
 
 def checkpoint_pending(worker, result, identifier, status, error=""):
@@ -79,6 +79,7 @@ def safe_automatic(item):
 
 
 async def maintain(worker, result):
+    repair_version = execution_version(worker.task)
     pending = result.get("pending_structure")
     if not pending:
         return True
@@ -132,7 +133,9 @@ async def maintain(worker, result):
                     "author_contract": worker.author_snapshot(),
                     "maintenance_chapter": {"id": chapter["id"], "revision": chapter["revision"]},
                     "maintenance_epoch": epoch,
-                    "character_field_origin": origin(payload, worker.task["id"], worker.attempt),
+                    "character_field_origin": origin(
+                        payload, worker.task["id"], worker.attempt, version=repair_version
+                    ),
                 },
                 worker.task["id"],
                 worker.attempt,

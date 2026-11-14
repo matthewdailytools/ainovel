@@ -581,7 +581,10 @@ export function WorkflowPage({
                   {task.result.continued_from && (
                     <p className="small muted">已承接上次检查点；原稿、费用历史与修订轮次保留。</p>
                   )}
-                  <FrozenCharacterFieldRepairPolicy enabled={task.payload.character_field_repair} />
+                  <FrozenCharacterFieldRepairPolicy
+                    enabled={task.payload.character_field_repair}
+                    version={task.result.character_field_repair_version}
+                  />
                   <FrozenStructureOutputPolicy
                     value={task.payload.structure_max_output_tokens}
                     maintenance={task.payload.structured_maintenance === true}

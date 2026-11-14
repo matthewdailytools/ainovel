@@ -1,5 +1,7 @@
 import {
   characterFieldRepairEnabled,
+  CHARACTER_FIELD_REPAIR_VERSION,
+  CHARACTER_FIELD_REPAIR_V2_VERSION,
   readCharacterRepairBasis,
   type CharacterRepairAccess,
 } from './characterFieldRepair'
@@ -30,19 +32,30 @@ export function CharacterFieldRepairOption({
         允许有限修订未采纳人物字段
       </label>
       <p id="character-field-repair-note" className="small">
-        默认关闭，仅自动采纳且维护结构时可用。人物说明、档案来源复核未通过时，最多修订2轮并独立复核，增加调用费用；原候选与每轮差异保留。仍未通过时等待作者核对。
+        默认关闭，仅自动采纳且维护结构时可用。新批次会在初次复核前确定AI新建人物非空说明、档案的可修范围，每轮只修当前未获来源支持的项，累计最多修订2轮并独立复核。已有正式人物、身份和来源不改；增加调用费用，保留原候选和每轮差异。仍未通过时等待核对。
       </p>
     </>
   )
 }
 
-export function FrozenCharacterFieldRepairPolicy({ enabled }: { enabled: unknown }) {
+export function FrozenCharacterFieldRepairPolicy({
+  enabled,
+  version,
+}: {
+  enabled: unknown
+  version?: unknown
+}) {
+  const actualVersion = version === undefined ? CHARACTER_FIELD_REPAIR_VERSION : version
   return (
     <p className="small muted" aria-label="本批次人物字段修订政策">
       人物字段有限修订：
-      {enabled === true
-        ? '已启用，最多2轮；增加调用费用，保留原候选与修订记录。'
-        : '未启用；旧任务缺少此政策时按关闭处理，不因当前表单改变。'}
+      {enabled !== true
+        ? '未启用；旧任务缺少此政策时按关闭处理，不因当前表单改变。'
+        : actualVersion === CHARACTER_FIELD_REPAIR_V2_VERSION
+          ? '已启用，最多2轮；初稿时确定全部AI新人物非空说明、档案范围，每轮只修当前未获支持项，范围不临时扩大。增加调用费用，保留原候选与修订记录。'
+          : actualVersion === CHARACTER_FIELD_REPAIR_VERSION
+            ? '已启用，最多2轮；沿用首次问题字段范围，增加调用费用，保留原候选与修订记录。历史任务不自动升级。'
+            : '修订政策版本无法确认，请核对任务记录，未将其当作新范围。'}
     </p>
   )
 }
@@ -92,6 +105,11 @@ export function CharacterFieldRepair({
       </div>
       {basis ? (
         <>
+          {basis.version === CHARACTER_FIELD_REPAIR_V2_VERSION && (
+            <p>
+              可修范围在初稿生成时已确定；本轮仅修改当前未获支持项，不改其他字段。原范围与来源随候选链保留。
+            </p>
+          )}
           <p>
             第{basis.round}轮／最多2轮 · {basis.version}
           </p>

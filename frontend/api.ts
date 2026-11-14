@@ -144,6 +144,7 @@ export type Task = {
     author_contract_snapshot?: AuthorContract
     genre_profile_snapshot?: GenreProfile
     character_field_repairs?: unknown
+    character_field_repair_version?: string
     plot_contract_version?: string
     workflow_plan_preparation_version?: string
     plot_preparations?: unknown

@@ -156,6 +156,9 @@ async def _grounded_extraction(worker, instruction, schema, context, validator, 
 
 
 async def run_extraction(worker, request, context, snapshot=None):
+    from .character_repair import V2_VERSION as REPAIR_V2, execution_version as repair_version
+
+    character_repair_v2 = repair_version(worker.task) == REPAIR_V2
     snapshot = snapshot or worker.task["result"]["story_extraction_snapshot"]
     if worker.domain.branch(request["branch_id"])["story_revision"] != snapshot["story_revision"]:
         raise DomainError("story_changed", "源稿排队后改变，未发送整理请求。", 409)
@@ -280,6 +283,14 @@ async def run_extraction(worker, request, context, snapshot=None):
         {
             "动作": "按保存稿反向整理长篇结构候选",
             "阶段证据契约版本": PROMISE_STAGE_GROUNDING_VERSION,
+            **(
+                {
+                    "人物自由字段契约版本": REPAIR_V2,
+                    "人物自由字段范围": "新人物notes/profile仅写该人物本项附引文可证明的叙事内容。全部实质断言都须在该record.sources中有本人物的原文支持；不将只在其他段落出现的信息塞入只引用身份段的档案。不得用未来规划、brief或其它人物来源补证，不把猜测、尚未知或失踪改成已确认事实或死亡。本批主要视角、作者确认、模型操作、推导边界等过程性解释放reasoning或unknowns，不写入人物叙事字段。只写有原文支持的具体内容，不为填充字段泛化未提及，不确定项保留unknowns。",
+                }
+                if character_repair_v2
+                else {}
+            ),
             **(
                 {
                     "场景证据契约版本": SCENE_GROUNDING_VERSION,

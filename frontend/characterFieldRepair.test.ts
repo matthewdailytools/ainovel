@@ -31,6 +31,45 @@ const basis = {
     },
   ],
 }
+
+test('v2当前子候选可核对采用，父候选仍只读，版本不能与旧任务混配', () => {
+  const journal = chain()
+  journal.root.version = 'character-field-repair/2'
+  const currentTask = task('v2-task', journal)
+  currentTask.result.character_field_repair_version = 'character-field-repair/2'
+  const child = {
+    ...artifact(),
+    basis: { character_field_repair: { ...basis, version: 'character-field-repair/2' } },
+  }
+  expect(readCharacterRepairBasis(child.basis.character_field_repair)?.version).toBe(
+    'character-field-repair/2',
+  )
+  expect(characterRepairAccess(child, 'branch', [currentTask], true).readOnly).toBe(false)
+  expect(characterRepairAccess(artifact('root'), 'branch', [currentTask], true).readOnly).toBe(true)
+  expect(characterRepairAccess(artifact(), 'branch', [currentTask], true).readOnly).toBe(true)
+  const missingMarker = { ...currentTask, result: { character_field_repairs: journal } }
+  expect(characterRepairAccess(child, 'branch', [missingMarker], true).readOnly).toBe(true)
+})
+
+test('冻结政策区分旧首次问题范围、新预定范围及未知版本', () => {
+  const legacy = renderToStaticMarkup(createElement(FrozenCharacterFieldRepairPolicy, { enabled: true }))
+  expect(legacy).toContain('首次问题字段范围')
+  expect(legacy).not.toContain('全部AI新人物')
+  const current = renderToStaticMarkup(
+    createElement(FrozenCharacterFieldRepairPolicy, {
+      enabled: true,
+      version: 'character-field-repair/2',
+    }),
+  )
+  expect(current).toContain('全部AI新人物非空')
+  expect(current).toContain('每轮只修当前未获支持项')
+  expect(current).toContain('最多2轮')
+  const unknown = renderToStaticMarkup(
+    createElement(FrozenCharacterFieldRepairPolicy, { enabled: true, version: 'future' }),
+  )
+  expect(unknown).toContain('版本无法确认')
+  expect(unknown).not.toContain('初稿时确定全部')
+})
 function chain(current = 'child') {
   return {
     root: {

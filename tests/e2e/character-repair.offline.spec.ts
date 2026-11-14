@@ -12,7 +12,7 @@ type Step = {
   diff?: { record_id: string; field: string; before: string; after: string; source_ids: string[] }[]
   response: { fields: { decision: string }[] }
 }
-type Chain = { current_artifact_id: string; rounds: Step[] }
+type Chain = { version: string; current_artifact_id: string; rounds: Step[] }
 type Task = {
   id: string
   branch_id: string
@@ -20,6 +20,7 @@ type Task = {
   error: string
   payload: { character_field_repair: boolean; structured_maintenance: boolean; adoption: string }
   result: {
+    character_field_repair_version?: string
     character_field_repairs: Record<string, Chain>
     pending_structure?: { artifact_id: string }
     structure_history: { artifact_id: string; policy: string }[]
@@ -32,7 +33,7 @@ type Artifact = {
   chapter_id: string
   payload: {
     text?: string
-    records: { id: string; record: { notes: string; sources: unknown[] } }[]
+    records: { id: string; record: { notes: string; profile?: string; sources: unknown[] } }[]
     source_manifest: { id: string; revision: number }[]
     character_semantic_review: {
       status: string
@@ -40,7 +41,10 @@ type Artifact = {
       response: { fields: { result: string }[] }
     }
   }
-  basis: { character_field_repair?: { parent_artifact_id: string; diff: Step['diff'] } }
+  basis: {
+    character_field_repair?: { version: string; parent_artifact_id: string; diff: Step['diff'] }
+    character_field_origin?: { version: string; initial_scope?: unknown }
+  }
 }
 
 async function get<T>(page: Page, path: string): Promise<T> {
@@ -49,7 +53,7 @@ async function get<T>(page: Page, path: string): Promise<T> {
   return response.json()
 }
 
-async function startFromUi(page: Page, cannot = false) {
+async function startFromUi(page: Page, cannot = false, late = false) {
   await page.goto('/')
   await page.getByText('＋ 新建作品', { exact: true }).click()
   await page
@@ -82,7 +86,9 @@ async function startFromUi(page: Page, cannot = false) {
   await page.getByRole('combobox', { name: '本次任务范围', exact: true }).selectOption('segment')
   await page
     .getByLabel('作品设定、粗纲与结局方向')
-    .fill(fixtureBrief + (cannot ? ' fixture-cannot-repair' : ''))
+    .fill(
+      fixtureBrief + (cannot ? ' fixture-cannot-repair' : '') + (late ? ' fixture-late-character-field' : ''),
+    )
   await page.getByLabel('计划章数', { exact: true }).fill('1')
   await page.getByLabel('每章字数下限').fill('200')
   await page.getByLabel('每章字数上限').fill('600')
@@ -106,8 +112,9 @@ async function startFromUi(page: Page, cannot = false) {
     .poll(async () => (await get<Task>(page, `/api/tasks/${started.id}`)).status, { timeout: 30_000 })
     .toBe(cannot ? 'needs_review' : 'segment_complete')
   await expect(page.getByLabel('本批次人物字段修订政策', { exact: true })).toHaveText(
-    '人物字段有限修订：已启用，最多2轮；增加调用费用，保留原候选与修订记录。',
+    '人物字段有限修订：已启用，最多2轮；初稿时确定全部AI新人物非空说明、档案范围，每轮只修当前未获支持项，范围不临时扩大。增加调用费用，保留原候选与修订记录。',
   )
+  expect(started.result.character_field_repair_version).toBe('character-field-repair/2')
   return { started, original, originalId: chapter.id }
 }
 
@@ -116,6 +123,52 @@ async function extractionPanel(page: Page) {
   await page.getByText('按保存稿整理人物、事件、状态和伏笔候选', { exact: true }).click()
   return page.getByRole('region', { name: '结构化整理与确认', exact: true })
 }
+
+test('人物修订v2：复检新增未知只在原范围内修第二轮，档案与来源不被重写', async ({ page }) => {
+  const { started, original, originalId } = await startFromUi(page, false, true)
+  const task = await get<Task>(page, `/api/tasks/${started.id}`)
+  const entries = Object.entries(task.result.character_field_repairs)
+  expect(entries).toHaveLength(1)
+  const [rootId, chain] = entries[0]
+  expect(chain.version).toBe('character-field-repair/2')
+  expect(chain.rounds).toHaveLength(2)
+  expect(chain.rounds[0].diff?.map((row) => row.field)).toEqual(['profile'])
+  expect(chain.rounds[1].diff?.map((row) => row.field)).toEqual(['notes'])
+  const root = await get<Artifact>(page, `/api/artifacts/${rootId}`)
+  const first = await get<Artifact>(page, `/api/artifacts/${chain.rounds[0].child_artifact_id}`)
+  const current = await get<Artifact>(page, `/api/artifacts/${chain.current_artifact_id}`)
+  const scope = root.basis.character_field_origin?.initial_scope
+  expect(scope).toBeDefined()
+  expect(scope).toMatchObject({
+    fields: expect.arrayContaining([
+      expect.objectContaining({ record_id: root.payload.records[0].id, field: 'notes' }),
+      expect.objectContaining({ record_id: root.payload.records[0].id, field: 'profile' }),
+    ]),
+  })
+  expect(first.basis.character_field_origin?.initial_scope).toEqual(scope)
+  expect(current.basis.character_field_origin?.initial_scope).toEqual(scope)
+  expect(root.payload.records[0].record.notes).toBe(unsupportedNote)
+  expect(first.payload.records[0].record.notes).toBe(unsupportedNote)
+  expect(first.payload.records[0].record.profile).toBe(groundedNote)
+  expect(current.payload.records[0].record.profile).toBe(first.payload.records[0].record.profile)
+  expect(current.payload.records[0].record.notes).toBe(groundedNote)
+  expect(current.payload.character_semantic_review.status).toBe('supported')
+  expect(current.status).toBe('accepted')
+  for (const child of [first, current])
+    expect(child.payload.records[0].record.sources).toEqual(root.payload.records[0].record.sources)
+  expect(await get(page, `/api/chapters/${originalId}`)).toEqual(original)
+  const panel = await extractionPanel(page)
+  await panel.getByRole('combobox', { name: '保存的结构候选', exact: true }).selectOption(current.id)
+  await expect(
+    panel.getByText(
+      '可修范围在初稿生成时已确定；本轮仅修改当前未获支持项，不改其他字段。原范围与来源随候选链保留。',
+      { exact: true },
+    ),
+  ).toBeVisible()
+  await expect(
+    panel.getByText('当前修订候选已采用，整条候选链只读，原候选和每轮记录保留。', { exact: true }),
+  ).toBeVisible()
+})
 
 test('人物有限修订：真实界面开启、独立复检、原稿及父报告保留，历史父稿只读', async ({ page }, testInfo) => {
   const { started, original, originalId } = await startFromUi(page)

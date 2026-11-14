@@ -611,6 +611,10 @@ class Domain:
                 from .workflow_plan_preparation import VERSION as PLAN_PREPARATION_VERSION
 
                 initial["workflow_plan_preparation_version"] = PLAN_PREPARATION_VERSION
+        if kind == "workflow" and payload.get("character_field_repair") is True:
+            from .character_repair import V2_VERSION as CHARACTER_REPAIR_VERSION
+
+            initial["character_field_repair_version"] = CHARACTER_REPAIR_VERSION
         if kind == "workflow":
             inherited = self.db.all(
                 "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind='structure_inheritance' AND status='accepted' ORDER BY created DESC LIMIT 1",

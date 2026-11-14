@@ -24,7 +24,9 @@ from helpers.character_review_fixture import character_review_output  # noqa: E4
 from helpers.plan_execution_fixture import plan_execution_output  # noqa: E402
 
 CHARACTER_REPAIR_FIXTURE = "character-field-repair-e2e"
+CHARACTER_LATE_FIELD_FIXTURE = "fixture-late-character-field"
 UNSUPPORTED_CHARACTER_NOTE = "工程替身错误备注：沈砚已经掌握飞行能力。"
+UNSUPPORTED_CHARACTER_PROFILE = "工程替身错误档案：沈砚已经学会飞行。"
 GROUNDED_CHARACTER_NOTE = "沈砚用旧尺测量潮水，留下可以回查的记录。"
 PLOT_UNKNOWN_FIXTURE = "plot-check-e2e-unknown"
 PLAN_PREPARATION_FIXTURE = "plan-preparation-e2e"
@@ -92,7 +94,13 @@ class Model(ReferenceModel):
                 "call_id": "offline-plan-preparation",
             }
         if CHARACTER_REPAIR_FIXTURE in brief:
-            self.character_repair_tasks[task_id] = "cannot" if "fixture-cannot-repair" in brief else "repair"
+            self.character_repair_tasks[task_id] = (
+                "late"
+                if CHARACTER_LATE_FIELD_FIXTURE in brief
+                else "cannot"
+                if "fixture-cannot-repair" in brief
+                else "repair"
+            )
         fixture = self.character_repair_tasks.get(task_id)
         if fixture and source_instruction.get("动作") == "修正未采纳人物自由文本字段":
             return {
@@ -121,10 +129,17 @@ class Model(ReferenceModel):
         character_review = character_review_output(instruction)
         if character_review is not None:
             if fixture:
+                profile_pending = any(
+                    target["field"] == "profile" and target["text"] == UNSUPPORTED_CHARACTER_PROFILE
+                    for target in source_instruction["人物字段"]
+                )
                 for target, field in zip(
                     source_instruction["人物字段"], character_review["fields"], strict=True
                 ):
-                    if target["text"] == UNSUPPORTED_CHARACTER_NOTE:
+                    if target["text"] == UNSUPPORTED_CHARACTER_PROFILE or (
+                        target["text"] == UNSUPPORTED_CHARACTER_NOTE
+                        and not (fixture == "late" and profile_pending)
+                    ):
                         field.update(
                             result="unknown",
                             source_ids=[],
@@ -325,6 +340,8 @@ class Model(ReferenceModel):
                 )
                 if fixture and records:
                     records[0]["record"]["notes"] = UNSUPPORTED_CHARACTER_NOTE
+                    if fixture == "late":
+                        records[0]["record"]["profile"] = UNSUPPORTED_CHARACTER_PROFILE
                 realized_events = set()
                 for old in instruction["已有记录索引"]:
                     if (

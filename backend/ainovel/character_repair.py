@@ -20,6 +20,7 @@ from .db import DomainError, dumps, uid
 from .story_graph import Strict
 
 VERSION = "character-field-repair/1"
+V2_VERSION = "character-field-repair/2"
 ACTION = "修正未采纳人物自由文本字段"
 MAX_ROUNDS = 2
 
@@ -40,6 +41,21 @@ class CharacterRepair(Strict):
     fields: list[FieldReplacement] = Field(min_length=1, max_length=120)
 
 
+class CharacterRepairV2(CharacterRepair):
+    version: Literal["character-field-repair/2"]
+
+
+def execution_version(task):
+    marker = task["result"].get("character_field_repair_version", VERSION)
+    if marker not in (VERSION, V2_VERSION):
+        raise DomainError("character_repair_version", "人物字段修订政策无法确认，未升级或派发旧任务。", 409)
+    return marker
+
+
+def repair_schema(version):
+    return CharacterRepairV2 if version == V2_VERSION else CharacterRepair
+
+
 def content_sha(payload):
     # Semantic reports are independently added after staging; all other content
     # remains immutable for this operation, including scenes and source history.
@@ -52,14 +68,103 @@ def content_sha(payload):
     )
 
 
-def origin(payload, task_id, attempt):
+def masked_content_sha(payload, fields):
+    value = deepcopy(payload)
+    for key in ("character_semantic_review", "character_semantic_review_history"):
+        value.pop(key, None)
+    allowed = {(field["record_id"], field["field"]) for field in fields}
+    for item in value["records"]:
+        for field in ("notes", "profile"):
+            if (item["id"], field) in allowed:
+                item["record"][field] = None
+    return sha(value)
+
+
+def initial_scope(payload):
+    fields = [
+        {
+            "record_id": item["id"],
+            "field": field,
+            "initial_sha256": sha(item["record"][field]),
+            "sources_sha256": sha(item["record"]["sources"]),
+        }
+        for item in payload["records"]
+        if item["record"]["kind"] == "character" and item.get("target_id") is None
+        for field in ("notes", "profile")
+        if item["record"].get(field, "").strip()
+    ]
+    if len(fields) > 120 or len({(f["record_id"], f["field"]) for f in fields}) != len(fields):
+        raise DomainError(
+            "character_repair_scope", "初始人物字段超过120项或身份重复，未截断或派发修订。", 409
+        )
+    data = {
+        "root_content_sha256": content_sha(payload),
+        "immutable_payload_sha256": masked_content_sha(payload, fields),
+        "fields": fields,
+    }
+    return {**data, "scope_sha256": sha(data)}
+
+
+def valid_scope(payload, scope):
+    if not isinstance(scope, dict) or not isinstance(scope.get("fields"), list):
+        return False
+    fields = scope["fields"]
+    try:
+        if (
+            len(fields) > 120
+            or scope.get("scope_sha256") != sha({k: v for k, v in scope.items() if k != "scope_sha256"})
+            or scope.get("immutable_payload_sha256") != masked_content_sha(payload, fields)
+        ):
+            return False
+        records = {item["id"]: item for item in payload["records"]}
+        keys = [(f["record_id"], f["field"]) for f in fields]
+        if len(keys) != len(set(keys)):
+            return False
+        for field in fields:
+            item = records[field["record_id"]]
+            if (
+                item["record"]["kind"] != "character"
+                or item.get("target_id") is not None
+                or field["field"] not in {"notes", "profile"}
+                or not item["record"][field["field"]].strip()
+                or field["sources_sha256"] != sha(item["record"]["sources"])
+                or not re.fullmatch(r"[0-9a-f]{64}", field["initial_sha256"])
+            ):
+                return False
+    except KeyError, TypeError, AttributeError:
+        return False
+    return True
+
+
+def origin(payload, task_id, attempt, *, version=VERSION, scope=None):
     """Service-stamped at AI extraction staging, never inferred from revision 0."""
     return {
-        "version": VERSION,
+        "version": version,
         "task_id": task_id,
         "attempt": attempt,
         "content_sha256": content_sha(payload),
+        **(
+            {"initial_scope": deepcopy(scope) if scope is not None else initial_scope(payload)}
+            if version == V2_VERSION
+            else {}
+        ),
     }
+
+
+def scope_matches_root(tx, artifact, scope):
+    root_id = artifact["basis"].get("character_field_repair", {}).get("root_artifact_id")
+    if not root_id:
+        return scope == initial_scope(artifact["payload"])
+    row = tx.execute("SELECT * FROM artifacts WHERE id=?", (root_id,)).fetchone()
+    if not row or row["branch_id"] != artifact["branch_id"] or row["kind"] != "story_extraction":
+        return False
+    payload, basis = json.loads(row["payload"]), json.loads(row["basis"])
+    marker = basis.get("character_field_origin", {})
+    return (
+        marker.get("version") == V2_VERSION
+        and marker.get("content_sha256") == content_sha(payload)
+        and marker.get("initial_scope") == scope == initial_scope(payload)
+    )
 
 
 def lineage(tx, task):
@@ -80,21 +185,28 @@ def lineage(tx, task):
 
 def eligible(tx, artifact, task):
     marker = artifact["basis"].get("character_field_origin", {})
+    version = execution_version(task)
     if (
         task["kind"] != "workflow"
         or task["payload"].get("adoption") != "automatic"
         or task["payload"].get("character_field_repair") is not True
         or artifact["candidate_revision"] != 0
         or not artifact["basis"].get("maintenance_chapter")
-        or marker.get("version") != VERSION
+        or marker.get("version") != version
         or marker.get("content_sha256") != content_sha(artifact["payload"])
+        or (version == V2_VERSION and not valid_scope(artifact["payload"], marker.get("initial_scope")))
+        or (version == V2_VERSION and not scope_matches_root(tx, artifact, marker["initial_scope"]))
     ):
         return False
     ids = lineage(tx, task)
     if artifact["task_id"] not in ids or marker.get("task_id") not in ids:
         return False
-    owner = tx.execute("SELECT payload FROM tasks WHERE id=?", (marker["task_id"],)).fetchone()
-    return bool(owner and json.loads(owner[0]).get("adoption") == "automatic")
+    owner = tx.execute("SELECT payload,result FROM tasks WHERE id=?", (marker["task_id"],)).fetchone()
+    return bool(
+        owner
+        and json.loads(owner["payload"]).get("adoption") == "automatic"
+        and execution_version({"result": json.loads(owner["result"])}) == version
+    )
 
 
 def failed_keys(report):
@@ -170,6 +282,12 @@ def saved_response(worker, slot, inputs, schema=CharacterRepair, validator=respo
 async def ensure_candidate_review(worker, artifact, result):
     """Persist a child's review dispatch, including the crash-before-report window."""
     if not artifact["basis"].get("character_field_repair"):
+        if execution_version(worker.task) == V2_VERSION:
+            with worker.db.connect() as tx:
+                tx.execute("BEGIN")
+                fresh, task, _ = current_input(tx, worker, artifact["id"])
+                if not eligible(tx, fresh, task):
+                    return artifact, None, "初始人物可修范围或来源未冻结，未派发复核或修订。"
         artifact, token = await ensure_character_review(worker, artifact)
         return artifact, token, ""
     with worker.db.connect(True) as tx:
@@ -263,6 +381,8 @@ def prepare(worker, artifact_id, result):
         if not valid_report(report, review) or report["status"] != "needs_review":
             return None, "人物复核绑定已改变，未自动修订。"
         failures = failed_keys(report)
+        version = execution_version(task)
+        scope = artifact["basis"]["character_field_origin"].get("initial_scope")
         records = {r["id"]: r for r in artifact["payload"]["records"]}
         if any(records[r].get("target_id") is not None for r, _ in failures):
             return None, "已有正式人物档案需作者处理，不自动改写。"
@@ -273,20 +393,35 @@ def prepare(worker, artifact_id, result):
             if root_id != artifact_id:
                 raise DomainError("workflow_progress", "人物修订链检查点缺失，未重置轮数。", 409)
             chain = chains[root_id] = {
-                "version": VERSION,
+                "version": version,
                 "root_artifact_id": root_id,
                 "max_rounds": MAX_ROUNDS,
-                "whitelist": sorted([list(key) for key in failures]),
+                "whitelist": sorted([list(key) for key in failures])
+                if version == VERSION
+                else [[f["record_id"], f["field"]] for f in scope["fields"]],
+                **(
+                    {
+                        "initial_scope": deepcopy(scope),
+                        "initial_failures": sorted([list(key) for key in failures]),
+                    }
+                    if version == V2_VERSION
+                    else {}
+                ),
                 "rounds": [],
                 "sources_sha256": review["binding"]["sources_sha256"],
                 "constraints_sha256": review["binding"]["constraints_sha256"],
                 "current_artifact_id": artifact_id,
             }
         if (
-            chain.get("version") != VERSION
+            chain.get("version") != version
             or chain.get("current_artifact_id") != artifact_id
             or review["binding"]["sources_sha256"] != chain["sources_sha256"]
             or review["binding"]["constraints_sha256"] != chain["constraints_sha256"]
+            or (version == V2_VERSION and chain.get("initial_scope") != scope)
+            or (
+                version == V2_VERSION
+                and chain.get("whitelist") != [[f["record_id"], f["field"]] for f in scope["fields"]]
+            )
         ):
             raise DomainError("candidate_changed", "人物修订链的候选、来源或约束已改变，未重置轮数。", 409)
         if not failures.issubset({tuple(key) for key in chain["whitelist"]}):
@@ -299,10 +434,26 @@ def prepare(worker, artifact_id, result):
         targets = []
         for target in review["targets"]:
             if (target["record_id"], target["field"]) in failures:
-                targets.append({**target, "old_sha256": sha(target["text"])})
+                targets.append(
+                    {
+                        **target,
+                        "old_sha256": sha(target["text"]),
+                        **(
+                            {
+                                "initial_sha256": next(
+                                    f["initial_sha256"]
+                                    for f in scope["fields"]
+                                    if (f["record_id"], f["field"]) == (target["record_id"], target["field"])
+                                )
+                            }
+                            if version == V2_VERSION
+                            else {}
+                        ),
+                    }
+                )
         allowed_sources = {identifier for target in targets for identifier in target["source_ids"]}
         data = {
-            "version": VERSION,
+            "version": version,
             "root_artifact_id": root_id,
             "round": active["round"] if active else len(chain["rounds"]) + 1,
             "parent_input_sha256": review["input_sha256"],
@@ -310,6 +461,7 @@ def prepare(worker, artifact_id, result):
             "targets": targets,
             "sources": [u for u in review["sources"] if u["source_id"] in allowed_sources],
             "constraints": review["constraints"],
+            **({"scope_sha256": scope["scope_sha256"]} if version == V2_VERSION else {}),
         }
         inputs = {**data, "input_sha256": sha(data)}
         if active and active["input_sha256"] != inputs["input_sha256"]:
@@ -351,6 +503,15 @@ def prepare(worker, artifact_id, result):
 
 def finish(worker, result, artifact, inputs, response, steps, stop=""):
     """Candidate creation and pending pointer transfer share one CAS transaction."""
+    if response is not None and inputs["version"] == V2_VERSION:
+        try:
+            response = CharacterRepairV2.model_validate(response).model_dump()
+        except ValidationError as error:
+            raise DomainError(
+                "candidate_changed", "人物修订产物不符合冻结v2契约，未创建子候选。", 409
+            ) from error
+        if response_issues(response, inputs):
+            raise DomainError("candidate_changed", "人物修订产物与本轮目标或来源不符，未创建子候选。", 409)
     child_id = None
     with worker.db.connect(True) as tx:
         fresh, task, review = current_input(tx, worker, artifact["id"])
@@ -395,9 +556,18 @@ def finish(worker, result, artifact, inputs, response, steps, stop=""):
             child_id = uid()
             basis = {
                 **deepcopy(fresh["basis"]),
-                "character_field_origin": origin(payload, task["id"], worker.attempt),
+                "character_field_origin": origin(
+                    payload,
+                    task["id"],
+                    worker.attempt,
+                    **(
+                        {"version": V2_VERSION, "scope": chain["initial_scope"]}
+                        if inputs["version"] == V2_VERSION
+                        else {}
+                    ),
+                ),
                 "character_field_repair": {
-                    "version": VERSION,
+                    "version": inputs["version"],
                     "root_artifact_id": inputs["root_artifact_id"],
                     "parent_artifact_id": fresh["id"],
                     "round": inputs["round"],
@@ -450,7 +620,8 @@ async def repair_fields(worker, artifact, result):
         if not prepared:
             return artifact, None, stop
         artifact, inputs, slot, recovering = prepared
-        response, steps = saved_response(worker, slot, inputs)
+        schema = repair_schema(inputs["version"])
+        response, steps = saved_response(worker, slot, inputs, schema)
         if response is None and recovering:
             artifact, stop = finish(
                 worker,
@@ -466,7 +637,7 @@ async def repair_fields(worker, artifact, result):
             response = await worker.grounded(
                 {
                     "动作": ACTION,
-                    "人物修订契约版本": VERSION,
+                    "人物修订契约版本": inputs["version"],
                     "input_sha256": inputs["input_sha256"],
                     "轮次": inputs["round"],
                     "人物字段": inputs["targets"],
@@ -480,7 +651,7 @@ async def repair_fields(worker, artifact, result):
                     ],
                     "要求": "只对所列未采纳AI生成的新人物notes/profile作最小、有本人物原文支持的修订。保留原文确实支持的实质信息和未知/猜测边界，不编造、拼接事实或删成空字段，不用泛化的未提及/信息不足掩盖可支持信息。身份、别名、来源、事件及其它字段均不可改。每项填old_sha256、replace/cannot_repair、replacement、本项source_ids及理由；不能合理修订则明确cannot_repair且replacement=null，系统保留原稿并停止，不为通过改判原报告。新候选将重新独立核对，旧报告始终保留。",
                 },
-                CharacterRepair,
+                schema,
                 {
                     "branch": {
                         "id": artifact["branch_id"],
@@ -491,7 +662,7 @@ async def repair_fields(worker, artifact, result):
                 lambda value: response_issues(value, inputs),
                 max_output=8192,
             )
-            _, steps = saved_response(worker, slot, inputs)
+            _, steps = saved_response(worker, slot, inputs, schema)
         artifact, stop = finish(worker, result, artifact, inputs, response, steps)
         if stop:
             return artifact, None, stop
