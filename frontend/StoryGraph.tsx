@@ -4,18 +4,10 @@ import type { components } from './api-schema'
 import type { Notify } from './App'
 import { StoryExtraction } from './StoryExtraction'
 import { useLeaveGuard } from './leaveGuard'
+import { StoryTimeQuery } from './StoryTimeQuery'
+import type { StoryPayload as Payload, StoryRow as Row } from './storyGraphTypes'
 
 type Schemas = components['schemas']
-type Payload =
-  Schemas['Character'] | Schemas['Event'] | Schemas['State'] | Schemas['Promise'] | Schemas['Relationship']
-type Row = {
-  id: string
-  kind: Payload['kind']
-  revision: number
-  payload: Payload
-  archived: number
-  invalid_reasons: string[]
-}
 type Graph = { story_revision: number; records: Row[]; chapters: Chapter[]; coverage: string }
 type Source = Schemas['Source']
 type Choice = { id: string; payload: { title: string }; invalid_reasons?: string[] }
@@ -100,19 +92,10 @@ export function StoryGraph({
   const [sourceChapter, setSourceChapter] = useState<Chapter & { content: string }>()
   const [selection, setSelection] = useState<Source>()
   const [history, setHistory] = useState<{ revision: number; payload: Payload }[]>([])
-  const [order, setOrder] = useState('')
   const [stageStatus, setStageStatus] = useState<Schemas['PromiseStage']['status']>('planted')
   const [stageEvent, setStageEvent] = useState('')
   const [stageNote, setStageNote] = useState('')
-  const [audience, setAudience] = useState<'author' | 'character' | 'reader'>('character')
-  const [queriedCharacter, setQueriedCharacter] = useState('')
   const [sourceView, setSourceView] = useState<Source>()
-  const [timeResult, setTimeResult] = useState<{
-    states: Row[]
-    uncertain: Row[]
-    conflicts: Row[][]
-    coverage: string
-  }>()
   const dirty = JSON.stringify(draft) !== JSON.stringify(editing?.payload || fresh(draft.kind))
   useLeaveGuard(dirty, '长篇结构记录')
   useEffect(() => {
@@ -835,53 +818,15 @@ export function StoryGraph({
           </article>
         ))}
       </details>
-      <details>
-        <summary>查询人物在故事时点知道什么、具有什么</summary>
-        <div className="form-grid">
-          {picker('查询人物', queriedCharacter, characters, setQueriedCharacter)}
-          <label>
-            查询故事顺序
-            <input type="number" value={order} onChange={(e) => setOrder(e.target.value)} />
-          </label>
-          <label>
-            查询信息视角
-            <select value={audience} onChange={(e) => setAudience(e.target.value as typeof audience)}>
-              <option value="character">人物</option>
-              <option value="author">作者</option>
-              <option value="reader">读者</option>
-            </select>
-          </label>
-        </div>
-        <button
-          disabled={busy}
-          onClick={() =>
-            void perform(async () => {
-              const q = new URLSearchParams({ audience })
-              if (order !== '') q.set('story_order', order)
-              if (queriedCharacter) q.set('character_id', queriedCharacter)
-              setTimeResult(await api(`/branches/${branchId}/story-context?${q}`))
-            })
-          }
-        >
-          查询有效状态
-        </button>
-        {timeResult && (
-          <section>
-            <p>{timeResult.coverage}</p>
-            <p>
-              有效状态 {timeResult.states.length}；冲突组 {timeResult.conflicts.length}；未知或待判断{' '}
-              {timeResult.uncertain.length}
-            </p>
-            {[...timeResult.states, ...timeResult.uncertain].map((r) => (
-              <article key={r.id}>
-                <button onClick={() => select(r)}>
-                  {r.payload.title} · {r.payload.kind === 'state' ? r.payload.value : ''}
-                </button>
-              </article>
-            ))}
-          </section>
-        )}
-      </details>
+      <StoryTimeQuery
+        branchId={branchId}
+        storyRevision={graph.story_revision}
+        records={graph.records}
+        chapters={graph.chapters}
+        onSelect={select}
+        notify={notify}
+        disabled={busy}
+      />
     </section>
   )
 }

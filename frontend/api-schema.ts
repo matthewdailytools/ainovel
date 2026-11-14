@@ -3426,6 +3426,9 @@ export interface operations {
         audience?: 'author' | 'character' | 'reader'
         character_id?: string | null
         text_position?: number
+        at_event_id?: string | null
+        base_story_revision?: number | null
+        chapter_revision?: number | null
       }
       header?: never
       path: {

@@ -306,8 +306,17 @@ def validate_record(tx, branch_id, identifier, payload):
         if payload["until_event_id"]:
             require_kind(payload["until_event_id"], "event")
             end = rows[payload["until_event_id"]]["payload"]["story_order"]
-            if end is None or start["story_order"] is None or end <= start["story_order"]:
-                raise DomainError("story_order", "状态失效事件须有明确且更晚的故事顺序。")
+            if end is None or start["story_order"] is None:
+                from .relative_context import EventOrder
+
+                order = EventOrder({key: r["payload"] for key, r in rows.items() if r["kind"] == "event"})
+                later = payload["event_id"] in order.ancestors(payload["until_event_id"])
+            else:
+                later = end > start["story_order"]
+            if not later:
+                raise DomainError(
+                    "story_order", "状态失效事件须有明确更晚的故事顺序，或有效依赖证明其晚于获得事件。"
+                )
     elif kind == "relationship":
         require_kind(payload["from_id"], "character")
         require_kind(payload["to_id"], "character")
@@ -403,8 +412,28 @@ def query_context(
     character_id=None,
     text_position=0,
     snapshot=None,
+    at_event_id=None,
 ):
     value = snapshot if snapshot is not None else graph(domain, branch_id)
+    if at_event_id is not None:
+        from .relative_context import at_event
+
+        if story_order is not None:
+            raise DomainError("time_query", "请选择整数故事顺序或事件锚点中的一种查询方式。")
+        if chapter_id:
+            from .domain import utf16_slice
+
+            chapter = domain.chapter(chapter_id, branch_id)
+            frozen = next((c for c in value["chapters"] if c["id"] == chapter_id), None)
+            if not frozen or frozen["revision"] != chapter["revision"]:
+                raise DomainError("revision_conflict", "查询边界章节已变化，请重新读取后查询。", 409)
+            utf16_slice(chapter["content"], text_position, text_position)
+        elif text_position:
+            raise DomainError("time_query", "指定原文位置时请一并选择边界章节。")
+        baseline = query_context(
+            domain, branch_id, chapter_id, None, audience, character_id, text_position, value
+        )
+        return at_event(baseline, value, at_event_id)
     chapter_positions = {c["id"]: c["position"] for c in value["chapters"]}
     at_position = chapter_positions.get(chapter_id, 1_000_000)
     valid = {}
@@ -586,9 +615,44 @@ def register_routes(app, domain):
         audience: Literal["author", "character", "reader"] = Query("author"),
         character_id: str | None = None,
         text_position: int = Query(0, ge=0),
+        at_event_id: str | None = Query(None, min_length=1, max_length=200),
+        base_story_revision: int | None = Query(None, ge=0),
+        chapter_revision: int | None = Query(None, ge=0),
     ):
         if chapter_id:
-            domain.chapter(chapter_id, branch_id)
-        return query_context(
-            domain, branch_id, chapter_id, story_order, audience, character_id, text_position
+            chapter = domain.chapter(chapter_id, branch_id)
+            if chapter_revision is not None and chapter["revision"] != chapter_revision:
+                raise DomainError(
+                    "revision_conflict", "原文边界的保存修订已变化，请重新读取边界后查询；条件保留。", 409
+                )
+            if chapter_revision is not None:
+                from .domain import utf16_slice
+
+                utf16_slice(chapter["content"], text_position, text_position)
+        elif chapter_revision is not None:
+            raise DomainError("time_query", "原文边界修订须与边界章节一并指定。")
+        snapshot = (
+            graph(domain, branch_id)
+            if base_story_revision is not None or chapter_revision is not None
+            else None
         )
+        if base_story_revision is not None and snapshot["story_revision"] != base_story_revision:
+            raise DomainError("story_changed", "故事记录已变化，请重新读取后查询；查询条件保留。", 409)
+        if chapter_revision is not None:
+            frozen = next((c for c in snapshot["chapters"] if c["id"] == chapter_id), None)
+            if not frozen or frozen["revision"] != chapter_revision:
+                raise DomainError("revision_conflict", "原文边界已变化，请重新读取边界后查询。", 409)
+        result = query_context(
+            domain,
+            branch_id,
+            chapter_id,
+            story_order,
+            audience,
+            character_id,
+            text_position,
+            snapshot,
+            at_event_id,
+        )
+        if snapshot is not None:
+            result["source_story_revision"] = snapshot["story_revision"]
+        return result

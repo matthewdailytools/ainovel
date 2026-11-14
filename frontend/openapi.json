@@ -691,6 +691,33 @@
             "in": "query",
             "required": false,
             "schema": { "type": "integer", "minimum": 0, "default": 0, "title": "Text Position" }
+          },
+          {
+            "name": "at_event_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 200 }, { "type": "null" }],
+              "title": "At Event Id"
+            }
+          },
+          {
+            "name": "base_story_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+              "title": "Base Story Revision"
+            }
+          },
+          {
+            "name": "chapter_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+              "title": "Chapter Revision"
+            }
           }
         ],
         "responses": {
