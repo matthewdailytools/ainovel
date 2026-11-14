@@ -831,6 +831,10 @@ pre {
 .reader-layout > .card {
   padding: 20px;
 }
+.reader-layout .wide {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
 .book-row {
   width: 100%;
   text-align: left;
