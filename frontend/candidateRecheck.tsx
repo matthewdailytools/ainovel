@@ -115,20 +115,32 @@ export function candidateRecheckEligibility(
   )
     return '候选与当前工作版本、章节或原稿修订不一致，请先核对。'
   if (!source) return '正在核对候选所属的整书任务…'
+  const authorAudit = artifact.payload.plot_audit ?? artifact.payload.previous_plot_audit
+  const sourceReady =
+    source.payload.mode === 'automatic'
+      ? source.result.workflow_plan_preparation_version === PREPARATION_VERSION
+      : source.payload.mode === 'assisted' &&
+        object(authorAudit) &&
+        authorAudit.version === PLOT_VERSION &&
+        authorAudit.source_kind === 'author_plot' &&
+        object(authorAudit.source) &&
+        authorAudit.source.kind === 'author_plot' &&
+        hash(authorAudit.source.text_sha256) &&
+        Array.isArray(authorAudit.items) &&
+        authorAudit.items.length > 0
   if (
     !artifact.task_id ||
     source.id !== artifact.task_id ||
     source.kind !== 'workflow' ||
     source.branch_id !== context.branchId ||
     source.status !== 'needs_review' ||
-    source.payload.mode !== 'automatic' ||
+    !sourceReady ||
     source.payload.plot_contract_check !== true ||
     source.result.waiting_artifact !== artifact.id ||
     !!source.result.continued_to ||
-    source.result.plot_contract_version !== PLOT_VERSION ||
-    source.result.workflow_plan_preparation_version !== PREPARATION_VERSION
+    source.result.plot_contract_version !== PLOT_VERSION
   )
-    return '当前候选不属于可复检的全自动待审任务；历史任务和其他模式不会自动升级。'
+    return '当前候选缺少原作者情节解释或完整写前章纲，或不是该任务的当前待审稿；旧契约不会自动升级。'
   return undefined
 }
 

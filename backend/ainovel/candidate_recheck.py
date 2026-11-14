@@ -1,4 +1,4 @@
-"""Explicitly review an unadopted workflow draft against its pre-prose contract."""
+"""Explicitly review an unadopted draft against its frozen source contract."""
 
 from copy import deepcopy
 import hashlib
@@ -34,6 +34,43 @@ def source_view(domain, parent):
     )
 
 
+def assisted_contract(source, parent, plot):
+    """Reuse the saved author-only interpretation, never infer it from edited prose."""
+    from .plot_audit import VERSION as PLOT_VERSION, ScopedAuthorPlot, author_contract_issues
+
+    original = next((p for p in parent["payload"]["plots"] if p["number"] == plot["number"]), None)
+    audit = source["payload"].get("plot_audit", source["payload"].get("previous_plot_audit"))
+    if (
+        original != plot
+        or not isinstance(audit, dict)
+        or audit.get("version") != PLOT_VERSION
+        or audit.get("source_kind") != "author_plot"
+        or audit.get("source") != {"kind": "author_plot", "text_sha256": sha(plot["plot"])}
+    ):
+        raise DomainError(
+            "candidate_recheck_source", "半自动原作者情节及其来源解释无法核对，未从候选重建。", 409
+        )
+    try:
+        items = audit["items"]
+        if not items or [r["id"] for r in items] != [f"P{i:02}" for i in range(1, len(items) + 1)]:
+            raise ValueError("missing or reordered author interpretation")
+        contract = ScopedAuthorPlot.model_validate(
+            {
+                "items": [{k: v for k, v in item.items() if k != "id"} for item in items],
+                "note": audit["interpretation_note"],
+            }
+        ).model_dump()
+        if author_contract_issues(contract, plot["plot"], scoped=True) or any(
+            not item["author_evidence"].strip() for item in contract["items"]
+        ):
+            raise ValueError("unverified author-side quotation")
+    except (KeyError, TypeError, ValueError) as error:
+        raise DomainError(
+            "candidate_recheck_source", "原作者情节解释的条目或依据无效，保留待审且未重新解释。", 409
+        ) from error
+    return contract
+
+
 def freeze(domain, request):
     from .plot_audit import VERSION as PLOT_VERSION
     from .workflow_plan_preparation import VERSION as PREPARATION_VERSION, frozen_contract
@@ -50,21 +87,23 @@ def freeze(domain, request):
         raise DomainError("candidate_changed", "待复检候选的身份、状态或版本已改变，未派发。", 409)
     parent = domain.task(source["task_id"])
     progress = parent["result"]
+    mode = parent["payload"].get("mode")
     if (
         parent["kind"] != "workflow"
         or (parent["novel_id"], parent["branch_id"]) != (source["novel_id"], source["branch_id"])
         or parent["payload"].get("novel_id") != source["novel_id"]
         or parent["status"] != "needs_review"
-        or parent["payload"].get("mode") != "automatic"
+        or mode not in {"automatic", "assisted"}
+        or parent["payload"].get("plot_contract_check") is not True
         or progress.get("waiting_artifact") != source["id"]
         or progress.get("plot_contract_version") != PLOT_VERSION
-        or progress.get("workflow_plan_preparation_version") != PREPARATION_VERSION
+        or (mode == "automatic" and progress.get("workflow_plan_preparation_version") != PREPARATION_VERSION)
         or not isinstance(progress.get("genre_profile_snapshot"), dict)
         or not isinstance(progress.get("author_contract_snapshot"), dict)
     ):
         raise DomainError(
             "candidate_recheck_source",
-            "当前只复检原全自动流程中已有完整写前契约的待审正文；旧任务和其他候选不升级。",
+            "仅复检来源完整的半自动或全自动待审正文；旧契约和其他候选不升级。",
             409,
         )
     chapter = domain.chapter(source["chapter_id"], source["branch_id"])
@@ -78,17 +117,22 @@ def freeze(domain, request):
         raise DomainError("story_changed", "复检依据的保存稿或故事版本已改变，未发送旧候选。", 409)
     row = progress.get("plot_preparations", {}).get(str(chapter["position"]))
     plot = next((p for p in progress["plan"]["chapters"] if p["number"] == chapter["position"]), None)
-    if (
-        row is None
-        or row.get("chapter_id") != chapter["id"]
-        or progress.get("next_chapter") != chapter["position"]
-        or plot is None
-        or not isinstance(row.get("prepared_contract"), dict)
-    ):
+    if plot is None or progress.get("next_chapter") != chapter["position"]:
         raise DomainError("candidate_recheck_source", "本章没有完整的写前冻结契约，未重新解释章纲。", 409)
-    contract = frozen_contract(
-        source_view(domain, parent), row["effective_plot"], plot["number"], row["prepared_contract"]
-    )
+    if mode == "automatic":
+        if (
+            row is None
+            or row.get("chapter_id") != chapter["id"]
+            or not isinstance(row.get("prepared_contract"), dict)
+        ):
+            raise DomainError("candidate_recheck_source", "本章没有完整的写前冻结契约，未重新解释章纲。", 409)
+        contract = frozen_contract(
+            source_view(domain, parent), row["effective_plot"], plot["number"], row["prepared_contract"]
+        )
+        effective_plot = {**deepcopy(plot), "plot": row["effective_plot"]}
+    else:
+        contract = assisted_contract(source, parent, plot)
+        effective_plot = deepcopy(plot)
     fixed = parent["payload"]["fixed"] + [
         item for item in plot["fixed"] if item not in parent["payload"]["fixed"]
     ]
@@ -111,8 +155,9 @@ def freeze(domain, request):
         "source_workflow_id": parent["id"],
         "source_payload_sha256": sha(parent["payload"]),
         "source_progress_sha256": sha(progress),
-        "plot": {**deepcopy(plot), "plot": row["effective_plot"]},
+        "plot": effective_plot,
         "prepared_contract": contract,
+        **({"source_kind": "author_plot"} if mode == "assisted" else {}),
         "fixed": fixed,
         "genre_profile_snapshot": deepcopy(progress["genre_profile_snapshot"]),
         "author_contract_snapshot": deepcopy(progress["author_contract_snapshot"]),
@@ -139,6 +184,13 @@ def verified_contract(worker, author_text, number, supplied):
     return deepcopy(snapshot["prepared_contract"])
 
 
+def verified_author_contract(worker, author_text, number, supplied):
+    snapshot = validate(worker)
+    if snapshot.get("source_kind") != "author_plot":
+        raise DomainError("candidate_recheck_source", "此复检没有冻结的作者情节解释。", 409)
+    return verified_contract(worker, author_text, number, supplied)
+
+
 async def run(worker):
     snapshot = validate(worker)
     request = worker.task["payload"]
@@ -153,7 +205,11 @@ async def run(worker):
         "全书简报": parent["payload"]["brief"],
         "结局方向": parent["result"]["plan"]["ending"],
         "预设": parent["payload"]["writing_profile"],
-        "要求": "只核对本次候选及原写前章纲，不生成正文、不改章纲，不把旧报告当成新稿事实。",
+        "要求": (
+            "只核对本次候选及作者原情节和原解释，不生成正文、不改情节，不把旧报告当成新稿事实。"
+            if snapshot.get("source_kind") == "author_plot"
+            else "只核对本次候选及原写前章纲，不生成正文、不改章纲，不把旧报告当成新稿事实。"
+        ),
     }
     if parent["payload"].get("completion_scope") == "segment":
         instructions["本次运行范围"] = "阶段批次；全书终局及后续计划不要求在本章提前完成。"
@@ -165,7 +221,7 @@ async def run(worker):
         snapshot["plot"]["plot"],
         text,
         snapshot["plot"]["number"],
-        "workflow_plan",
+        snapshot.get("source_kind", "workflow_plan"),
         prepared_contract=snapshot["prepared_contract"],
     )
     review["plot_audit"]["candidate_revision"] = snapshot["candidate_revision"]

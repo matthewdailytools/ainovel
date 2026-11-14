@@ -152,6 +152,26 @@ test('只有原自动待审流程的当前未采纳候选可复检，保存后�
   ).toBeUndefined()
 })
 
+test.each(['plot_audit', 'previous_plot_audit'])(
+  '半自动复检读取保留的作者解释%s，不能以AI章纲替代',
+  (field) => {
+    const owner = source()
+    owner.payload.mode = 'assisted'
+    delete owner.result.workflow_plan_preparation_version
+    const artifact = candidate()
+    const audit = {
+      version: 'author-plot-audit/2',
+      source_kind: 'author_plot',
+      source: { kind: 'author_plot', text_sha256: sha('作者原情节') },
+      items: [{ id: 'P01' }],
+    }
+    artifact.payload[field] = audit
+    expect(candidateRecheckEligibility(artifact, owner, context)).toBeUndefined()
+    artifact.payload[field] = { ...audit, source_kind: 'workflow_plan' }
+    expect(candidateRecheckEligibility(artifact, owner, context)).toBeTruthy()
+  },
+)
+
 test.each([
   undefined,
   { ...source(), id: 'other-owner' },

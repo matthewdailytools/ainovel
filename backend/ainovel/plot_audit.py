@@ -230,6 +230,41 @@ async def independent_flows(worker, items, text, checks, *, source_label="作者
     return {"status": "observed", "entities": entities, "objects": objects, **observed}
 
 
+def author_contract_issues(value, author_text, *, scoped):
+    """Validate resolved author-side claims without reading candidate prose."""
+    issues = []
+    for item in value["items"]:
+        if not item["author_evidence"] or item["author_evidence"] not in author_text:
+            issues.append("每项解释必须引用作者原话，不能用候选正文或参考材料佐证。")
+        if not any(item[field].strip() for field in ("action", "object", "direction", "result")):
+            issues.append("解释须包含原话支持的事件内容，不能仅凭空字段宣称覆盖情节。")
+        if (
+            item["certainty"] == "explicit"
+            and item["transfer_scope"] in {"attempted", "completed"}
+            and (
+                not all(item[field].strip() for field in ("transfer_object", "supplier", "recipient"))
+                or item["supplier"] == item["recipient"]
+            )
+        ):
+            issues.append("明确交换须给出不同的双方和物品；不能确定时标歧义，不编造流向。")
+        if scoped and item["scope_condition"] and item["scope_condition"] not in author_text:
+            issues.append("scope_condition只能为来源的连续原话条件／时点，不得补造限制。")
+        if (
+            scoped
+            and item["recipient_scope"] == "only"
+            and item["certainty"] == "explicit"
+            and (
+                not all(item[key].strip() for key in ("transfer_object", "supplier", "recipient"))
+                or item["supplier"] == item["recipient"]
+                or item["transfer_scope"] == "none"
+            )
+        ):
+            issues.append(
+                "明确的仅向接收范围须有原话支持的不同双方、内容与实际／尝试／计划阶段；不能确认则保留歧义。"
+            )
+    return issues
+
+
 async def interpret_plot(worker, author_text, *, source_kind=None, preparation=None):
     if not author_text.strip():
         return {"items": [], "note": "缺少作者情节，不能从候选反推。"}
@@ -244,40 +279,13 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
     ] = list(author_sources)
 
     def validate_author(value):
+        for item in value["items"]:
+            resolve_field(item, "author_evidence", author_sources)
         issues = []
         if preparation is not None and preparation.get("item_count") is not None:
             if len(value["items"]) != preparation["item_count"]:
                 issues.append("写前复解释必须按原P编号顺序逐项保留全部事项，不得删除、合并或遗漏歧义项。")
-        for item in value["items"]:
-            resolve_field(item, "author_evidence", author_sources)
-            if not item["author_evidence"] or item["author_evidence"] not in author_text:
-                issues.append("每项解释必须引用作者原话，不能用候选正文或参考材料佐证。")
-            if not any(item[field].strip() for field in ("action", "object", "direction", "result")):
-                issues.append("解释须包含原话支持的事件内容，不能仅凭空字段宣称覆盖情节。")
-            if (
-                item["certainty"] == "explicit"
-                and item["transfer_scope"] in {"attempted", "completed"}
-                and (
-                    not all(item[field].strip() for field in ("transfer_object", "supplier", "recipient"))
-                    or item["supplier"] == item["recipient"]
-                )
-            ):
-                issues.append("明确交换须给出不同的双方和物品；不能确定时标歧义，不编造流向。")
-            if scoped and item["scope_condition"] and item["scope_condition"] not in author_text:
-                issues.append("scope_condition只能为来源的连续原话条件／时点，不得补造限制。")
-            if (
-                scoped
-                and item["recipient_scope"] == "only"
-                and item["certainty"] == "explicit"
-                and (
-                    not all(item[key].strip() for key in ("transfer_object", "supplier", "recipient"))
-                    or item["supplier"] == item["recipient"]
-                    or item["transfer_scope"] == "none"
-                )
-            ):
-                issues.append(
-                    "明确的仅向接收范围须有原话支持的不同双方、内容与实际／尝试／计划阶段；不能确认则保留歧义。"
-                )
+        issues.extend(author_contract_issues(value, author_text, scoped=scoped))
         return issues
 
     source_label = "本章工作章纲（AI规划）" if source_kind == "workflow_plan" else "作者原话"
@@ -315,9 +323,14 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
     else:
         from .workflow_plan_preparation import frozen_contract
 
-        if source_kind != "workflow_plan":
+        if source_kind == "author_plot" and worker.task["kind"] == "candidate_recheck":
+            from .candidate_recheck import verified_author_contract
+
+            contract = verified_author_contract(worker, author_text, number, prepared_contract)
+        elif source_kind == "workflow_plan":
+            contract = frozen_contract(worker, author_text, number, prepared_contract)
+        else:
             raise DomainError("plan_preparation_version", "冻结工作章纲解释不能替代作者情节解释。", 409)
-        contract = frozen_contract(worker, author_text, number, prepared_contract)
     items = [{"id": f"P{index:02}", **item} for index, item in enumerate(contract["items"], 1)]
     if not items:
         return {
