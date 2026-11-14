@@ -2616,5 +2616,93 @@
     "result": "passed",
     "record": "2026-11-14-scene-unknown-coverage.md",
     "fix_of": "json-and-scene-combined-regression-001"
+  },
+  {
+    "id": "thinking-config-controlled-rollout-001",
+    "date": "2026-11-14",
+    "commit": "b59aac2",
+    "module": "思考配置受控更新",
+    "scenario": "ee1c备份实际隔离验证、六保护表与全usage不变；旧3账户逐项相同，新同密钥high账户仍共CNY80，字段/窗口/保守费率不扩额",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-thinking-live-and-assisted-decision.md",
+    "fix_of": "deepseek-thinking-full-backend-001"
+  },
+  {
+    "id": "thinking-account-live-headless-001",
+    "date": "2026-11-14",
+    "commit": "b59aac2",
+    "module": "思考账户日常无头选择",
+    "scenario": "4账户中high别名可选择，公开模式匹配；自有空章及任务列表不变，0模型提交/写入/页面错误；另有独立付费测试同期不混算全局费用",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-thinking-live-and-assisted-decision.md",
+    "fix_of": "thinking-config-controlled-rollout-001"
+  },
+  {
+    "id": "thinking-structure-candidate-live-001",
+    "date": "2026-11-14",
+    "commit": "b59aac2",
+    "module": "同保存章真实思考结构候选",
+    "scenario": "e28任务5次CNY0.756650/未知0，经截断和引用修正形成0aaa未采用22记录10场景；75来源/内部引用/非空白覆盖核实，叙述顺序2,1,3..10，旧章/任务/全部既有保护行不变；非普遍质量结论",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-thinking-live-and-assisted-decision.md",
+    "fix_of": "scene-real-unknown-ref-stop-001"
+  },
+  {
+    "id": "auto-same-checkpoint-thinking-continue-001",
+    "date": "2026-11-14",
+    "commit": "b59aac2",
+    "module": "原自动检查点显式换账户",
+    "scenario": "bb34→70f7同分支，保留2597字与原36计划/解释/题材/政策/轮次；只变账户预算nonce，子29+原0.596664<原模式30，共享80不重置。正在首章结构维护，章间暂停请求未判完成",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-thinking-live-and-assisted-decision.md",
+    "fix_of": "thinking-structure-candidate-live-001"
+  },
+  {
+    "id": "assisted-first-manual-engineering-adoption-001",
+    "date": "2026-11-14",
+    "commit": "b59aac2",
+    "module": "半自动明确人工采纳",
+    "scenario": "工程操作员通读2795字及6剧情/10本章条件；唯一未来数值unknown尚未触发，未来仍待兑现。原人工接口采纳rev0→1并恢复，报告/unknown/正文不改，旧稿历史保留，非用户文学认可或自动放行",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-thinking-live-and-assisted-decision.md",
+    "fix_of": "required-json-fields-real-candidate-001"
+  },
+  {
+    "id": "auto-thinking-staged-pause-001",
+    "date": "2026-11-14",
+    "commit": "b59aac2",
+    "module": "自动结构候选持久暂停",
+    "scenario": "70f7实际paused，6次CNY1.003918/未知0；2597字rev1保持，77d6候选已保存但人物复核/采纳未完成、正式结构/场景0，next2非第二章已写",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-thinking-live-and-assisted-decision.md",
+    "fix_of": "auto-same-checkpoint-thinking-continue-001"
+  },
+  {
+    "id": "assisted-staged-thinking-continue-001",
+    "date": "2026-11-14",
+    "commit": "b59aac2",
+    "module": "半自动原候选显式换账户",
+    "scenario": "原33次CNY1.077326/未知0，5eaa结构候选在人物引用核验停；同分支换high子9d2f，保留2795字/原候选/静态范围/轮次，子28+原<原模式30，正在执行非完成",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-thinking-live-and-assisted-decision.md",
+    "fix_of": "assisted-first-manual-engineering-adoption-001"
+  },
+  {
+    "id": "deepseek-thinking-ci-b59aac2-001",
+    "date": "2026-11-14",
+    "commit": "b59aac2",
+    "module": "思考模式同源码双CI",
+    "scenario": "main43597370137及隔离分支43597326749均completed/success，同SHA核实，无重跑/取消；不替代真实模式或作者评价",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-thinking-live-and-assisted-decision.md",
+    "fix_of": "deepseek-thinking-full-backend-001"
   }
 ]
