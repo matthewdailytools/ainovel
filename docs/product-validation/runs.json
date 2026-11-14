@@ -1538,5 +1538,82 @@
     "result": "unverified",
     "record": "2026-11-14-structure-output-config.md",
     "fix_of": ""
+  },
+  {
+    "id": "structure-output-ci-success-001",
+    "date": "2026-11-14",
+    "commit": "73b00ff",
+    "module": "结构配置远端CI完成",
+    "scenario": "CI43565797037及job132359257326完成success；此前in_progress记录保留，文档44f586a的CI43566112775结果另待核实",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-structure-output-config.md",
+    "fix_of": "structure-output-ci-pending-001"
+  },
+  {
+    "id": "scene-live-deepseek-initial16-001",
+    "date": "2026-11-14",
+    "commit": "73b00ff",
+    "module": "DeepSeek首轮16k真实提取",
+    "scenario": "ec8de4f2任务3完整调用CNY0.273116后blocked_runtime；5场景依据及母亲生死断言仍错，无产物/未采用，1879既有行不变",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-14-structure-initial16-quality.md",
+    "fix_of": ""
+  },
+  {
+    "id": "scene-live-openai-initial16-001",
+    "date": "2026-11-14",
+    "commit": "73b00ff",
+    "module": "OpenAI首轮16k真实候选",
+    "scenario": "90daa7c1任务2完整调用USD0.233550后succeeded，19记录/5unknown场景/59引文准确/52段覆盖，未采用；本章控制不等于总体质量通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-structure-initial16-quality.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-ten-initial16-start-001",
+    "date": "2026-11-14",
+    "commit": "44f586a",
+    "module": "新独立全自动十章启动",
+    "scenario": "产品源与73b00ff相同；967cd8e9/8036a6d1全自动阶段10章2500-3500字，人物修订+情节核对+结构场景维护/首轮16k/USD5.5；queued→running仅启动未通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-new-automatic-ten.md",
+    "fix_of": ""
+  },
+  {
+    "id": "validation-record-ci-success-002",
+    "date": "2026-11-14",
+    "commit": "44f586a",
+    "module": "结构配置文档远端CI",
+    "scenario": "文档CI43566112775已完成success，独立核实，不借产品73b00ff的CI结果推定",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-structure-output-config.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-ten-initial16-first-stop-001",
+    "date": "2026-11-14",
+    "commit": "44f586a",
+    "module": "新自动十章首章等待核对",
+    "scenario": "产品源73b00ff；967cd第1章needs_review，0采用保存章/3124字候选未采用；9pass0fail0unknown但P06/P08解释ambiguous，repair_round0，5调用USD0.169642/未知0",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-14-new-automatic-ten.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-plan-clarification-in-progress-001",
+    "date": "2026-11-14",
+    "commit": "73b00ff+工作区",
+    "module": "全自动写前章纲明确化进行中",
+    "scenario": "仅新全自动的写前AI章纲明确化正在实现，未构建/全量/提交；旧967cd任务与候选保持，不将方案或9项pass记作修复通过",
+    "phase": "stability",
+    "result": "unverified",
+    "record": "2026-11-14-new-automatic-ten.md",
+    "fix_of": ""
   }
 ]
