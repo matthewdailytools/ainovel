@@ -41,6 +41,7 @@ longform.plans单独列出作者维护的未来计划，包含各信息视角的
 """
 PROMPT_VERSION = "0.13.0"
 STRUCTURE_REPAIR_VERSION = "2"
+REVIEW_CHECK_VERSION = "fixed-check-shape/1"
 
 
 def structure_issues(error):
@@ -855,7 +856,17 @@ class Worker:
             "succeeded",
         )
 
-    async def grounded(self, instruction, schema, context, validator, max_output=4096, contract=None):
+    async def grounded(
+        self,
+        instruction,
+        schema,
+        context,
+        validator,
+        max_output=4096,
+        contract=None,
+        *,
+        diagnostic_label=None,
+    ):
         current = instruction
         units = instruction.get("可引用原文", instruction.get("可替换原文", []))
         contract = contract or (source_schema(schema.model_json_schema(), units) if units else None)
@@ -873,7 +884,13 @@ class Worker:
                 "定位错误": issues,
                 "引用修正要求": "回到本次正文重新核验，引用必须是连续逐字原文。不得编造引文或仅为通过检查删除真实问题；确无证据时标未知，不改造正文。",
             }
-        raise DomainError("evidence", "两轮引用修正后仍无法回到原文，未采纳或自动推进。")
+        message = "两轮引用修正后仍无法回到原文，未采纳或自动推进。"
+        if diagnostic_label:
+            details = "；".join(issue[:350] for issue in issues[:6])
+            message += f" {diagnostic_label}（{len(issues)}项）：{details}"
+            if len(issues) > 6:
+                message += f"；另{len(issues) - 6}项详见任务引用修正记录"
+        raise DomainError("evidence", message)
 
     async def review(self, text, fixed, context, number, instructions=None):
         context = self.whole_chapter_context(context)
@@ -892,7 +909,21 @@ class Worker:
         def validate(result):
             issues = []
             if [item["condition"] for item in result["checks"]] != fixed:
-                issues.append("checks 未按顺序逐字覆盖固定条件")
+                issues.append(
+                    f"checks须严格{len(fixed)}项，实际{len(result['checks'])}项；"
+                    "按固定条件原顺序逐字填写，不添加或改写条件。"
+                )
+                for index, check in enumerate(result["checks"]):
+                    if index >= len(fixed):
+                        issues.append(
+                            f"checks[{index}]不在固定条件清单；其他情节覆盖、题材提示与建议"
+                            "应写入findings，不得追加checks。"
+                        )
+                    elif check["condition"] != fixed[index]:
+                        issues.append(
+                            f"checks[{index}].condition未逐字对应固定条件[{index}]；"
+                            "核对漏项、重复、改写或顺序错误，不修改锁定原话。"
+                        )
             for index, check in enumerate(result["checks"]):
                 resolve_field(check, "evidence", sources)
                 if check["result"] == "pass" and (not check["evidence"] or check["evidence"] not in text):
@@ -910,6 +941,10 @@ class Worker:
                 "审查目标": "只审本次正文及相同内容的上下文.chapter.content；source_version_basis仅用于版本校验。原报告与写作要求中的旧引文是待验证意见，不能当作本稿事实。必须重新读取候选，不能把旧稿问题套在已修改的候选上。",
                 "可引用原文": units,
                 "固定条件": fixed,
+                "固定条件检查格式版本": REVIEW_CHECK_VERSION,
+                "固定条件项数": len(fixed),
+                "checks清单边界": "checks只能逐字按顺序覆盖固定条件清单，项数必须等于固定条件项数，每项一次。不得另加‘其他情节覆盖’、作者写作要求、题材提示或其改写；清单外的问题写findings。修正格式时保留原有unknown/fail及依据，不得为满足项数删除真实问题或改成pass。",
+                "条件性约束核对": "区分本章必须完成的结果与‘只有实施A时才须B’的条件。后者若正文明确只准备、尚未实施A，可引用该代表段核对本章仍遵守限制；未出现B的数值本身不是本章违约，不能要求提前实施A。此时pass仅表示本章保持约束，summary须说明未触发、尚未兑现，不能宣称B已经完成。若是否实施A不明确、缺少合适原文，或A已实施而B无法核实，仍填unknown；明确违背列blocker。无条件的本章结果和禁止项不能借‘未触发’跳过，不得仅凭全文未见而pass。",
                 "作者写作要求": instructions or {},
                 "作者明确例外": self.genre_snapshot().get("author_exceptions", []),
                 "作者契约核对": "冻结契约中的prohibitions按本章时点核对，有逐字原文依据的明确违反列blocker。fixed_results和ending是全书约定，仅核对当前章明确触发的结果，不要求每章提前实现终局。情绪目标、钩子、未锁定方向只能给具体suggestion，不追加checks。发现本次指令与作品固定约定冲突应明确指出，不静默覆盖。",
@@ -928,6 +963,7 @@ class Worker:
             context,
             validate,
             contract=contract,
+            diagnostic_label="正文审查检查格式或来源未通过",
         )
         return result
 
