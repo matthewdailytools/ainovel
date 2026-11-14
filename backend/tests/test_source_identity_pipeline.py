@@ -2,19 +2,30 @@
 
 import asyncio
 from copy import deepcopy
+from importlib.util import module_from_spec, spec_from_file_location
 import json
+from pathlib import Path
 
 import pytest
 
 from ainovel.models import ModuleInput
 from ainovel.worker import Worker
 from helpers.source_identity_fixture import SOURCE, BODY
-from scripts.e2e_server import Model
 from test_candidate_recheck import queue_recheck
 from test_workflow_scope import workflow_payload
 
 
-class Probe(Model):
+def offline_browser_model():
+    # pytest's console entry point does not put the repository root on sys.path.
+    source = Path(__file__).resolve().parents[2] / "scripts/e2e_server.py"
+    spec = spec_from_file_location("ainovel_offline_browser_model", source)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.Model
+
+
+class Probe(offline_browser_model()):
     def __init__(self, hook=None):
         super().__init__()
         self.frames = []
