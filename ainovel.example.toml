@@ -42,9 +42,15 @@ input_per_million = "0.20"
 output_per_million = "0.75"
 source = "https://developers.openai.com/api/docs/models/gpt-6-luna"
 
-# 可选 Sol：缺省请求上限 120,000 UTF-8 字节，低于 272K 输入 Token 的加价边界。
-# 调高输入边界前需重新核对该模型计价档位；窗口设置不会自动改变单价。
-# 2026-11-13 核对 Standard 单价；不计缓存折扣，不使用 Fast/Ultrafast。
+# 可选 Sol：未配置仍缺省 120,000 UTF-8 字节。
+# 2026-11-14 核对该模型窗口 1,050,000 Token；输入超过 272K Token 时阶梯加价。
+# 已使用 gpt-6.1-sol 的账户可在各自 [accounts.xxx] 下明确配置：
+# max_input_bytes = 240000
+# context_window_tokens = 1050000
+# context_source = "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+# 只发送文本，完整请求的 UTF-8 字节作为保守 Token 上界，240,000 另留门槛余量。
+# 不能只把上限改到模型窗口大小而继续沿用短输入单价；窗口设置不会自动改变价格。
+# 2026-11-14 核对 Standard 单价；不计缓存折扣，不使用 Fast/Ultrafast。
 [pricing."gpt-6.1-sol"]
 currency = "USD"
 input_per_million = "2"

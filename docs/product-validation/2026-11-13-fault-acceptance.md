@@ -25,7 +25,7 @@
 | 生成时作者改稿 | 通过 | B1：[领域](../../backend/tests/test_domain.py) `test_edit_while_generating_is_not_overwritten`；[Worker](../../backend/tests/test_api_worker.py) `test_author_edit_after_generation_stops_before_review_call`；[反向整理](../../backend/tests/test_story_extraction.py) `test_mid_generation_edit_preserves_raw_result_without_staging`。新稿保留，过期结果不能成为当前候选；完成的原始模型结果可保留。 | 此行不等同于所有浏览器切换时序都已执行。 |
 | 多窗口保存冲突 | 通过 | B1：`test_version_conflict_preserves_original`；U1：[双窗口](../../tests/e2e/writing-conflict.offline.spec.ts) `双窗口保存冲突：保留中文本地输入与先提交原稿，刷新可比较恢复`。独立浏览器上下文保留先提交稿、本地冲突稿及明确比较恢复。 | 无泛化为无限并发压力结论。 |
 | 候选多窗口编辑、拒绝及采纳竞争 | 通过 | B1/B2：[API](../../backend/tests/test_api_worker.py) `test_candidate_cross_window_edits_and_acceptance_require_seen_version`。旧候选版本编辑、拒绝、采纳均返回冲突；不改原稿，见到新版本后才可采纳。 | 未执行浏览器端两个候选编辑窗口的全部点击竞争排列。 |
-| 切章/切作品与未保存表单 | 部分通过 | U1：[离开保护](../../tests/e2e/leave-guard.offline.spec.ts) `未保存场景：拒绝切章保留表单，保存后可切换且不串用范围`、`未提交整书设置：取消切换保留输入，确认跨作品切换隔离表单`；[参考流程](../../tests/e2e/reference.offline.spec.ts) 验证返回书库/主导航取消后方案不丢。 | **正在生成时切章/切作品，再让旧响应晚返回的独立无头完整场景未执行**；后端所有权与版本校验不能代替此浏览器场景。 |
+| 切章/切作品与未保存表单 | 通过（已列场景） | U1：[离开保护](../../tests/e2e/leave-guard.offline.spec.ts) `未保存场景：拒绝切章保留表单，保存后可切换且不串用范围`、`未提交整书设置：取消切换保留输入，确认跨作品切换隔离表单`；[参考流程](../../tests/e2e/reference.offline.spec.ts) 验证返回书库/主导航取消后方案不丢。 | 新增[晚返回完整无头](2026-11-14-writing-target-race.md)：同作品手写触发版本停止且完整步骤保留，跨作品受控POST晚回只发布原章候选；刷新前后全文与任务归属均核对，39项全项目回归通过。未穷举任意切换排列。 |
 | 排队取消及运行中取消 | 通过 | B1：[API](../../backend/tests/test_api_worker.py) `test_queue_cancel_and_independent_workflows`；[结构](../../backend/tests/test_workflow_structure.py) `test_pause_preserves_pending_and_cancellation_blocks_adoption`。U1：[后台故障](../../tests/e2e/writing-faults.offline.spec.ts) `后台任务：刷新重连同一任务、取消保留片段、明确恢复后候选不覆盖原稿`。取消无候选发布、无原稿覆盖，片段留存。 | 替身取消不证明真实供应商立即停止计费。 |
 | 刷新、事件重连及明确恢复 | 通过 | U1：上述后台故障用例使用 15 秒慢替身；刷新后重连同一任务并重放片段，未确认未知结果的恢复返回 409，明确恢复后只有一份未采纳候选。B1：[结构](../../backend/tests/test_workflow_structure.py) `test_staged_structure_recovers_without_another_model_call`。 | 不等同于公网代理断线、浏览器离线多日等网络组合全覆盖。 |
 | 上游流不完整、错误终止及输出上限 | 通过 | B1：[供应商](../../backend/tests/test_budget_provider.py) `test_incomplete_stream_and_cancellation_hold_reservation`、`test_provider_failed_event_keeps_sanitized_reason_and_does_not_retry`、`test_explicit_output_limit_settles_known_usage_and_preserves_partial`。缺完成事件保留未知预留；失败不自动重试；已知上限用量结算并保留片段。 | 未执行真实供应商链路拔网；未证明任意字节分片、任意 SSE 畸形序列的全部排列。 |
@@ -90,6 +90,6 @@
 
 ## 下一步与最终判定
 
-按证据缺口继续：补生成中切目标并晚返回的浏览器场景、外部资料原件变化场景；系统输入法与真实浏览器缩放保留人工验收项。迁移/恢复的 SQL 与写入异常已完成本轮注入，物理进程中断、磁盘满和恢复复制完成后的其他时点保持未执行。每次执行将首次失败、修复版本与复测结果追加至对应记录，不覆盖历史。
+生成中切目标并晚返回已补独立浏览器证据；按剩余缺口继续外部资料原件变化场景；系统输入法与真实浏览器缩放保留人工验收项。迁移/恢复的 SQL 与写入异常已完成本轮注入，物理进程中断、磁盘满和恢复复制完成后的其他时点保持未执行。每次执行将首次失败、修复版本与复测结果追加至对应记录，不覆盖历史。
 
 本表可结案的是**已列明确范围的工程保护**；未执行项保持开放，不以邻近测试代替。连续十章、跨卷、两种独立整书、真实模型对照、作者盲审和总投入收益另行判定。本表没有把作者尚未评价的文学质量或使用收益标为通过。

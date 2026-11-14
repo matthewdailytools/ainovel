@@ -18,7 +18,7 @@
 | N05、N06 | U10 | 前文修改影响 | F10、F11、F14 | 修改原文→依赖失效→有限修订→复检 | test_targeted_revision.py；test_targeted_revision_race.py；test_longform_scale.py；真实开篇局部修订49f02254575349608dc691e85535f352只改结尾追问，未选正文保持，旧候选未采用 | 局部最小修订已实际执行，不再列为完全未做；长篇跨章检出／误报、后续影响的修订质量及作者认可仍待评，不能由单个局部修订外推 |
 | N02、N03、N05、N06、N10、N12 | U11 | 连续一卷至整书 | F02、F03、F04、F05、F06、F07、F08、F09、F10、F11、F13、F14、F15、F16 | 选择阶段／整书→规划／作者情节→写作维护→暂停恢复→范围审查 | test_api_worker.py两模式工程36章、test_workflow_structure.py、workflow-structure.offline.spec.ts、真实Worker终止／90秒租约及runner证据保留；ea1cb95、test_workflow_scope.py、test_completion_scope_evidence.py及workflow-scope.offline.spec.ts验证阶段终态、逐章ID／修订／UTF-16证据、暂停恢复和整书默认兼容；ea7a2ec补混合干预回归 | segment_complete固定closed=false，不能充当整书生产完成或三层通过；旧十章不追认阶段通过，当前不含向同一已完成阶段版追加下一批。真实十章、跨卷及两模式独立36章仍待验收；旧36章与18／15章候选保持待审 |
 | N04、N06、N09、N10、N12 | U12 | 反馈、审稿与交付 | F10、F14、F15 | 反馈分类定位→定向修订→承诺核对→导出 | 423447c已接通反馈到对应章节的主动局部修订；feedback-revision.offline.spec.ts验证旧来源确认、作者选区、来源元数据、仅替换选区、恢复及键盘退出；test_targeted_revision.py、test_manual_finalization.py、test_evidence.py、test_library_backup.py | 不再只是复制提示词；人工反馈不伪装模型审稿，审美意见不升级事实。真实整书评价、最终稿／恢复一致性以及作者定稿仍待完整长篇出口 |
-| N08、N11、N12 | U13 | 模型与预算 | F16、F13 | 账户配置→队列→取消／未知／续跑→费用恢复 | test_budget_provider.py、test_api_worker.py、test_worker_process_restart.py、writing-faults.offline.spec.ts及真实费用／进程证据保留；cac0016按账户核实窗口与来源，以同一实际UTF-8 JSON字节串校验和发送；ea7a2ec、test_workflow_interventions.py核对混合干预、旧拒绝正文、同章产物／状态与最多8帧安全诊断 | 晚响应切目标、资料原件变化、物理故障及完整人工输入／缩放等未执行范围仍开放；离线恢复不等于现场成功。长篇累计费用待结束归档，两个OpenAI合计USD20、DeepSeek CNY80不变且账本不清零 |
+| N08、N11、N12 | U13 | 模型与预算 | F16、F13 | 账户配置→队列→取消／未知／续跑→费用恢复 | test_budget_provider.py、test_api_worker.py、test_worker_process_restart.py、writing-faults.offline.spec.ts及真实费用／进程证据保留；cac0016按账户核实窗口与来源，以同一实际UTF-8 JSON字节串校验和发送；ea7a2ec、test_workflow_interventions.py核对混合干预、旧拒绝正文、同章产物／状态与最多8帧安全诊断 | 晚响应切目标已有[完整浏览器补验](2026-11-14-writing-target-race.md)；资料原件变化、物理故障及完整人工输入／缩放等剩余范围分别核对；离线恢复不等于现场成功。长篇累计费用待结束归档，两个OpenAI合计USD20、DeepSeek CNY80不变且账本不清零 |
 
 ## 已完成证据的更新入口
 
@@ -105,3 +105,7 @@ N08／N11／N12、U13／F16的[原生进程身份](2026-11-14-runtime-process-id
 08:30:17Z的新977584bb…快照为前三章3022／2967／2963字采用、第四章空修订0。首章scope10在初检前冻结、3字段1轮后全10supported，第二scope0；写前与旧999a／967／d500保护不变量保持，任务仍running。启动前OAI11.177753＋旧未知1.417732／净7.404515、DS11.916150／净68.083850只是固定端点，不是运行实时余额；next4不算第四章或十章完成。
 
 HEAD4caabb0的14项外部skill／18／19设计／根README变更保留，未改变215产品文件，也不据此宣称技能已融入产品运行。2c本机全套与原CI43574281944失败并列；相同产品字节的4ca CI43574866230成功是另一轮远端结果，原超时原因调查尚未结案的部分不预填通过。
+
+2026-11-14追加：bded76c补生成中同作品切章／手写及跨作品回执晚到，新旧目标、原稿、步骤、候选与任务归属分别验证，完整无头39项通过（224.960秒、0重试／失败／跳过／flaky）。原2c远端API短暂失响应的根因仍未确认，原失败trace、同产品后续成功及原断言三次观察分开保留；详见[补验记录](2026-11-14-writing-target-race.md)。
+
+2026-11-14容量追加：新977在4章采用／第5写作缓存后，被完整请求字节门禁停止；两OpenAI账户明确240000字节及1050000窗口，63／19项专项与零付费原请求复现通过，原预算／未知预留保持，备份实际恢复及哈希一致后显式继续同任务。详见[容量与恢复记录](2026-11-14-openai-capacity-recovery.md)，十章及整书质量不能据此通过。

@@ -1890,5 +1890,104 @@
     "result": "unverified",
     "record": "2026-11-14-character-repair-scope.md",
     "fix_of": ""
+  },
+  {
+    "id": "writing-target-race-test-first-001",
+    "date": "2026-11-14",
+    "commit": "bded76c",
+    "module": "生成中切目标首轮测试修正",
+    "scenario": "首轮0/2、r2为1/2；busy切章与同branch版本门禁的错误预期已查明，完整失败记录保留，未改产品保护",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-14-writing-target-race.md",
+    "fix_of": ""
+  },
+  {
+    "id": "writing-target-race-final-001",
+    "date": "2026-11-14",
+    "commit": "bded76c",
+    "module": "生成中切章与作品",
+    "scenario": "r3两项通过：同作品手写使旧结果版本失效且步骤保留；跨作品旧POST回执晚到只归原章，新稿及拒绝路径完整",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-writing-target-race.md",
+    "fix_of": "writing-target-race-test-first-001"
+  },
+  {
+    "id": "project-browser-39-001",
+    "date": "2026-11-14",
+    "commit": "bded76c",
+    "module": "全项目39无头",
+    "scenario": "原37加切目标2，224.960秒，0fail/skip/flaky，retries0；对应本轮新增测试和原产品字节",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-writing-target-race.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-ci-api-stall-review-001",
+    "date": "2026-11-14",
+    "commit": "2c7e654",
+    "module": "原CI失响应继续调查",
+    "scenario": "原2c CI单条失败保留；trace显示创建后多个API约10秒无响应，无前序活动/reading-state写证据；同产品后续CI及原断言本地3次通过，根因仍未确认",
+    "phase": "stability",
+    "result": "unverified",
+    "record": "2026-11-14-writing-target-race.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-ten-capacity-stop-001",
+    "date": "2026-11-14",
+    "commit": "bded76c",
+    "module": "新977十章第5章容量停点",
+    "scenario": "4章11922字采用，第5写作2896字仅缓存；审查137114大于120000，在预留/HTTP前停止，48call USD2.035148新增unknown0；十章未通过",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-14-openai-capacity-recovery.md",
+    "fix_of": ""
+  },
+  {
+    "id": "openai-capacity-boundary-001",
+    "date": "2026-11-14",
+    "commit": "bded76c",
+    "module": "两Key240k容量边界",
+    "scenario": "63provider/19budget-cache专项通过：240000完整发送，240001零HTTP拒绝，unknown共享总额/任务预算和仅limit变更的已付费步骤复用",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-openai-capacity-recovery.md",
+    "fix_of": ""
+  },
+  {
+    "id": "openai-capacity-rollout-001",
+    "date": "2026-11-14",
+    "commit": "bded76c",
+    "module": "旧API先备份与配置更新",
+    "scenario": "2fa40778备份实际隔离恢复ok，双OpenAI240000/1050000官方依据、2/10及USD20/CNY80不改；6保护表和全usage哈希相同，回环单实例",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-openai-capacity-recovery.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-ten-capacity-resume-001",
+    "date": "2026-11-14",
+    "commit": "bded76c",
+    "module": "原977检查点恢复",
+    "scenario": "独立零费复现复用第5付费正文缓存；显式恢复同task/payload/branch/USD6.5，不regenerate或ack_changes；后续十章质量及终态仍未验证",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-openai-capacity-recovery.md",
+    "fix_of": "automatic-ten-capacity-stop-001"
+  },
+  {
+    "id": "automatic-ten-cache-resume-observed-001",
+    "date": "2026-11-14",
+    "commit": "bded76c",
+    "module": "真实第5章缓存恢复观察",
+    "scenario": "08:52:19Z同task新attempt：第5章rev1/2896与原paidcache逐字SHA一致，无第二writer派发，新增首call为原未发送review；52call USD2.257422+活动0.286392/newunknown0，结构及十章待核",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-openai-capacity-recovery.md",
+    "fix_of": "automatic-ten-capacity-stop-001"
   }
 ]

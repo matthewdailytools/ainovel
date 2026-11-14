@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import replace
+from decimal import Decimal
 import json
 
 import httpx
@@ -11,6 +12,7 @@ from ainovel.budget import Budget
 from ainovel.db import DomainError
 from ainovel.providers import ModelClient
 from ainovel.settings import Settings
+from ainovel.worker import Worker
 
 
 def load_config(tmp_path, monkeypatch, limits=""):
@@ -246,3 +248,151 @@ def test_output_bound_must_be_positive_integer_before_reservation(settings, valu
             )
         )
     assert caught.value.code == "configuration" and budget.report() == before
+
+
+OPENAI_MODEL_SOURCE = "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+
+
+def configured_openai_capacity(provider):
+    # Isolated fixtures only: the approved cap must not imply use of the full window.
+    return replace(
+        provider,
+        model="gpt-6.1-sol",
+        reasoning="low",
+        input_rate=Decimal("2"),
+        output_rate=Decimal("10"),
+        price_source=OPENAI_MODEL_SOURCE,
+        max_input_bytes=240_000,
+        context_window_tokens=1_050_000,
+        context_source=OPENAI_MODEL_SOURCE,
+    )
+
+
+@pytest.mark.parametrize("account", ["openai_1", "openai_2"])
+@pytest.mark.parametrize("structured", [False, True])
+def test_openai_240000_wire_boundary_counts_schema_and_preserves_full_input(settings, account, structured):
+    settings.providers[account] = configured_openai_capacity(settings.providers[account])
+    deepseek = settings.providers["deepseek"]
+    budget = Budget(settings)
+    wire = []
+    reserved = []
+    system, prefix = '系统"约束"\\\n', '正文渡船😀𠮷\n"引文"\\末尾'
+    schema = (
+        {"type": "object", "properties": {"text": {"type": "string", "description": "逐字保留依据"}}}
+        if structured
+        else None
+    )
+
+    def handler(request):
+        wire.append(request.content)
+        with budget.db() as db:
+            reserved.append(db.execute("SELECT reserved FROM calls WHERE task_id='endpoint'").fetchone())
+        return response(account)
+
+    model = ModelClient(settings, budget, httpx.MockTransport(handler))
+    asyncio.run(model.generate(account, "measure", system, prefix, 16_384, schema=schema))
+    # Calibrate against the real adapter body; ASCII padding adds exactly one byte.
+    prompt = prefix + "x" * (240_000 - len(wire[0]))
+    result = asyncio.run(
+        model.generate(account, "endpoint", system, prompt, 16_384, schema=schema, run_limit=1)
+    )
+    body = json.loads(wire[-1])
+    assert len(wire[-1]) == 240_000 and len(wire) == 2
+    assert body["input"] == [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+    assert body["service_tier"] == "default" and body["store"] is False
+    assert ("text" in body) is structured
+    if structured:
+        assert body["text"]["format"]["schema"]["properties"]["text"]["description"] == "逐字保留依据"
+    assert result["text"] == "完成" and reserved[-1]["reserved"] == 647_936
+    assert settings.providers["deepseek"] == deepseek
+    assert str(settings.limits["openai"]) == "20" and str(settings.limits["deepseek"]) == "80"
+    before = budget.report()
+    with pytest.raises(DomainError) as caught:
+        asyncio.run(
+            model.generate(account, "one-byte-over", system, prompt + "x", 16_384, schema=schema, run_limit=1)
+        )
+    assert caught.value.code == "context_limit" and len(wire) == 2
+    assert budget.report() == before
+
+
+@pytest.mark.parametrize("gate", ["task", "shared_unknown"])
+def test_openai_capacity_increase_keeps_task_and_two_key_unknown_budget_gates(settings, gate):
+    for account in ("openai_1", "openai_2"):
+        settings.providers[account] = configured_openai_capacity(settings.providers[account])
+    budget = Budget(settings)
+    task_id = "larger-input"
+    held = budget.reserve(
+        settings.providers["openai_1"],
+        task_id if gate == "task" else "historical-unknown",
+        10_000 if gate == "task" else 9_800_000,
+        0,
+    )
+    budget.settle(held)
+    before = budget.report()
+    assert before[0]["reserved_unknown"] == (0.02 if gate == "task" else 19.6)
+    budget = Budget(settings)
+    transport = httpx.MockTransport(lambda request: pytest.fail("budget gate must stop before transport"))
+    with pytest.raises(DomainError) as caught:
+        asyncio.run(
+            ModelClient(settings, budget, transport).generate(
+                "openai_2",
+                task_id,
+                "系统",
+                "正文" * 25_000,
+                16_384,
+                run_limit=0.4 if gate == "task" else 1,
+            )
+        )
+    assert caught.value.code == "budget"
+    assert ("本次任务" if gate == "task" else "共享预算") in str(caught.value)
+    assert budget.report() == before
+    assert before[1]["remaining"] == 80
+
+
+def test_limit_only_change_reuses_same_account_completed_worker_step_after_restart(settings, domain, story):
+    configured = configured_openai_capacity(settings.providers["openai_1"])
+    settings.providers["openai_1"] = replace(
+        configured, max_input_bytes=120_000, context_window_tokens=None, context_source=""
+    )
+    task = domain.queue(
+        "module",
+        {
+            "novel_id": story["id"],
+            "branch_id": story["branch_id"],
+            "account": "openai_1",
+            "action": "writing.advise",
+        },
+    )
+    budget = Budget(settings)
+    unknown = budget.reserve(settings.providers["openai_2"], "historical-unknown", 1000, 0)
+    budget.settle(unknown)
+    wire = []
+
+    def handler(request):
+        wire.append(request.content)
+        return response("openai_1")
+
+    transport = httpx.MockTransport(handler)
+    worker = Worker(settings, ModelClient(settings, budget, transport))
+    worker.task = worker.claim()
+    worker.attempt = worker.task["attempt"]
+    instruction = {"动作": "保持相同写作输入"}
+    first = asyncio.run(worker.call(instruction))
+    before = budget.report()
+    assert len(wire) == 1 and before[0]["reserved_unknown"] == 0.002
+    settings.providers["openai_1"] = configured
+    restored_budget = Budget(settings)
+    restored = Worker(settings, ModelClient(settings, restored_budget, transport))
+    restored.task = domain.task(task["id"])
+    restored.attempt = restored.task["attempt"]
+    assert asyncio.run(restored.call(instruction)) == first
+    assert len(wire) == 1 and restored_budget.report() == before
+    assert len(domain.db.all("SELECT fingerprint FROM task_steps WHERE task_id=?", (task["id"],))) == 1
+    assert (
+        len(
+            domain.db.all(
+                "SELECT id FROM task_events WHERE task_id=? AND kind='step_dispatched'", (task["id"],)
+            )
+        )
+        == 1
+    )
