@@ -37,6 +37,8 @@ def test_complete_story_has_causal_spine_payoffs_and_an_ending():
     "failure",
     [
         "missing_ending",
+        "duplicate_ending",
+        "duplicate_opening",
         "missing_development",
         "blank_motivation",
         "placeholder",
@@ -54,6 +56,13 @@ def test_incomplete_structures_do_not_pass(failure):
     value = complete_idea_output()
     if failure == "missing_ending":
         value["beats"][-1]["stage"] = "发展"
+    elif failure == "duplicate_ending":
+        # The real model labelled both the climax aftermath and final beat as endings.
+        value["beats"].append({**deepcopy(value["beats"][-1]), "number": 6, "caused_by": [5]})
+    elif failure == "duplicate_opening":
+        value["beats"].insert(1, deepcopy(value["beats"][0]))
+        for number, beat in enumerate(value["beats"], 1):
+            beat.update(number=number, caused_by=[] if number == 1 else [number - 1])
     elif failure == "missing_development":
         value["beats"][1]["stage"] = "转折"
     elif failure == "blank_motivation":
@@ -124,7 +133,7 @@ def test_worker_publishes_only_valid_full_structure_and_keeps_source(settings, d
     artifact = domain.artifact(completed["result"]["artifact_id"])
     assert artifact["kind"] == "advice"
     assert artifact["chapter_id"] is None
-    assert artifact["payload"]["idea_structure_version"] == "1.0.0"
+    assert artifact["payload"]["idea_structure_version"] == "1.0.1"
     assert artifact["payload"]["idea_structure_revision"] == 0
     structure = CompleteIdea.model_validate(artifact["payload"]["idea_structure"])
     assert artifact["payload"]["text"] == render_idea(structure)

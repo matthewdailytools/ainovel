@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 
 def substantive(value: str) -> str:
@@ -30,7 +30,9 @@ class StructurePart(BaseModel):
 
 class StoryBeat(StructurePart):
     number: BeatNumber
-    stage: Literal["开端", "发展", "转折", "高潮", "结局"]
+    stage: Literal["开端", "发展", "转折", "高潮", "结局"] = Field(
+        description="首节点是唯一开端，末节点是唯一结局；中间节点仅用发展、转折或高潮，不把余波再标为结局。"
+    )
     event: Short = Field(description="本节点具体发生的事，不能只写逐渐成长、揭开真相等概述。")
     caused_by: list[BeatNumber] = Field(
         max_length=4, description="承接的前序节点编号；开端为空，其余包含紧邻前一节点。"
@@ -133,6 +135,13 @@ async def generate_structure(worker, request, context):
             "作者想法": request["instruction"],
             "固定条件": request["fixed"],
             "写作偏好": request["writing_profile"],
+            "结构校验规则": (
+                "beats编号从1连续递增；首节点是唯一开端，末节点是唯一结局，"
+                "中间节点仅用发展、转折或高潮；结局后的余波写在ending，不另加第二个结局节点。"
+                "首次发展、首次转折、首次高潮依此先后。开端caused_by为空；后续每项含紧邻前一编号，"
+                "其余引用只能是更早的现有编号且不重复，不能自引或引用未来。"
+                "每条伏笔须1<=planted_at<resolved_at<=节点总数。保留完整结构，精简重复描述，方案总长不超过6000字。"
+            ),
             "要求": (
                 "给出一个结构完整、可修改的原创小说构思，约1000至1800字，不写正文。"
                 "围绕同一主角目标与主冲突，以5至9个主线节点覆盖开端、发展、关键转折、高潮、结局。"

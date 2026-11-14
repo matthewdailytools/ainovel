@@ -82,7 +82,7 @@ def test_two_format_repairs_explain_enum_without_turning_belief_into_fact(settin
 def test_repeated_wrong_kind_still_stops_after_two_repairs_without_adoption(settings, domain, story):
     model = RepairModel("belief", remain_invalid=True)
     worker, context = setup_worker(settings, domain, story, model)
-    with pytest.raises(DomainError, match="两轮格式修正"):
+    with pytest.raises(DomainError, match="结构化产物未通过契约"):
         asyncio.run(worker.memory(TEXT, context))
     assert len(model.requests) == 3
     assert domain.chapter(story["chapter_id"])["revision"] == 1

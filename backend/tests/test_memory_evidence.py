@@ -155,7 +155,7 @@ def test_contiguous_verbatim_fallback_remains_compatible(settings, domain, story
 def test_fact_limit_is_not_relaxed_to_repair_multiple_sources(settings, domain, story):
     model = MemoryModel(over_limit=True)
     worker, context, chapter, _ = prepared(settings, domain, story, model)
-    with pytest.raises(DomainError, match="两轮格式修正"):
+    with pytest.raises(DomainError, match="结构化产物未通过契约"):
         asyncio.run(worker.memory(TEXT, context))
     assert len(model.requests) == 3 and all(len(output["facts"]) == 7 for output in model.outputs)
     assert domain.chapter(chapter["id"]) == chapter and domain.db.all("SELECT * FROM facts") == []

@@ -414,7 +414,7 @@ class Worker:
                     details.append(f"{field} ({issue['type']})")
                 raise DomainError(
                     "invalid_structure",
-                    "结构化产物在两轮格式修正后仍未通过契约，未采纳。 字段诊断：" + "；".join(details),
+                    "结构化产物未通过契约，未采纳。 字段诊断：" + "；".join(details),
                 ) from error
 
         # Lossless wire aliases must not discard a paid, completed generation
