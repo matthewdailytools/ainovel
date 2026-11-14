@@ -603,9 +603,11 @@ class Domain:
         if (kind == "module" and payload.get("action") == "story.extract") or (
             kind == "workflow" and payload.get("structured_maintenance")
         ):
+            from .extraction_refs import KEY as REFERENCE_KEY, VERSION as REFERENCE_VERSION
             from .extraction_sources import KEY as SOURCE_OUTPUT_KEY, VERSION as SOURCE_OUTPUT_VERSION
 
             initial[SOURCE_OUTPUT_KEY] = SOURCE_OUTPUT_VERSION
+            initial[REFERENCE_KEY] = REFERENCE_VERSION
         if kind == "candidate_recheck":
             from .candidate_recheck import VERSION, freeze
 

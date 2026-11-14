@@ -8,6 +8,11 @@ from pydantic import Field
 
 from .db import DomainError, dumps, uid
 from .evidence import source_units
+from .extraction_refs import (
+    INSTRUCTION as REFERENCE_INSTRUCTION,
+    frozen_version as reference_version,
+    reference_issues,
+)
 from .extraction_sources import (
     INSTRUCTION as SOURCE_CHOICE,
     SourceIdSchema,
@@ -166,6 +171,7 @@ async def run_extraction(worker, request, context, snapshot=None):
 
     character_repair_v2 = repair_version(worker.task) == REPAIR_V2
     source_output = source_output_version(worker.task)
+    reference_checks = reference_version(worker.task)
     snapshot = snapshot or worker.task["result"]["story_extraction_snapshot"]
     if worker.domain.branch(request["branch_id"])["story_revision"] != snapshot["story_revision"]:
         raise DomainError("story_changed", "源稿排队后改变，未发送整理请求。", 409)
@@ -200,6 +206,14 @@ async def run_extraction(worker, request, context, snapshot=None):
         if len(set(local)) != len(local) or set(local) & known:
             issues.append("候选local_id必须独立、唯一，不得与正式标识相同。")
         reference_index = {**by_id, **{r["local_id"]: r["record"] for r in value["records"]}}
+        applied_index = (
+            {
+                identifier: node["record"]
+                for identifier, node in effective_records(by_id, value["records"]).items()
+            }
+            if reference_checks
+            else {}
+        )
         for proposal_index, proposal in enumerate(value["records"]):
             record = proposal["record"]
             path = f"records[{proposal_index}](local_id={proposal['local_id']}).record"
@@ -290,7 +304,13 @@ async def run_extraction(worker, request, context, snapshot=None):
                 else:
                     source.update({k: unit[k] for k in ("chapter_id", "revision", "start", "end")})
                     source["quote"] = unit["text"]
-            if not references(record).issubset(known | set(local)):
+            if reference_checks:
+                issues.extend(
+                    reference_issues(
+                        {**proposal, "record": applied_index[proposal["local_id"]]}, applied_index, path
+                    )
+                )
+            elif not references(record).issubset(known | set(local)):
                 issues.append("关联只能使用本批local_id或已提供的正式标识。")
         if with_scenes:
             issues.extend(
@@ -322,6 +342,11 @@ async def run_extraction(worker, request, context, snapshot=None):
             "阶段证据契约版本": PROMISE_STAGE_GROUNDING_VERSION,
             "身份格式契约版本": "character-name-format/1",
             **({"来源输出契约版本": source_output, "来源输出格式": SOURCE_CHOICE} if source_output else {}),
+            **(
+                {"关联核对契约版本": reference_checks, "关联与未知身份": REFERENCE_INSTRUCTION}
+                if reference_checks
+                else {}
+            ),
             "人物称谓格式": "title是本项人物的一个来源支持称谓；aliases仅列其他有依据的称谓，不得重复title、重复列表项、使用空白或超过200字的名称。不为避开冲突改造姓名或合并身份；已有身份继续使用正式id，身份不明列unknowns。更新仅按update_fields应用，其余沿用正式值。",
             **(
                 {
