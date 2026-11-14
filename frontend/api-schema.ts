@@ -346,6 +346,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/ideas/adopt': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Adopt */
+    post: operations['adopt_api_branches__branch_id__ideas_adopt_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/story-inheritance': {
     parameters: {
       query?: never
@@ -1890,6 +1907,24 @@ export interface components {
       /** Detail */
       detail?: components['schemas']['ValidationError'][]
     }
+    /** IdeaAdoptInput */
+    IdeaAdoptInput: {
+      /** Text */
+      text: string
+      /** Author Idea */
+      author_idea: string
+      /** Source Candidate Id */
+      source_candidate_id?: string | null
+      /**
+       * Candidate Revision
+       * @default 0
+       */
+      candidate_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Idempotency Key */
+      idempotency_key: string
+    }
     /** ManualFinalizationInput */
     ManualFinalizationInput: {
       /** Base Story Revision */
@@ -3378,6 +3413,41 @@ export interface operations {
       cookie?: never
     }
     requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  adopt_api_branches__branch_id__ideas_adopt_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['IdeaAdoptInput']
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {

@@ -707,6 +707,36 @@
         }
       }
     },
+    "/api/branches/{branch_id}/ideas/adopt": {
+      "post": {
+        "summary": "Adopt",
+        "operationId": "adopt_api_branches__branch_id__ideas_adopt_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IdeaAdoptInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/story-inheritance": {
       "get": {
         "summary": "Preview",
@@ -3247,6 +3277,33 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "IdeaAdoptInput": {
+        "properties": {
+          "text": { "type": "string", "maxLength": 6000, "minLength": 1, "title": "Text" },
+          "author_idea": { "type": "string", "maxLength": 6000, "minLength": 1, "title": "Author Idea" },
+          "source_candidate_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Source Candidate Id"
+          },
+          "candidate_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "title": "Candidate Revision",
+            "default": 0
+          },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["text", "author_idea", "base_story_revision", "idempotency_key"],
+        "title": "IdeaAdoptInput"
       },
       "ManualFinalizationInput": {
         "properties": {

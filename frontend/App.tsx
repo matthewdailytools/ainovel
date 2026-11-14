@@ -4,6 +4,7 @@ import { Writing } from './Writing'
 import { LibraryPage } from './Library'
 import { WorkflowPage } from './Workflow'
 import { Records } from './Records'
+import { Ideation } from './Ideation'
 import { confirmLeave } from './leaveGuard'
 import type { FeedbackHandoff } from './feedbackRevision'
 
@@ -124,6 +125,7 @@ export function App() {
         <nav aria-label="主要页面">
           {[
             ['writing', '写作'],
+            ['ideation', '小说构思'],
             ['library', '资料书库'],
             ['workflow', '整书创作'],
             ['records', '故事与审阅'],
@@ -333,6 +335,15 @@ export function App() {
               </div>
             ) : (
               <>
+                {page === 'ideation' && branch && (
+                  <Ideation
+                    key={branch.id}
+                    branch={branch}
+                    account={account}
+                    modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
+                    onWriting={() => navigate('writing')}
+                  />
+                )}
                 {page === 'writing' && novel && branch && (
                   <Writing
                     key={branchId}

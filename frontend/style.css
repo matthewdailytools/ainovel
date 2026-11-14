@@ -413,6 +413,15 @@ details > label {
   padding: 40px 36px 64px;
   margin: auto;
 }
+.ideation-page {
+  max-width: 880px;
+}
+.ideation-page > .card {
+  margin-bottom: 20px;
+}
+.ideation-page textarea {
+  overflow-wrap: anywhere;
+}
 .page-heading {
   display: flex;
   justify-content: space-between;

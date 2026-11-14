@@ -167,7 +167,20 @@ class Model(ReferenceModel):
                 "usage": {"input": 1, "output": 1},
                 "call_id": "offline-intent",
             }
+        if instruction.get("action") == "ideation.explore" and "后台慢速构思" in instruction.get(
+            "作者要求", ""
+        ):
+            partial = "尚未完成的构思片段：学徒听见了旧匣里的求救声。"
+            if kwargs.get("on_text"):
+                await kwargs["on_text"](partial)
+            for _ in range(100):
+                await asyncio.sleep(0.1)
+                if kwargs.get("cancelled") and kwargs["cancelled"]():
+                    error = DomainError("cancelled", "构思已取消，已有片段保留。", 409)
+                    error.partial_text = partial
+                    raise error
         designs = {
+            "ideation.explore": "一句话故事：修补旧物的学徒发现失主遗失的记忆。\n主角目标：找回师父的往事。\n主要阻力：每次修补都会失去自己的一段记忆。\n开篇：一只旧木匣带回陌生人的求救声。\n后续建议：沿着旧物追查，是否公开真相留待作者决定。",
             "world.generate": "世界提案：临河小城的旧闸有公开刻度，检查与修理分属不同职责。尚未决定的制度保持待作者补充。",
             "character.generate": "人物提案：女修城器师林杳会读尺和记录，须借用守闸人的旧尺；没有修门权限，不新增能力。",
             "outline.plan": "粗纲提案：本章核对公开刻度、借尺复测，只留下读数；下一阶段与终局留待作者决定，不强制填满。",

@@ -372,6 +372,9 @@ def create_app(settings=None, schema_only=False):
     from .story_graph import register_routes as register_story_routes
 
     register_story_routes(app, domain)
+    from .ideation import register_routes as register_ideation_routes
+
+    register_ideation_routes(app, domain)
     from .story_inheritance import register_routes as register_inheritance_routes
 
     register_inheritance_routes(app, domain)
