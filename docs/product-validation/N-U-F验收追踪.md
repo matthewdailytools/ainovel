@@ -11,12 +11,12 @@
 | N02、N04、N12 | U03 | 频道、题材与机制 | F02、F03、F04、F09、F10 | 组合题材→查看例外→按作者约定生成 | test_genre_catalog.py；test_genre_integration.py；author-genre.offline.spec.ts；女频无CP、仙侠与自定义辅题材、作者例外的界面与请求隔离已实测 | 36题材与频道组合已融入目录／上下文／自动化的工程证据，不代表每种组合的真实表达质量已验收；不能仅据目录齐全宣称质量覆盖 |
 | N03、N04、N12 | U04 | 指定情节补写 | F02、F05、F07、F08、F10 | 固定事件结果→正文候选→情节覆盖核对 | test_api_worker.py；workflow-structure.offline.spec.ts；七类首轮7对14稿已完成；交涉／调查／打斗另各三次，共9对18稿；真实原稿方向反转检出与失败产物保留 | 固定条件模型pass不保证完整情节忠实；真实方向错误、数量／长度控制及误报仍需独立核对，不能判总体质量通过 |
 | N03、N04、N12 | U05 | 打斗描写与参考学习 | F08、F09、F10、F14 | 选段→证据拆解→本书方案→试写→比较 | test_reference_flow.py；reference.offline.spec.ts完整闭环；首轮及三类三次重复均已完成，匿名包、答案索引与费用已分开保存；规则／方案／候选编辑的离开保护已实测 | 代表三次重复不再列为未执行；首轮样例01开篇已返回偏好B及自然／细节反馈；其他表达、情绪、声音及完整总投入收益仍未验证；不同模板轮次分别记录 |
-| N05、N08 | U06 | 人物在目标时点的知识与能力 | F05、F06、F11 | 身份别名→来源事件→视角状态→回原文 | test_story_graph.py；test_scene_time.py；test_extraction_scenes.py；scene-time.offline.spec.ts；真实采用的前文／结构／场景及旧十章超限记录保留，账户边界与新阶段独立复核另列 | 连续十章出口尚未达到；来源定位和已修复重复不等于认知／能力或数值因果正确，新阶段前两章仍有基准／时点阻断，后续质量须逐章核实 |
+| N05、N08 | U06 | 人物在目标时点的知识与能力 | F05、F06、F11 | 身份别名→来源事件→视角状态→回原文 | test_story_graph.py；test_scene_time.py；test_extraction_scenes.py；scene-time.offline.spec.ts；真实采用的前文／结构／场景及旧十章超限记录保留，账户边界与新阶段独立复核另列 | 新自动开篇十章阶段条件、542处结构来源与实际恢复已核实，110记录／56场景仍7未知时点；见[完整范围](2026-11-14-automatic-ten-segment-complete.md)。旧稿阻断不追认，精确时点、跨卷及整体文学仍待评 |
 | N05、N06、N10 | U07 | 多线与伏笔 | F06、F07、F11 | 依赖／多线→埋设强化→回收／保留→定位 | test_story_graph.py、test_manual_finalization.py、story-graph.offline.spec.ts及test_longform_scale.py的100事件跨卷／来源失效证据保留；0693e5e、45da49a及test_story_extraction_promises.py／test_story_extraction_append.py验证独立阶段来源、明确追加保留旧阶段／旧证据／历史、100阶段上界、伪造或过期来源回滚，safe_automatic未放宽 | 默认仍为原有替换提案；保留／放弃不借追加模式自动决定。引用正确不保证伏笔解释正确；真实跨卷、主线闭合及承诺处理仍待整体核对 |
-| N07、N08、N11 | U08 | 获取、阅读与取材 | F12、F08、F16 | 获取／导入→原文搜索→摘录→任务资料包 | test_library_backup.py；reference.offline.spec.ts；reference.live.spec.ts；中文短词／跨单元短语、部分EPUB、回源及主动选段已验证 | 官方单页真实获取→阅读→搜索回源→摘录→主动资料包已分次完成（library-acquisition.live.spec.ts）；多页EPUB及模型取材质量未评 |
+| N07、N08、N11 | U08 | 获取、阅读与取材 | F12、F08、F16 | 获取／导入→原文搜索→摘录→任务资料包 | test_library_backup.py；reference.offline.spec.ts；reference.live.spec.ts；中文短词／跨单元短语、部分EPUB、回源及主动选段已验证 | 官方单页及[多页EPUB9／9](2026-11-14-real-epub.md)真实获取、日常阅读、搜索回源、摘录和主动资料包均完成；模型取材质量与总投入未评 |
 | N02、N05、N08 | U09 | 已有稿件继续创作 | F01、F05、F11、F14 | 编码章界预览→映射草稿→导入→整理候选 | test_manuscript_import.py；test_story_extraction.py；manuscript-import.offline.spec.ts；36／100章规模、test_import_maximum.py恰好20MiB及超界、250000字符与UTF-16边界；long-manuscript.offline.spec.ts长章编辑／保存／刷新逐字一致 | 20MiB服务端边界和长章浏览器专项不再列为未执行；本轮没有证明20MiB原文全部在编辑器同时渲染，且大尾部跳过回执只证明选定范围，不冒充整文件导入 |
 | N05、N06 | U10 | 前文修改影响 | F10、F11、F14 | 修改原文→依赖失效→有限修订→复检 | test_targeted_revision.py；test_targeted_revision_race.py；test_longform_scale.py；真实开篇局部修订49f02254575349608dc691e85535f352只改结尾追问，未选正文保持，旧候选未采用 | 局部最小修订已实际执行，不再列为完全未做；长篇跨章检出／误报、后续影响的修订质量及作者认可仍待评，不能由单个局部修订外推 |
-| N02、N03、N05、N06、N10、N12 | U11 | 连续一卷至整书 | F02、F03、F04、F05、F06、F07、F08、F09、F10、F11、F13、F14、F15、F16 | 选择阶段／整书→规划／作者情节→写作维护→暂停恢复→范围审查 | test_api_worker.py两模式工程36章、test_workflow_structure.py、workflow-structure.offline.spec.ts、真实Worker终止／90秒租约及runner证据保留；ea1cb95、test_workflow_scope.py、test_completion_scope_evidence.py及workflow-scope.offline.spec.ts验证阶段终态、逐章ID／修订／UTF-16证据、暂停恢复和整书默认兼容；ea7a2ec补混合干预回归 | segment_complete固定closed=false，不能充当整书生产完成或三层通过；旧十章不追认阶段通过，当前不含向同一已完成阶段版追加下一批。真实十章、跨卷及两模式独立36章仍待验收；旧36章与18／15章候选保持待审 |
+| N02、N03、N05、N06、N10、N12 | U11 | 连续一卷至整书 | F02、F03、F04、F05、F06、F07、F08、F09、F10、F11、F13、F14、F15、F16 | 选择阶段／整书→规划／作者情节→写作维护→暂停恢复→范围审查 | test_api_worker.py两模式工程36章、test_workflow_structure.py、workflow-structure.offline.spec.ts、真实Worker终止／90秒租约及runner证据保留；ea1cb95、test_workflow_scope.py、test_completion_scope_evidence.py及workflow-scope.offline.spec.ts验证阶段终态、逐章ID／修订／UTF-16证据、暂停恢复和整书默认兼容；ea7a2ec补混合干预回归 | 新自动开篇十章segment_complete、closed=false及实际恢复已核实，有工程干预与7未知时点，不能当整书三层通过；[新半自动36章](2026-11-14-books-coldstart.md)首章仍空，修订篇幅不足停止，新自动36尚未创建；跨卷及两种整书待验，旧36与18／15候选保持待审 |
 | N04、N06、N09、N10、N12 | U12 | 反馈、审稿与交付 | F10、F14、F15 | 反馈分类定位→定向修订→承诺核对→导出 | 423447c已接通反馈到对应章节的主动局部修订；feedback-revision.offline.spec.ts验证旧来源确认、作者选区、来源元数据、仅替换选区、恢复及键盘退出；test_targeted_revision.py、test_manual_finalization.py、test_evidence.py、test_library_backup.py | 不再只是复制提示词；人工反馈不伪装模型审稿，审美意见不升级事实。真实整书评价、最终稿／恢复一致性以及作者定稿仍待完整长篇出口 |
 | N08、N11、N12 | U13 | 模型与预算 | F16、F13 | 账户配置→队列→取消／未知／续跑→费用恢复 | test_budget_provider.py、test_api_worker.py、test_worker_process_restart.py、writing-faults.offline.spec.ts及真实费用／进程证据保留；cac0016按账户核实窗口与来源，以同一实际UTF-8 JSON字节串校验和发送；ea7a2ec、test_workflow_interventions.py核对混合干预、旧拒绝正文、同章产物／状态与最多8帧安全诊断 | 晚响应切目标已有[完整浏览器补验](2026-11-14-writing-target-race.md)；[资料原件变化隔离验证](2026-11-14-library-source-changes.md)及87380fb远端1131／129／39已通过、修复已随413f01d备份验证后部署；物理故障及完整人工输入／缩放等剩余范围分别核对；离线恢复不等于现场成功。长篇累计费用待结束归档，两个OpenAI合计USD20、DeepSeek CNY80不变且账本不清零 |
 
@@ -42,7 +42,7 @@
 
 编号覆盖：N01—N12、U01—U13、F01—F16均有映射。编号齐全仅说明没有漏列，不证明所有行为或业务结果已经验收通过。半自动与全自动在U11分别保留真实整书出口，参考学习在U05保留作者质量出口。PDF／OCR、百章真实创作等后续扩展不因列在历史构思中自动变成本轮首版的阻断前置项。
 
-历史轮次补充：全量后端476项及全量无头21项曾通过；FTS异常分类再补4项后，11项迁移／恢复故障专项通过（相关回归59项）。这些历史次数与当时26项无头分开报告，不合并为一次全量。旧十章在第6章结构维护曾发现缺阶段引用，后续阶段证据和显式追加修复已交付；真实任务当前进度仍以独立记录为准，尚无十章或新整书通过的聚合判定。
+历史轮次补充：全量后端476项及全量无头21项曾通过；FTS异常分类再补4项后，11项迁移／恢复故障专项通过（相关回归59项）。这些历史次数与当时26项无头分开报告，不合并为一次全量。旧十章在第6章结构维护曾发现缺阶段引用，后续阶段证据和显式追加修复已交付；真实任务当前进度以独立记录为准；最新自动十章系统范围与恢复已核实，新整书与作者质量仍待验收。
 
 ## 人物语义复核与作者反馈的最新证据
 
@@ -123,3 +123,7 @@ N03／N05／N08／N10／N12、U06／U09／U11／U13、F08／F10／F11／F13／F1
 2026-11-14工程采纳后的起始快照：20项及6条记忆引用／语义独立核查未见blocker后，已API采纳章10候选rev1→保存稿rev1并显式resume原977 {}。原plan、plots=[]、segment10与父预算6.5保持，独立复检3笔0.354506在auxiliary_evaluations单列。人工最小编辑和工程采纳记录为干预，非文学认可／非无人干预；当时running next11但pending_structure仍章10rev1，10章正文保存不等于segment_complete。父97笔为96已结5.777080＋1在途预留0.326874，不把预留算费用或新unknown；后续终态另追加，不覆盖此快照。
 
 2026-11-14 **10:25:28Z结构停点**：N05／N06／N10／N12、U06／U07／U11／U13、F10／F11／F13／F14／F16仍待质量证据。10章保存修订均1、共29643字，第10章2935字；原977 needs_review／next11，等待c83e9e84…结构候选。新人物别名与本名自重复，notes／profile一轮char2后supported不豁免身份格式；12名正式人物无同名冲突，采纳事务回滚，正式97条结构／50场景保持采纳前快照。原54事实不变，新6条为第10正文采纳的记忆，不把有效增量混同坏结构污染。父100笔全结USD5.918324／新增未知0，复检另3笔0.354506；局部格式修正提前到有界结构检查仍是下一步方案，未在此记录为修复通过。完整结构维护、阶段结尾检查、导出恢复及作者文学／收益未验收；不因该质量停点否认已通过的候选复检工程CI。
+
+## 最新实际出口
+
+1d057a3合入构思模块后1217后端／183前端／45无头／48既有通过且清单稳定，已受控更新；[新自动开篇十章](2026-11-14-automatic-ten-segment-complete.md)及[官方多页EPUB](2026-11-14-real-epub.md)补齐各自实际范围。历史各节均保留为对应轮次，不能用最新阶段成功抹掉早期失败。新两模式36章、半自动十章、跨卷、取材模型质量、文学和作者总投入仍分别开放。

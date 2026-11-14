@@ -224,6 +224,42 @@ def test_overlapping_quote_occurrences_are_not_a_unique_repair_scope(settings, d
     assert not model.requests
 
 
+@pytest.mark.parametrize("correct_after_diagnostic", [False, True])
+def test_length_repair_reports_actual_bounds_without_expanding_scope(
+    settings, domain, story, correct_after_diagnostic
+):
+    text = "她核对账本。" * 100 + "\n\n" + "他翻阅副本。" * 100
+
+    def answer(request, number):
+        instruction = request["任务"]
+        assert instruction["篇幅诊断版本"] == "replacement-length-diagnostics/1"
+        if number > 1:
+            diagnostic = "；".join(instruction["定位错误"])
+            assert "replacement须980—1419" in diagnostic
+            assert "实际700" in diagnostic and "整章非空白字符数为1300" in diagnostic
+            assert "目标1500—2100" in diagnostic
+            assert text not in diagnostic
+        size = 1000 if correct_after_diagnostic and number > 1 else 700
+        return {
+            "edits": [{"original": "EDIT0001", "replacement": "改" * size}],
+            "reason": f"第{number}轮，只展开已选场景。",
+        }
+
+    model = OfflineModel(answer)
+    worker, context, chapter = claimed_worker(settings, domain, story, model, text)
+    if correct_after_diagnostic:
+        result = asyncio.run(worker.revise_chapter(text, {}, {}, context, 1500, 2100))
+        assert result.startswith("改" * 1000) and result.endswith("他翻阅副本。" * 100)
+        assert len(model.requests) == 2
+    else:
+        with pytest.raises(DomainError, match="局部修订格式核对.*实际700"):
+            asyncio.run(worker.revise_chapter(text, {}, {}, context, 1500, 2100))
+        assert len(model.requests) == 3
+    assert domain.chapter(chapter["id"]) == chapter
+    assert domain.db.all("SELECT * FROM artifacts") == []
+    assert domain.db.all("SELECT * FROM facts") == []
+
+
 @pytest.mark.parametrize("result", ["unknown", "pass"])
 def test_negative_condition_without_quotable_evidence_stays_unknown_or_blocks(
     settings, domain, story, result

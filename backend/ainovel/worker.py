@@ -42,6 +42,7 @@ longform.plans单独列出作者维护的未来计划，包含各信息视角的
 PROMPT_VERSION = "0.13.0"
 STRUCTURE_REPAIR_VERSION = "2"
 REVIEW_CHECK_VERSION = "fixed-check-shape/1"
+REVISION_LENGTH_VERSION = "replacement-length-diagnostics/1"
 
 
 def structure_issues(error):
@@ -1082,12 +1083,21 @@ class Worker:
                         isinstance(replacement, tuple)
                         and not replacement[0] <= len(edit["replacement"]) <= replacement[1]
                     ):
-                        issues.append("替换段落字符数不在本次结构契约范围内")
+                        projected = (
+                            current_chars - char_count(edit["original"]) + char_count(edit["replacement"])
+                        )
+                        issues.append(
+                            f"替换段落字符数不在本次结构契约范围内：replacement须{replacement[0]}—{replacement[1]}"
+                            f"个Unicode字符（含空白），实际{len(edit['replacement'])}；"
+                            f"本次替换后的整章非空白字符数为{projected}，目标{minimum}—{maximum}。"
+                            "修正替换片段的实际篇幅，不能只修改reason或重复提交原替换文本。"
+                        )
             return issues
 
         patch = await self.grounded(
             {
                 "动作": "用局部替换修订正文",
+                "篇幅诊断版本": REVISION_LENGTH_VERSION,
                 "原稿": text,
                 "可替换原文": units,
                 "原始写作要求": instructions,
@@ -1105,6 +1115,7 @@ class Worker:
             validate,
             8192,
             contract,
+            diagnostic_label="局部修订格式核对",
         )
         replacements = [(text.index(edit["original"]), edit) for edit in patch["edits"]]
         for start, edit in sorted(replacements, reverse=True, key=lambda item: item[0]):
