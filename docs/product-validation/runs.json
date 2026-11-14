@@ -1725,5 +1725,170 @@
     "result": "unverified",
     "record": "2026-11-14-automatic-plan-preparation.md",
     "fix_of": ""
+  },
+  {
+    "id": "automatic-ten-prepared-stop-001",
+    "date": "2026-11-14",
+    "commit": "00bc762",
+    "module": "d500首章人物结构停点",
+    "scenario": "1章2986字采用/结构场景0，3profile修后supported但未改notes转unknown超v1白名单正确停；15callUSD0.621640/新未知0，旧1883及旧usage行不变",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-14-character-repair-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "runtime-pid-reuse-first-001",
+    "date": "2026-11-14",
+    "commit": "00bc762",
+    "module": "恢复守卫PID复用误挡",
+    "scenario": "旧API PID实际变conhost/msedge；独立内存库仅首道守卫复现service_active，未生产恢复；当时真实API/Worker仍须阻止恢复",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-14-runtime-process-identity.md",
+    "fix_of": ""
+  },
+  {
+    "id": "runtime-identity-target-first-001",
+    "date": "2026-11-14",
+    "commit": "00bc762+工作区",
+    "module": "进程身份专项首败",
+    "scenario": "首轮70过3失败：两新旧备份fixture漏Library初始化，一原拒绝提示兼容；日志与原断言保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-14-runtime-process-identity.md",
+    "fix_of": ""
+  },
+  {
+    "id": "runtime-identity-target-final-001",
+    "date": "2026-11-14",
+    "commit": "1317b77",
+    "module": "原生进程身份隔离专项",
+    "scenario": "最终85过pytest6.41/墙8.682秒，含55新；旧73/43新另留历史，增加POSIX ESRCH/hidepid/Windows禁kill等12项，unknown继续阻止恢复",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-runtime-process-identity.md",
+    "fix_of": "runtime-identity-target-first-001"
+  },
+  {
+    "id": "runtime-identity-real-rehearsal-001",
+    "date": "2026-11-14",
+    "commit": "3ddc828+工作区",
+    "module": "真实旧包隔离恢复",
+    "scenario": "原09ef旧包在clone迁移/真实restore/注册注销成功，1883旧六表/24原件SHA同；旧1100→最新1115call及USD0.621640增量不回退，生产0写/模型0",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-runtime-process-identity.md",
+    "fix_of": "runtime-pid-reuse-first-001"
+  },
+  {
+    "id": "character-scope-v2-target-001",
+    "date": "2026-11-14",
+    "commit": "2c7e654",
+    "module": "初检前冻结人物修订范围",
+    "scenario": "7文件170过44.79秒；真实Worker替身先3profile后notes两轮，全字段核对、120/121边界与v1 schema/单步缓存保持，旧d500不升级",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-character-repair-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-scope-v2-local-full-001",
+    "date": "2026-11-14",
+    "commit": "2c7e654",
+    "module": "人物范围及身份守卫本机全套",
+    "scenario": "1109后端pytest293.63/墙295.990秒、129前端/37无头166.956秒(report166.451)/48Node过，215文件前后及当前产品清单同；本地通过不盖远端CI失败",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-character-repair-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-scope-v2-rollout-001",
+    "date": "2026-11-14",
+    "commit": "2c7e654",
+    "module": "人物范围与伴表生产更新",
+    "scenario": "旧运行API先备份b449并实际隔离verify，再启动加法迁移；六表/全usage哈希同，process-identities/1及2新身份，UI giraI3Wz；d500仍needs_review",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-runtime-process-identity.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-scope-v2-live-chain-001",
+    "date": "2026-11-14",
+    "commit": "2c7e654",
+    "module": "真实修订链后台只读展示",
+    "scenario": "独立无头scope10/1轮/父子范围相同/采用后只读通过，320px/200%/键盘，0POST/模型/界面错误；不推导小说质量",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-character-repair-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic-ten-scope-v2-progress-001",
+    "date": "2026-11-14",
+    "commit": "2c7e654",
+    "module": "新977自动十章阶段进展",
+    "scenario": "08:30:17Z快照running：前三章3022/2967/2963采用，第4空rev0；首章初检前scope10、3字段1轮后全10supported，第2scope0；next4不算第4采用，十章未通过",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-14-character-repair-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "character-scope-v2-ci-failed-001",
+    "date": "2026-11-14",
+    "commit": "2c7e654",
+    "module": "人物范围产品远端CI失败",
+    "scenario": "CI43574281944 FAILED，独立原因调查中；保留本地1109/129/37/48与远端失败区别，不预填修复结果",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-14-character-repair-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "writing-docs-ci-success-001",
+    "date": "2026-11-14",
+    "commit": "3ddc828",
+    "module": "外部写作设计文档CI",
+    "scenario": "CI43572828713 success；该文档/技能提交与人物范围产品验证分别记录，不外推小说效果",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-character-repair-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "writing-docs-ci-pending-001",
+    "date": "2026-11-14",
+    "commit": "4caabb0",
+    "module": "额外写作技能文档CI",
+    "scenario": "HEAD4caabb0仅14项写作skill/18/19设计/根README文档变更，215产品文件与2c清单同；CI43574866230 in_progress，外部提交保留",
+    "phase": "stability",
+    "result": "unverified",
+    "record": "2026-11-14-character-repair-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "writing-docs-ci-success-002",
+    "date": "2026-11-14",
+    "commit": "4caabb0",
+    "module": "相同产品字节额外文档CI成功",
+    "scenario": "CI43574866230 success，产品215文件与2c清单同；仅说明本次远端结果，原2c半自动停点poll超时失败仍保留，不声称根因已修",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-14-character-repair-scope.md",
+    "fix_of": "writing-docs-ci-pending-001"
+  },
+  {
+    "id": "character-scope-v2-ci-investigation-001",
+    "date": "2026-11-14",
+    "commit": "2c7e654",
+    "module": "原CI半自动停点超时调查",
+    "scenario": "job132385002590后端1109/前端129等过，仅plot-check半自动unknown应needs_review的10秒poll超时；trace调查继续，不据后续CI成功推定根因已修",
+    "phase": "stability",
+    "result": "unverified",
+    "record": "2026-11-14-character-repair-scope.md",
+    "fix_of": ""
   }
 ]
