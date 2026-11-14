@@ -45,7 +45,7 @@ def render(records):
         """<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ainovel 全项目验证历史</title><style>
 body{font:16px/1.7 system-ui;background:#f6f7f4;color:#233a33;margin:24px}main{max-width:1400px;margin:auto}
-input,select{font:inherit;padding:8px;border:1px solid #73867a;border-radius:6px}label{display:inline-block;margin:8px}
+input,select{font:inherit;padding:8px;border:1px solid #73867a;border-radius:6px;box-sizing:border-box;max-width:100%;min-width:0}label{display:inline-block;margin:8px;max-width:calc(100% - 16px);overflow-wrap:anywhere}
 .scroll{overflow:auto}table{border-collapse:collapse;width:100%;min-width:1200px;background:#fffefa}td,th{border:1px solid #c8d1c9;padding:10px;text-align:left;overflow-wrap:anywhere}
 td:first-child,td:nth-child(2),td:nth-child(3),td:nth-child(6),td:nth-child(7),td:nth-child(8),th{white-space:nowrap;overflow-wrap:normal}
 td:nth-child(5){min-width:20rem}
