@@ -1152,10 +1152,14 @@ summary {
   .model-select {
     flex-basis: 100% !important;
   }
+  .new-novel {
+    flex-basis: 100%;
+  }
   .new-novel form {
-    left: auto;
-    right: 0;
-    min-width: 230px;
+    position: static;
+    min-width: 0;
+    width: 100%;
+    margin-top: 8px;
   }
   .writing-layout {
     display: flex;

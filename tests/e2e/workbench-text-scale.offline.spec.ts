@@ -1,5 +1,50 @@
 import { test, expect } from '@playwright/test'
 
+test('窄屏新建作品：普通和实际翻倍文字下表单均可见，键盘提交不改旧作品', async ({ page }, info) => {
+  await page.setViewportSize({ width: 320, height: 900 })
+  await page.goto('/')
+  const before = await (await page.request.get('/api/novels')).json()
+  const budget = (await (await page.request.get('/api/config')).json()).budget
+  await page.locator('.new-novel summary').click()
+  const form = page.locator('.new-novel form')
+  const title = page.getByRole('textbox', { name: '作品名称', exact: true })
+  await expect(title).toBeVisible()
+  const measurements = []
+  for (const scale of [1, 2]) {
+    if (scale === 2)
+      await page.evaluate(() => {
+        const sizes = [...document.querySelectorAll('*')].map(
+          (element) => [element, parseFloat(getComputedStyle(element).fontSize)] as const,
+        )
+        for (const [element, size] of sizes)
+          if (element instanceof HTMLElement) element.style.fontSize = `${size * 2}px`
+      })
+    const bounds = await form.boundingBox()
+    expect(bounds).not.toBeNull()
+    measurements.push({ scale, ...bounds })
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
+  }
+  const name = '后台验证 · 键盘创建😀𠮷'
+  await title.focus()
+  await title.fill(name)
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('combobox', { name: '作品', exact: true })).toHaveValue(/\w+/)
+  const novels = await (await page.request.get('/api/novels')).json()
+  expect(novels).toHaveLength(before.length + 1)
+  for (const old of before) expect(novels).toContainEqual(old)
+  const created = novels.find((novel: { title: string }) => novel.title === name)
+  expect(created).toBeDefined()
+  await expect(page.getByRole('combobox', { name: '作品', exact: true })).toHaveValue(created.id)
+  await expect(page.getByRole('button', { name: '新建第一章', exact: true })).toBeVisible()
+  expect((await (await page.request.get('/api/config')).json()).budget).toEqual(budget)
+  await info.attach('new-novel-form-bounds', {
+    contentType: 'application/json',
+    body: JSON.stringify({ measurements, modelCalls: 0 }),
+  })
+})
+
 test('五个工作区实际文字翻倍：长参考来源仍可阅读并用键盘打开', async ({ page }, info) => {
   await page.goto('/')
   const session = await (await page.request.get('/api/session')).json()
