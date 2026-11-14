@@ -7,7 +7,12 @@
     "scenarios": "新建、编辑、保存、目录、恢复、导出",
     "stability": "unverified",
     "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_scope": "本项的实际写作总投入/作者体验仍未测量；不能用保存回归替代使用收益。"
   },
   {
     "id": "PV02",
@@ -16,8 +21,16 @@
     "pain": "查找与搬运资料困难",
     "scenarios": "获取、解析覆盖、阅读、短词搜索、摘录、回源",
     "stability": "unverified",
-    "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "quality": "unverified",
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_evidence": [
+      "2026-11-14-real-epub.md"
+    ],
+    "quality_scope": "已执行真实获取与一对有/无摘录输出；作者相关性及总投入待审。"
   },
   {
     "id": "PV03",
@@ -26,8 +39,17 @@
     "pain": "看懂写法但难以用于自己的故事",
     "scenarios": "选段、拆解、规则选择、应用方案、试写、对照采纳",
     "stability": "unverified",
-    "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "quality": "unverified",
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_evidence": [
+      "2026-11-13-reference-repeats.md",
+      "2026-11-13-author-review-feedback.md"
+    ],
+    "quality_scope": "首轮与代表重复已执行；仅样例01有作者偏好，其余文学/收益未验收。"
   },
   {
     "id": "PV04",
@@ -36,8 +58,16 @@
     "pain": "方向漂移、预设压过作者安排",
     "scenarios": "原话、AI提案、确认、频道题材、锁定项继承",
     "stability": "unverified",
-    "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "quality": "unverified",
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_evidence": [
+      "2026-11-14-books-coldstart.md"
+    ],
+    "quality_scope": "已执行限定频道/题材的真实两模式起步，不代表36题材组合质量覆盖。"
   },
   {
     "id": "PV05",
@@ -46,8 +76,16 @@
     "pain": "忘记人物知道什么及能做什么",
     "scenarios": "身份、别名、获知、能力、资源、伤势、时点与视角",
     "stability": "unverified",
-    "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "quality": "unverified",
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_evidence": [
+      "2026-11-14-automatic-ten-segment-complete.md"
+    ],
+    "quality_scope": "已执行真实十章与来源复核；7未知时点、精确认知/能力和更长范围继续待验。"
   },
   {
     "id": "PV06",
@@ -56,8 +94,16 @@
     "pain": "同期事件混乱、伏笔遗忘",
     "scenarios": "事件、因果、泳道、关系图、跨卷、伏笔生命周期",
     "stability": "unverified",
-    "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "quality": "unverified",
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_evidence": [
+      "2026-11-14-automatic-ten-segment-complete.md"
+    ],
+    "quality_scope": "已有开篇真实记录与承诺范围；跨卷、主线闭合及伏笔处理仍未验收。"
   },
   {
     "id": "PV07",
@@ -67,7 +113,12 @@
     "scenarios": "编码、章界、映射、重复、回执、反向整理",
     "stability": "unverified",
     "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_scope": "工程导入与范围边界已有证据，真实既有长稿导入后反向整理的整体语义质量仍未完整评估。"
   },
   {
     "id": "PV08",
@@ -76,8 +127,17 @@
     "pain": "反馈搬运、误采纳和返修负担",
     "scenarios": "差异、编辑、拒绝、采纳、反馈修订、版本失效",
     "stability": "unverified",
-    "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "quality": "unverified",
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_evidence": [
+      "2026-11-15-assisted-candidate-recheck.md",
+      "2026-11-15-source-identity-context.md"
+    ],
+    "quality_scope": "真实最小修订及复检已执行，原稿/旧检查保留；作者未认可文学或收益。"
   },
   {
     "id": "PV09",
@@ -86,8 +146,17 @@
     "pain": "有情节但写作投入过高",
     "scenarios": "批量情节、补写、审查、状态更新、交付",
     "stability": "unverified",
-    "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "quality": "unverified",
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_evidence": [
+      "2026-11-15-second-chapter-review-candidates.md",
+      "2026-11-15-source-identity-context.md"
+    ],
+    "quality_scope": "新36章验证仅采用首章，第二章修订1仍待审；局部检查不构成整书通过。"
   },
   {
     "id": "PV10",
@@ -96,8 +165,17 @@
     "pain": "不想逐章规划和维护资料",
     "scenarios": "规划、生成、有限返修、检查点、完结",
     "stability": "unverified",
-    "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "quality": "unverified",
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_evidence": [
+      "2026-11-14-automatic-ten-segment-complete.md",
+      "2026-11-15-assisted-candidate-recheck.md"
+    ],
+    "quality_scope": "新十章阶段已结束、closed=false；另一独立36章仅首章采用，整书未通过。"
   },
   {
     "id": "PV11",
@@ -107,7 +185,12 @@
     "scenarios": "取消、暂停、恢复、未知超时、多账户预算、备份",
     "stability": "unverified",
     "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_scope": "实际费用/故障/恢复属于工程稳定性；使用总投入尚未完整测量，不据此作文学或收益通过。"
   },
   {
     "id": "PV12",
@@ -117,6 +200,11 @@
     "scenarios": "组合输入、UTF-16、焦点、键盘、200%文字、响应",
     "stability": "unverified",
     "quality": "not_run",
-    "stability_evidence": "2026-11-13-project-stability-baseline.md"
+    "stability_evidence": "2026-11-13-project-stability-baseline.md",
+    "status_as_of": "2026-11-15",
+    "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
+    "current_evidence_index": "N-U-F验收追踪.md",
+    "latest_regression_evidence": "2026-11-15-source-identity-context.md",
+    "quality_scope": "工程中文/键盘/缩放已有范围；真实作者输入法、辅助技术和体验评估不能由替身事件推定。"
   }
 ]
