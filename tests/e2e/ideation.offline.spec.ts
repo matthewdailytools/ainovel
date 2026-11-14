@@ -86,7 +86,7 @@ test('一句想法生成、编辑、刷新恢复、采用并去写作；保留�
   const originalCandidate = await (
     await page.request.get(`/api/artifacts/${contract.provenance.source_candidate_id}`)
   ).json()
-  expect(originalCandidate.payload.idea_structure_version).toBe('1.0.0')
+  expect(originalCandidate.payload.idea_structure_version).toBe('1.0.1')
   expect(originalCandidate.payload.idea_structure.beats.map((beat: { stage: string }) => beat.stage)).toEqual(
     ['开端', '发展', '转折', '高潮', '结局'],
   )
