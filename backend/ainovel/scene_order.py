@@ -178,7 +178,7 @@ def overlaps(record, chapter_id, revision, ranges):
     )
 
 
-def resolve_basis(scene, selected, nodes):
+def resolve_basis(scene, selected, nodes, *, guidance=False):
     """Never choose an order or convert a failed event decision to unknown."""
     basis = scene["order_basis"]
     issues, resolved = [], []
@@ -222,12 +222,16 @@ def resolve_basis(scene, selected, nodes):
                 f"有效引用order={preview(orders)}，全部覆盖order={preview(coverage_orders)}（各最多8项）；"
                 "null也是未确认边界，不能忽略、任取一个已知值或改写事件以通过。"
             )
+            if guidance:
+                from .scene_guidance import REPAIR_HINT
+
+                issues[-1] += REPAIR_HINT
         elif not issues:
             order = next(iter(orders))
     return issues, order, resolved, list(covered.values())
 
 
-def linked_scene_issues(scenes, units, known, proposals, domain=None, branch_id=None):
+def linked_scene_issues(scenes, units, known, proposals, domain=None, branch_id=None, *, guidance=False):
     # Reuse legacy coverage/viewpoint checks without supplying any guessed scalar.
     from .extraction_scenes import scene_issues
 
@@ -243,7 +247,7 @@ def linked_scene_issues(scenes, units, known, proposals, domain=None, branch_id=
         selected = [indexed.get(ref) for ref in scene["source_ids"]]
         if not selected or any(s is None for s in selected) or len({s["chapter_id"] for s in selected}) != 1:
             continue
-        errors, _, _, _ = resolve_basis(scene, selected, nodes)
+        errors, _, _, _ = resolve_basis(scene, selected, nodes, guidance=guidance)
         issues.extend(f"scenes[{index}].order_basis: {message}" for message in errors)
     return issues
 

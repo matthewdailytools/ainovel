@@ -619,8 +619,10 @@ class Domain:
             kind == "workflow" and payload.get("structured_maintenance") and payload.get("scene_maintenance")
         ):
             from .scene_order import VERSION as SCENE_CONTRACT_VERSION
+            from .scene_guidance import VERSION as SCENE_GUIDANCE_VERSION
 
             initial["scene_contract_version"] = SCENE_CONTRACT_VERSION
+            initial["scene_order_guidance_version"] = SCENE_GUIDANCE_VERSION
         if payload.get("plot_contract_check") is True:
             from .plot_audit import VERSION as PLOT_CONTRACT_VERSION
 

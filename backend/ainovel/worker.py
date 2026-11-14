@@ -490,6 +490,11 @@ class Worker:
                         else {}
                     ),
                     **(
+                        {"scene_order_guidance_version": source_instruction["场景时点提示版本"]}
+                        if "场景时点提示版本" in source_instruction
+                        else {}
+                    ),
+                    **(
                         {"review_check_version": source_instruction["固定条件检查格式版本"]}
                         if "固定条件检查格式版本" in source_instruction
                         else {}
