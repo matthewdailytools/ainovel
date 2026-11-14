@@ -15,3 +15,5 @@
 本轮增加一条浏览器回归；完整浏览器由51条增至52条，已全量通过，墙259.426秒，0失败／跳过／flaky／全局错误。260项源码、构建、历史HTML和JSON清单前后相同；当时为356条历史记录，归档后357条的实际字体专项及组合筛选均通过，359个Markdown链接、修复链及210个本轮文档链接核对通过，0页面错误。新的文字放大检查只覆盖本页，不由此宣称整个工作台的200%文字或完整WCAG符合性均通过。
 
 私有证据：acceptance/reference-checks-20261115/history-all-fonts-first.json、history-target-before.log、history-before-results、history-all-fonts-after.json及history-target-after.log。实际截图与诊断不进Git。
+
+后续补证：a7ca88e源码的main43636384184及分支43636259350均success，1427后端696.04／830.97秒、208前端及52隔离浏览器4.9分钟通过。[工作台实际文字补查](2026-11-15-workbench-actual-text-scale.md)另行记录五个主工作区及长来源的发现，不与本页范围合并为完整无障碍认证。

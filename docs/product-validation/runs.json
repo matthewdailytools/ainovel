@@ -3925,5 +3925,170 @@
     "result": "passed",
     "record": "2026-11-15-history-actual-text-scale.md",
     "fix_of": "history-actual-text-contained-after-001"
+  },
+  {
+    "id": "history-actual-text-code-ci-success-001",
+    "date": "2026-11-15",
+    "commit": "a7ca88e",
+    "module": "历史页实际文字双CI",
+    "scenario": "main43636384184/分支43636259350均success：1427后端696.04/830.97秒、208前端、52隔离无头4.9分钟及类型/格式/构建/既有检查；仅历史页实际翻倍范围",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-history-actual-text-scale.md",
+    "fix_of": "history-actual-text-full-52-001"
+  },
+  {
+    "id": "scene-range-old-diagnostics-001",
+    "date": "2026-11-15",
+    "commit": "7311017",
+    "module": "旧场景范围零调用重诊断",
+    "scenario": "原983最后两项仍拒绝，区分同章当前修订而范围交集0；旧输出和标准化输入不变，不放宽门禁、不升级旧任务",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-scene-range-evidence.md",
+    "fix_of": "typed-reference-base-source-stop-001"
+  },
+  {
+    "id": "scene-range-local-full-001",
+    "date": "2026-11-15",
+    "commit": "7311017",
+    "module": "直接来源提示完整回归",
+    "scenario": "新增29/相关135；完整1456后端354.92秒、52隔离无头267.754秒；210/260各自清单稳定、提交逐项绑定；API无diff、类型/Ruff通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-scene-range-evidence.md",
+    "fix_of": "scene-range-old-diagnostics-001"
+  },
+  {
+    "id": "scene-range-runtime-001",
+    "date": "2026-11-15",
+    "commit": "7311017",
+    "module": "直接来源提示本机受控更新",
+    "scenario": "80e645实恢，旧API出生身份确认/Worker自然退出，无活动任务；六保护表/完整费用/两父任务/六账户配置保持，UI Cf不变",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-scene-range-evidence.md",
+    "fix_of": "scene-range-local-full-001"
+  },
+  {
+    "id": "scene-range-base-candidate-001",
+    "date": "2026-11-15",
+    "commit": "7311017",
+    "module": "同两章真实待审候选",
+    "scenario": "6efd3b8原非思考账户/请求除nonce相同、145段完整/16384/CNY2；2次0.241526全结，34记录/12未知时点场景/116逐字来源，引用范围通过；16事件order未知/after空、群体人物待整理，0采用",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-scene-range-evidence.md",
+    "fix_of": "typed-reference-base-source-stop-001"
+  },
+  {
+    "id": "scene-range-final-restored-001",
+    "date": "2026-11-15",
+    "commit": "7311017",
+    "module": "新候选与七轮费用实际恢复",
+    "scenario": "c57f2d实恢fa942完整payload、36章原字节及导入回执；旧六表/步骤不变，1候选/14完成缓存/27调用分别核对；七轮4.390462全结，旧未知不清零",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-scene-range-evidence.md",
+    "fix_of": "scene-range-base-candidate-001"
+  },
+  {
+    "id": "scene-range-code-ci-success-001",
+    "date": "2026-11-15",
+    "commit": "7311017",
+    "module": "场景范围源码双CI",
+    "scenario": "main43639650879/分支43639597277均success：1456后端737.49/769.96秒、208前端、52隔离无头4.9分钟及其他检查；后续54条范围另计",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-scene-range-evidence.md",
+    "fix_of": "scene-range-local-full-001"
+  },
+  {
+    "id": "workbench-font-fixture-first-001",
+    "date": "2026-11-15",
+    "commit": "7311017",
+    "module": "工作台字体探针夹具",
+    "scenario": "私有精确label误查询、首次新用例误等写作页h1、其次书目与历史按钮同时匹配；均未当作产品失败，0模型，脚本和日志保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-workbench-actual-text-scale.md",
+    "fix_of": ""
+  },
+  {
+    "id": "workbench-font-long-name-before-001",
+    "date": "2026-11-15",
+    "commit": "7311017",
+    "module": "长参考来源实际翻倍溢出",
+    "scenario": "日常只读5工作区正文15→30/导航12→24，书库宽400其余320；隔离回归长连续来源名使书库1717px，修正选择器后确切复现，截图/trace保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-workbench-actual-text-scale.md",
+    "fix_of": "workbench-font-fixture-first-001"
+  },
+  {
+    "id": "workbench-font-long-name-after-001",
+    "date": "2026-11-15",
+    "commit": "01126c7",
+    "module": "长参考来源宽度修复",
+    "scenario": "只限制reader-layout内wide按钮最大宽度/长词换行，完整来源保持；实际翻倍五页320、键盘打开历史、0模型，专项通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-workbench-actual-text-scale.md",
+    "fix_of": "workbench-font-long-name-before-001"
+  },
+  {
+    "id": "workbench-font-full-53-001",
+    "date": "2026-11-15",
+    "commit": "01126c7",
+    "module": "五工作区与全量53浏览器",
+    "scenario": "53隔离无头全部通过、墙266.160秒；263项源码/构建/历史输入清单稳定，历史363条；208前端/48既有/类型/格式/构建通过，137后端同1456已测字节",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-workbench-actual-text-scale.md",
+    "fix_of": "workbench-font-long-name-after-001"
+  },
+  {
+    "id": "workbench-font-daily-after-001",
+    "date": "2026-11-15",
+    "commit": "01126c7",
+    "module": "长参考来源日常复测",
+    "scenario": "6b488f实际恢复后部署，7构建文件相同，六表/全费用/两父任务/6配置保持；日常5页30px/24px均320、0写请求，原稿不改",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-workbench-actual-text-scale.md",
+    "fix_of": "workbench-font-full-53-001"
+  },
+  {
+    "id": "new-novel-form-left-first-001",
+    "date": "2026-11-15",
+    "commit": "01126c7",
+    "module": "新建作品表单向左越界",
+    "scenario": "日常实际展开，普通x=-114/宽230、翻倍x=-48.703/宽230，0写请求；隔离新回归同样左边界失败，未把关闭状态布局当缺陷",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-workbench-actual-text-scale.md",
+    "fix_of": ""
+  },
+  {
+    "id": "new-novel-form-full-after-001",
+    "date": "2026-11-15",
+    "commit": "79906aa",
+    "module": "新建作品完整54浏览器",
+    "scenario": "窄屏表单页面内展开，2专项通过；完整54条墙263.777秒、0失败/跳过/flaky；263清单稳定绑定，208前端/48既有/类型/格式/构建通过，后端137文件同1456已测字节",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-workbench-actual-text-scale.md",
+    "fix_of": "new-novel-form-left-first-001"
+  },
+  {
+    "id": "new-novel-form-daily-after-001",
+    "date": "2026-11-15",
+    "commit": "79906aa",
+    "module": "新建表单本机实际复测",
+    "scenario": "e05ecb实恢后受控部署，7构建文件相同，六表/费用/两父任务/6配置保持；普通/翻倍表单x16/宽288/右304、五主工作区均320、0写请求，未在日常创建新作品",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-workbench-actual-text-scale.md",
+    "fix_of": "new-novel-form-full-after-001"
   }
 ]
