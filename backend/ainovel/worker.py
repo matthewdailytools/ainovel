@@ -539,18 +539,34 @@ class Worker:
             partial = getattr(error, "partial_text", "")
             trace = failure_trace(error, self.settings, self.budget, self.task)
             if partial or trace:
-                # This is a recoverable output transcript, never an accepted story update.
                 with self.db.connect(True) as tx:
+                    live_trace = False
                     try:
                         self.db.check_attempt(tx, self.task["id"], self.attempt)
                     except DomainError:
-                        pass  # Preserve the original failure; stopped attempts cannot append trace events.
+                        # The outer stopped event must not bypass the same trace gate.
+                        for key in trace:
+                            error.provider_details.pop(key, None)
                     else:
+                        live_trace = True
+                    current = tx.execute(
+                        "SELECT attempt FROM tasks WHERE id=?", (self.task["id"],)
+                    ).fetchone()
+                    if partial and current and current["attempt"] == self.attempt:
+                        # Received text is recoverable history after cancellation,
+                        # never a new result, state transition or adopted manuscript.
                         self.db.event(
                             tx,
                             self.task["id"],
-                            "partial_retained" if partial else "request_failed",
-                            {**({"text": partial} if partial else {}), "fingerprint": fingerprint, **trace},
+                            "partial_retained",
+                            {"text": partial, "fingerprint": fingerprint, **(trace if live_trace else {})},
+                        )
+                    elif trace and live_trace:
+                        self.db.event(
+                            tx,
+                            self.task["id"],
+                            "request_failed",
+                            {"fingerprint": fingerprint, **trace},
                         )
             if (
                 isinstance(error, Exception)

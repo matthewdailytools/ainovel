@@ -136,10 +136,12 @@ def test_no_partial_failure_persists_real_request_summary_without_auto_retry(
 
 @pytest.mark.parametrize("late", ["attempt", "cancel", "status", "lease"])
 @pytest.mark.parametrize("with_partial", [False, True])
-def test_old_or_stopped_attempt_cannot_write_partial_or_failure_trace(
+def test_stopped_attempt_preserves_only_same_attempt_received_text_without_live_trace(
     settings, domain, story, late, with_partial
 ):
     captured = []
+    stopped = []
+    original = domain.chapter(story["chapter_id"])
     worker = None
 
     def stop():
@@ -151,6 +153,7 @@ def test_old_or_stopped_attempt_cannot_write_partial_or_failure_trace(
         }
         with domain.db.connect(True) as tx:
             tx.execute("UPDATE tasks SET " + assignments[late] + " WHERE id=?", (worker.task["id"],))
+        stopped.append(domain.task(worker.task["id"]))
 
     class LatePartial(httpx.AsyncByteStream):
         async def __aiter__(self):
@@ -171,7 +174,18 @@ def test_old_or_stopped_attempt_cannot_write_partial_or_failure_trace(
         asyncio.run(worker.call({"动作": "旧尝试晚返回核对"}, Answer))
     assert bool(caught.value.partial_text) is with_partial
     assert len(captured) == 1
-    assert not events(domain, "partial_retained") and not events(domain, "request_failed")
+    retained = events(domain, "partial_retained")
+    if with_partial and late != "attempt":
+        assert len(retained) == 1
+        assert set(retained[0]) == {"text", "fingerprint"}
+        assert retained[0]["text"] == "旧尝试已读到的片段"
+    else:
+        assert not retained
+    assert not events(domain, "request_failed")
+    assert not {"call_id", "sent", "request_metadata"} & caught.value.provider_details.keys()
+    assert domain.task(worker.task["id"]) == stopped[0]
+    assert domain.chapter(story["chapter_id"]) == original
+    assert not domain.db.all("SELECT * FROM artifacts")
     assert not domain.db.all("SELECT * FROM task_steps")
     assert ledger.report()[0]["reserved_unknown"] > 0
 
@@ -218,10 +232,14 @@ def test_pre_http_cancel_trace_is_explicitly_not_sent_or_charged(settings, domai
     assert ledger.report()[0]["reserved_unknown"] == 0
 
 
-def test_legacy_fake_without_metadata_keeps_original_partial_shape(settings, domain, story):
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_legacy_fake_without_metadata_keeps_original_partial_shape(settings, domain, story, cancelled):
     class Offline:
         async def generate(self, *args, **kwargs):
-            error = DomainError("incomplete", "仅离线错误")
+            if cancelled:
+                with domain.db.connect(True) as tx:
+                    tx.execute("UPDATE tasks SET cancel=1 WHERE id=?", (worker.task["id"],))
+            error = DomainError("cancelled" if cancelled else "incomplete", "仅离线错误")
             error.partial_text = "旧部分输出"
             raise error
 
@@ -231,6 +249,49 @@ def test_legacy_fake_without_metadata_keeps_original_partial_shape(settings, dom
     retained = events(domain, "partial_retained")
     assert len(retained) == 1 and set(retained[0]) == {"text", "fingerprint"}
     assert not events(domain, "request_failed")
+
+
+def test_cancelled_real_adapter_keeps_history_without_trace_bypassing_outer_stopped(settings, domain, story):
+    chapter = domain.save(story["chapter_id"], 0, "只核对当前保存稿，原文不得改变。")
+    task = domain.queue(
+        "module",
+        ModuleInput(
+            novel_id=story["id"],
+            branch_id=story["branch_id"],
+            chapter_id=chapter["id"],
+            base_revision=chapter["revision"],
+            account="openai_1",
+            action="memory.extract",
+            instruction="离线验证取消后历史与正式结果的边界",
+        ).model_dump(),
+    )
+    captured = []
+
+    class CancelStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield stream([{"type": "response.output_text.delta", "delta": '{"facts":['}])
+            with domain.db.connect(True) as tx:
+                tx.execute("UPDATE tasks SET cancel=1 WHERE id=?", (task["id"],))
+            yield stream([{"type": "response.output_text.delta", "delta": "不会被读取的晚返回"}])
+
+    def handler(request):
+        captured.append(request.content)
+        return httpx.Response(200, stream=CancelStream())
+
+    ledger = Budget(settings)
+    worker = Worker(settings, ModelClient(settings, ledger, httpx.MockTransport(handler)))
+    assert asyncio.run(worker.run_once())
+    assert len(captured) == 1 and domain.task(task["id"])["status"] == "cancelled"
+    retained = events(domain, "partial_retained")
+    assert len(retained) == 1 and set(retained[0]) == {"text", "fingerprint"}
+    assert retained[0]["text"] == '{"facts":['
+    stopped = events(domain, "stopped")
+    assert len(stopped) == 1 and stopped[0]["code"] == "cancelled"
+    assert stopped[0]["provider_details"] == {}
+    assert not events(domain, "request_failed") and not domain.db.all("SELECT * FROM task_steps")
+    assert not domain.db.all("SELECT * FROM artifacts") and not domain.db.all("SELECT * FROM facts")
+    assert domain.chapter(chapter["id"]) == chapter
+    assert ledger.report()[0]["reserved_unknown"] > 0
 
 
 @pytest.mark.parametrize(
