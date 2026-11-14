@@ -41,6 +41,11 @@ key_env = "DEEPSEEK_API_KEY"
 # key_env = "DEEPSEEK_API_KEY"
 # model = "deepseek-flash"
 # reasoning_effort = "high"
+# 可选：为结构化审查/整理预留包含思考的输出额度；不缩小模块原有更大上限。
+# 仅显式配置生效，纯正文调用不受此项影响；窗口/共享预算和有限修正仍限制请求。
+# structured_output_min_tokens = 16384
+# 若纯正文也因思考耗尽额度，可另行显式预留；未配置时保持模块原值。
+# text_output_min_tokens = 16384
 # max_input_bytes = 512000
 # context_window_tokens = 1000000
 # context_source = "https://api-docs.deepseek.com/quick_start/pricing/"

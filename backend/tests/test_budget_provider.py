@@ -307,6 +307,13 @@ def test_thinking_only_output_limit_settles_usage_without_returning_internal_tex
             ).generate("deepseek", "thinking-length", "系统", "正文", 30)
         )
     assert caught.value.code == "incomplete" and caught.value.known_usage and caught.value.repairable
+    assert "达到本次输出上限" in str(caught.value)
+    assert caught.value.provider_details == {
+        "reason": "max_output_tokens",
+        "max_output_tokens": 30,
+        "received_terminal": True,
+        "visible_text_chars": 0,
+    }
     assert not getattr(caught.value, "partial_text", "")
     assert "内部文本" not in str(caught.value)
     assert ledger.report()[1]["reserved_unknown"] == 0 and ledger.report()[1]["settled"] > 0

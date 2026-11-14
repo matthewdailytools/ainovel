@@ -28,6 +28,8 @@ class Provider:
     max_input_bytes: int = DEFAULT_MAX_INPUT_BYTES
     context_window_tokens: int | None = None
     context_source: str = ""
+    structured_output_min_tokens: int | None = None
+    text_output_min_tokens: int | None = None
 
     def __post_init__(self):
         if self.kind == "deepseek" and self.reasoning not in (None, "", "none", "low", "high", "max"):
@@ -40,6 +42,10 @@ class Provider:
             raise ValueError("context_window_tokens 必须为正整数。")
         if not isinstance(self.context_source, str):
             raise ValueError("context_source 必须为来源说明文本。")
+        for name in ("structured_output_min_tokens", "text_output_min_tokens"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ValueError(f"{name} 必须为正整数。")
         if self.max_input_bytes > DEFAULT_MAX_INPUT_BYTES and (
             self.context_window_tokens is None or not self.context_source.strip()
         ):
@@ -51,7 +57,21 @@ class Provider:
             "context_window_tokens": self.context_window_tokens,
             "context_source": self.context_source,
             "context_safety_tokens": CONTEXT_SAFETY_TOKENS,
+            **(
+                {"structured_output_min_tokens": self.structured_output_min_tokens}
+                if self.structured_output_min_tokens is not None
+                else {}
+            ),
+            **(
+                {"text_output_min_tokens": self.text_output_min_tokens}
+                if self.text_output_min_tokens is not None
+                else {}
+            ),
         }
+
+    def output_limit(self, requested, structured=False):
+        floor = self.structured_output_min_tokens if structured else self.text_output_min_tokens
+        return max(requested, floor or 0)
 
     def public(self):
         return {
@@ -161,6 +181,8 @@ class Settings:
                 max_input_bytes=item.get("max_input_bytes", DEFAULT_MAX_INPUT_BYTES),
                 context_window_tokens=item.get("context_window_tokens"),
                 context_source=item.get("context_source", ""),
+                structured_output_min_tokens=item.get("structured_output_min_tokens"),
+                text_output_min_tokens=item.get("text_output_min_tokens"),
             )
         limits = {
             kind: min(cap, Decimal(str(config.get("budgets", {}).get(kind, cap))))

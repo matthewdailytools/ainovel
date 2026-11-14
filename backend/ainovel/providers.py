@@ -32,6 +32,7 @@ class ModelClient:
             raise DomainError("configuration", "所选模型账户未配置密钥。")
         if type(max_output) is not int or max_output <= 0:
             raise DomainError("configuration", "单次输出上限必须为正整数。")
+        max_output = provider.output_limit(max_output, structured=schema is not None)
         output, usage, completed = "", None, False
         received_terminal = False
         input_tokens = output_tokens = None
@@ -287,6 +288,18 @@ class ModelClient:
                             if provider.kind == "openai" and received_terminal:
                                 break
             if not completed or not received_terminal or not output.strip():
+                if repairable:
+                    error = DomainError(
+                        "incomplete",
+                        "模型达到本次输出上限，未返回完整可用正文；请核对输出额度、思考强度与费用后再决定是否重试。",
+                    )
+                    error.provider_details = {
+                        "reason": "max_output_tokens",
+                        "max_output_tokens": max_output,
+                        "received_terminal": received_terminal,
+                        "visible_text_chars": len(output),
+                    }
+                    raise error
                 raise DomainError("incomplete", "模型流中断或为空，不能作为完整稿件采纳。")
             if (
                 type(input_tokens) is int

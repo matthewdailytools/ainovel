@@ -30,6 +30,8 @@ if (-not (Test-Path ainovel.toml)) { Copy-Item ainovel.example.toml ainovel.toml
 
 DeepSeek 工作台支持显式 `reasoning_effort = "none" / "low" / "high" / "max"`，默认 `none` 保持原非思考行为；也可按模板另设同密钥的 `deepseek_thinking` 账户，仍共用 CNY80。思考占用输出用量，开启不代表质量已通过；连接测试保留其固定简短请求。见[接入和验证记录](docs/product-validation/2026-11-14-deepseek-thinking.md)。
 
+账户可选 `structured_output_min_tokens = 16384`，为结构化审查和整理明确预留包含思考的输出空间；纯正文可独立设置 `text_output_min_tokens = 16384`。实际上限取对应配置与模块上限中的较大值；两项默认不配置，旧账户行为不变。请求记录、缓存、窗口与费用预留均使用实际额度，预算不足时不会发送；增大额度不增加自动修正轮次，也不保证生成质量。
+
 各账户还可配置 `max_input_bytes`（缺省 `120000`）、`context_window_tokens` 和 `context_source`，见 [TOML 模板](ainovel.example.toml)。字节上限是本机工程保护，不能当成模型 Token 窗口。提高缺省字节上限必须同时填写已核实的正整数窗口及非空来源；布尔值、浮点数、无效或无限值均不接受，不按模型名称猜测能力。发送前按**实际完整 JSON 请求体的 UTF-8 字节数**检查字节上限，并以“请求体字节数＋本次最大输出 Token＋4096 安全余量”作为保守 Token 上界检查已配置窗口。两项检查都在费用预留之前，超限时不截断、不发请求。账户公开信息与步骤派发记录保留实际上限、窗口与来源；这些估算不冒充精确 Token 计数。
 
 2026-11-13 的长篇验证在无损正文、来源及引文去重后仍遇到原 `120000` 字节工程边界，因此本轮在保留无损去重的同时，改为按明确配置的已核实模型能力设置边界。当天 [DeepSeek 官方模型说明](https://api-docs.deepseek.com/quick_start/pricing/)列出 `deepseek-flash` 对应 `DeepSeek-V4.1-Flash-1017`、窗口为 1M Token，模板提供 `512000` 字节／`1000000` Token 的可选配置。此配置不会自动启用、切换模型或改变价格；调高其他模型边界前还需核对其计价档位。共享 USD20／CNY80、单次任务预算、历史费用及未知预留均保持生效。

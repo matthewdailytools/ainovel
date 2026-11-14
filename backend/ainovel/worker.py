@@ -272,6 +272,7 @@ class Worker:
     ):
         payload = self.task["payload"]
         provider = self.settings.providers[payload["account"]]
+        max_output = provider.output_limit(max_output, structured=schema is not None)
         if self.cancelled():
             raise DomainError("cancelled", "已取消。", 409)
         if self.task["kind"] == "candidate_recheck":
