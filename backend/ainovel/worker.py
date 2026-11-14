@@ -485,6 +485,11 @@ class Worker:
                     "prompt_utf8_bytes": len(prompt.encode()),
                     "max_output_tokens": max_output,
                     **(
+                        {"extraction_source_output_version": source_instruction["来源输出契约版本"]}
+                        if "来源输出契约版本" in source_instruction
+                        else {}
+                    ),
+                    **(
                         {"source_identity_context_version": source_instruction["角色限定版本"]}
                         if "角色限定版本" in source_instruction
                         else {}

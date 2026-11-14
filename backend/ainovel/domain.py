@@ -600,6 +600,12 @@ class Domain:
         profile = self.genre_profile(branch_id)
         contract = self.author_contract(branch_id)
         initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
+        if (kind == "module" and payload.get("action") == "story.extract") or (
+            kind == "workflow" and payload.get("structured_maintenance")
+        ):
+            from .extraction_sources import KEY as SOURCE_OUTPUT_KEY, VERSION as SOURCE_OUTPUT_VERSION
+
+            initial[SOURCE_OUTPUT_KEY] = SOURCE_OUTPUT_VERSION
         if kind == "candidate_recheck":
             from .candidate_recheck import VERSION, freeze
 

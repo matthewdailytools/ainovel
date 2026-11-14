@@ -8,6 +8,11 @@ from pydantic import Field
 
 from .db import DomainError, dumps, uid
 from .evidence import source_units
+from .extraction_sources import (
+    INSTRUCTION as SOURCE_CHOICE,
+    SourceIdSchema,
+    frozen_version as source_output_version,
+)
 from .story_graph import RECORD, Record, Strict, graph, references, validate_record
 from .extraction_scenes import SceneProposal, adopt_scenes, freeze_scenes, normalize_scenes, scene_issues
 from .scene_guidance import INSTRUCTION as SCENE_GUIDANCE, frozen_version as scene_guidance_version
@@ -160,6 +165,7 @@ async def run_extraction(worker, request, context, snapshot=None):
     from .character_repair import V2_VERSION as REPAIR_V2, execution_version as repair_version
 
     character_repair_v2 = repair_version(worker.task) == REPAIR_V2
+    source_output = source_output_version(worker.task)
     snapshot = snapshot or worker.task["result"]["story_extraction_snapshot"]
     if worker.domain.branch(request["branch_id"])["story_revision"] != snapshot["story_revision"]:
         raise DomainError("story_changed", "源稿排队后改变，未发送整理请求。", 409)
@@ -306,12 +312,16 @@ async def run_extraction(worker, request, context, snapshot=None):
         "branch": context["branch"],
         "coverage": "仅本批已选择保存稿和正式身份索引；不把外部资料、预设或未来计划当事实。",
     }
+    schema = (
+        ExtractionWithLinkedScenes if linked_scenes else ExtractionWithScenes if with_scenes else Extraction
+    )
     result = await _grounded_extraction(
         worker,
         {
             "动作": "按保存稿反向整理长篇结构候选",
             "阶段证据契约版本": PROMISE_STAGE_GROUNDING_VERSION,
             "身份格式契约版本": "character-name-format/1",
+            **({"来源输出契约版本": source_output, "来源输出格式": SOURCE_CHOICE} if source_output else {}),
             "人物称谓格式": "title是本项人物的一个来源支持称谓；aliases仅列其他有依据的称谓，不得重复title、重复列表项、使用空白或超过200字的名称。不为避开冲突改造姓名或合并身份；已有身份继续使用正式id，身份不明列unknowns。更新仅按update_fields应用，其余沿用正式值。",
             **(
                 {
@@ -402,7 +412,7 @@ async def run_extraction(worker, request, context, snapshot=None):
             "伏笔显式追加": "已有promise的新增埋设、强化或回收使用append_stages=true，指定target_id、target_revision及update_fields包含stages；record.stages只输出本批新增且有独立来源的阶段，服务将完整保留旧阶段并追加，不能重建或重复未提供的旧历史。索引只提供当前状态与阶段数。追加不能改写历史或自动决定retained/abandoned；无证据列unknowns。append_stages默认false，仍表示原有的整字段替换提案，不能假装已掌握未提供历史，自动采用仍受既有安全政策约束。sources字段原有追加/明确替换语义不变。",
             "要求": "仅提取所给正文有依据的人物、事件、状态、关系及伏笔。已有身份用正式id关联，避免重建同一人物；新项使用本批local_id。更新已有项必须指定target_id、target_revision和非空update_fields，只列本批确有新依据的变化字段，未列字段保持原值，不猜测未提供的旧档案。sources默认追加证据；明确需替换时才列sources。状态在更晚事件中变化时新建事件与状态，不把新变化回写成旧事件当时的状态；修改旧状态只作为有明确依据的纠错提案。quote填source_id，其余来源位置由服务复原。档案、作者知识、角色知识及读者知识分开；计划不冒充实际，未知故事时间和冲突保持可见。不确定伏笔只列unknowns。每项解释推导边界，不能改稿或自动采用。",
         },
-        ExtractionWithLinkedScenes if linked_scenes else ExtractionWithScenes if with_scenes else Extraction,
+        SourceIdSchema(schema, units) if source_output else schema,
         narrow,
         validate,
         max_output=request.get("max_output_tokens", 8192),
