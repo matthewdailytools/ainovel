@@ -3793,5 +3793,137 @@
     "result": "passed",
     "record": "2026-11-15-extraction-source-ids.md",
     "fix_of": "source-ids-complete-reference-stop-001"
+  },
+  {
+    "id": "source-ids-code-ci-success-001",
+    "date": "2026-11-15",
+    "commit": "16327ed",
+    "module": "来源编号源码双CI",
+    "scenario": "main43632161396/分支43632121091成功：1400后端787.55/1227.16秒、208前端、51无头4.9/5.2分钟及其他检查；不改真实两处引用及未知时点停点",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-extraction-source-ids.md",
+    "fix_of": "source-ids-fixed-source-full-001"
+  },
+  {
+    "id": "typed-reference-old-output-readonly-001",
+    "date": "2026-11-15",
+    "commit": "04a9747",
+    "module": "旧被拒结果字段定位",
+    "scenario": "零调用只读核对ad7旧输出，定位records[2]/[14].participants[2]；旧32记录/来源/任务保持，不猜名称对应身份",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-extraction-reference-checks.md",
+    "fix_of": "source-ids-complete-reference-stop-001"
+  },
+  {
+    "id": "typed-reference-local-full-001",
+    "date": "2026-11-15",
+    "commit": "04a9747",
+    "module": "关联字段完整回归",
+    "scenario": "新增27、108相关；1427完整后端342.31秒、51全项目隔离无头272.262秒，208/257清单保持并绑定源码；Ruff/格式/API/类型通过，缺失/错类/自依赖及部分更新覆盖",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-extraction-reference-checks.md",
+    "fix_of": "typed-reference-old-output-readonly-001"
+  },
+  {
+    "id": "typed-reference-controlled-runtime-001",
+    "date": "2026-11-15",
+    "commit": "04a9747",
+    "module": "关联核对日常更新",
+    "scenario": "8a03ed备份实恢，原30296出生核实关闭/18172自然退出，新71736API；六保护表/完整费用/两父任务/六配置保持，Cf界面及用户无关差异保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-extraction-reference-checks.md",
+    "fix_of": "typed-reference-local-full-001"
+  },
+  {
+    "id": "typed-reference-low-incomplete-001",
+    "date": "2026-11-15",
+    "commit": "04a9747",
+    "module": "关联契约low真实两章",
+    "scenario": "11fdbe5原两章/145段/全部场景/16384/CNY2，三次均截断无完整JSON，无关联修正机会；CNY0.535548全结、0未知/候选/采用，不能说真实提示通过",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-15-extraction-reference-checks.md",
+    "fix_of": "typed-reference-controlled-runtime-001"
+  },
+  {
+    "id": "typed-reference-base-preflight-first-001",
+    "date": "2026-11-15",
+    "commit": "04a9747",
+    "module": "非思考账户预检夹具",
+    "scenario": "公开字段在关闭时省略thinking_mode，私有脚本误索引而失败；当时仅只读费用，无intent/任务/模型调用。修正脚本，产品配置不改",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-extraction-reference-checks.md",
+    "fix_of": "typed-reference-low-incomplete-001"
+  },
+  {
+    "id": "typed-reference-base-source-stop-001",
+    "date": "2026-11-15",
+    "commit": "04a9747",
+    "module": "非思考两章完整对照",
+    "scenario": "983d0f2显式非思考账户，原145段/契约/16384/CNY2保持；6完成响应含3次格式问题、3份有效结构无记录关联错误，最终32记录/127引用/145段覆盖，仍2场景借范围外事件，拒绝发布；CNY0.883398全结、0采用",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-15-extraction-reference-checks.md",
+    "fix_of": "typed-reference-base-preflight-first-001"
+  },
+  {
+    "id": "typed-reference-final-six-restored-001",
+    "date": "2026-11-15",
+    "commit": "04a9747",
+    "module": "六轮失败与完整费用恢复",
+    "scenario": "4ed2bd实恢36新章/原字节/回执/六任务/12完成响应缓存（含无效结构），旧219章/431修订/822事实/367产物/305结构/113场景/1337步骤相同；旧费用哈希相同，25调用CNY4.148936全结，本轮9次1.418946",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-extraction-reference-checks.md",
+    "fix_of": "typed-reference-base-source-stop-001"
+  },
+  {
+    "id": "typed-reference-code-ci-success-001",
+    "date": "2026-11-15",
+    "commit": "04a9747",
+    "module": "关联核对源码双CI",
+    "scenario": "main43634227971/分支43634194828均success：1427后端468.82/752.94秒、208前端、51隔离无头4.8/4.7分钟及API/类型/格式/构建/既有检查通过，真实质量仍受阻",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-extraction-reference-checks.md",
+    "fix_of": "typed-reference-local-full-001"
+  },
+  {
+    "id": "history-actual-text-overflow-before-001",
+    "date": "2026-11-15",
+    "commit": "04a9747",
+    "module": "历史页实际文字翻倍溢出",
+    "scenario": "此前只调根字号未覆盖固定16px正文；320视口下全部实际字体翻倍，body/query32px，document413/query右405；私有探针及新增Playwright均失败，日志/截图/trace保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-history-actual-text-scale.md",
+    "fix_of": ""
+  },
+  {
+    "id": "history-actual-text-contained-after-001",
+    "date": "2026-11-15",
+    "commit": "a7ca88e",
+    "module": "历史页实际200文字修复",
+    "scenario": "生成器限制筛选控件及label宽度，保持表格自身滚动；实际body/query32px、document320/query右288，搜索/筛选/Tab/方向键通过，9生成器测试及格式通过；后端同04，无服务重启",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-history-actual-text-scale.md",
+    "fix_of": "history-actual-text-overflow-before-001"
+  },
+  {
+    "id": "history-actual-text-full-52-001",
+    "date": "2026-11-15",
+    "commit": "a7ca88e",
+    "module": "含实际字体回归的完整浏览器",
+    "scenario": "52条全项目隔离无头通过，墙259.426秒，0失败/跳过/flaky/全局错误；260项源码/构建/历史HTML与JSON清单前后相同；当时356条记录，归档追加本记录后另做实际字体/组合筛选专项",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-history-actual-text-scale.md",
+    "fix_of": "history-actual-text-contained-after-001"
   }
 ]
