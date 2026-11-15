@@ -520,8 +520,23 @@ class Worker:
                         else {}
                     ),
                     **(
+                        {"conditional_guidance_version": source_instruction["全书条件上下文提示版本"]}
+                        if "全书条件上下文提示版本" in source_instruction
+                        else {}
+                    ),
+                    **(
                         {"plot_contract_version": source_instruction["情节核对契约版本"]}
                         if "情节核对契约版本" in source_instruction
+                        else {}
+                    ),
+                    **(
+                        {"plot_comparison_guidance_version": source_instruction["情节阶段对照版本"]}
+                        if "情节阶段对照版本" in source_instruction
+                        else {}
+                    ),
+                    **(
+                        {"flow_role_observation_version": source_instruction["角色流向观察版本"]}
+                        if "角色流向观察版本" in source_instruction
                         else {}
                     ),
                     **(
@@ -960,6 +975,7 @@ class Worker:
             ConditionalReview,
             bind_report,
             check_issues,
+            condition_origins,
             eligible_conditions,
             enabled as conditional_enabled,
         )
@@ -972,6 +988,7 @@ class Worker:
         fixed = [*fixed, *[item for item in dict.fromkeys(prohibitions) if item not in fixed]]
         conditional = conditional_enabled(self.task)
         eligible = eligible_conditions(self.task, fixed, instructions, prohibitions) if conditional else []
+        origins = condition_origins(self.task, fixed, instructions, prohibitions) if conditional else []
         schema = ConditionalReview if conditional else Review
         units = source_units(text, f"C{number:03}P")
         sources = {unit["source_id"]: unit for unit in units}
@@ -1051,10 +1068,23 @@ class Worker:
             "章节号": number,
         }
         if conditional:
-            from .conditional_review import VERSION as CONDITIONAL_VERSION
+            from .conditional_review import VERSION as CONDITIONAL_VERSION, GUIDANCE_VERSION
 
             instruction.update(
                 全书条件适用性政策=CONDITIONAL_VERSION,
+                全书条件上下文提示版本=GUIDANCE_VERSION,
+                固定条件来源=origins,
+                来源与本章义务=(
+                    "scope沿用固定条件来源：book是全书来源，chapter是本章固定条件，prohibition是作者禁止项。"
+                    "来源不等于本章义务；根据本章原情节与约定中的明确时点判断chapter_obligation，"
+                    "不能因为全书结果列在checks中就推定本章必须兑现。"
+                    "例如全书条件明确‘实施A时才须满足B’，本章原情节未要求实施A，正文又逐字说明尚未实施A："
+                    "可引用该代表段以pass表示本章仍遵守触发限制，说明B的整书结果仍待核对；"
+                    "不能仅因B尚未发生就要求作者指定章号，或判本章缺失必达结果。"
+                    "没有合适代表段且不在新政策未触发清单内仍unknown；已经实施A而B不符仍fail，"
+                    "本章情节明确要求完成A时，不能拿‘尚未实施A’跳过。"
+                    "不改约定原话、不提前安排未来剧情，不把本章保持限制说成全书已兑现。"
+                ),
                 允许单列本章未触发的全书约定=eligible,
                 本章未触发政策=(
                     "只对‘允许单列本章未触发的全书约定’中的原话逐项判断。仅当本章完全未涉及"
@@ -1078,7 +1108,7 @@ class Worker:
             contract=contract,
             diagnostic_label="正文审查检查格式或来源未通过",
         )
-        return bind_report(result, eligible) if conditional else result
+        return bind_report(result, eligible, origins) if conditional else result
 
     async def memory(self, text, context):
         context = text_context(context, text, "memory_extraction")

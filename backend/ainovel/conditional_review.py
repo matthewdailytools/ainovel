@@ -9,6 +9,7 @@ from .models import Review, ReviewCheck
 
 KEY = "conditional_book_policy_version"
 VERSION = "conditional-book-check/1"
+GUIDANCE_VERSION = "book-condition-context/1"
 
 
 class ConditionalReviewCheck(ReviewCheck):
@@ -18,7 +19,10 @@ class ConditionalReviewCheck(ReviewCheck):
     evidence: str = Field(
         description="pass必须引用本章合法source_id或连续逐字原文。完全未触发且满足本次新政策时可not_triggered并留空，其余证据不足仍unknown；不得编造引文。"
     )
-    scope: Literal["book", "chapter", "prohibition", "unspecified"] = "unspecified"
+    scope: Literal["book", "chapter", "prohibition", "unspecified"] = Field(
+        default="unspecified",
+        description="沿用固定条件来源的scope；来源是全书不表示本章必须兑现，其本章义务另判。",
+    )
     applicability: Literal["triggered", "not_triggered", "uncertain", "unconditional"] = "uncertain"
     chapter_obligation: Literal["required", "not_required", "uncertain"] = "uncertain"
     explanation: str = Field(default="", max_length=5000)
@@ -35,27 +39,42 @@ def enabled(task):
     return version == VERSION
 
 
-def eligible_conditions(task, fixed, instructions, prohibitions):
-    """Eligibility comes from frozen book conditions, never generated prose."""
+def book_conditions(task):
     if not enabled(task):
         return []
     if task["kind"] == "workflow":
-        book = task["payload"]["fixed"]
+        return task["payload"]["fixed"]
     elif task["kind"] == "candidate_recheck":
         snapshot = task["result"]["candidate_recheck_snapshot"]
         if snapshot.get(KEY) != VERSION:
             raise DomainError("conditional_policy", "复检的全书条件政策与冻结来源不符。", 409)
-        book = snapshot["book_fixed"]
-    else:
-        return []
+        return snapshot["book_fixed"]
+    return []
+
+
+def condition_origins(task, fixed, instructions, prohibitions):
+    """Classify author sources without inventing when a condition must occur."""
+    book = book_conditions(task)
     chapter = (instructions or {}).get("本章", {}).get("fixed", [])
     return [
-        condition
+        {
+            "condition": condition,
+            "scope": "prohibition"
+            if condition in prohibitions
+            else "chapter"
+            if condition in chapter or condition not in book
+            else "book",
+        }
         for condition in fixed
-        if condition in book
-        and condition not in chapter
-        and condition not in prohibitions
-        and "若涉及" in condition
+    ]
+
+
+def eligible_conditions(task, fixed, instructions, prohibitions):
+    """Eligibility comes from frozen book conditions, never generated prose."""
+    return [
+        row["condition"]
+        for row in condition_origins(task, fixed, instructions, prohibitions)
+        if row["scope"] == "book" and "若涉及" in row["condition"]
     ]
 
 
@@ -87,10 +106,12 @@ def check_issues(check, index, eligible, text):
     return issues
 
 
-def bind_report(review, eligible):
+def bind_report(review, eligible, origins):
     review.update(
         conditional_policy_version=VERSION,
+        conditional_guidance_version=GUIDANCE_VERSION,
         conditional_book_conditions=eligible,
+        condition_origins=origins,
         book_checks_pending=[
             {
                 "condition": check["condition"],
@@ -98,7 +119,7 @@ def bind_report(review, eligible):
                 "status": "whole_book_pending",
             }
             for check in review["checks"]
-            if check["condition"] in eligible
+            if any(row["condition"] == check["condition"] and row["scope"] == "book" for row in origins)
         ],
     )
     return review

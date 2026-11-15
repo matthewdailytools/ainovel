@@ -11,6 +11,8 @@ from .db import DomainError
 
 LEGACY_VERSION = "author-plot-audit/1"
 VERSION = "author-plot-audit/2"
+COMPARISON_GUIDANCE_VERSION = "stage-aware-comparison/1"
+OBSERVATION_GUIDANCE_VERSION = "source-role-observation/1"
 
 
 def execution_version(worker):
@@ -165,6 +167,22 @@ async def independent_flows(
             "可引用原文": units,
             **({"情节核对契约版本": VERSION} if version == VERSION else {}),
             **({"角色限定版本": identity_context["version"]} if identity_context else {}),
+            **(
+                {
+                    "角色流向观察版本": OBSERVATION_GUIDANCE_VERSION,
+                    "独立角色映射": (
+                        "名称表中的原话称谓可以与正文中的姓名、尊称或简称不同。只依据本次正文核对其身份范围，"
+                        "例如本次已核实限定是‘某地的一位工匠’，正文明确此人在该地点从事对应手艺，且当前来源范围内"
+                        "能够区分该角色时，应引用对应正文将其映射到该称谓编号；不能仅因姓名不同一律填unknown。"
+                        "‘一位／某位’不要求证明该地点只有一人，也不要求新增姓名。确有多位符合者、身份范围"
+                        "不符或依据不足才填unknown，并说明无法区分之处。不能因物品交给谁或看似符合预期就猜身份；"
+                        "此调用未提供预期方向，不得补造。不得把正文姓名或动作回填为原话身份限定，"
+                        "也不得把未核实限定称为已核实。supplier始终是给出方、recipient始终是取得方，索取者是recipient。"
+                    ),
+                }
+                if version == VERSION
+                else {}
+            ),
             "要求": "只提取正文实际给出、索取、交换、借还或传递的方向，不判断是否符合任何作者要求。supplier是给出方，recipient是取得方；交易失败也须区分原本提议的方向。offered/requested是当前提出的方向，completed是已交付，未来计划为planned，拒绝项为refused。只能据原文明确信息映射实体编号；不能映射则unknown，其他物品为other。引用FLOW编号。",
         },
         FlowObservations,
@@ -181,17 +199,24 @@ async def independent_flows(
             and flow["certainty"] == "explicit"
             and flow["stage"] in {"offered", "requested", "completed"}
         ]
+        stages = (
+            {"completed"}
+            if version == VERSION and item["transfer_scope"] == "completed"
+            else {"offered", "requested", "completed"}
+        )
         forward = [
             flow
             for flow in relevant
             if flow["supplier_id"] == entity_ids[item["supplier"]]
             and flow["recipient_id"] == entity_ids[item["recipient"]]
+            and flow["stage"] in stages
         ]
         reverse = [
             flow
             for flow in relevant
             if flow["supplier_id"] == entity_ids[item["recipient"]]
             and flow["recipient_id"] == entity_ids[item["supplier"]]
+            and flow["stage"] in stages
         ]
         row = rows[item["id"]]
         original_check = deepcopy(row) if version == VERSION else None
@@ -248,7 +273,14 @@ async def independent_flows(
                 },
             )
         elif not forward and row["result"] == "pass":
-            row.update(result="unknown", reason="未获得独立且同向的正文流向证据，不能仅凭模型结论标通过。")
+            row.update(
+                result="unknown",
+                reason=(
+                    "未获得独立且同向的已完成交付证据；提出、索取或反向提议不证明原约定已完成，不能仅凭模型结论标通过。"
+                    if version == VERSION and item["transfer_scope"] == "completed"
+                    else "未获得独立且同向的正文流向证据，不能仅凭模型结论标通过。"
+                ),
+            )
         if version == VERSION and row != original_check:
             row.setdefault("original_model_check", original_check)
     return {
@@ -256,6 +288,7 @@ async def independent_flows(
         "entities": entities,
         "objects": objects,
         **observed,
+        **({"role_observation_version": OBSERVATION_GUIDANCE_VERSION} if version == VERSION else {}),
         **({"source_identity_context": identity_context} if identity_context else {}),
     }
 
@@ -403,6 +436,27 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
             "本次候选": text,
             "可引用原文": units,
             **source_metadata(source_kind, version),
+            **(
+                {
+                    "情节阶段对照版本": COMPARISON_GUIDANCE_VERSION,
+                    "按冻结事项区分行动阶段": (
+                        "逐项保持transfer_scope及原话的阶段。planned只要求原话明确的意愿、决定、准备或未来安排，"
+                        "不能仅因尚未实际索取、尝试受阻、被拦停或尚未交付而判不符；若原话还明确要求本章已经"
+                        "发生的独立结果，仍须核对该结果，不用计划覆盖它。attempted要求实际发起尝试，交易失败"
+                        "不等于没有尝试，也不能把原本失败的结果改为成交。completed必须有实际交付或取得的正文依据，"
+                        "只有提出、索取、准备、被拒绝或约定未来交付不证明已经完成。无法判断阶段仍unknown，"
+                        "不得按正文反改冻结事项。"
+                    ),
+                    "最终判断一致性": (
+                        "每项只输出核对后的同一个最终判断，result、observed、reason和repair须一致。"
+                        "先在内部完成比较，再输出结果；不要先写fail，又在reason或repair反复自问并建议改成pass。"
+                        "pass说明已符合的阶段和原文，unknown说明尚缺哪项依据，fail说明本稿哪处明确违背及如何保留原约定修订。"
+                        "不能靠改写标签、猜身份或删除真实问题制造通过。"
+                    ),
+                }
+                if version == VERSION
+                else {}
+            ),
             "要求": "先写本稿实际发生了什么，再逐项比较行动者、对象、流向及结果；不要用候选重新解释作者原话来制造一致。即使交易成败相同，对象或流向反转也应指出。歧义或证据不足标unknown，不能把AI解释升级成作者新条件；偏好不判fail。只能引用PLOT原文编号，不能拿AUTHOR证据作正文证据。",
         },
         PlotAudit,
@@ -485,4 +539,5 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
         "findings": findings,
         "policy": f"解释来自{source_label}，仍须作者核对；不写入故事事实，不自动采用候选。",
         **({"version": version} if source_kind is not None else {}),
+        **({"comparison_guidance_version": COMPARISON_GUIDANCE_VERSION} if version == VERSION else {}),
     }
