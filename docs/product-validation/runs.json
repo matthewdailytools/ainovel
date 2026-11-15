@@ -6114,5 +6114,60 @@
     "result": "unverified",
     "record": "2026-11-15-bf270-auto4-maintenance-checkpoint.md",
     "fix_of": ""
+  },
+  {
+    "date": "2026-11-15",
+    "commit": "eeaa7840ce63f3e45e20b9461bac3a3e3430e093",
+    "module": "writing",
+    "record": "2026-11-15-source-correction-output-contract.md",
+    "id": "source-shape-root-import-binding-failed-001",
+    "scenario": "根补测初次误读venv原有main可编辑安装，2例失败并作1定位探针；保留失败，不改断言，随后显式绑定本checkout",
+    "phase": "stability",
+    "result": "failed",
+    "fix_of": ""
+  },
+  {
+    "date": "2026-11-15",
+    "commit": "eeaa7840ce63f3e45e20b9461bac3a3e3430e093",
+    "module": "writing",
+    "record": "2026-11-15-source-correction-output-contract.md",
+    "id": "source-shape-root-backend-411-001",
+    "scenario": "显式PYTHONPATH绑定本checkout；根后端整合411passed/219.76s，新增15例含2项DeepSeek，1已有warning；阶段墙223.368s",
+    "phase": "stability",
+    "result": "passed",
+    "fix_of": "source-shape-root-import-binding-failed-001"
+  },
+  {
+    "date": "2026-11-15",
+    "commit": "eeaa7840ce63f3e45e20b9461bac3a3e3430e093",
+    "module": "writing",
+    "record": "2026-11-15-source-correction-output-contract.md",
+    "id": "source-shape-all-items-contract-offline-001",
+    "scenario": "新格式版本全9P/全部FIX精确schema+顺序校验，真实OpenAI/DeepSeek适配器HTTP替身验证；仅回3仍停止/费用保留，旧nonce缓存/ready兼容；实际半自动未重跑",
+    "phase": "stability",
+    "result": "passed",
+    "fix_of": "bf270-source235-shape-blocked-001"
+  },
+  {
+    "date": "2026-11-15",
+    "commit": "eeaa7840ce63f3e45e20b9461bac3a3e3430e093",
+    "module": "writing",
+    "record": "2026-11-15-source-correction-output-contract.md",
+    "id": "source-shape-root-front-browser-321-binding-001",
+    "scenario": "137前端+7无头通过，API生成无变化、类型/Ruff/build通过；三阶段321输入逐项相同，原UI资源不变，未控制日常浏览器",
+    "phase": "stability",
+    "result": "passed",
+    "fix_of": ""
+  },
+  {
+    "date": "2026-11-15",
+    "commit": "eeaa7840ce63f3e45e20b9461bac3a3e3430e093",
+    "module": "writing",
+    "record": "2026-11-15-source-correction-output-contract.md",
+    "id": "source-shape-real-retry-not-run-001",
+    "scenario": "eeaa784离线修复已提交；日常仍bf270，真实新nonce来源及后续正文复检尚未执行，半自动原任务/候选/费用保持，不追认旧3项回复",
+    "phase": "quality",
+    "result": "not_run",
+    "fix_of": ""
   }
 ]
