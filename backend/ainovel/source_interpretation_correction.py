@@ -24,7 +24,8 @@ PROPOSE = "仅从原情节纠偏事项主体与指令性质"
 VERIFY = "独立核对来源解释纠偏与全部事项保持"
 READONLY_KINDS = {KIND, "source_corrected_candidate_recheck"}
 SHAPE_KEY = "source_correction_shape_version"
-SHAPE_VERSION = "source-correction-output-shape/1"
+SHAPE_V1 = "source-correction-output-shape/1"
+SHAPE_VERSION = "source-correction-output-shape/2"
 SHAPE_EVENT = "source_correction_shape_frozen"
 
 
@@ -68,12 +69,17 @@ class Preservation(Input):
     summary: str = Field(min_length=1, max_length=2000)
 
 
-def shape_enabled(snapshot):
+def shape_version(snapshot):
     if SHAPE_KEY not in snapshot:
-        return False
-    if snapshot[SHAPE_KEY] != SHAPE_VERSION:
+        return None
+    version = snapshot[SHAPE_KEY]
+    if not isinstance(version, str) or version not in {SHAPE_V1, SHAPE_VERSION}:
         raise DomainError("source_correction_shape", "来源纠偏输出契约版本无法确认，未升级或重发。", 409)
-    return True
+    return version
+
+
+def shape_enabled(snapshot):
+    return shape_version(snapshot) is not None
 
 
 def versioned_payload(domain, payload):
@@ -101,11 +107,12 @@ def validate_shape(domain, task):
     )
     if not events and not any(SHAPE_KEY in row for row in containers):
         return False
-    if len(events) != 1 or not all(shape_enabled(row) for row in containers):
+    versions = [shape_version(row) for row in containers]
+    if len(events) != 1 or versions[0] is None or any(value != versions[0] for value in versions):
         raise DomainError("source_correction_shape", "新输出契约标记或冻结依据缺失，未降级为旧模板。", 409)
     frozen = json.loads(events[0]["payload"])
     if frozen != {
-        SHAPE_KEY: SHAPE_VERSION,
+        SHAPE_KEY: versions[0],
         "payload_sha256": sha(task["payload"]),
         "snapshot_sha256": sha(snapshot),
     }:
@@ -126,6 +133,30 @@ def output_contract(snapshot, *, preservation=False):
         schema["properties"]["fixed_checks"].update(minItems=len(fixed), maxItems=len(fixed))
         if fixed:
             schema["$defs"]["FixedCheck"]["properties"]["condition_id"]["enum"] = fixed
+    if shape_version(snapshot) == SHAPE_VERSION:
+        authors = [unit["source_id"] for unit in source_units(snapshot["plot"]["plot"], "AUTHOR")]
+        properties = schema["$defs"][definition]["properties"]
+        properties["evidence"].update(
+            enum=authors,
+            description="只填可引用原文中的一个AUTHOR编号；不是原句、编号加原句、多个编号或空占位。后端从编号还原原文。",
+        )
+        if preservation:
+            evidence = schema["$defs"]["FixedCheck"]["properties"]["evidence"]
+            evidence["description"] = (
+                "只填与本项condition_id相同的一个FIX编号，不填固定条件原句或AUTHOR编号。"
+            )
+            if fixed:
+                evidence["enum"] = fixed
+        else:
+            properties["actor"]["description"] = (
+                "story_event只依据原情节保持或纠偏主体，确实不明保留ambiguous，不新增人名；"
+                "narrative_requirement必须填空字符串，不能填未注明、作者或故事角色。"
+            )
+            properties["statement_kind"]["description"] = (
+                "story_event包括作者安排须在正文发生的计划、要求或行动，分类本身不宣称已发生；"
+                "保留原阶段、结果和顺序。narrative_requirement仅限任务列出的可为文本交代要求P，"
+                "只约束文本交代且actor为空，不锁定故事内讲述者。不能将完成、记录改分类以消除主体歧义。"
+            )
     return schema
 
 
@@ -146,7 +177,7 @@ def freeze(domain, request, *, verify_basis=True):
         "item_ids": selected,
         "original_contract_sha256": sha(original),
         "source_text_sha256": sha(snapshot["plot"]["plot"]),
-        **({SHAPE_KEY: SHAPE_VERSION} if shape_enabled(request) else {}),
+        **({SHAPE_KEY: shape_version(request)} if shape_enabled(request) else {}),
     }
     # Selected P IDs are an explicit request scope; preview displays all P items.
     # Every source/candidate/config field is bound even for same-revision reviews.
@@ -195,7 +226,7 @@ def source_frame(snapshot, *, proposal=None):
     if shape_enabled(snapshot):
         ids = [f"P{i:02}" for i in range(1, len(original["items"]) + 1)]
         frame.update(
-            来源纠偏输出契约版本=SHAPE_VERSION,
+            来源纠偏输出契约版本=shape_version(snapshot),
             全部P编号按原顺序=ids,
             未选择事项原样返回字段=[
                 {
@@ -212,6 +243,32 @@ def source_frame(snapshot, *, proposal=None):
                 f"items必须按全部P编号原顺序返回全部{len(ids)}项各一次，不能只返回选中的{len(snapshot['item_ids'])}项。"
                 "未选择事项actor、certainty保持原值，statement_kind保持story_event，仍须给原话证据和理由。"
                 "只读原情节和旧解释；不得从候选正文、旧正文检查、自由reason或全书未来补齐。"
+            ),
+        )
+    if shape_version(snapshot) == SHAPE_VERSION:
+        frame.update(
+            可为文本交代要求P=[
+                f"P{i:02}"
+                for i, item in enumerate(original["items"], 1)
+                if f"P{i:02}" in snapshot["item_ids"]
+                and item["action"] in {"说明", "交代", "写明", "写出", "描写", "展示"}
+                and item["transfer_scope"] == "none"
+                and narrative_requirement_supported(item, snapshot["plot"]["plot"])
+            ],
+            出处字段要求=(
+                "items[].evidence和item_checks[].evidence只填可引用原文中的一个AUTHOR编号，"
+                "不填原句、不拼接编号与原句、不填多个编号或空占位；原文由后端还原。"
+                "fixed_checks[].evidence只填与condition_id相同的一个FIX编号，不填条件原句或AUTHOR编号。"
+            ),
+            事项性质与主体要求=(
+                "story_event包括作者安排将要或需要在正文发生的计划、要求和行动，分类不等于已发生；"
+                "原阶段、结果和顺序保持。不能为避免把计划当已发生就改为narrative_requirement。"
+                "只有列入可为文本交代要求P且原话确为说明、交代、写明、写出、描写或展示指令的事项，"
+                "才可提议只约束文本交代的narrative_requirement，无需锁定故事内讲述者；"
+                "此时actor必须是空字符串，不填未注明、作者或人物。"
+                "完成、记录及其他故事行动仍是story_event，不能因省略主体或有歧义就改为叙述要求。"
+                "本次原话仍无法唯一确定主体时保留ambiguous；不从正文或未来安排选人。"
+                "未选择事项保持原actor、certainty和story_event，不因本次核对改动它们。"
             ),
         )
     if proposal is not None:

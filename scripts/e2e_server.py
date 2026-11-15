@@ -66,6 +66,19 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if "flow-policy-native-timeout" in json.dumps(instruction, ensure_ascii=False):
+            from e2e_flow_policy_fixture import known_sent_timeout
+
+            return await known_sent_timeout(
+                self.flow_native_settings,
+                self.flow_native_sends,
+                account,
+                task_id,
+                system,
+                prompt,
+                max_output,
+                **kwargs,
+            )
         source_result = source_correction_output(instruction)
         if source_result is None:
             source_result = source_correction_body_output(instruction)
@@ -585,6 +598,7 @@ def main():
     # Model is also imported via spec_from_file_location; only server startup needs fixture routes.
     from e2e_scene_reconfirmation_fixture import register_scene_reconfirmation_fixture
     from e2e_source_correction_fixture import register_source_correction_fixture
+    from e2e_flow_policy_fixture import register_flow_policy_fixture
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8877)
@@ -610,12 +624,16 @@ def main():
         app = create_app(settings)
         register_scene_reconfirmation_fixture(app, settings, location)
         register_source_correction_fixture(app, settings, location)
+        register_flow_policy_fixture(app, settings, location)
         original = app.router.lifespan_context
 
         @asynccontextmanager
         async def lifespan(app):
             async with original(app):
-                worker = Worker(settings, Model())
+                model = Model()
+                model.flow_native_settings = settings
+                model.flow_native_sends = app.state.flow_native_transport_sends
+                worker = Worker(settings, model)
 
                 async def execute():
                     while True:

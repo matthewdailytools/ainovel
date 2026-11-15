@@ -1795,6 +1795,96 @@
         }
       }
     },
+    "/api/tasks/{task_id}/continue-flow-policy-preview": {
+      "get": {
+        "summary": "Flow Policy Preview",
+        "operationId": "flow_policy_preview_api_tasks__task_id__continue_flow_policy_preview_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/flow-policy-continuations/{client_request_id}": {
+      "get": {
+        "summary": "Flow Policy Receipt",
+        "operationId": "flow_policy_receipt_api_tasks__task_id__flow_policy_continuations__client_request_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          },
+          {
+            "name": "client_request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Client Request Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/continue-flow-policy": {
+      "post": {
+        "summary": "Continue Flow Policy",
+        "operationId": "continue_flow_policy_api_tasks__task_id__continue_flow_policy_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/FlowContinuationInput" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/artifacts/{artifact_id}/source-interpretation-correction-preview": {
       "get": {
         "summary": "Correction Preview",
@@ -3913,6 +4003,31 @@
         "type": "object",
         "required": ["issue_id", "decision", "reason"],
         "title": "FinalizationDisposition"
+      },
+      "FlowContinuationInput": {
+        "properties": {
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "preview_basis_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Preview Basis Sha256"
+          },
+          "flow_source_entailment_version": {
+            "type": "string",
+            "const": "source-flow-entailment/1",
+            "title": "Flow Source Entailment Version"
+          },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["client_request_id", "preview_basis_sha256", "flow_source_entailment_version", "reason"],
+        "title": "FlowContinuationInput"
       },
       "GenreProfileBasis": {
         "properties": {

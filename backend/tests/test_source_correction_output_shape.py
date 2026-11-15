@@ -184,6 +184,7 @@ def test_empty_fixed_contract_is_exact_empty_array_without_invalid_empty_enum():
         correction.SHAPE_KEY: correction.SHAPE_VERSION,
         "prepared_contract": {"items": [{}] * 9},
         "fixed": [],
+        "plot": {"plot": "用于空固定条件契约检查的原始来源。"},
     }
     schema = correction.output_contract(snapshot, preservation=True)
     assert (

@@ -909,6 +909,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/tasks/{task_id}/continue-flow-policy-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Flow Policy Preview */
+    get: operations['flow_policy_preview_api_tasks__task_id__continue_flow_policy_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/flow-policy-continuations/{client_request_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Flow Policy Receipt */
+    get: operations['flow_policy_receipt_api_tasks__task_id__flow_policy_continuations__client_request_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/continue-flow-policy': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Continue Flow Policy */
+    post: operations['continue_flow_policy_api_tasks__task_id__continue_flow_policy_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/artifacts/{artifact_id}/source-interpretation-correction-preview': {
     parameters: {
       query?: never
@@ -2242,6 +2293,20 @@ export interface components {
        * @enum {string}
        */
       decision: 'not_an_error' | 'intentional_choice'
+      /** Reason */
+      reason: string
+    }
+    /** FlowContinuationInput */
+    FlowContinuationInput: {
+      /** Client Request Id */
+      client_request_id: string
+      /** Preview Basis Sha256 */
+      preview_basis_sha256: string
+      /**
+       * Flow Source Entailment Version
+       * @constant
+       */
+      flow_source_entailment_version: 'source-flow-entailment/1'
       /** Reason */
       reason: string
     }
@@ -5009,6 +5074,104 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['PlanRestartInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  flow_policy_preview_api_tasks__task_id__continue_flow_policy_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  flow_policy_receipt_api_tasks__task_id__flow_policy_continuations__client_request_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+        client_request_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  continue_flow_policy_api_tasks__task_id__continue_flow_policy_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['FlowContinuationInput']
       }
     }
     responses: {

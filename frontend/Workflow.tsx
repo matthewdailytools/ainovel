@@ -25,6 +25,7 @@ import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from
 import { FrozenStructureOutputPolicy, StructureOutputSettings } from './StructureOutputSettings'
 import { PlanPreparationDetails, planPreparationNeedsReview } from './PlanPreparationDetails'
 import { PlanRestartPanel, PlanRestartReceipt } from './PlanRestartPanel'
+import { FlowContinuationPanel, FlowContinuationReceipt } from './FlowContinuationPanel'
 import {
   DEFAULT_STRUCTURE_OUTPUT_TOKENS,
   workflowStructureOutput,
@@ -77,10 +78,14 @@ export function WorkflowPage({
   const [tasks, setTasks] = useState<Task[]>([])
   const [operationBusy, setBusy] = useState(false)
   const [restartLocked, setRestartLocked] = useState(false)
-  const busy = operationBusy || restartLocked
+  const [flowLocked, setFlowLocked] = useState(false)
+  const busy = operationBusy || restartLocked || flowLocked
   const pendingRequest = useRef<{ signature: string; key: string } | null>(null)
   const pendingContinuation = useRef<{ signature: string; key: string } | null>(null)
-  const pendingConditionalContinuation = useRef<{ signature: string; key: string } | null>(null)
+  const pendingConditionalContinuation = useRef<{
+    signature: string
+    key: string
+  } | null>(null)
   const conditionalTarget = useRef('')
   const [selectedTask, setSelectedTask] = useState('')
   const [loadedWaiting, setWaiting] = useState<Artifact>()
@@ -635,18 +640,36 @@ export function WorkflowPage({
                   />
                   <PlanRestartReceipt task={task} />
                   <PlanRestartPanel
-                    key={JSON.stringify([novel.id, branchId, task.id])}
+                    key={JSON.stringify(['plan-restart', novel.id, branchId, task.id])}
                     task={task}
                     activeBranchId={branchId}
                     currency={
                       accounts.find((entry) => entry.id === task.payload.account)?.currency || '原账户币种'
                     }
-                    disabled={operationBusy}
+                    disabled={operationBusy || flowLocked}
                     onLockChange={setRestartLocked}
                     onCreated={async (row) => {
                       setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])
                       setSelectedTask(row.id)
                       setStatus('写前重核新任务已建立；原规划、旧失败与累计费用保留。')
+                      await onStarted(row.branch_id)
+                    }}
+                  />
+                  <FlowContinuationReceipt task={task} />
+                  <FlowContinuationPanel
+                    key={JSON.stringify(['flow-continuation', novel.id, branchId, task.id])}
+                    task={task}
+                    activeBranchId={branchId}
+                    disabled={operationBusy || restartLocked}
+                    onLockChange={setFlowLocked}
+                    onCreated={async (row) => {
+                      setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])
+                      setSelectedTask(task.id)
+                      setStatus('新版流向政策子任务已建立；可打开子任务查看进度。')
+                    }}
+                    onOpen={async (row) => {
+                      setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])
+                      setSelectedTask(row.id)
                       await onStarted(row.branch_id)
                     }}
                   />
@@ -867,7 +890,10 @@ export function WorkflowPage({
                                   ? { account: requestedAccount }
                                   : {}),
                               }
-                              const signature = JSON.stringify({ source: task.id, ...values })
+                              const signature = JSON.stringify({
+                                source: task.id,
+                                ...values,
+                              })
                               if (pendingConditionalContinuation.current?.signature !== signature)
                                 pendingConditionalContinuation.current = {
                                   signature,
@@ -930,7 +956,8 @@ export function WorkflowPage({
                         </label>
                         <label>
                           续跑预算上限（
-                          {accounts.find((a) => a.id === continueAccount)?.currency || '先选择账户'}）
+                          {accounts.find((a) => a.id === continueAccount)?.currency || '先选择账户'}
+                          ）
                           <input
                             type="number"
                             min="0.01"
@@ -967,9 +994,15 @@ export function WorkflowPage({
                                 reason: continueReason,
                                 acknowledge_unknown: unknown,
                               }
-                              const signature = JSON.stringify({ source: task.id, ...values })
+                              const signature = JSON.stringify({
+                                source: task.id,
+                                ...values,
+                              })
                               if (pendingContinuation.current?.signature !== signature)
-                                pendingContinuation.current = { signature, key: crypto.randomUUID() }
+                                pendingContinuation.current = {
+                                  signature,
+                                  key: crypto.randomUUID(),
+                                }
                               const body: ContinuationInput = {
                                 ...values,
                                 client_request_id: pendingContinuation.current.key,
@@ -1019,7 +1052,8 @@ export function WorkflowPage({
                         本批继承的设定与计划 · {task.result.structure_inheritance.records.length}项
                       </summary>
                       <p>
-                        来自来源故事修订{task.result.structure_inheritance.source_story_revision}
+                        来自来源故事修订
+                        {task.result.structure_inheritance.source_story_revision}
                         ；已建立本版独立身份，未复制原稿或实际经历。
                       </p>
                       <ul>

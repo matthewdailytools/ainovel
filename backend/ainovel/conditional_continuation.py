@@ -49,8 +49,17 @@ def previous_request(domain, parent_id, request, tx=None):
 
 
 def checkpoint(domain, current):
+    if KEY in current["result"]:
+        raise DomainError(
+            "conditional_checkpoint", "只从旧政策已暂停的章节检查点新建批次；不升级原任务。", 409
+        )
+    return adopted_checkpoint(domain, current)
+
+
+def adopted_checkpoint(domain, current):
+    """Common adopted, maintained boundary; policy wrappers keep their own gates."""
     progress, payload = current["result"], current["payload"]
-    if current["kind"] != "workflow" or current["status"] != "paused" or KEY in progress:
+    if current["kind"] != "workflow" or current["status"] != "paused":
         raise DomainError(
             "conditional_checkpoint", "只从旧政策已暂停的章节检查点新建批次；不升级原任务。", 409
         )
@@ -133,16 +142,41 @@ def lineage(domain, current):
     raise DomainError("conditional_lineage", "原批次的续跑来源不完整或存在循环，未创建新任务。", 409)
 
 
-def receipt_budget(domain, usage, tasks, current, provider):
-    ids = [task["id"] for task in tasks]
-    slots = ",".join("?" for _ in ids)
-    calls = [dict(row) for row in usage.execute(f"SELECT * FROM calls WHERE task_id IN ({slots})", ids)]
-    if any(
+def unresolved_call(call):
+    return (
         call["status"] != "settled"
         or call["charged"] is None
         or any(type(call[key]) is not int or call[key] < 0 for key in ("input_tokens", "output_tokens"))
+    )
+
+
+def call_audit(call, *, complete_step, scope):
+    return {
+        "id": call["id"],
+        "task_id": call["task_id"],
+        "account": call["account"],
+        "provider": call["provider"],
+        "currency": call["currency"],
+        "reserved": call["reserved"] / 1_000_000,
+        "charged": call["charged"] / 1_000_000 if call["charged"] is not None else None,
+        "status": call["status"],
+        "input_tokens": call["input_tokens"],
+        "output_tokens": call["output_tokens"],
+        "has_complete_step": complete_step,
+        "scope": scope,
+    }
+
+
+def receipt_budget(domain, usage, tasks, current, provider, *, allow_foreign_history=False):
+    ids = [task["id"] for task in tasks]
+    slots = ",".join("?" for _ in ids)
+    calls = [dict(row) for row in usage.execute(f"SELECT * FROM calls WHERE task_id IN ({slots})", ids)]
+    required = [
+        call
         for call in calls
-    ):
+        if not allow_foreign_history or call["task_id"] == current["id"] or call["provider"] == provider.kind
+    ]
+    if any(unresolved_call(call) for call in required):
         raise DomainError("unknown_result", "原批次仍有未知费用或未决调用，预留保留；未开启新政策批次。", 409)
     receipts = {
         (row["task_id"], json.loads(row["result"]).get("call_id"))
@@ -157,7 +191,7 @@ def receipt_budget(domain, usage, tasks, current, provider):
             "status": call["status"],
         }
         for call in calls
-        if (call["task_id"], call["id"]) not in receipts
+        if not unresolved_call(call) and (call["task_id"], call["id"]) not in receipts
     ]
     own = sum(call["charged"] for call in calls if call["task_id"] == current["id"])
     if any(
@@ -177,14 +211,14 @@ def receipt_budget(domain, usage, tasks, current, provider):
         "old_call_replay": "禁止重发或重放已结算但没有完整步骤产物的旧调用；仅从已采纳并维护完成的下一章检查点继续。",
         "lineage_task_ids": ids,
         "provider": provider.kind,
-        "lineage_settled": sum(call["charged"] for call in calls if call["provider"] == provider.kind)
+        "lineage_settled": sum(call["charged"] or 0 for call in calls if call["provider"] == provider.kind)
         / 1_000_000,
         "lineage_by_currency": [
             {
                 "provider": kind,
                 "currency": currency,
                 "settled": sum(
-                    call["charged"]
+                    call["charged"] or 0
                     for call in calls
                     if call["provider"] == kind and call["currency"] == currency
                 )
@@ -194,6 +228,29 @@ def receipt_budget(domain, usage, tasks, current, provider):
         ],
         "remaining_run_limit": float(Decimal(remaining) / 1_000_000) if remaining is not None else None,
         "unknown_reserve": 0,
+        **(
+            {
+                "foreign_unknown_calls": [
+                    call_audit(
+                        call, complete_step=(call["task_id"], call["id"]) in receipts, scope="workflow"
+                    )
+                    for call in calls
+                    if call["provider"] != provider.kind
+                    and call["task_id"] != current["id"]
+                    and unresolved_call(call)
+                ],
+                "foreign_history_calls": [
+                    call_audit(
+                        call, complete_step=(call["task_id"], call["id"]) in receipts, scope="workflow"
+                    )
+                    for call in calls
+                    if call["provider"] != provider.kind and call["task_id"] != current["id"]
+                ],
+                "foreign_history_policy": "历史外币未知仅保留原币种预留及审计，不重放，不扣当前币种任务额度；当前任务及当前服务商未知继续停止。",
+            }
+            if allow_foreign_history
+            else {}
+        ),
         "note": "子任务限额只减当前父任务已付费用；祖先仅汇总审计，避免重复扣减已缩减的父任务额度。服务商共享账本保持。",
     }
 
