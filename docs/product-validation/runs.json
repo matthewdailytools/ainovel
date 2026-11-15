@@ -6334,5 +6334,126 @@
     "result": "unverified",
     "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
     "fix_of": ""
+  },
+  {
+    "id": "flow-policy-v4-independent-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "reliability",
+    "scenario": "独立195个不同后端测试及正式API/Worker本地HTTP替身探针：整个后续正文派发、未知保留、双nonce竞争、原规划轮次和逐币种预算",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-root-initial-build-race-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "reliability",
+    "scenario": "首次全量2090通过加1项setup失败：并行build短暂清空dist/assets；检查编排冲突，原失败保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-root-initial-ui-key-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "workflow",
+    "scenario": "首次完整94项无头86通过8失败：同级计划重核与流向面板React key重复，切任务和轮询导致入口/输入串用",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-ui-distinct-key-targeted-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "workflow",
+    "scenario": "面板key增加各自类型前缀，旧8项断言原样；新增双入口轮询及切任务，定向18通过，新增夹具17+1失败链保留",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": "flow-root-initial-ui-key-001"
+  },
+  {
+    "id": "source-shape2-independent-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "reliability",
+    "scenario": "独立92项通过/185输入保持：新AUTHOR/FIX编号契约与叙述边界、旧235/75e6提示和已付cache逐字兼容，不放宽resolver",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-source-final-static-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "reliability",
+    "scenario": "本轮最终407前端/48Node及Ruff、格式、API、类型、审阅检查和89模块构建通过，7dist冻结",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-source-final-backend-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "reliability",
+    "scenario": "构建先完成后全量2119通过/pytest589.75秒，保留1既有警告；334输入前后相同，首轮setup失败不改写",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": "flow-root-initial-build-race-001"
+  },
+  {
+    "id": "flow-source-final-browser-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "workflow",
+    "scenario": "整个项目无头95通过/361.235秒，0失败跳过重试flaky；参考完整闭环、整书与版本边界，原8项回归全部通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": "flow-root-initial-ui-key-001"
+  },
+  {
+    "id": "flow-source-final-identity-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "reliability",
+    "scenario": "三阶段6份334输入清单完全相同，当前源字节与7dist保持；UI B_Da8YDa，源码7847f9a，不以构建证明部署",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": ""
+  },
+  {
+    "id": "source-shape2-real-pending-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "workflow",
+    "scenario": "此交付截止时尚未执行新shape2真实模型；原235/75e6失败保持，无新ready/正文复检/采纳/恢复",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-policy-real-pending-001",
+    "date": "2026-11-16",
+    "commit": "7847f9a3abc5b6078f1f4a4adf3e6eeaebffc68c",
+    "module": "workflow",
+    "scenario": "此交付截止时新政策续跑未发布或真实启动；两模式原36章计划不缩减，十章跨卷整书与作者文学收益不提升",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-16-flow-continuation-and-source-evidence.md",
+    "fix_of": ""
   }
 ]
