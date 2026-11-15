@@ -707,6 +707,9 @@ class Domain:
                 from .workflow_plan_preparation import VERSION as PLAN_PREPARATION_VERSION
 
                 initial["workflow_plan_preparation_version"] = PLAN_PREPARATION_VERSION
+                from .workflow_plan_open_details import KEY as OPEN_KEY, VERSION as OPEN_VERSION
+
+                initial[OPEN_KEY] = OPEN_VERSION
         if kind == "workflow" and payload.get("character_field_repair") is True:
             from .character_repair import V2_VERSION as CHARACTER_REPAIR_VERSION
 
@@ -838,6 +841,9 @@ class Domain:
         return self.task(task_id)
 
     def continue_workflow(self, current, payload, request):
+        from .workflow_plan_open_details import validate_task as validate_open_details
+
+        validate_open_details(current)
         frozen_output = current["payload"].get("structure_max_output_tokens", 8192)
         if "structure_max_output_tokens" in payload and (
             type(payload["structure_max_output_tokens"]) is not int

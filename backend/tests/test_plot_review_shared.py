@@ -156,7 +156,11 @@ def test_workflow_unverified_does_not_force_revision_and_plan_origin_remains_exp
     queued = domain.queue("workflow", request, story["branch_id"])
     if mode == "automatic":
         # Frozen pre-preparation tasks retain the exact post-draft audit path.
-        legacy = {k: v for k, v in queued["result"].items() if k != "workflow_plan_preparation_version"}
+        legacy = {
+            k: v
+            for k, v in queued["result"].items()
+            if k not in {"workflow_plan_preparation_version", "workflow_plan_open_details_version"}
+        }
         with domain.db.connect(True) as tx:
             tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(legacy), queued["id"]))
     model = PlotModel(verdict, certainty)
@@ -272,7 +276,11 @@ def test_automatic_failure_report_names_workflow_plan_instead_of_author_lock(
     request["plot_contract_check"] = True
     queued = domain.queue("workflow", request, story["branch_id"])
     # This test is the old frozen workflow/report compatibility contract.
-    legacy = {k: v for k, v in queued["result"].items() if k != "workflow_plan_preparation_version"}
+    legacy = {
+        k: v
+        for k, v in queued["result"].items()
+        if k not in {"workflow_plan_preparation_version", "workflow_plan_open_details_version"}
+    }
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(legacy), queued["id"]))
     model = PlotModel()

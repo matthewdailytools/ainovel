@@ -851,6 +851,10 @@ def create_app(settings=None, schema_only=False):
         provider_ready(data.account or current["payload"]["account"])
         return continue_policy(domain, budget, current, request)
 
+    from .workflow_plan_restart import register_routes as register_plan_restart_routes
+
+    register_plan_restart_routes(app, domain, budget, provider_ready)
+
     @app.get("/api/artifacts")
     def artifacts(branch_id: str, chapter_id: str | None = None):
         rows = db.all(

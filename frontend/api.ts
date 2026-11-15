@@ -159,6 +159,9 @@ export type Task = {
     source_identity_context_version?: string
     candidate_recheck_snapshot?: unknown
     workflow_plan_preparation_version?: string
+    workflow_plan_open_details_version?: string
+    plan_preparation_restart?: unknown
+    expected_story_revision?: number
     plot_preparations?: unknown
   }
   payload: {

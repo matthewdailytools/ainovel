@@ -130,8 +130,12 @@ def test_new_automatic_prepares_before_prose_keeps_original_and_reuses_frozen_in
     assert not any(f["任务"].get("动作") == "仅依据作者原话整理本场景情节" for f in model.frames)
     for frame in model.preparation_frames:
         assert "本次候选" not in dumps(frame) and "沈砚向陆栖画出" not in dumps(frame)
-        assert "recent" not in frame["上下文"] and "chapter" not in frame["上下文"]
-        assert "genre_profile" not in frame["上下文"]
+        if frame["任务"]["动作"] == "写前解释AI工作章纲":
+            assert "recent" not in frame["上下文"] and "chapter" not in frame["上下文"]
+            assert "genre_profile" not in frame["上下文"]
+        else:
+            assert "content" not in frame["上下文"]["chapter"]
+            assert frame["上下文"]["creative_context_version"] == "workflow-plan-creative-context/1"
 
 
 @pytest.mark.parametrize("verdict", ["fail", "unknown"])
@@ -347,9 +351,12 @@ def test_dispatch_checkpoint_without_complete_cache_stops_without_new_calls(
 
 
 def test_legacy_nonce_replay_does_not_add_policy(domain, story):
+    from ainovel.workflow_plan_open_details import KEY as OPEN_KEY
+
     task = queued(domain, story)
     old = deepcopy(task["result"])
     old.pop("workflow_plan_preparation_version")
+    old.pop(OPEN_KEY)
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(old), task["id"]))
     replayed = domain.queue("workflow", task["payload"], story["branch_id"])
@@ -358,10 +365,13 @@ def test_legacy_nonce_replay_does_not_add_policy(domain, story):
 
 @pytest.mark.parametrize("legacy", [True, False])
 def test_account_continuation_inherits_frozen_policy_including_absence(settings, domain, story, legacy):
+    from ainovel.workflow_plan_open_details import KEY as OPEN_KEY
+
     task = queued(domain, story)
     result = deepcopy(task["result"])
     if legacy:
         result.pop("workflow_plan_preparation_version")
+        result.pop(OPEN_KEY)
     result["expected_story_revision"] = domain.branch(story["branch_id"])["story_revision"]
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET status='paused',result=? WHERE id=?", (dumps(result), task["id"]))

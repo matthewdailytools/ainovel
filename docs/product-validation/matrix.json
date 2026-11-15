@@ -11,7 +11,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_scope": "本项的实际写作总投入/作者体验仍未测量；不能用保存回归替代使用收益。"
   },
   {
@@ -26,7 +26,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_evidence": [
       "2026-11-14-real-epub.md"
     ],
@@ -44,7 +44,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_evidence": [
       "2026-11-13-reference-repeats.md",
       "2026-11-13-author-review-feedback.md"
@@ -63,7 +63,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_evidence": [
       "2026-11-14-books-coldstart.md"
     ],
@@ -81,7 +81,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
@@ -101,7 +101,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
@@ -121,7 +121,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_scope": "36章导入保留；六轮旧失败后，相同两章第七轮2次CNY0.241526形成34记录/12场景待审候选，116逐字来源/145段覆盖及引用范围通过；16事件order未知、after空及群体身份待整理，0采用。真实十章/跨卷/作者整体质量仍待验。",
     "quality_evidence": [
       "2026-11-15-longform-import-and-reverse.md",
@@ -143,7 +143,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_evidence": [
       "2026-11-15-assisted-candidate-recheck.md",
       "2026-11-15-source-identity-context.md",
@@ -164,7 +164,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_evidence": [
       "2026-11-15-second-chapter-review-candidates.md",
       "2026-11-15-source-identity-context.md",
@@ -188,7 +188,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-assisted-candidate-recheck.md",
@@ -212,7 +212,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_scope": "实际费用/故障/恢复属于工程稳定性；使用总投入尚未完整测量，不据此作文学或收益通过。"
   },
   {
@@ -227,7 +227,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+    "latest_regression_evidence": "2026-11-15-plan-open-details-and-restart.md",
     "quality_scope": "工程中文/键盘/缩放已有范围；真实作者输入法、辅助技术和体验评估不能由替身事件推定。"
   }
 ]

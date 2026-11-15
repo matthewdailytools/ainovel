@@ -5179,5 +5179,148 @@
     "result": "passed",
     "record": "2026-11-15-chapter3-joint-corrections.md",
     "fix_of": ""
+  },
+  {
+    "id": "plan-open-mock-reason-first-failed-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "accessibility",
+    "scenario": "私有模拟首轮7通过1失败：原因trim的测试预期错误；保留输入/IME0提交断言与原失败",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open-root-default-headless-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "automatic",
+    "scenario": "正式CI匹配的新8case通过；原失败call不伪作成功解释，原phase/hash保持，0真实模型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": "plan-open-mock-reason-first-failed-001"
+  },
+  {
+    "id": "plan-open-backend-integration-failed-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "revision",
+    "scenario": "完整首轮1771通过39同根因失败：复检适配器缺父冻结genre_snapshot；490输入稳定，原失败保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open-recheck-adapter-fixed-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "revision",
+    "scenario": "补一行原父题材快照副本及4回归，63相关通过；保持原context/契约、篡改前后均拒绝",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": "plan-open-backend-integration-failed-001"
+  },
+  {
+    "id": "plan-open-backend-final-full-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "reliability",
+    "scenario": "修复后完整1814后端通过516.43秒/墙519.031秒；491输入前后稳定，全部39受影响路径已复测",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": "plan-open-backend-integration-failed-001"
+  },
+  {
+    "id": "plan-open-frontend-final-full-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "reliability",
+    "scenario": "全部300前端/48既有及API再生成、类型、格式、构建和静态审阅通过；491双清单相同、BUJ",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open-browser-final-full-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "accessibility",
+    "scenario": "整个产品82无头通过339.174秒/墙340.082秒，0失败/跳过/retry/flaky；491三阶段输入逐项相同",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open-context-frozen-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "state",
+    "scenario": "144专项及真实held38隔离五阶段回放：同书采用状态/频道题材冻结，当前/未来/foreign与未知重放保护；人工预置非质量证明",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open-restart-api-replay-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "automatic",
+    "scenario": "当前paused4/error空/expected38隔离GETpreview、POST与原nonce查询幂等通过，原36规划/17调用/全usage/空章4保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": ""
+  },
+  {
+    "id": "validation-docs-d901-branch-ci-001",
+    "date": "2026-11-15",
+    "commit": "d901ba74e8e987e577edb39152083f0e7ed67e09",
+    "module": "reliability",
+    "scenario": "旧产品的d901文档工作分支CI43697769898 success：1766后端1150.35秒/265前端/74无头5.7m/48既有",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": ""
+  },
+  {
+    "id": "validation-docs-d901-main-ci-001",
+    "date": "2026-11-15",
+    "commit": "d901ba74e8e987e577edb39152083f0e7ed67e09",
+    "module": "reliability",
+    "scenario": "旧产品的d901文档main CI43697794262 success：1766后端889.08秒/265前端/74无头5.3m/48既有",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open-daily-rollout-not-run-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "automatic",
+    "scenario": "日常仍5fd/B4，新BUJ及新写前策略尚未部署/线上只读验证，工具仅准备",
+    "phase": "stability",
+    "result": "not_run",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open-real-quality-not-run-001",
+    "date": "2026-11-15",
+    "commit": "d901ba7+working-tree/BUJruMaa",
+    "module": "automatic",
+    "scenario": "本轮0付费调用；新策略真实重核、连续十章/跨卷/两整书/作者其余文学和总投入未验收",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-15-plan-open-details-and-restart.md",
+    "fix_of": ""
   }
 ]

@@ -236,6 +236,10 @@ def test_account_continuation_preserves_frozen_contract_without_upgrading(marker
     ).model_dump()
     current = domain.queue("workflow", payload, story["branch_id"])
     progress = deepcopy(current["result"])
+    if marker != VERSION:
+        # Historical plot contracts predate both before-prose policies.
+        progress.pop("workflow_plan_preparation_version")
+        progress.pop("workflow_plan_open_details_version")
     if marker is None:
         progress.pop("plot_contract_version")
     else:

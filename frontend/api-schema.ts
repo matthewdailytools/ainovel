@@ -858,6 +858,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/tasks/{task_id}/reprepare-plan-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Reprepare Plan Preview */
+    get: operations['reprepare_plan_preview_api_tasks__task_id__reprepare_plan_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/plan-restarts/{client_request_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Plan Restart Receipt */
+    get: operations['plan_restart_receipt_api_tasks__task_id__plan_restarts__client_request_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/reprepare-plan': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Reprepare Plan */
+    post: operations['reprepare_plan_api_tasks__task_id__reprepare_plan_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/artifacts': {
     parameters: {
       query?: never
@@ -2246,6 +2297,19 @@ export interface components {
        * @default
        */
       brief: string
+    }
+    /** PlanRestartInput */
+    PlanRestartInput: {
+      /** Client Request Id */
+      client_request_id: string
+      /** Reason */
+      reason: string
+      /** Chapter */
+      chapter: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Base Progress Sha256 */
+      base_progress_sha256: string
     }
     /** Plot */
     Plot: {
@@ -4698,6 +4762,104 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['ConditionalContinuationInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  reprepare_plan_preview_api_tasks__task_id__reprepare_plan_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  plan_restart_receipt_api_tasks__task_id__plan_restarts__client_request_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+        client_request_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  reprepare_plan_api_tasks__task_id__reprepare_plan_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PlanRestartInput']
       }
     }
     responses: {

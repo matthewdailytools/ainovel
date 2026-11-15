@@ -336,8 +336,9 @@ class Worker:
             "独立核对AI工作章纲保持",
             "独立观察全书条件在本章是否触发",
         }:
-            # These source-isolated stages must not reinterpret source claims
-            # through other adopted settings, genre preferences or old prose.
+            # No implicit enrichment: source interpretation receives only its
+            # source scope. New plan choice/check stages explicitly supply their
+            # own frozen adopted context; v1 keeps its original isolated scope.
             context = deepcopy(context or {})
         else:
             context = {
@@ -570,6 +571,25 @@ class Worker:
                     **(
                         {"workflow_plan_preparation_version": source_instruction["写前准备契约版本"]}
                         if "写前准备契约版本" in source_instruction
+                        else {}
+                    ),
+                    **(
+                        {
+                            "workflow_plan_open_details_version": source_instruction[
+                                "workflow_plan_open_details_version"
+                            ]
+                        }
+                        if "workflow_plan_open_details_version" in source_instruction
+                        else {}
+                    ),
+                    **(
+                        {
+                            "workflow_plan_creative_context_version": source_instruction[
+                                "写前创作上下文版本"
+                            ],
+                            "workflow_plan_creative_context_sha256": source_instruction["写前创作上下文摘要"],
+                        }
+                        if "写前创作上下文版本" in source_instruction
                         else {}
                     ),
                     **(
@@ -985,6 +1005,15 @@ class Worker:
                 "定位错误": issues,
                 "引用修正要求": "回到本次正文重新核验，引用必须是连续逐字原文。不得编造引文或仅为通过检查删除真实问题；确无证据时标未知，不改造正文。",
             }
+            if (
+                instruction.get("workflow_plan_open_details_version") == "workflow-plan-open-details/1"
+                and instruction.get("动作") == "写前解释AI工作章纲"
+            ):
+                current["引用修正要求"] = (
+                    "本阶段没有正文。只回到给定的AI工作章纲连续原话修正解释，不读取候选或未来稿。"
+                    "条件不能拼接、概括或补造；确实未指定的双方／物品槽按open_fields规则保留待选择，"
+                    "不能猜人、删除传递事件、换对象或把原阶段／否定／只／仅／未知改掉来通过校验。"
+                )
             if instruction.get("固定条件检查格式版本") == "fixed-check-id/1":
                 from .review_condition_ids import REPAIR_GUIDANCE
 

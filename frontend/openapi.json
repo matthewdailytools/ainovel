@@ -1707,6 +1707,94 @@
         }
       }
     },
+    "/api/tasks/{task_id}/reprepare-plan-preview": {
+      "get": {
+        "summary": "Reprepare Plan Preview",
+        "operationId": "reprepare_plan_preview_api_tasks__task_id__reprepare_plan_preview_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/plan-restarts/{client_request_id}": {
+      "get": {
+        "summary": "Plan Restart Receipt",
+        "operationId": "plan_restart_receipt_api_tasks__task_id__plan_restarts__client_request_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          },
+          {
+            "name": "client_request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Client Request Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/reprepare-plan": {
+      "post": {
+        "summary": "Reprepare Plan",
+        "operationId": "reprepare_plan_api_tasks__task_id__reprepare_plan_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PlanRestartInput" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/artifacts": {
       "get": {
         "summary": "Artifacts",
@@ -3840,6 +3928,28 @@
         "type": "object",
         "required": ["title"],
         "title": "NovelInput"
+      },
+      "PlanRestartInput": {
+        "properties": {
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" },
+          "chapter": { "type": "integer", "maximum": 10000, "minimum": 1, "title": "Chapter" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "base_progress_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Base Progress Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["client_request_id", "reason", "chapter", "base_story_revision", "base_progress_sha256"],
+        "title": "PlanRestartInput"
       },
       "Plot": {
         "properties": {

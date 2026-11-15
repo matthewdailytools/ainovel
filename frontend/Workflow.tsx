@@ -11,7 +11,7 @@ import {
   type GenreProfile,
 } from './api'
 import type { Notify } from './App'
-import { useLeaveGuard } from './leaveGuard'
+import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import story from '../fixtures/original-story.json'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
@@ -24,6 +24,7 @@ import { CONDITIONAL_REVIEW_VERSION, ConditionalReviewNotice } from './Condition
 import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from './MemorySelection'
 import { FrozenStructureOutputPolicy, StructureOutputSettings } from './StructureOutputSettings'
 import { PlanPreparationDetails, planPreparationNeedsReview } from './PlanPreparationDetails'
+import { PlanRestartPanel, PlanRestartReceipt } from './PlanRestartPanel'
 import {
   DEFAULT_STRUCTURE_OUTPUT_TOKENS,
   workflowStructureOutput,
@@ -74,7 +75,9 @@ export function WorkflowPage({
   const [seenContract, setSeenContract] = useState<AuthorContract>()
   const [seenGenre, setSeenGenre] = useState<GenreProfile>()
   const [tasks, setTasks] = useState<Task[]>([])
-  const [busy, setBusy] = useState(false)
+  const [operationBusy, setBusy] = useState(false)
+  const [restartLocked, setRestartLocked] = useState(false)
+  const busy = operationBusy || restartLocked
   const pendingRequest = useRef<{ signature: string; key: string } | null>(null)
   const pendingContinuation = useRef<{ signature: string; key: string } | null>(null)
   const pendingConditionalContinuation = useRef<{ signature: string; key: string } | null>(null)
@@ -562,7 +565,12 @@ export function WorkflowPage({
             <>
               <label>
                 本作品批次
-                <select value={task?.id || ''} onChange={(e) => setSelectedTask(e.target.value)}>
+                <select
+                  value={task?.id || ''}
+                  onChange={(e) => {
+                    if (confirmLeave()) setSelectedTask(e.target.value)
+                  }}
+                >
                   {visibleTasks.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.payload.mode === 'assisted' ? '半自动' : '全自动'} · {t.payload.account} ·{' '}
@@ -623,6 +631,23 @@ export function WorkflowPage({
                     version={task.result.workflow_plan_preparation_version}
                     value={task.result.plot_preparations}
                     taskStatus={task.status}
+                  />
+                  <PlanRestartReceipt task={task} />
+                  <PlanRestartPanel
+                    key={JSON.stringify([novel.id, branchId, task.id])}
+                    task={task}
+                    activeBranchId={branchId}
+                    currency={
+                      accounts.find((entry) => entry.id === task.payload.account)?.currency || '原账户币种'
+                    }
+                    disabled={operationBusy}
+                    onLockChange={setRestartLocked}
+                    onCreated={async (row) => {
+                      setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])
+                      setSelectedTask(row.id)
+                      setStatus('写前重核新任务已建立；原规划、旧失败与累计费用保留。')
+                      await onStarted(row.branch_id)
+                    }}
                   />
                   <details>
                     <summary>本批次冻结的频道与题材</summary>

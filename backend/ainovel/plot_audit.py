@@ -71,6 +71,18 @@ class ScopedAuthorPlot(StrictModel):
     note: str = Field(max_length=2000)
 
 
+class OpenPlanItem(ScopedPlotItem):
+    open_fields: list[Literal["supplier", "recipient", "transfer_object"]] = Field(
+        default_factory=list, max_length=3
+    )
+    open_reason: str = Field(default="", max_length=1200)
+
+
+class OpenPlanInterpretation(StrictModel):
+    items: list[OpenPlanItem] = Field(max_length=12)
+    note: str = Field(max_length=2000)
+
+
 class PlotCheck(StrictModel):
     item_id: str = Field(min_length=1, max_length=20)
     result: Literal["pass", "fail", "unknown"]
@@ -328,6 +340,46 @@ def author_contract_issues(value, author_text, *, scoped):
     return issues
 
 
+def normalize_open_plan(value):
+    """Keep the unresolved slot visible and non-executable, never fill it."""
+    result, slots = deepcopy(value), []
+    for index, item in enumerate(result["items"], 1):
+        fields = item.pop("open_fields")
+        reason = item.pop("open_reason")
+        if fields:
+            slots.append(
+                {
+                    "item_id": f"P{index:02}",
+                    "fields": fields,
+                    "reason": reason,
+                    "author_evidence": item["author_evidence"],
+                    "source_certainty": item["certainty"],
+                }
+            )
+            item["certainty"] = "ambiguous"
+    return {"contract": ScopedAuthorPlot.model_validate(result).model_dump(), "open_details": slots}
+
+
+def open_plan_issues(value, source):
+    problems = []
+    for item in value["items"]:
+        fields = item["open_fields"]
+        if len(fields) != len(set(fields)):
+            problems.append("同一事项的开放槽不得重复。")
+        if fields and not item["open_reason"].strip():
+            problems.append("开放槽须说明原章纲未确定哪项执行细节，并保留连续原话证据。")
+        if fields and item["transfer_scope"] == "none":
+            problems.append(
+                "无交换传递的事项不能声明传递双方或物品开放槽；剧情未知按原含义保留，不制造可选细节。"
+            )
+        if any(item[field].strip() for field in fields):
+            problems.append("开放槽只能指向尚未填写的字段；原话已指明的角色／关系不能换成开放对象。")
+    # Only the preparation artifact is ambiguous; all ordinary source and
+    # scope checks still run. The final ready contract uses the strict gate.
+    problems.extend(author_contract_issues(normalize_open_plan(value)["contract"], source, scoped=True))
+    return problems
+
+
 async def interpret_plot(worker, author_text, *, source_kind=None, preparation=None):
     if not author_text.strip():
         return {"items": [], "note": "缺少作者情节，不能从候选反推。"}
@@ -336,10 +388,25 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
     version = execution_version(worker) if source_kind is not None else LEGACY_VERSION
     scoped = version == VERSION
     schema = ScopedAuthorPlot if scoped else AuthorPlot
+    from .workflow_plan_open_details import (
+        GUIDANCE as OPEN_GUIDANCE,
+        KEY as OPEN_KEY,
+        VERSION as OPEN_VERSION,
+        enabled as open_enabled,
+    )
+
+    open_details = preparation is not None and OPEN_KEY in preparation
+    if open_details:
+        if (
+            source_kind != "workflow_plan"
+            or preparation[OPEN_KEY] != OPEN_VERSION
+            or not open_enabled(worker)
+        ):
+            raise DomainError("plan_open_details_version", "开放槽仅用于已冻结政策的全自动写前解释。", 409)
+        schema = OpenPlanInterpretation
     author_contract = schema.model_json_schema()
-    author_contract["$defs"]["ScopedPlotItem" if scoped else "PlotItem"]["properties"]["author_evidence"][
-        "enum"
-    ] = list(author_sources)
+    item_type = "OpenPlanItem" if open_details else "ScopedPlotItem" if scoped else "PlotItem"
+    author_contract["$defs"][item_type]["properties"]["author_evidence"]["enum"] = list(author_sources)
 
     def validate_author(value):
         for item in value["items"]:
@@ -348,7 +415,11 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
         if preparation is not None and preparation.get("item_count") is not None:
             if len(value["items"]) != preparation["item_count"]:
                 issues.append("写前复解释必须按原P编号顺序逐项保留全部事项，不得删除、合并或遗漏歧义项。")
-        issues.extend(author_contract_issues(value, author_text, scoped=scoped))
+        issues.extend(
+            open_plan_issues(value, author_text)
+            if open_details
+            else author_contract_issues(value, author_text, scoped=scoped)
+        )
         return issues
 
     source_label = "本章工作章纲（AI规划）" if source_kind == "workflow_plan" else "作者原话"
@@ -359,6 +430,7 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
             source_label: author_text,
             "可引用原文": author_units,
             **source_metadata(source_kind, version),
+            **({OPEN_KEY: OPEN_VERSION, "开放执行槽解释": OPEN_GUIDANCE} if open_details else {}),
             **(
                 {
                     "写前准备契约版本": preparation["version"],
@@ -374,8 +446,9 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
         {"scope": f"仅{source_label}，尚未读取候选"},
         validate_author,
         contract=author_contract,
+        **({"diagnostic_label": "AI工作章纲写前解释"} if open_details else {}),
     )
-    return contract
+    return normalize_open_plan(contract) if open_details else contract
 
 
 async def audit_plot(worker, author_text, text, number, *, source_kind=None, prepared_contract=None):

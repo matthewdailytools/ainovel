@@ -48,6 +48,9 @@ class PlanPreservation(Input):
 
 
 def enabled(worker):
+    from .workflow_plan_open_details import enabled as open_enabled
+
+    open_enabled(worker)
     if "workflow_plan_preparation_version" not in worker.task["result"]:
         return False
     marker = worker.task["result"]["workflow_plan_preparation_version"]
@@ -115,6 +118,14 @@ def constraints(worker, plot):
 
 
 def check_receipt(worker, row, plot, chapter):
+    from .workflow_plan_open_details import KEY, VERSION as OPEN_VERSION
+
+    if KEY in row and (row[KEY] != OPEN_VERSION or worker.task["result"].get(KEY) != OPEN_VERSION):
+        raise DomainError("plan_preparation_changed", "本章开放细节解释政策无法确认。", 409)
+    if KEY in row:
+        from .workflow_plan_context import validate as validate_creative_context
+
+        validate_creative_context(worker, row)
     expected = bindings(worker, plot, chapter)
     if (
         chapter["position"] != plot["number"]
@@ -153,6 +164,12 @@ def lineage(worker):
 async def phase(worker, row, key, state, invoke):
     """A resumed dispatch can read exact paid cache entries, never issue a new call."""
     active(worker)
+    from .workflow_plan_open_details import KEY as OPEN_KEY
+
+    if OPEN_KEY in row:
+        from .workflow_plan_context import validate as validate_creative_context
+
+        validate_creative_context(worker, row, current=True)
     slots = row.setdefault("phases", {})
     slot = slots.get(key)
     history = []
@@ -278,6 +295,8 @@ async def prepare(worker, plot, chapter):
     if not enabled(worker):
         return plot, None
     result = worker.task["result"]
+    from .workflow_plan_open_details import KEY as OPEN_KEY, VERSION as OPEN_VERSION
+
     rows = result.setdefault("plot_preparations", {})
     row = rows.get(str(plot["number"]))
     if row is None:
@@ -289,6 +308,7 @@ async def prepare(worker, plot, chapter):
             )
         row = rows[str(plot["number"])] = {
             **bindings(worker, plot, chapter),
+            **({OPEN_KEY: OPEN_VERSION} if OPEN_KEY in result else {}),
             "status": "interpreting",
             "round": 0,
             "effective_plot": plot["plot"],
@@ -298,6 +318,10 @@ async def prepare(worker, plot, chapter):
             "preservation_checks": [],
             "reason": "",
         }
+        if OPEN_KEY in row:
+            from .workflow_plan_context import KEY as CONTEXT_KEY, freeze as freeze_creative_context
+
+            row[CONTEXT_KEY] = freeze_creative_context(worker, row, chapter)
         worker.checkpoint(result)
     check_receipt(worker, row, plot, chapter)
     if row["status"] == "ready":
@@ -306,11 +330,25 @@ async def prepare(worker, plot, chapter):
     if row["status"] == "needs_review":
         return stop(worker, row, row["reason"])
     fixed = constraints(worker, plot)
+    from .workflow_plan_context import KEY as CONTEXT_KEY, VERSION as CONTEXT_VERSION, for_action
+
+    def creative_instruction():
+        return (
+            {
+                "写前创作上下文版本": CONTEXT_VERSION,
+                "写前创作上下文摘要": row[CONTEXT_KEY]["sha256"],
+                "采用上下文边界": "设定、频道题材及规划只作为创作边界，不是已发生事实，不证明原章纲已明确。仅使用冻结的本书前叙述来源；状态、人物知识及有效时点未知不擅自补齐。题材预设不升级成作者硬条件。",
+                "创作兼容核对": "选择开放角色或物品须遵守已采用身份、世界规则及相关前章约束，保持原角色／物品区分。独立保持核对的constraints_check同时检查这种兼容性；实际冲突fail，选择确实依赖未明状态才unknown，不因无关未知一律阻断，不凭频道增添CP或作者未锁定的结果。",
+            }
+            if OPEN_KEY in row
+            else {}
+        )
+
     try:
         while True:
             round_number = row["round"]
             initial = row["interpretations"][0]["contract"] if row["interpretations"] else None
-            contract = await phase(
+            interpretation = await phase(
                 worker,
                 row,
                 f"interpret:{round_number}",
@@ -322,6 +360,7 @@ async def prepare(worker, plot, chapter):
                     preparation={
                         "version": VERSION,
                         "round": round_number,
+                        **({OPEN_KEY: OPEN_VERSION} if OPEN_KEY in row else {}),
                         **(
                             {"item_count": len(initial["items"]), "原始事项": indexed(initial)}
                             if initial is not None
@@ -330,12 +369,15 @@ async def prepare(worker, plot, chapter):
                     },
                 ),
             )
+            contract = interpretation["contract"] if OPEN_KEY in row else interpretation
+            open_details = interpretation["open_details"] if OPEN_KEY in row else []
             if not any(r["round"] == round_number for r in row["interpretations"]):
                 row["interpretations"].append(
                     {
                         "round": round_number,
                         "source_sha256": row["effective_plot_sha256"],
                         "contract": deepcopy(contract),
+                        **({"open_details": deepcopy(open_details)} if OPEN_KEY in row else {}),
                     }
                 )
                 worker.checkpoint(result)
@@ -356,15 +398,24 @@ async def prepare(worker, plot, chapter):
                     {
                         "动作": CHECK_ACTION,
                         "写前准备契约版本": VERSION,
+                        **({OPEN_KEY: OPEN_VERSION} if OPEN_KEY in row else {}),
+                        **creative_instruction(),
                         "原始本章": plot,
                         "有效章纲": row["effective_plot"],
                         "初轮全部事项": indexed(initial),
                         "本轮全部事项": indexed(contract),
                         "不可更改的来源": fixed,
-                        "要求": "独立核对每个初轮事项与同编号本轮事项的语义保持，含原文中尚未展开的事项，不得靠删项、合并、换义消除歧义。原明确事件、否定、尝试/完成/未来阶段、只/仅接收范围和时点限制必须保持。剧情明确保留未知时不得提前解谜；附注只可细化本事项开放细节，不新增脱离原计划事件。逐项按原P编号顺序各一次，不符fail、无法判断unknown；constraints_check独立核对作者简报/固定条件/采用约定和完整原规划前后衔接，不能因附注自称保持就pass。这里没有正文，不得从候选反推章纲。",
+                        "要求": "独立核对每个初轮事项与同编号本轮事项的语义保持，含原文中尚未展开的事项，不得靠删项、合并、换义消除歧义。原明确事件、否定、尝试/完成/未来阶段、只/仅接收范围和时点限制必须保持。剧情明确保留未知时不得提前解谜；附注只可细化本事项开放细节，不新增脱离原计划事件。逐项按原P编号顺序各一次，不符fail、无法判断unknown；constraints_check独立核对作者简报/固定条件/采用约定和完整原规划前后衔接，不能因附注自称保持就pass。"
+                        + (
+                            "未提供本章正文或候选；已保存前章资料仅作兼容核对和创作边界，不得反推原章纲已明确。"
+                            if OPEN_KEY in row
+                            else "这里没有正文，不得从候选反推章纲。"
+                        ),
                     },
                     PlanPreservation,
-                    {"scope": "写前独立保持核对，仅原规划、固定条件和解释，无正文或候选"},
+                    for_action(worker, row, "check")
+                    if OPEN_KEY in row
+                    else {"scope": "写前独立保持核对，仅原规划、固定条件和解释，无正文或候选"},
                     lambda value: preservation_issues(value, initial, contract),
                     contract=check_schema,
                 ),
@@ -405,11 +456,24 @@ async def prepare(worker, plot, chapter):
                         "原始本章": plot,
                         "当前有效章纲": row["effective_plot"],
                         "执行解释": indexed(contract),
+                        **creative_instruction(),
+                        **(
+                            {"原话尚未确定的执行槽": open_details, OPEN_KEY: OPEN_VERSION}
+                            if OPEN_KEY in row
+                            else {}
+                        ),
                         "不可更改的来源": fixed,
-                        "要求": "只为本轮ambiguous事项选择尚未限定的可执行细节，输出追加附注，不重写原文。原明确事件、阶段、否定、只/仅范围和全部作者条件不得改变；明确保留的剧情未知不能解谜，未来章安排不能提前兑现。不新增脱离原事项的事件。附注是AI工作安排，非作者新锁定或事实；不读取正文或候选。",
+                        "要求": "只为本轮ambiguous事项选择尚未限定的可执行细节，输出追加附注，不重写原文。原明确事件、阶段、否定、只/仅范围和全部作者条件不得改变；明确保留的剧情未知不能解谜，未来章安排不能提前兑现。不新增脱离原事项的事件。附注是AI工作安排，非作者新锁定或事实；"
+                        + (
+                            "未提供本章正文或候选；已保存前章资料仅作兼容核对和创作边界，不得反推原章纲已明确。"
+                            if OPEN_KEY in row
+                            else "不读取正文或候选。"
+                        ),
                     },
                     PlanChoice,
-                    {"scope": "只为未写正文的本章AI开放细节选择，未读取正文或候选"},
+                    for_action(worker, row, "choice")
+                    if OPEN_KEY in row
+                    else {"scope": "只为未写正文的本章AI开放细节选择，未读取正文或候选"},
                     4096,
                 ),
             )

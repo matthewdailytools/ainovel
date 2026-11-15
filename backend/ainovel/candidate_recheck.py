@@ -32,6 +32,7 @@ def source_view(domain, parent):
         task=parent,
         domain=domain,
         author_snapshot=lambda: deepcopy(parent["result"]["author_contract_snapshot"]),
+        genre_snapshot=lambda: deepcopy(parent["result"]["genre_profile_snapshot"]),
     )
 
 
