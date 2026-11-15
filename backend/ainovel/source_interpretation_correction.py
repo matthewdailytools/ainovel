@@ -23,6 +23,9 @@ KIND = "source_interpretation_correction"
 PROPOSE = "仅从原情节纠偏事项主体与指令性质"
 VERIFY = "独立核对来源解释纠偏与全部事项保持"
 READONLY_KINDS = {KIND, "source_corrected_candidate_recheck"}
+SHAPE_KEY = "source_correction_shape_version"
+SHAPE_VERSION = "source-correction-output-shape/1"
+SHAPE_EVENT = "source_correction_shape_frozen"
 
 
 class CorrectionInput(CandidateRecheckInput):
@@ -65,6 +68,67 @@ class Preservation(Input):
     summary: str = Field(min_length=1, max_length=2000)
 
 
+def shape_enabled(snapshot):
+    if SHAPE_KEY not in snapshot:
+        return False
+    if snapshot[SHAPE_KEY] != SHAPE_VERSION:
+        raise DomainError("source_correction_shape", "来源纠偏输出契约版本无法确认，未升级或重发。", 409)
+    return True
+
+
+def versioned_payload(domain, payload):
+    """Keep a previous nonce's policy; freeze new nonces with the new shape."""
+    if SHAPE_KEY in payload:
+        shape_enabled(payload)
+        return payload
+    rows = domain.db.all("SELECT task_id FROM task_requests WHERE key=?", (payload.get("client_request_id"),))
+    if rows:
+        old = domain.task(rows[0]["task_id"])
+        if old["kind"] == KIND:
+            return {
+                **payload,
+                **({SHAPE_KEY: old["payload"][SHAPE_KEY]} if shape_enabled(old["payload"]) else {}),
+            }
+        return payload
+    return {**payload, SHAPE_KEY: SHAPE_VERSION}
+
+
+def validate_shape(domain, task):
+    snapshot = task["result"].get("source_correction_snapshot", {})
+    containers = (task["payload"], task["result"], snapshot)
+    events = domain.db.all(
+        "SELECT payload FROM task_events WHERE task_id=? AND kind=?", (task["id"], SHAPE_EVENT)
+    )
+    if not events and not any(SHAPE_KEY in row for row in containers):
+        return False
+    if len(events) != 1 or not all(shape_enabled(row) for row in containers):
+        raise DomainError("source_correction_shape", "新输出契约标记或冻结依据缺失，未降级为旧模板。", 409)
+    frozen = json.loads(events[0]["payload"])
+    if frozen != {
+        SHAPE_KEY: SHAPE_VERSION,
+        "payload_sha256": sha(task["payload"]),
+        "snapshot_sha256": sha(snapshot),
+    }:
+        raise DomainError("source_correction_shape", "输出契约与原冻结输入不符，保留旧步骤并停止。", 409)
+    return True
+
+
+def output_contract(snapshot, *, preservation=False):
+    if not shape_enabled(snapshot):
+        return None
+    schema = (Preservation if preservation else Proposal).model_json_schema()
+    ids = [f"P{i:02}" for i in range(1, len(snapshot["prepared_contract"]["items"]) + 1)]
+    field, definition = ("item_checks", "ItemCheck") if preservation else ("items", "ProposedItem")
+    schema["properties"][field].update(minItems=len(ids), maxItems=len(ids))
+    schema["$defs"][definition]["properties"]["item_id"]["enum"] = ids
+    if preservation:
+        fixed = [f"FIX{i:03}" for i in range(1, len(snapshot["fixed"]) + 1)]
+        schema["properties"]["fixed_checks"].update(minItems=len(fixed), maxItems=len(fixed))
+        if fixed:
+            schema["$defs"]["FixedCheck"]["properties"]["condition_id"]["enum"] = fixed
+    return schema
+
+
 def freeze(domain, request, *, verify_basis=True):
     """Reuse eligibility checks, but never the old recheck execution policy."""
     snapshot = old_freeze(domain, request)
@@ -82,10 +146,13 @@ def freeze(domain, request, *, verify_basis=True):
         "item_ids": selected,
         "original_contract_sha256": sha(original),
         "source_text_sha256": sha(snapshot["plot"]["plot"]),
+        **({SHAPE_KEY: SHAPE_VERSION} if shape_enabled(request) else {}),
     }
     # Selected P IDs are an explicit request scope; preview displays all P items.
     # Every source/candidate/config field is bound even for same-revision reviews.
-    snapshot["basis_sha256"] = sha({key: value for key, value in snapshot.items() if key != "item_ids"})
+    snapshot["basis_sha256"] = sha(
+        {key: value for key, value in snapshot.items() if key not in {"item_ids", SHAPE_KEY}}
+    )
     if verify_basis and request.get("preview_basis_sha256") != snapshot["basis_sha256"]:
         raise DomainError(
             "source_correction_preview_changed", "预览依据已改变，保留输入并重新读取后使用新提交标识。", 409
@@ -97,6 +164,7 @@ def validate(worker):
     expected = worker.task["result"].get("source_correction_snapshot")
     if worker.task["result"].get("source_correction_version") != VERSION or expected is None:
         raise DomainError("source_correction_version", "来源纠偏版本未冻结，不能升级旧任务。", 409)
+    validate_shape(worker.domain, worker.task)
     if freeze(worker.domain, worker.task["payload"]) != expected:
         raise DomainError("source_correction_changed", "来源、候选或故事版本已改变，保留旧步骤并停止。", 409)
     return expected
@@ -124,6 +192,28 @@ def source_frame(snapshot, *, proposal=None):
             "本阶段没有候选正文、旧检查、全书规划或自由reason，不得补造。"
         ),
     }
+    if shape_enabled(snapshot):
+        ids = [f"P{i:02}" for i in range(1, len(original["items"]) + 1)]
+        frame.update(
+            来源纠偏输出契约版本=SHAPE_VERSION,
+            全部P编号按原顺序=ids,
+            未选择事项原样返回字段=[
+                {
+                    "item_id": item_id,
+                    "actor": item["actor"],
+                    "certainty": item["certainty"],
+                    "statement_kind": "story_event",
+                }
+                for item_id, item in zip(ids, original["items"], strict=True)
+                if item_id not in snapshot["item_ids"]
+            ],
+            完整输出要求=(
+                f"本次共有{len(ids)}个原P事项。允许纠偏事项仅限定可修改范围，不是输出范围。"
+                f"items必须按全部P编号原顺序返回全部{len(ids)}项各一次，不能只返回选中的{len(snapshot['item_ids'])}项。"
+                "未选择事项actor、certainty保持原值，statement_kind保持story_event，仍须给原话证据和理由。"
+                "只读原情节和旧解释；不得从候选正文、旧正文检查、自由reason或全书未来补齐。"
+            ),
+        )
     if proposal is not None:
         frame.update(
             纠偏提案=deepcopy(proposal),
@@ -141,6 +231,12 @@ def source_frame(snapshot, *, proposal=None):
                 "非允许事项保持原解释。真正角色选择、无法确认回指或指令性质均unknown，不能强行通过。"
             ),
         )
+        if shape_enabled(snapshot):
+            frame["完整保持输出要求"] = (
+                f"item_checks必须按原顺序覆盖全部{len(original['items'])}个P各一次，不是仅核选中事项；"
+                f"fixed_checks须按原顺序覆盖全部{len(snapshot['fixed'])}个FIX各一次，没有FIX时返回空数组。"
+                "独立回到原情节及固定条件核对，不把提案自称保持当证据；有歧义或无法确认仍unknown。"
+            )
     return frame
 
 
@@ -330,6 +426,7 @@ async def run(worker):
         Proposal,
         {"scope": "仅冻结本章原情节及旧解释；没有正文"},
         structure_repairs=0,
+        contract=output_contract(snapshot),
     )
     validate(worker)
     proposal, corrected = resolve_proposal(result, snapshot)
@@ -340,6 +437,7 @@ async def run(worker):
         Preservation,
         {"scope": "仅冻结原情节、旧解释、提案与固定条件保持；没有正文"},
         structure_repairs=0,
+        contract=output_contract(snapshot, preservation=True),
     )
     validate(worker)
     preservation = resolve_preservation(result, snapshot)
@@ -394,6 +492,7 @@ def preview(domain, artifact_id):
         "chapter_id": candidate["chapter_id"],
         "base_revision": candidate["base_revision"],
         "item_ids": ids,
+        SHAPE_KEY: SHAPE_VERSION,
     }
     snapshot = freeze(domain, request, verify_basis=False)
     return {
@@ -408,6 +507,7 @@ def preview(domain, artifact_id):
         "story_revision": snapshot["story_revision"],
         "source_workflow_id": parent["id"],
         "notice": "两个独立模型步骤，仅发送原情节和解释；第二步另核固定条件保持，产生额外费用。",
+        SHAPE_KEY: SHAPE_VERSION,
     }
 
 
@@ -440,7 +540,7 @@ def register_routes(app, domain, budget, provider_ready):
 
     @app.post("/api/artifacts/{artifact_id}/source-interpretation-corrections", status_code=202)
     def create_correction(artifact_id: str, data: CorrectionInput):
-        payload = request_payload(domain, artifact_id, data)
+        payload = versioned_payload(domain, request_payload(domain, artifact_id, data))
         previous = domain.find_request(KIND, payload)
         if previous:
             return previous

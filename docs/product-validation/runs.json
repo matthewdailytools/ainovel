@@ -5949,5 +5949,170 @@
     "scenario": "统一520完整无头85pass/墙339.165s，0unexpected/flaky/skipped；含真实computed文字2x及全部原业务路径，三轮520逐项相同",
     "result": "passed",
     "fix_of": ""
+  },
+  {
+    "id": "bf270-exact-dual-ci-success-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "reliability",
+    "scenario": "同bf270分支43718945874/main43720625033均success，1950/378/85/48；精确head及main日志SHA核对，非旧版本CI",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-bf270-live-rechecks-and-text-adoption.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-backup-deployed-verified-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "reliability",
+    "scenario": "583c fresh备份实际隔离恢复40表/25原件/265章/227任务；原rows/schema/usage/配置保持后发布8766/Bkf，原生身份及实际verify通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-bf270-live-rechecks-and-text-adoption.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-daily-readonly-first-target-failed-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "writing",
+    "scenario": "只读首轮33.05s设施失败：未先开章4导致候选列表缺目标；91GET+1reading PUT被拒，0实际写，前后保护通过",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-bf270-live-rechecks-and-text-adoption.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-daily-readonly-followup-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "writing",
+    "scenario": "仅补稳定chapter定位后5.79s通过：半自动r1新panel9P/r0历史，两旧FLOW提示；70GET/0非GET，320实际2x与键盘，40表/费用保护保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-bf270-live-rechecks-and-text-adoption.md",
+    "fix_of": "bf270-daily-readonly-first-target-failed-001"
+  },
+  {
+    "id": "bf270-source235-shape-blocked-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "writing",
+    "scenario": "付费source235完整返回仅P05–07三项而原scope9，严格顺序校验blocked_runtime；1settled/CNY0.012070，无ready/第二步/正文复检，新shape修复未交付",
+    "phase": "stability",
+    "result": "blocked",
+    "record": "2026-11-15-bf270-live-rechecks-and-text-adoption.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-auto6c54-recheck-succeeded-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "automatic",
+    "scenario": "显式复检6settled/CNY0.442410，11情节pass含P05、3来源supported，普通11pass+1未触发/10book pending；原r0正文未改，旧报告保留",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-bf270-live-rechecks-and-text-adoption.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-auto4-text-only-adopted-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "writing",
+    "scenario": "另行稳定回执明确indices[]保存同正文到正式章4r1，6flatfacts全部省略保留；正式facts/原workflow/预算保持，0新费用/无resume或后章",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-bf270-live-rechecks-and-text-adoption.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-seven-call-cost-audit-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "reliability",
+    "scenario": "7已结共CNY0.454480，原1526calls+metadata逐行保持；DS36.409066/余43.590934，OAI17.740313+旧unknown1.683170/余0.576517",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-bf270-live-rechecks-and-text-adoption.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-auto4-maintenance-not-run-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "automatic",
+    "scenario": "仅正文采用后未resume，正式章4结构/时点维护及第5章未执行；6事实待核，不将保存正文计为维护完成",
+    "phase": "stability",
+    "result": "not_run",
+    "record": "2026-11-15-bf270-live-rechecks-and-text-adoption.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-author-books-quality-unverified-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "automatic",
+    "scenario": "作者文学/实际总投入、两模式连续十章/跨卷/两新36章整书仍未验；半自动来源shape仍阻断，12模块整体不提升",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-bf270-live-rechecks-and-text-adoption.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-auto4-explicit-maintenance-checkpoint-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "automatic",
+    "scenario": "仅正文采纳后另行一次resume带pause_after_maintenance，200后实际paused/next5；pending/waiting/暂停标记清除，原36规划保持，无第5章正文",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-bf270-auto4-maintenance-checkpoint.md",
+    "fix_of": "bf270-auto4-maintenance-not-run-001"
+  },
+  {
+    "id": "bf270-auto4-structure-maintained-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "longform",
+    "scenario": "独立67fbd61b结构产物已采用22记录：人物2/事件7/状态7/关系2/承诺4，7场景；原正文及已采用候选保持，原略过6flatfacts仍候选待核",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-bf270-auto4-maintenance-checkpoint.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-auto4-structure-source-check-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "longform",
+    "scenario": "98处UTF16来源逐项命中章4r1，scene-event-refs/2时点检查完成/unknown0，人物4字段模型supported；引用通过不等于全部语义作者认可",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-bf270-auto4-maintenance-checkpoint.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-auto4-maintenance-cost-audit-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "reliability",
+    "scenario": "维护新增2settled/CNY0.249220，原1533calls逐行保持；DS累计36.658286/余43.341714，OAI17.740313+旧unknown1.683170保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-bf270-auto4-maintenance-checkpoint.md",
+    "fix_of": ""
+  },
+  {
+    "id": "bf270-auto4-maintenance-author-boundary-001",
+    "date": "2026-11-15",
+    "commit": "bf27069593091e00b1d2d7c31cee098762128c22",
+    "module": "automatic",
+    "scenario": "仅第4章维护检查点完成，作者结构语义/文学/实际总投入和连续十章/跨卷/两新36章未验；半自动shape未交付，12模块整体不提升",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-bf270-auto4-maintenance-checkpoint.md",
+    "fix_of": ""
   }
 ]

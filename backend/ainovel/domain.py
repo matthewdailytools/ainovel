@@ -642,6 +642,10 @@ class Domain:
             return task
 
     def queue(self, kind, payload, branch_id=None):
+        if kind == "source_interpretation_correction":
+            from .source_interpretation_correction import versioned_payload
+
+            payload = versioned_payload(self, payload)
         previous = self.find_request(kind, payload)
         if previous:
             return previous
@@ -704,6 +708,8 @@ class Domain:
                 author_contract_snapshot=snapshot["author_contract_snapshot"],
                 plot_contract_version="author-plot-audit/2",
             )
+            if kind == source_correction.KIND and source_correction.SHAPE_KEY in snapshot:
+                initial[source_correction.SHAPE_KEY] = snapshot[source_correction.SHAPE_KEY]
             if kind == corrected_recheck.KIND:
                 from .flow_entailment import KEY as CORRECTED_FLOW_KEY
 
@@ -852,6 +858,17 @@ class Domain:
                 ),
             )
             self.db.event(db, task_id, "queued", {"kind": kind})
+            if kind == "source_interpretation_correction" and source_correction.SHAPE_KEY in initial:
+                self.db.event(
+                    db,
+                    task_id,
+                    source_correction.SHAPE_EVENT,
+                    {
+                        source_correction.SHAPE_KEY: initial[source_correction.SHAPE_KEY],
+                        "payload_sha256": source_correction.sha(payload),
+                        "snapshot_sha256": source_correction.sha(initial["source_correction_snapshot"]),
+                    },
+                )
             self.db.event(
                 db,
                 task_id,

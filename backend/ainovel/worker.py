@@ -605,6 +605,11 @@ class Worker:
                         else {}
                     ),
                     **(
+                        {"source_correction_shape_version": source_instruction["来源纠偏输出契约版本"]}
+                        if "来源纠偏输出契约版本" in source_instruction
+                        else {}
+                    ),
+                    **(
                         {"scene_grounding_version": source_instruction["场景证据契约版本"]}
                         if "场景证据契约版本" in source_instruction
                         else {}

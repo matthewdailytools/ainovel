@@ -42,6 +42,7 @@ def freeze(domain, request, *, verify_basis=True):
     if receipt["kind"] != correction.KIND or receipt["status"] != "candidate" or not receipt["task_id"]:
         raise DomainError("source_correction_receipt", "须选择本候选有效的独立来源解释回执。", 409)
     task = domain.task(receipt["task_id"])
+    correction.validate_shape(domain, task)
     if (
         payload.get("version") != correction.VERSION
         or payload.get("state") != "ready"
@@ -61,6 +62,11 @@ def freeze(domain, request, *, verify_basis=True):
             **request,
             "item_ids": payload["snapshot"]["item_ids"],
             "preview_basis_sha256": payload["snapshot"]["basis_sha256"],
+            **(
+                {correction.SHAPE_KEY: payload["snapshot"][correction.SHAPE_KEY]}
+                if correction.SHAPE_KEY in payload["snapshot"]
+                else {}
+            ),
         },
     )
     if current != payload["snapshot"]:
