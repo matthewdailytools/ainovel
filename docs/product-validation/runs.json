@@ -6796,5 +6796,82 @@
     "result": "passed",
     "record": "2026-11-16-9b283-runtime-and-readonly.md",
     "fix_of": ""
+  },
+  {
+    "id": "unknown-scene-reason-20261116-root-backend",
+    "date": "2026-11-16",
+    "commit": "0c906a1+scene-unknown-working-tree",
+    "module": "未知场景原因",
+    "scenario": "明确理由更正、来源/并发/幂等及旧接口兼容",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-unknown-scene-reason-and-auto5-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "unknown-scene-reason-20261116-root-ui",
+    "date": "2026-11-16",
+    "commit": "0c906a1+scene-unknown-working-tree",
+    "module": "未知场景原因",
+    "scenario": "双入口正式API、丢响应、晚返回、中文与320实际2倍",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-unknown-scene-reason-and-auto5-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "unknown-scene-reason-20261116-live-not-yet",
+    "date": "2026-11-16",
+    "commit": "0c906a1+scene-unknown-working-tree",
+    "module": "未知场景原因",
+    "scenario": "41表日常迁移及MAINT01正式更正尚未执行",
+    "phase": "stability",
+    "result": "not_run",
+    "record": "2026-11-16-unknown-scene-reason-and-auto5-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic5-role1-20261116-source-error",
+    "date": "2026-11-16",
+    "commit": "9b2839a",
+    "module": "全自动整书",
+    "scenario": "来源解释无源新增接收方排他only，未倒改旧来源",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-16-unknown-scene-reason-and-auto5-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic5-role1-20261116-body-reviewed",
+    "date": "2026-11-16",
+    "commit": "9b2839a",
+    "module": "全自动整书",
+    "scenario": "候选第5章独立核对、不同副本误报与低项待澄清",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-16-unknown-scene-reason-and-auto5-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "source-roles-ci-9b283-20261116-success",
+    "date": "2026-11-16",
+    "commit": "9b2839a",
+    "module": "全项目CI",
+    "scenario": "精确9b283完整远端检查已success",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-unknown-scene-reason-and-auto5-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "source-roles-ci-0c906-20261116-success",
+    "date": "2026-11-16",
+    "commit": "0c906a1",
+    "module": "全项目CI",
+    "scenario": "精确0c906完整远端检查已success",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-unknown-scene-reason-and-auto5-review.md",
+    "fix_of": ""
   }
 ]

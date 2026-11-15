@@ -2,15 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type Chapter } from './api'
 import type { Notify } from './App'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
-import { hasSceneOrderBasis, sceneSaveMessage } from './sceneOrderBasis'
+import { hasSceneOrderBasis, readSceneOrderBasis, sceneSaveMessage } from './sceneOrderBasis'
 import { SceneOrderBasisDetails } from './SceneOrderBasisDetails'
 import { SceneReconfirmation } from './SceneReconfirmationPanel'
+import { SceneUnknownReasonCorrection } from './SceneUnknownReasonPanel'
 
 type Scene = {
   event_id?: string | null
   event_revision?: number | null
   order_basis?: unknown
   author_reconfirmed?: unknown
+  unknown_reason_corrected?: unknown
   title: string
   source_revision: number
   start: number
@@ -95,6 +97,7 @@ export function SceneTimePanel({
   const targetEpoch = liveTarget.current.epoch
   const [baseline, setBaseline] = useState(() => JSON.stringify(fresh(chapter)))
   const [reconfirmDirty, setReconfirmDirty] = useState(false)
+  const [correctionLocked, setCorrectionLocked] = useState(false)
   const dirty = JSON.stringify(form) !== baseline
   useLeaveGuard(dirty, '场景时点绑定')
   const [context, setContext] = useState<Context>()
@@ -151,7 +154,7 @@ export function SceneTimePanel({
     }
   }, [open, branchId, chapter.id, chapter.revision, cursor, data?.story_revision, notify])
   async function save(archived = false) {
-    if (busy || !data || (reconfirmDirty && !confirmLeave())) return
+    if (busy || correctionLocked || !data || (reconfirmDirty && !confirmLeave())) return
     setBusy(true)
     try {
       const result = await api<Data>(
@@ -237,7 +240,34 @@ export function SceneTimePanel({
             />
           </label>
           <SceneOrderBasisDetails scene={form} stale={editing?.stale} nameFor={eventNameFor} />
-          {editing && (
+          {editing && readSceneOrderBasis(editing.payload.order_basis)?.kind === 'unknown' && (
+            <SceneUnknownReasonCorrection
+              key={JSON.stringify([branchId, chapter.id, editing.id])}
+              branchId={branchId}
+              chapterId={chapter.id}
+              scene={editing}
+              disabled={dirty || busy}
+              onDirtyChange={setReconfirmDirty}
+              onLockChange={setCorrectionLocked}
+              onSaved={async () => {
+                const updated = await api<Data>(`/branches/${branchId}/chapters/${chapter.id}/scene-times`)
+                const row = updated.scenes.find((item) => item.id === editing.id)
+                if (!row) throw new Error('已保存的场景暂未读到。')
+                if (liveTarget.current.target !== target || liveTarget.current.epoch !== targetEpoch) return
+                setData(updated)
+                setEditing(row)
+                setForm(row.payload)
+                setBaseline(JSON.stringify(row.payload))
+                setBundle(undefined)
+                const revisions = await api<typeof history>(
+                  `/branches/${branchId}/chapters/${chapter.id}/scene-times/${row.id}/history`,
+                )
+                if (liveTarget.current.target === target && liveTarget.current.epoch === targetEpoch)
+                  setHistory(revisions)
+              }}
+            />
+          )}
+          {editing && readSceneOrderBasis(editing.payload.order_basis)?.kind !== 'unknown' && (
             <SceneReconfirmation
               key={JSON.stringify([branchId, chapter.id, editing.id])}
               branchId={branchId}
@@ -397,12 +427,15 @@ export function SceneTimePanel({
             />
           </label>
           <div className="actions">
-            <button disabled={busy || !data || !form.title.trim()} onClick={() => void save()}>
+            <button
+              disabled={busy || correctionLocked || !data || !form.title.trim()}
+              onClick={() => void save()}
+            >
               确认保存场景时点
             </button>
             {editing && (
               <>
-                <button disabled={busy} onClick={() => void save(true)}>
+                <button disabled={busy || correctionLocked} onClick={() => void save(true)}>
                   归档保存的场景绑定（保留历史）
                 </button>
                 <button

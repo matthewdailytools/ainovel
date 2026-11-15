@@ -10,6 +10,7 @@ from .db import DomainError, dumps, uid
 from .story_graph import Strict, graph, graph_snapshot, metadata_revision_compatible, query_context
 from .scene_order import SceneOrderAudit, audit_valid, payload_sha
 from .scene_reconfirmation import AuthorReconfirmation, PAYLOAD_HASH_VERSION
+from .scene_unknown_reason_correction import UnknownReasonCorrectionInput, UnknownReasonCorrected
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scene_times(
@@ -23,10 +24,17 @@ CREATE TABLE IF NOT EXISTS scene_reconfirmation_receipts(
  key TEXT PRIMARY KEY,scene_id TEXT NOT NULL REFERENCES scene_times(id),
  request_sha256 TEXT NOT NULL,result TEXT NOT NULL,created REAL NOT NULL);
 INSERT OR IGNORE INTO extension_migrations VALUES('scene-author-reconfirmation/1',unixepoch());
+CREATE TABLE IF NOT EXISTS scene_unknown_reason_correction_receipts(
+ key TEXT PRIMARY KEY,scene_id TEXT NOT NULL REFERENCES scene_times(id),
+ request_sha256 TEXT NOT NULL,result TEXT NOT NULL,created REAL NOT NULL);
+INSERT OR IGNORE INTO extension_migrations VALUES('scene-unknown-reason-correction/1',unixepoch());
 """
 
 
 class SceneTime(Strict):
+    unknown_reason_corrected: UnknownReasonCorrected | None = Field(
+        default=None, json_schema_extra={"readOnly": True}
+    )
     author_reconfirmed: AuthorReconfirmation | None = None
     order_basis: SceneOrderAudit | None = None
     event_id: str | None = None
@@ -44,6 +52,8 @@ class SceneTime(Strict):
     @model_serializer(mode="wrap")
     def retain_legacy_serialization(self, handler):
         value = handler(self)
+        if self.unknown_reason_corrected is None:
+            value.pop("unknown_reason_corrected", None)
         if self.author_reconfirmed is None:
             value.pop("author_reconfirmed", None)
         if self.order_basis is None:
@@ -56,6 +66,14 @@ class SaveScene(Strict):
     base_revision: int | None = Field(default=None, ge=0)
     scene: SceneTime
     archived: bool = False
+    unknown_reason_correction: UnknownReasonCorrectionInput | None = None
+
+    @model_serializer(mode="wrap")
+    def retain_legacy_serialization(self, handler):
+        value = handler(self)
+        if self.unknown_reason_correction is None:
+            value.pop("unknown_reason_correction", None)
+        return value
 
 
 def event_basis_valid(tx, payload, chapter_id, indexed):
@@ -122,6 +140,10 @@ def scenes(domain, branch_id, chapter_id):
 def save_scene(domain, branch_id, chapter_id, data, identifier=None):
     from .domain import utf16_slice
 
+    if data.unknown_reason_correction is not None:
+        from .scene_unknown_reason_correction import correct
+
+        return correct(domain, branch_id, chapter_id, data, identifier)
     creating = identifier is None
     identifier = identifier or uid()
     p = data.scene.model_dump()
@@ -141,6 +163,15 @@ def save_scene(domain, branch_id, chapter_id, data, identifier=None):
         if creating and (data.base_revision is not None or data.archived):
             raise DomainError("scene_changed", "新场景不能指定旧修订或直接归档。")
         previous = json.loads(old["payload"]) if old else {}
+        if "unknown_reason_corrected" in data.scene.model_fields_set:
+            if p.get("unknown_reason_corrected") != previous.get("unknown_reason_corrected"):
+                raise DomainError(
+                    "scene_reason_receipt_readonly",
+                    "未知原因更正回执由显式专用输入产生，不能伪造或改写。",
+                    409,
+                )
+        elif previous.get("unknown_reason_corrected") is not None:
+            p["unknown_reason_corrected"] = previous["unknown_reason_corrected"]
         if "author_reconfirmed" in data.scene.model_fields_set:
             if p.get("author_reconfirmed") != previous.get("author_reconfirmed"):
                 raise DomainError(
@@ -363,6 +394,10 @@ def chapter_context(domain, branch_id, chapter_id):
 
 
 def register_routes(app, domain):
+    from .scene_unknown_reason_correction import register_routes as register_reason_routes
+
+    register_reason_routes(app, domain)
+
     @app.get("/api/branches/{branch_id}/chapters/{chapter_id}/scene-context")
     def whole_context(branch_id: str, chapter_id: str):
         domain.chapter(chapter_id, branch_id)

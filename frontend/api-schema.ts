@@ -380,6 +380,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/unknown-reason-correction-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Preview */
+    get: operations['read_preview_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__unknown_reason_correction_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/unknown-reason-corrections/{key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Receipt */
+    get: operations['read_receipt_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__unknown_reason_corrections__key__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/chapters/{chapter_id}/scene-context': {
     parameters: {
       query?: never
@@ -2019,6 +2053,21 @@ export interface components {
        */
       acknowledge_unknown: boolean
     }
+    /** CorrectionEvidence */
+    CorrectionEvidence: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Revision */
+      revision: number
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Quote */
+      quote: string
+      /** Content Sha256 */
+      content_sha256: string
+    }
     /** CorrectionInput */
     CorrectionInput: {
       /**
@@ -2809,6 +2858,7 @@ export interface components {
        * @default false
        */
       archived: boolean
+      unknown_reason_correction?: components['schemas']['UnknownReasonCorrectionInput'] | null
     }
     /** SceneOrderAudit */
     SceneOrderAudit: {
@@ -2837,6 +2887,7 @@ export interface components {
     }
     /** SceneTime */
     SceneTime: {
+      readonly unknown_reason_corrected?: components['schemas']['UnknownReasonCorrected'] | null
       author_reconfirmed?: components['schemas']['AuthorReconfirmation'] | null
       order_basis?: components['schemas']['SceneOrderAudit'] | null
       /** Event Id */
@@ -2979,6 +3030,101 @@ export interface components {
       end: number
       /** Quote */
       quote: string
+    }
+    /** UnknownReasonCorrected */
+    UnknownReasonCorrected: {
+      /**
+       * Version
+       * @default scene-unknown-reason-correction/1
+       * @constant
+       */
+      version: 'scene-unknown-reason-correction/1'
+      /**
+       * Authority
+       * @default explicit_correction_not_model_or_literary_review
+       * @constant
+       */
+      authority: 'explicit_correction_not_model_or_literary_review'
+      /**
+       * Actor
+       * @enum {string}
+       */
+      actor: 'author' | 'authorized_operator'
+      /** Scene Id */
+      scene_id: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Request Sha256 */
+      request_sha256: string
+      /** Reason */
+      reason: string
+      /** Previous Reason */
+      previous_reason: string
+      /** Original Reason */
+      original_reason: string
+      /** Previous Scene Revision */
+      previous_scene_revision: number
+      /** Scene Revision */
+      scene_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Story Revision */
+      story_revision: number
+      /** Source Revision */
+      source_revision: number
+      /** Content Sha256 */
+      content_sha256: string
+      /** Previous Payload Sha256 */
+      previous_payload_sha256: string
+      /** Previous Raw Json Sha256 */
+      previous_raw_json_sha256: string
+      /** Evidence */
+      evidence: components['schemas']['CorrectionEvidence'][]
+      /** Corrected At */
+      corrected_at: number
+      /**
+       * Story Time Inferred
+       * @default false
+       * @constant
+       */
+      story_time_inferred: false
+      /**
+       * Model Review Performed
+       * @default false
+       * @constant
+       */
+      model_review_performed: false
+      /**
+       * Literary Review Performed
+       * @default false
+       * @constant
+       */
+      literary_review_performed: false
+    }
+    /** UnknownReasonCorrectionInput */
+    UnknownReasonCorrectionInput: {
+      /**
+       * Version
+       * @constant
+       */
+      version: 'scene-unknown-reason-correction/1'
+      /** Client Request Id */
+      client_request_id: string
+      /**
+       * Actor
+       * @enum {string}
+       */
+      actor: 'author' | 'authorized_operator'
+      /** Base Payload Sha256 */
+      base_payload_sha256: string
+      /** Source Revision */
+      source_revision: number
+      /** Content Sha256 */
+      content_sha256: string
+      /** Reason */
+      reason: string
+      /** Evidence */
+      evidence: components['schemas']['CorrectionEvidence'][]
     }
     /** ValidationError */
     ValidationError: {
@@ -3987,6 +4133,73 @@ export interface operations {
       header?: never
       path: {
         branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_preview_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__unknown_reason_correction_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_receipt_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__unknown_reason_corrections__key__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+        identifier: string
+        key: string
       }
       cookie?: never
     }

@@ -790,6 +790,88 @@
         }
       }
     },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/unknown-reason-correction-preview": {
+      "get": {
+        "summary": "Read Preview",
+        "operationId": "read_preview_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__unknown_reason_correction_preview_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/unknown-reason-corrections/{key}": {
+      "get": {
+        "summary": "Read Receipt",
+        "operationId": "read_receipt_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__unknown_reason_corrections__key__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 8, "maxLength": 128, "title": "Key" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/chapters/{chapter_id}/scene-context": {
       "get": {
         "summary": "Whole Context",
@@ -3672,6 +3754,20 @@
         "required": ["client_request_id", "account", "reason"],
         "title": "ContinuationInput"
       },
+      "CorrectionEvidence": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "start": { "type": "integer", "minimum": 0, "title": "Start" },
+          "end": { "type": "integer", "exclusiveMinimum": 0, "title": "End" },
+          "quote": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Quote" },
+          "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Content Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "revision", "start", "end", "quote", "content_sha256"],
+        "title": "CorrectionEvidence"
+      },
       "CorrectionInput": {
         "properties": {
           "source_identity_context": {
@@ -4647,7 +4743,10 @@
             "title": "Base Revision"
           },
           "scene": { "$ref": "#/components/schemas/SceneTime" },
-          "archived": { "type": "boolean", "title": "Archived", "default": false }
+          "archived": { "type": "boolean", "title": "Archived", "default": false },
+          "unknown_reason_correction": {
+            "anyOf": [{ "$ref": "#/components/schemas/UnknownReasonCorrectionInput" }, { "type": "null" }]
+          }
         },
         "additionalProperties": false,
         "type": "object",
@@ -4679,6 +4778,10 @@
       },
       "SceneTime": {
         "properties": {
+          "unknown_reason_corrected": {
+            "anyOf": [{ "$ref": "#/components/schemas/UnknownReasonCorrected" }, { "type": "null" }],
+            "readOnly": true
+          },
           "author_reconfirmed": {
             "anyOf": [{ "$ref": "#/components/schemas/AuthorReconfirmation" }, { "type": "null" }]
           },
@@ -4822,6 +4925,131 @@
         "type": "object",
         "required": ["chapter_id", "revision", "start", "end", "quote"],
         "title": "TimeEvidence"
+      },
+      "UnknownReasonCorrected": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "const": "scene-unknown-reason-correction/1",
+            "title": "Version",
+            "default": "scene-unknown-reason-correction/1"
+          },
+          "authority": {
+            "type": "string",
+            "const": "explicit_correction_not_model_or_literary_review",
+            "title": "Authority",
+            "default": "explicit_correction_not_model_or_literary_review"
+          },
+          "actor": { "type": "string", "enum": ["author", "authorized_operator"], "title": "Actor" },
+          "scene_id": { "type": "string", "title": "Scene Id" },
+          "client_request_id": { "type": "string", "title": "Client Request Id" },
+          "request_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Request Sha256" },
+          "reason": { "type": "string", "title": "Reason" },
+          "previous_reason": { "type": "string", "title": "Previous Reason" },
+          "original_reason": { "type": "string", "title": "Original Reason" },
+          "previous_scene_revision": { "type": "integer", "title": "Previous Scene Revision" },
+          "scene_revision": { "type": "integer", "title": "Scene Revision" },
+          "base_story_revision": { "type": "integer", "title": "Base Story Revision" },
+          "story_revision": { "type": "integer", "title": "Story Revision" },
+          "source_revision": { "type": "integer", "title": "Source Revision" },
+          "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Content Sha256" },
+          "previous_payload_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Previous Payload Sha256"
+          },
+          "previous_raw_json_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Previous Raw Json Sha256"
+          },
+          "evidence": {
+            "items": { "$ref": "#/components/schemas/CorrectionEvidence" },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "corrected_at": { "type": "number", "title": "Corrected At" },
+          "story_time_inferred": {
+            "type": "boolean",
+            "const": false,
+            "title": "Story Time Inferred",
+            "default": false
+          },
+          "model_review_performed": {
+            "type": "boolean",
+            "const": false,
+            "title": "Model Review Performed",
+            "default": false
+          },
+          "literary_review_performed": {
+            "type": "boolean",
+            "const": false,
+            "title": "Literary Review Performed",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "actor",
+          "scene_id",
+          "client_request_id",
+          "request_sha256",
+          "reason",
+          "previous_reason",
+          "original_reason",
+          "previous_scene_revision",
+          "scene_revision",
+          "base_story_revision",
+          "story_revision",
+          "source_revision",
+          "content_sha256",
+          "previous_payload_sha256",
+          "previous_raw_json_sha256",
+          "evidence",
+          "corrected_at"
+        ],
+        "title": "UnknownReasonCorrected"
+      },
+      "UnknownReasonCorrectionInput": {
+        "properties": {
+          "version": { "type": "string", "const": "scene-unknown-reason-correction/1", "title": "Version" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "actor": { "type": "string", "enum": ["author", "authorized_operator"], "title": "Actor" },
+          "base_payload_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Base Payload Sha256"
+          },
+          "source_revision": { "type": "integer", "minimum": 0, "title": "Source Revision" },
+          "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Content Sha256" },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" },
+          "evidence": {
+            "items": { "$ref": "#/components/schemas/CorrectionEvidence" },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Evidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "client_request_id",
+          "actor",
+          "base_payload_sha256",
+          "source_revision",
+          "content_sha256",
+          "reason",
+          "evidence"
+        ],
+        "title": "UnknownReasonCorrectionInput"
       },
       "ValidationError": {
         "properties": {

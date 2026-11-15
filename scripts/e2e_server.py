@@ -599,6 +599,7 @@ def main():
     from e2e_scene_reconfirmation_fixture import register_scene_reconfirmation_fixture
     from e2e_source_correction_fixture import register_source_correction_fixture
     from e2e_flow_policy_fixture import register_flow_policy_fixture
+    from e2e_scene_unknown_reason_fixture import register_unknown_reason_fixture
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8877)
@@ -625,6 +626,7 @@ def main():
         register_scene_reconfirmation_fixture(app, settings, location)
         register_source_correction_fixture(app, settings, location)
         register_flow_policy_fixture(app, settings, location)
+        register_unknown_reason_fixture(app, settings)
         original = app.router.lifespan_context
 
         @asynccontextmanager

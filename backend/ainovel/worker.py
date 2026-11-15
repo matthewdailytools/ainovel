@@ -388,6 +388,9 @@ class Worker:
                 else definition
                 for definition in context["definitions"]
             ]
+        from .scene_unknown_reason_correction import model_context as scene_reason_model_context
+
+        context = scene_reason_model_context(context)
         semantic_prompt = dumps({"任务": instruction, "上下文": context})
         prompt = dumps(encode_prompt(instruction, context))
         if schema and self.settings.providers[payload["account"]].kind != "openai":

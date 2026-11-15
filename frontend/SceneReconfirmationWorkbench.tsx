@@ -3,6 +3,8 @@ import { api, type Chapter } from './api'
 import { confirmLeave } from './leaveGuard'
 import { SceneReconfirmation } from './SceneReconfirmationPanel'
 import type { SceneRow } from './sceneReconfirmation'
+import { readSceneOrderBasis } from './sceneOrderBasis'
+import { SceneUnknownReasonCorrection } from './SceneUnknownReasonPanel'
 
 export function SceneReconfirmationWorkbench({
   branchId,
@@ -88,7 +90,24 @@ export function SceneReconfirmationWorkbench({
               {row.archived ? ' · 已归档' : row.stale ? ' · 待复核' : ''}
             </button>
           ))}
-          {scene && (
+          {scene && readSceneOrderBasis(scene.payload.order_basis)?.kind === 'unknown' && (
+            <SceneUnknownReasonCorrection
+              key={JSON.stringify([owner, scene.id])}
+              branchId={branchId}
+              chapterId={chapterId}
+              scene={scene}
+              onDirtyChange={setDirty}
+              onSaved={async () => {
+                const result = await api<{ scenes: SceneRow[] }>(
+                  `/branches/${branchId}/chapters/${chapterId}/scene-times`,
+                )
+                if (liveOwner.current.owner !== owner || liveOwner.current.epoch !== epoch) return
+                setRows(result.scenes)
+                await onSaved()
+              }}
+            />
+          )}
+          {scene && readSceneOrderBasis(scene.payload.order_basis)?.kind !== 'unknown' && (
             <SceneReconfirmation
               key={JSON.stringify([owner, scene.id])}
               branchId={branchId}
