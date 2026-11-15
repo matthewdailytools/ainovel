@@ -7104,5 +7104,126 @@
     "result": "not_run",
     "record": "2026-11-16-author-source-clarification.md",
     "fix_of": ""
+  },
+  {
+    "id": "83c-ci-full-success-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "全项目CI",
+    "scenario": "精确83c远端2374／551／125／48全部成功",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": ""
+  },
+  {
+    "id": "83c-scene41-double-restore-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "备份迁移恢复",
+    "scenario": "正式备份及40→41目标binary再备份／第二次实际恢复，旧业务费用保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": ""
+  },
+  {
+    "id": "83c-daily-runtime-published-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "本机更新",
+    "scenario": "8766精确83c/C07、原生身份与601运行文件核对，41表迁移",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": ""
+  },
+  {
+    "id": "83c-daily-readonly-closed-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "全项目日常只读",
+    "scenario": "17.92秒83GET，旧半自动安全禁用、当前自动隐藏入口，所有浏览器关闭及全表保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": ""
+  },
+  {
+    "id": "maint01-controller-httpx-first-failed-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "更正执行器",
+    "scenario": "session GET后重复进入HTTPClient，正式prepare在PUT前失败，原失败保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": ""
+  },
+  {
+    "id": "maint01-controller-httpx-fixed-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "更正执行器",
+    "scenario": "contextmanager修复、真实Client五对照与来源请求篡改守卫通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": "maint01-controller-httpx-first-failed-20261116"
+  },
+  {
+    "id": "maint01-official-correction-83c-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "未知场景原因",
+    "scenario": "一次正式PUT200、原nonce回执核对，scene1/story32，旧稿及旧理由历史保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": "unknown-scene-reason-20261116-live-not-yet"
+  },
+  {
+    "id": "assisted4-ack-budget-preflight-failed-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "检查点执行器",
+    "scenario": "预算字符串／整数前置比较失败，尚无resume POST，原件保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted4-ack-sequence-verifier-failed-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "检查点执行器",
+    "scenario": "正式resume已200后核对器漏合法事件自增序号；未重发",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted4-ack32-paused5-verified-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "半自动恢复",
+    "scenario": "GET-only核对三事件与seq精确加3，paused5/expected32，原36规划及费用保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": "assisted4-ack-sequence-verifier-failed-20261116"
+  },
+  {
+    "id": "automatic5-source-scope-official-not-ready-83c-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "全自动来源纠偏",
+    "scenario": "旧automatic的无源only不能由现半自动纠偏入口修正，新受限回执尚私有，不先付正文复检",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
+    "fix_of": ""
   }
 ]
