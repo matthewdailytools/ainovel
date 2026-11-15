@@ -6455,5 +6455,126 @@
     "result": "not_run",
     "record": "2026-11-16-flow-continuation-and-source-evidence.md",
     "fix_of": ""
+  },
+  {
+    "id": "flow-0ec97-binding-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "reliability",
+    "scenario": "新shape2源码与目标一致：544Git+历史及新dist共553文件摘要覆盖匹配，无pyc；334已测输入与7新构建对应",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-0ec97-actual-restore-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "reliability",
+    "scenario": "新正式backup66df30ce及verify后真正隔离恢复40表/25原件/9回执/265章/230任务和全usage，无配置账户/Worker/迁移",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-0ec97-runtime-verified-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "reliability",
+    "scenario": "旧Worker自然退出、hidden启动、原生链/实际导入/新B_Da8YDa及API verify通过；旧业务和main保护保持，有重启中断",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-0ec97-readonly-scope-failed-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "workflow",
+    "scenario": "首GET窗8.519秒：错误要求当前DS任务家族包含无关全局USD未知，测试范围断言失败；无产品修改/HTTP写/模型",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-0ec97-readonly-final-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "workflow",
+    "scenario": "第二窗8.498秒/106GET：新shape2与FLOW、旧历史、320实际2x和键盘通过；42表/25原件/553文件保持，0写/外源/模型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": "flow-0ec97-readonly-scope-failed-001"
+  },
+  {
+    "id": "flow-source2-real-actor-failed-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "workflow",
+    "scenario": "新来源0ea393仅1已结CNY0.019366后P06 actor误装ambiguous而blocked；无第二步/ready/body/adopt/resume，原稿/父任务保持",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": "source-shape2-real-pending-001"
+  },
+  {
+    "id": "flow-source2-offline-diagnosis-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "reliability",
+    "scenario": "只读已付proposal重放定位字段包装；P07只静态，原话可回指既有主体是人工判断，不修生产提案或冒造ready",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": "flow-source2-real-actor-failed-001"
+  },
+  {
+    "id": "flow-source2-budget-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "reliability",
+    "scenario": "来源终态DS累计36.711380CNY/未知0/余43.288620；OAI17.740313USD/旧未知1.683170/余0.576517，全旧账保持不混币",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-0ec97-ci-import-failed-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "reliability",
+    "scenario": "CI43735831971/job132878119876实际2118通过1scripts导入失败/997.66秒，后续前端无头未运行；原decoded日志保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": ""
+  },
+  {
+    "id": "flow-console-import-fixed-001",
+    "date": "2026-11-16",
+    "commit": "bf10eea274f76b2db51347e67aa4fd24895e6d9d",
+    "module": "reliability",
+    "scenario": "bf10eea仅测试复用显式offline模型加载，原断言不改；无repo根路径console等效88通过，原用例单独新进程1通过，Ruff/格式过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": "flow-0ec97-ci-import-failed-001"
+  },
+  {
+    "id": "flow-console-ci-pending-001",
+    "date": "2026-11-16",
+    "commit": "bf10eea274f76b2db51347e67aa4fd24895e6d9d",
+    "module": "reliability",
+    "scenario": "本轮测试修复的远端完整CI尚未取得结果；日常仍0ec97，未把本地88项当新全量或旧CI追认为绿",
+    "phase": "stability",
+    "result": "not_run",
+    "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
+    "fix_of": ""
   }
 ]
