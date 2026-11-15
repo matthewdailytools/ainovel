@@ -84,9 +84,10 @@
     "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
-      "2026-11-15-scene-reconfirmation-and-semantic-corrections.md"
+      "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+      "2026-11-15-chapter3-joint-corrections.md"
     ],
-    "quality_scope": "相对事件查询与原来源保持的场景重核已有工程/日常证据；两套章2共36项最小语义更正、24记录+8场景修订及实际恢复通过，0模型。人物自述和无依据时段的修正不代表所有长篇事实或文学已验收。"
+    "quality_scope": "相对事件查询和场景重核已有工程/日常证据；此前两套章2共36项更正保留。本轮章3纠正知识、关系与资源有效时点，并在正式查询及1c4实际恢复中复检通过，原文和旧记录保留。人工最小更正不代表模型能稳定自动提取，十章/跨卷/整书及文学收益仍待验。"
   },
   {
     "id": "PV06",
@@ -103,9 +104,10 @@
     "latest_regression_evidence": "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
-      "2026-11-15-scene-reconfirmation-and-semantic-corrections.md"
+      "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
+      "2026-11-15-chapter3-joint-corrections.md"
     ],
-    "quality_scope": "多线/承诺保存与依赖检查已有工程证据；本轮将已决定整理与已完成区分并刷新依赖。跨卷及新整书的承诺完整闭合仍待实际运行。"
+    "quality_scope": "事件、依赖和承诺保存已有工程证据；此前章2更正与8场景回执保留。本轮半自动章3只更正事件标题主体并刷新依赖见证、显式重核同ID场景，原范围/顺序/视角保持，实际恢复通过；跨卷及新整书承诺闭合仍待验。"
   },
   {
     "id": "PV07",
@@ -169,9 +171,10 @@
       "2026-11-15-chapter-adherence-and-maintenance.md",
       "2026-11-15-memory-selection-and-races.md",
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
-      "2026-11-15-conditional-book-continuations.md"
+      "2026-11-15-conditional-book-continuations.md",
+      "2026-11-15-chapter3-joint-corrections.md"
     ],
-    "quality_scope": "新政策子任务保留原36规划/约定/题材与累计预算，实际采用并维护章3后，独立检查发现派生记忆范围及事件标题主体两处待更正，官方paused/next4。正文硬项尚未见确认违约，不等于十章/整书/文学与收益通过。"
+    "quality_scope": "新政策子任务保留原36规划/约定/题材及累计预算，实际采用并维护3章。章3派生事实范围与事件主体问题已按5项正式最小更正及语义查询复检，同步故事修订27，paused next4；0新增模型调用。工程人工介入不代表十章/整书/文学或总投入已通过。"
   },
   {
     "id": "PV10",
@@ -192,9 +195,10 @@
       "2026-11-15-chapter-adherence-and-maintenance.md",
       "2026-11-15-memory-selection-and-races.md",
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
-      "2026-11-15-conditional-book-continuations.md"
+      "2026-11-15-conditional-book-continuations.md",
+      "2026-11-15-chapter3-joint-corrections.md"
     ],
-    "quality_scope": "新政策子任务独立实际采用3章及结构维护；正式时点查询确认派生信息提前与资源移交后旧状态未结束，待最小修正。第4章在写前章纲解释两轮后受阻，未生成正文。原36计划/约定与旧费用保留，十章/整书/文学/总投入未验收。"
+    "quality_scope": "独立实际采用并维护3章。章3派生时点/交付后资源状态问题已按5项正式最小更正并复检，同步故事修订38，paused next4；0新增模型。第4章旧写前解释失败及三份调用保留，仍未生成正文；原36计划和预算不变，十章/跨卷/整书/文学及收益待验。"
   },
   {
     "id": "PV11",

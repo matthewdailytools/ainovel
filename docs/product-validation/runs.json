@@ -5091,5 +5091,93 @@
     "result": "failed",
     "record": "2026-11-15-conditional-book-continuations.md",
     "fix_of": ""
+  },
+  {
+    "id": "chapter3-assisted-derived-corrected-001",
+    "date": "2026-11-15",
+    "commit": "5fd7e7b6f099ef3d4e3a53688b77e14f0f65c144",
+    "module": "assisted",
+    "scenario": "第3章派生范围与事件主体最小更正：5项正式写入/语义查询通过；原正文/六记忆保留，非文学或整书认可",
+    "phase": "quality",
+    "result": "passed",
+    "record": "2026-11-15-chapter3-joint-corrections.md",
+    "fix_of": "conditional-assisted3-derived-failed-001"
+  },
+  {
+    "id": "chapter3-automatic-state-corrected-001",
+    "date": "2026-11-15",
+    "commit": "5fd7e7b6f099ef3d4e3a53688b77e14f0f65c144",
+    "module": "automatic",
+    "scenario": "第3章资源期满/知识与关系时点等5项正式更正通过；无提前信息/移交后旧持有，工程人工介入非无人验收",
+    "phase": "quality",
+    "result": "passed",
+    "record": "2026-11-15-chapter3-joint-corrections.md",
+    "fix_of": "conditional-automatic3-state-failed-001"
+  },
+  {
+    "id": "chapter3-joint-final-backup-restored-001",
+    "date": "2026-11-15",
+    "commit": "5fd7e7b6f099ef3d4e3a53688b77e14f0f65c144",
+    "module": "reliability",
+    "scenario": "1c4实际隔离恢复39物理表/全部usage/9回执/5新修订/2替代事实及语义查询通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-chapter3-joint-corrections.md",
+    "fix_of": ""
+  },
+  {
+    "id": "chapter3-assisted-checkpoint-sync-001",
+    "date": "2026-11-15",
+    "commit": "5fd7e7b6f099ef3d4e3a53688b77e14f0f65c144",
+    "module": "assisted",
+    "scenario": "显式同步半自动故事修订27，paused next4且维护空；原规划/步骤/正文/账本保持，0模型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-chapter3-joint-corrections.md",
+    "fix_of": ""
+  },
+  {
+    "id": "chapter3-automatic-checkpoint-sync-001",
+    "date": "2026-11-15",
+    "commit": "5fd7e7b6f099ef3d4e3a53688b77e14f0f65c144",
+    "module": "automatic",
+    "scenario": "显式同步全自动故事修订38，paused next4；旧三份无效写前解释与费用仍保留，未重发",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-chapter3-joint-corrections.md",
+    "fix_of": ""
+  },
+  {
+    "id": "chapter3-joint-complete-scope-unverified-001",
+    "date": "2026-11-15",
+    "commit": "5fd7e7b6f099ef3d4e3a53688b77e14f0f65c144",
+    "module": "automatic",
+    "scenario": "两书各3章且第4章未写；连续十章/跨卷/整书/其余作者文学与总投入仍未验收",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-chapter3-joint-corrections.md",
+    "fix_of": ""
+  },
+  {
+    "id": "validation-docs-d73-branch-ci-001",
+    "date": "2026-11-15",
+    "commit": "d73a98e8ddf60691c30831f99f67160e7cc08cf2",
+    "module": "reliability",
+    "scenario": "d73文档提交工作分支精确CI43694242891 success：1766后端/265前端/74无头/48既有，非新原型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-chapter3-joint-corrections.md",
+    "fix_of": ""
+  },
+  {
+    "id": "validation-docs-d73-main-ci-001",
+    "date": "2026-11-15",
+    "commit": "d73a98e8ddf60691c30831f99f67160e7cc08cf2",
+    "module": "reliability",
+    "scenario": "d73文档提交main精确CI43694269115 success：1766后端/265前端/74无头/48既有，非新原型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-chapter3-joint-corrections.md",
+    "fix_of": ""
   }
 ]
