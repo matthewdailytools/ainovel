@@ -349,7 +349,7 @@ def test_ancestor_nominal_limit_and_all_family_auxiliary_fees_are_subtracted_onc
 def test_child_next_chapter_runs_new_observation_and_source_check_without_old_replay(
     client, domain, settings, parent
 ):
-    from scripts.e2e_server import Model
+    from test_source_identity_pipeline import offline_browser_model
 
     exclusive = "plot-scope-exclusive-e2e：本章中，沈砚把潮水读数只告诉师傅，并让师傅记下。"
     payload = deepcopy(parent["payload"])
@@ -361,7 +361,8 @@ def test_child_next_chapter_runs_new_observation_and_source_check_without_old_re
     before = deepcopy(parent)
     body = request(client, parent)
     child = submit(client, parent, body).json()
-    model = Model()
+    model_class = offline_browser_model()
+    model = model_class()
     generate = model.generate
 
     async def capture(account, task_id, system, prompt, max_output, **kwargs):
