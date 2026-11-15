@@ -6169,5 +6169,170 @@
     "phase": "quality",
     "result": "not_run",
     "fix_of": ""
+  },
+  {
+    "id": "fc71-ci-complete-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "精确fc71 CI43726357330/job132849026769 success：1965后端/378前端/85全项目无头/48Node；保留实际完整日志，不以准备时pending冒绿",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-runtime-v1-export-only-blocked-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "v1仅导出529个Git文件；独立审发现held_tasks消费者与新binding不符，未执行live，原导出及冻结保持",
+    "phase": "stability",
+    "result": "blocked",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-prebackup-actual-restore-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "v2正式新backup07b57f7c及verify后实际隔离恢复：40物理表/25原件/9回执/265章/229tasks及全usage/schema保持，无迁移",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-controlled-stop-interruption-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "原生birth/父链/8766监听者核验后停止旧API，Worker自然退；新服务就绪前存在中断，不称零停机",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-legacy-pid-restart-blocked-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "旧无birth的单worker登记PID被无关应用复用，原启动门禁停止且尚无start-intent；未杀应用/删登记/改全局恢复guard",
+    "phase": "stability",
+    "result": "blocked",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-exact-single-row-restart-gate-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "仅本helper内核单row/投影唯一性/当前native birth与绝对image及created晚>5；其他原guard保持，新API/Worker不继承例外",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": "fc71-legacy-pid-restart-blocked-001"
+  },
+  {
+    "id": "fc71-diagnostic-pyc-coverage-blocked-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "诊断命令额外产生3个pyc，严格覆盖检查拒绝且无start-intent；原绑定源码无缺失或改动",
+    "phase": "stability",
+    "result": "blocked",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-diagnostic-pyc-quarantine-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "3个诊断cache按原SHA完整移至隔离保留目录，未删除/未改源码，537冻结文件恢复精确覆盖，未启动新进程",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": "fc71-diagnostic-pyc-coverage-blocked-001"
+  },
+  {
+    "id": "fc71-immutable-runtime-verified-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "fc71不可变副本hidden启动及verify完成，launcher/API/Worker16296/25008/39176有原生身份父链；Bkf及旧assets、main/index/status、原业务/全usage保持，部署模型0（备份2POST另算）",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-daily-readonly-window-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "实际日常6.112s/76GET/非GET0/写0/外源0/pageerror0/模型0，窗口已关闭；40表/schema/全usage/完整API/537文件与原任务候选保持，不含后续付费source",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-daily-source-preview-actual2x-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "writing",
+    "scenario": "日常新shape1原9P预览/旧r0历史/键盘及320px实际文字2倍可读，13→26与12→24px，4图已查看；只读不创任务、不追认旧政策",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-source75e6-evidence-blocked-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "writing",
+    "scenario": "新来源75e6首步完整返回P01-P09，但evidence填原句非AUTHOR编号，第一实际错误处blocked，无ready；actor/type其他疑点仅静态诊断，不冒已执行后续校验",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-source75e6-cost-audit-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "reliability",
+    "scenario": "仅1settled/input2972/output3473/CNY0.033728，新未知0；DS累计36.692014/余43.307986，OAI17.740313+旧unknown1.683170保持，不混币/清账",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-source75e6-downstream-not-run-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "writing",
+    "scenario": "没有第二source步骤/独立保持/正文复检/采纳/resume；旧235仍blocked，semi候选r1正式4空/needs_review4、auto正式4已维护/paused5保持",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
+  },
+  {
+    "id": "fc71-author-and-future-release-unverified-001",
+    "date": "2026-11-15",
+    "commit": "fc71c7de74283c2cb589112d9f487438a4a5c3a3",
+    "module": "automatic",
+    "scenario": "shape2尚私有未交付、新FLOWv4/UI未发布；十章/跨卷/两新36章、作者文学/总投入/收益及12模块整体不提升",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-16-fc71-runtime-and-source-attempt.md",
+    "fix_of": ""
   }
 ]
