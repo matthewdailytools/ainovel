@@ -5322,5 +5322,159 @@
     "result": "not_run",
     "record": "2026-11-15-plan-open-details-and-restart.md",
     "fix_of": ""
+  },
+  {
+    "id": "plan-open853-branch-ci-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "reliability",
+    "scenario": "精确853工作分支43701427817 success：1814后端884.01秒/300前端/48既有/82无头5.3m；原始日志独立封存",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-main-ci-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "reliability",
+    "scenario": "精确853 main43703007942 success：1814后端1331.91秒/300前端/48既有/82无头6.4m；未重跑，不冒充文学质量",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-restore-actual-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "reliability",
+    "scenario": "64d22d发布前实际隔离恢复39物理表/25资料原件/9回执，旧业务和完整usage保持；0模型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-openapi-verify-first-failed-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "reliability",
+    "scenario": "首次发布verify将0与0.0的86处等价数值视作差异而停止，原失败和原schema契约保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-rollout-actual-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "reliability",
+    "scenario": "verify-only精确数值比较20正反边界后实际完整核验成功；853/BUJ/7dist/native身份/原业务/usage/7配置保持，0模型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": "plan-open853-openapi-verify-first-failed-001"
+  },
+  {
+    "id": "plan-open853-daily-readonly-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "accessibility",
+    "scenario": "真实日常旧章纲/3失败来源/余额/旧报告入口，320px实际2倍/键盘/中文草稿通过；0写尝试/模型，SQL前后同",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-activation-actual-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "automatic",
+    "scenario": "正式reprepare新自动0eda和resume原半自动b453共2请求；原36规划/作者约定/频道题材/祖先费用保留，无新逐章情节",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-assisted-chapter4-held-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "assisted",
+    "scenario": "半自动第4章有独立待审候选，正式正文空rev0/仅采用前3章，needs_review4；情节解释及来源待核，不确证正文违约",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-automatic-chapter4-held-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "automatic",
+    "scenario": "自动写前一轮开放选择ready后生成独立候选，本章两次局部修订后needs_review4，正式章4空rev0；全书repair_round0不代表本章未修订",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-observer-ledger-first-blocked-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "reliability",
+    "scenario": "新observer preflight误将旧OpenAI unknown当作本轮DeepSeek阻断；8条USD1.683170保留，未启动/未pause",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-observer-ledger-guard-fixed-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "reliability",
+    "scenario": "费用范围守卫最小修正：DS unknown0；其他旧unknown逐行ID/金额/状态固定；1498行冻结基线核对，25离线边界过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": "plan-open853-observer-ledger-first-blocked-001"
+  },
+  {
+    "id": "plan-open853-observer-terminal-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "automatic",
+    "scenario": "新epoch只启动一次，10:42:11Z两模式held_needs_review4后原生确认退出；pause0/resume0/模型0，十章出口false",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-cost-accounting-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "reliability",
+    "scenario": "18:45:14账本只读：本轮7+21=28笔CNY2.708330全已结；DS35.954586/余44.045414，OAI旧费用和8unknown不变",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-open853-whole-book-author-quality-unverified-001",
+    "date": "2026-11-15",
+    "commit": "853d62d4436bfb18ba142f00e6adfc432e7c0940",
+    "module": "automatic",
+    "scenario": "两模式原36规划保持；连续十章/跨卷/整书/作者其余文学和总投入均未验收，旧18/15候选不采纳",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-plan-open-live-and-held.md",
+    "fix_of": ""
   }
 ]
