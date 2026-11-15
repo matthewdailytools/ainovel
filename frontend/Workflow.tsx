@@ -21,6 +21,7 @@ import { CharacterFieldRepairOption, FrozenCharacterFieldRepairPolicy } from './
 import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
 import { plotAuditFromPayload } from './plotAudit'
 import { CONDITIONAL_REVIEW_VERSION, ConditionalReviewNotice } from './ConditionalReviewNotice'
+import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from './MemorySelection'
 import { FrozenStructureOutputPolicy, StructureOutputSettings } from './StructureOutputSettings'
 import { PlanPreparationDetails, planPreparationNeedsReview } from './PlanPreparationDetails'
 import {
@@ -145,6 +146,7 @@ export function WorkflowPage({
   const waitingId = task?.result.waiting_structure || task?.result.waiting_artifact
   conditionalTarget.current = `${novel.id}/${task?.id || ''}`
   const waiting = loadedWaiting?.id === waitingId ? loadedWaiting : undefined
+  const memorySelection = useMemorySelection(waiting, `${novel.id}/${task?.id}/${waiting?.chapter_id}`)
   const structureWaiting = !!task?.result.waiting_structure
   const candidateChanged = !!waiting && incomingWaiting?.id === waiting.id
   const waitingPlotAudit = plotAuditFromPayload(waiting?.payload || {})
@@ -1035,16 +1037,31 @@ export function WorkflowPage({
                         <ConditionalReviewNotice value={waiting.payload.review} />
                         <pre>{JSON.stringify(waiting.payload.review, null, 2)}</pre>
                       </details>
+                      {waiting.status === 'candidate' && (
+                        <MemorySelectionPanel
+                          selection={memorySelection}
+                          disabled={busy || candidateChanged}
+                        />
+                      )}
+                      <MemoryAcceptanceRecord key={waiting.id} artifact={waiting} />
                       <button
                         className="primary"
-                        disabled={busy || candidateChanged || waiting.status !== 'candidate'}
+                        disabled={
+                          busy ||
+                          candidateChanged ||
+                          waiting.status !== 'candidate' ||
+                          !!memorySelection.error
+                        }
                         onClick={() =>
                           void perform(async () => {
-                            await api(`/artifacts/${waiting.id}/accept`, 'POST', {
-                              idempotency_key: 'manual-' + waiting.id,
-                              candidate_revision: waiting.candidate_revision,
-                            })
-                            setWaiting(await api(`/artifacts/${waiting.id}`))
+                            const request = memorySelection.input('manual-' + waiting.id)
+                            const target = conditionalTarget.current
+                            await api(`/artifacts/${waiting.id}/accept`, 'POST', request)
+                            memorySelection.acknowledge(request)
+                            if (!memorySelection.isCurrent() || conditionalTarget.current !== target) return
+                            const adopted = await api<Artifact>(`/artifacts/${waiting.id}`)
+                            if (!memorySelection.isCurrent() || conditionalTarget.current !== target) return
+                            setWaiting(adopted)
                             setStatus('候选已采纳。点击恢复继续下一章。')
                           })
                         }

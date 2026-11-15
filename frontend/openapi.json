@@ -1730,6 +1730,32 @@
         }
       }
     },
+    "/api/artifacts/{artifact_id}/acceptance": {
+      "get": {
+        "summary": "Candidate Acceptance Receipt",
+        "operationId": "candidate_acceptance_receipt_api_artifacts__artifact_id__acceptance_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/artifacts/{artifact_id}/recheck": {
       "post": {
         "summary": "Recheck Candidate",
@@ -2766,6 +2792,24 @@
             "minimum": 0,
             "title": "Candidate Revision",
             "default": 0
+          },
+          "memory_fact_indices": {
+            "anyOf": [{ "items": { "type": "integer" }, "type": "array" }, { "type": "null" }],
+            "title": "Memory Fact Indices",
+            "description": "仅正文/局部替换候选：None沿用全选，[]明确不采用附带事实；编号来自原memory.facts顺序。"
+          },
+          "memory_selection_reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Memory Selection Reason",
+            "default": ""
+          },
+          "memory_facts_sha256": {
+            "anyOf": [
+              { "type": "string", "maxLength": 64, "minLength": 64, "pattern": "^[0-9a-fA-F]{64}$" },
+              { "type": "null" }
+            ],
+            "title": "Memory Facts Sha256"
           }
         },
         "additionalProperties": false,

@@ -22,6 +22,12 @@ import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
 import { SceneTimePanel } from './SceneTimePanel'
 import { ConditionalReviewNotice } from './ConditionalReviewNotice'
+import {
+  MemoryAcceptanceRecord,
+  MemorySelectionPanel,
+  useMemorySelection,
+  type CandidateAcceptanceInput,
+} from './MemorySelection'
 import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
 import { plotAuditEnabled, plotAuditFromPayload } from './plotAudit'
 import {
@@ -1290,13 +1296,21 @@ export function Writing({
                   }}
                   busy={busy}
                   perform={doAction}
-                  onAccept={async () => {
+                  onAccept={async (request) => {
+                    const target = current.current?.id
+                    const load = loadSequence.current
+                    const comparison = candidateRequest.current
+                    const matches = () =>
+                      alive.current &&
+                      current.current?.id === target &&
+                      loadSequence.current === load &&
+                      candidateRequest.current === comparison
                     if (current.current) await save()
-                    await api(`/artifacts/${candidate.id}/accept`, 'POST', {
-                      idempotency_key: 'manual-' + candidate.id,
-                      candidate_revision: candidate.candidate_revision,
-                    })
+                    if (!matches()) return
+                    await api(`/artifacts/${candidate.id}/accept`, 'POST', request)
+                    if (!matches()) return
                     if (chapter) await loadChapter(chapter.id, 0, true)
+                    if (!alive.current || current.current?.id !== target) return
                     const latest = await api<Artifact[]>(`/artifacts?branch_id=${branch.id}`)
                     setArtifacts((rows) => refreshArtifactList(rows, latest))
                     await refresh()
@@ -1355,12 +1369,13 @@ function Candidate({
   onStarted: (task: Task) => void
   busy: boolean
   perform: (fn: () => Promise<unknown>) => Promise<void>
-  onAccept: () => Promise<void>
+  onAccept: (request: CandidateAcceptanceInput) => Promise<void>
   onUpdate: () => Promise<void>
 }) {
   const [edit, setEdit] = useState(artifact.payload.text || '')
   const [editRevision, setEditRevision] = useState(artifact.candidate_revision)
   const candidateChanged = editRevision !== artifact.candidate_revision
+  const memorySelection = useMemorySelection(artifact, `${novelId}/${branchId}/${chapter?.id}`)
   const [selectedDirection, setSelectedDirection] = useState('')
   useLeaveGuard(!!selectedDirection.trim(), '尚未载入的作者选定方向')
   let directionError = ''
@@ -1636,6 +1651,13 @@ function Candidate({
           </button>
         </section>
       )}
+      {artifact.status === 'candidate' && (
+        <MemorySelectionPanel
+          selection={memorySelection}
+          disabled={busy || candidateChanged || edit !== (artifact.payload.text || '')}
+        />
+      )}
+      <MemoryAcceptanceRecord key={artifact.id} artifact={artifact} />
       <div className="actions">
         <button
           className="primary"
@@ -1645,10 +1667,17 @@ function Candidate({
             (artifact.kind === 'intent' && !!artifact.payload.author_text) ||
             busy ||
             candidateChanged ||
+            !!memorySelection.error ||
             artifact.status !== 'candidate' ||
             edit !== (artifact.payload.text || '')
           }
-          onClick={() => void perform(onAccept)}
+          onClick={() =>
+            void perform(async () => {
+              const request = memorySelection.input('manual-' + artifact.id)
+              await onAccept(request)
+              memorySelection.acknowledge(request)
+            })
+          }
         >
           {['text_patch', 'chapter_draft'].includes(artifact.kind)
             ? '采纳到正文'

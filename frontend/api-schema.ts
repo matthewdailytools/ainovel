@@ -879,6 +879,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/artifacts/{artifact_id}/acceptance': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Candidate Acceptance Receipt */
+    get: operations['candidate_acceptance_receipt_api_artifacts__artifact_id__acceptance_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/artifacts/{artifact_id}/recheck': {
     parameters: {
       query?: never
@@ -1474,6 +1491,18 @@ export interface components {
        * @default 0
        */
       candidate_revision: number
+      /**
+       * Memory Fact Indices
+       * @description 仅正文/局部替换候选：None沿用全选，[]明确不采用附带事实；编号来自原memory.facts顺序。
+       */
+      memory_fact_indices?: number[] | null
+      /**
+       * Memory Selection Reason
+       * @default
+       */
+      memory_selection_reason: string
+      /** Memory Facts Sha256 */
+      memory_facts_sha256?: string | null
     }
     /** AdoptExtraction */
     AdoptExtraction: {
@@ -4585,6 +4614,37 @@ export interface operations {
         'application/json': components['schemas']['AcceptInput']
       }
     }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  candidate_acceptance_receipt_api_artifacts__artifact_id__acceptance_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        artifact_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
     responses: {
       /** @description Successful Response */
       200: {

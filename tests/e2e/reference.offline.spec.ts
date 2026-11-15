@@ -212,7 +212,38 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   expect(checked2.payload.plot_audit.candidate_revision).toBe(2)
   expect(checked2.payload.plot_audit.candidate_sha256).toBe(hash(revision2))
 
-  await page.getByRole('button', { name: '对照后采纳到目标正文', exact: true }).click()
+  // The checked manuscript is now revision 2. Even an empty memory list must
+  // be explicitly re-read after the candidate source changes; do not bypass
+  // the production adoption gate to keep the old one-click test sequence.
+  const adopt = page.getByRole('button', { name: '对照后采纳到目标正文', exact: true })
+  await expect(adopt).toBeDisabled()
+  const memory = page.getByRole('region', { name: '正文附带的记忆候选', exact: true })
+  await expect(memory).toContainText('原选择已失效')
+  const reread = memory.getByRole('button', { name: '读取新版记忆并重新选择', exact: true })
+  await expect(reread).toBeVisible()
+  await reread.focus()
+  await expect(reread).toBeFocused()
+  await reread.press('Enter')
+  await expect(adopt).toBeEnabled()
+  const currentCandidate = await (
+    await page.request.get(`/api/artifacts/${checked2.payload.target.candidate.id}`)
+  ).json()
+  expect(currentCandidate.candidate_revision).toBe(2)
+  expect(currentCandidate.payload.memory?.facts || []).toEqual([])
+  expect(currentCandidate.memory_facts_sha256).toMatch(/^[a-f0-9]{64}$/)
+  const adoption = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/artifacts/${currentCandidate.id}/accept`) &&
+      response.request().method() === 'POST',
+  )
+  await adopt.click()
+  const accepted = await adoption
+  expect(accepted.ok(), await accepted.text()).toBeTruthy()
+  expect(accepted.request().postDataJSON()).toMatchObject({
+    candidate_revision: 2,
+    memory_fact_indices: [],
+    memory_facts_sha256: currentCandidate.memory_facts_sha256,
+  })
   await expect(page.getByText('已采纳为新正文修订，原稿历史保留。故事记录可按需整理。')).toBeVisible()
   await page.getByRole('button', { name: '回到写作页继续编辑或恢复版本' }).click()
   await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toContainText('螺栓')

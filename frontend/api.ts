@@ -100,6 +100,7 @@ export type Artifact = {
   branch_id?: string
   task_id?: string | null
   candidate_revision: number
+  memory_facts_sha256?: string | null
   kind: string
   chapter_id: string | null
   base_revision: number | null

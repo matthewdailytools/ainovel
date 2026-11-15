@@ -53,6 +53,8 @@ class Model(ReferenceModel):
         self.character_repair_tasks = {}
         self.exclusive_plot_tasks = set()
         self.plan_preparation_tasks = {}
+        self.memory_selection_tasks = set()
+        self.memory_selection_modes = {}
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
@@ -60,6 +62,70 @@ class Model(ReferenceModel):
         source_instruction = instruction
         while "原始任务" in source_instruction:
             source_instruction = source_instruction["原始任务"]
+        if source_instruction.get(
+            "动作"
+        ) == "按章纲写完整正文" and "memory-selection-e2e" in source_instruction.get("本章", {}).get(
+            "plot", ""
+        ):
+            self.memory_selection_tasks.add(task_id)
+            plot = source_instruction["本章"]["plot"]
+            if "memory-selection-e2e-empty-refresh" in plot:
+                self.memory_selection_modes[task_id] = "工程记忆边界：复检后留空。"
+            elif "memory-selection-e2e-empty-initial" in plot:
+                self.memory_selection_modes[task_id] = "工程记忆边界：首次留空。"
+        if (
+            source_instruction.get("动作") == "从正文提取事实候选与章节摘要"
+            and task_id in self.memory_selection_tasks
+        ):
+            source_id = source_instruction["可引用原文"][0]["source_id"]
+            facts = [
+                {
+                    "subject": "沈砚",
+                    "kind": "event",
+                    "statement": "工程候选一：保存量潮记录。",
+                    "truth": "fact",
+                    "story_time": "未知",
+                    "evidence": source_id,
+                },
+                {
+                    "subject": "沈砚",
+                    "kind": "event",
+                    "statement": "工程候选二：等待作者核定时点。",
+                    "truth": "fact",
+                    "story_time": "午后（未核定的夹具时点）",
+                    "evidence": source_id,
+                },
+                {
+                    "subject": "沈砚",
+                    "kind": "event",
+                    "statement": "工程候选三：保留可回查的读数。",
+                    "truth": "fact",
+                    "story_time": "未知",
+                    "evidence": source_id,
+                },
+            ]
+            if "工程记忆边界：首次留空。" in source_instruction["正文"]:
+                facts = []
+            return {
+                "text": json.dumps(
+                    {"facts": facts, "summary": "只用于记忆选择工程验证，不代表事实质量。"},
+                    ensure_ascii=False,
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-memory-selection",
+            }
+        if source_instruction.get(
+            "动作"
+        ) == "从正文提取事实候选与章节摘要" and "工程记忆边界：复检后留空。" in source_instruction.get(
+            "正文", ""
+        ):
+            return {
+                "text": json.dumps(
+                    {"facts": [], "summary": "工程替身复检没有生成事实，保留正文。"}, ensure_ascii=False
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-memory-empty-refresh",
+            }
         identity_response = source_identity_output(source_instruction)
         if identity_response is not None:
             if source_instruction.get("动作") in {"阶段批次规划", "全书滚动规划", "按章纲写完整正文"}:
@@ -450,7 +516,10 @@ class Model(ReferenceModel):
                     "usage": {"input": 1, "output": 1},
                     "call_id": "offline-book-structure",
                 }
-            return await self.book_model.generate(account, task_id, system, prompt, max_output, **kwargs)
+            result = await self.book_model.generate(account, task_id, system, prompt, max_output, **kwargs)
+            if instruction.get("动作") == "按章纲写完整正文" and task_id in self.memory_selection_modes:
+                result["text"] += "\n" + self.memory_selection_modes[task_id]
+            return result
         if instruction.get("动作") == "按保存稿反向整理长篇结构候选":
             fixture = (
                 UpdateModel()

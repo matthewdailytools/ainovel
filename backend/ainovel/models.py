@@ -1,5 +1,5 @@
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from .author_contract import AuthorIntentFields
 
@@ -113,6 +113,21 @@ class CandidateVersionInput(Input):
 class AcceptInput(Input):
     idempotency_key: str = Field(min_length=8, max_length=128)
     candidate_revision: int = Field(default=0, ge=0)
+    memory_fact_indices: list[StrictInt] | None = Field(
+        default=None,
+        description="仅正文/局部替换候选：None沿用全选，[]明确不采用附带事实；编号来自原memory.facts顺序。",
+    )
+    memory_selection_reason: str = Field(default="", max_length=2000)
+    memory_facts_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern="^[0-9a-fA-F]{64}$"
+    )
+
+    @field_validator("memory_fact_indices")
+    @classmethod
+    def distinct_nonnegative_indices(cls, value):
+        if value is not None and (any(index < 0 for index in value) or len(set(value)) != len(value)):
+            raise ValueError("事实编号须为不重复的非负整数。")
+        return value
 
 
 class Fact(Input):

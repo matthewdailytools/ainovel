@@ -251,6 +251,10 @@ class Domain:
         for key in ("payload", "basis"):
             artifact[key] = json.loads(artifact[key])
         artifact["candidate_revision"] = artifact["payload"].get("_candidate_revision", 0)
+        if artifact["kind"] in {"chapter_draft", "text_patch"}:
+            from .memory_selection import facts_sha256
+
+            artifact["memory_facts_sha256"] = facts_sha256(artifact["payload"])
         return artifact
 
     @staticmethod
@@ -287,23 +291,57 @@ class Domain:
         attempt=None,
         candidate_revision=None,
         workflow_result=None,
+        memory_fact_indices=None,
+        memory_selection_reason="",
+        memory_facts_sha256=None,
     ):
+        from .memory_selection import check_replay, selection
+
         with self.db.connect(True) as db:
             row = db.execute("SELECT * FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
             if not row:
                 raise DomainError("not_found", "候选不存在。", 404)
             artifact = dict(row)
             artifact["payload"], artifact["basis"] = json.loads(row["payload"]), json.loads(row["basis"])
+            if artifact["kind"] not in {"chapter_draft", "text_patch"}:
+                selection(
+                    artifact,
+                    memory_fact_indices,
+                    memory_selection_reason,
+                    expected_sha256=memory_facts_sha256,
+                )
             prior = db.execute("SELECT * FROM receipts WHERE key=?", (key,)).fetchone()
             if prior:
                 if prior["artifact_id"] != artifact_id:
                     raise DomainError("idempotency", "采纳标识已用于另一个候选。", 409)
-                return json.loads(prior["result"])
+                receipt = json.loads(prior["result"])
+                chosen_memory = selection(
+                    artifact,
+                    memory_fact_indices,
+                    memory_selection_reason,
+                    require_reason=False,
+                    expected_sha256=memory_facts_sha256,
+                )
+                check_replay(
+                    receipt, chosen_memory, artifact, explicit_selection=memory_fact_indices is not None
+                )
+                return receipt
             previous = db.execute(
                 "SELECT result FROM receipts WHERE artifact_id=?", (artifact_id,)
             ).fetchone()
             if previous:
-                return json.loads(previous[0])
+                receipt = json.loads(previous[0])
+                chosen_memory = selection(
+                    artifact,
+                    memory_fact_indices,
+                    memory_selection_reason,
+                    require_reason=False,
+                    expected_sha256=memory_facts_sha256,
+                )
+                check_replay(
+                    receipt, chosen_memory, artifact, explicit_selection=memory_fact_indices is not None
+                )
+                return receipt
             current = db.execute("SELECT status FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
             if current[0] != "candidate":
                 raise DomainError("candidate_state", "该产物已被拒绝或采纳。", 409)
@@ -316,6 +354,9 @@ class Domain:
                 )
             if candidate_revision is not None and candidate_revision != payload.get("_candidate_revision", 0):
                 raise DomainError("candidate_conflict", "候选已有新修订，请重新比较后采纳；正文未改动。", 409)
+            chosen_memory = selection(
+                artifact, memory_fact_indices, memory_selection_reason, expected_sha256=memory_facts_sha256
+            )
             if "story_revision" in artifact["basis"]:
                 story_revision = db.execute(
                     "SELECT story_revision FROM branches WHERE id=?", (artifact["branch_id"],)
@@ -348,6 +389,8 @@ class Domain:
             if require_review and not payload.get("review_passed"):
                 raise DomainError("review_required", "候选尚未通过本轮检查，不能自动采纳。", 409)
             result = {"artifact_id": artifact_id, "chapter_id": artifact["chapter_id"]}
+            if chosen_memory is not None:
+                result["memory_selection"] = chosen_memory
             if artifact["kind"] in ("text_patch", "chapter_draft"):
                 chapter = dict(
                     db.execute("SELECT * FROM chapters WHERE id=?", (artifact["chapter_id"],)).fetchone()
@@ -365,7 +408,8 @@ class Domain:
                     content = payload["text"]
                 revision = self.revise_tx(db, chapter, content, "采纳候选")
                 memory = payload.get("memory", {})
-                for fact in memory.get("facts", []):
+                for index in chosen_memory["selected_indices"]:
+                    fact = memory["facts"][index]
                     self.add_fact_tx(db, artifact["branch_id"], chapter["id"], revision, fact, content)
                 result["revision"] = revision
             elif artifact["kind"] == "memory":
@@ -446,6 +490,13 @@ class Domain:
                 )
                 workflow_result.update(progress)
             return result
+
+    def acceptance_receipt(self, artifact_id):
+        self.artifact(artifact_id)
+        rows = self.db.all(
+            "SELECT result FROM receipts WHERE artifact_id=? ORDER BY rowid LIMIT 1", (artifact_id,)
+        )
+        return {"artifact_id": artifact_id, "receipt": json.loads(rows[0]["result"]) if rows else None}
 
     def genre_profile(self, branch_id, definitions=None):
         branch = self.branch(branch_id)

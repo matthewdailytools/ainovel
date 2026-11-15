@@ -6,6 +6,7 @@ import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { PlotAuditDetails } from './PlotAuditDetails'
 import { SourceIdentityOption } from './sourceIdentity'
 import { readComparisonTarget, usePlotAuditTarget } from './plotAuditTarget'
+import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from './MemorySelection'
 
 type Card = {
   id: string
@@ -261,6 +262,10 @@ export function ReferenceWorkspace({
     }
   }, [draft?.branch_id, notify])
   const candidate = artifacts.draft
+  const memorySelection = useMemorySelection(
+    candidate,
+    `${identifier}/${draft?.branch_id}/${draft?.chapter_id}`,
+  )
   useEffect(() => {
     let active = true
     if (!candidate) return
@@ -719,6 +724,13 @@ export function ReferenceWorkspace({
                 <ReferenceComparison value={candidate.payload.previous_reference_comparison} historical />
               </details>
             )}
+            {candidate.status === 'candidate' && (
+              <MemorySelectionPanel
+                selection={memorySelection}
+                disabled={busy || running || candidateText !== candidate.payload.text}
+              />
+            )}
+            <MemoryAcceptanceRecord key={candidate.id} artifact={candidate} />
             <div className="actions">
               <button
                 disabled={
@@ -752,14 +764,15 @@ export function ReferenceWorkspace({
                   busy ||
                   running ||
                   candidate.status !== 'candidate' ||
+                  !!memorySelection.error ||
                   candidateText !== candidate.payload.text
                 }
                 onClick={() =>
                   void perform(async () => {
-                    await api(`/artifacts/${candidate.id}/accept`, 'POST', {
-                      idempotency_key: 'reference-' + candidate.id,
-                      candidate_revision: candidate.candidate_revision,
-                    })
+                    const request = memorySelection.input('reference-' + candidate.id)
+                    await api(`/artifacts/${candidate.id}/accept`, 'POST', request)
+                    memorySelection.acknowledge(request)
+                    if (!mounted.current || !memorySelection.isCurrent()) return
                     setArtifacts((old) => ({ ...old, draft: { ...candidate, status: 'accepted' } }))
                     setMessage('已采纳为新正文修订，原稿历史保留。故事记录可按需整理。')
                   })

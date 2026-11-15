@@ -920,7 +920,18 @@ def create_app(settings=None, schema_only=False):
 
     @app.post("/api/artifacts/{artifact_id}/accept")
     def accept_candidate(artifact_id: str, data: AcceptInput):
-        return domain.accept(artifact_id, data.idempotency_key, candidate_revision=data.candidate_revision)
+        return domain.accept(
+            artifact_id,
+            data.idempotency_key,
+            candidate_revision=data.candidate_revision,
+            memory_fact_indices=data.memory_fact_indices,
+            memory_selection_reason=data.memory_selection_reason,
+            memory_facts_sha256=data.memory_facts_sha256,
+        )
+
+    @app.get("/api/artifacts/{artifact_id}/acceptance")
+    def candidate_acceptance_receipt(artifact_id: str):
+        return domain.acceptance_receipt(artifact_id)
 
     @app.post("/api/artifacts/{artifact_id}/recheck", status_code=202)
     def recheck_candidate(artifact_id: str, data: CandidateRecheckInput):
