@@ -271,6 +271,9 @@ class Worker:
         contract=None,
     ):
         payload = self.task["payload"]
+        from .flow_entailment import enabled as flow_entailment_enabled
+
+        flow_entailment_enabled(self)
         provider = self.settings.providers[payload["account"]]
         max_output = provider.output_limit(max_output, structured=schema is not None)
         if self.cancelled():
@@ -279,6 +282,18 @@ class Worker:
             from .candidate_recheck import validate
 
             validate(self)
+        run_limit = payload.get("budget_limit")
+        if self.task["kind"] in {"source_interpretation_correction", "source_corrected_candidate_recheck"}:
+            from . import source_interpretation_correction as source_correction
+            from . import source_corrected_candidate_recheck as corrected_recheck
+
+            module = source_correction if self.task["kind"] == source_correction.KIND else corrected_recheck
+            module.validate(self)
+            run_limit = source_correction.bounded_run_limit(self)
+        elif self.task["kind"] == "workflow":
+            from .source_interpretation_correction import bounded_run_limit
+
+            run_limit = bounded_run_limit(self)
         if payload.get("action") == "revision.targeted":
             selection = validate_targeted_revision(self.domain, payload, context or {})
             frozen_selection = self.task["result"].get("targeted_revision_snapshot")
@@ -330,10 +345,13 @@ class Worker:
             "仅从情节原话补全角色称谓限定",
             "独立核对原话角色称谓限定",
             "独立核对人物自由文本的本项来源蕴含",
+            "独立核对正文流向观察的来源蕴含",
             "修正未采纳人物自由文本字段",
             "写前解释AI工作章纲",
             "写前明确AI工作章纲开放细节",
             "独立核对AI工作章纲保持",
+            "仅从原情节纠偏事项主体与指令性质",
+            "独立核对来源解释纠偏与全部事项保持",
             "独立观察全书条件在本章是否触发",
         }:
             # No implicit enrichment: source interpretation receives only its
@@ -454,6 +472,24 @@ class Worker:
         if previous:
             saved = json.loads(previous[0]["result"])
             return await validated(saved)
+        if self.task["kind"] in {"source_interpretation_correction", "source_corrected_candidate_recheck"}:
+            dispatched = self.db.all(
+                "SELECT id FROM task_events WHERE task_id=? AND kind='step_dispatched' "
+                "AND json_extract(payload,'$.fingerprint')=? ORDER BY id DESC LIMIT 1",
+                (self.task["id"], fingerprint),
+            )
+            known_not_sent = dispatched and self.db.all(
+                "SELECT id FROM task_events WHERE task_id=? AND kind='step_not_sent' "
+                "AND json_extract(payload,'$.fingerprint')=? "
+                "AND json_extract(payload,'$.dispatch_event_id')=? LIMIT 1",
+                (self.task["id"], fingerprint, dispatched[0]["id"]),
+            )
+            if dispatched and not known_not_sent:
+                raise DomainError(
+                    "unknown_result",
+                    "该来源核对步骤已派发但缺少完整回执，保留旧缓存与费用，未盲目重发。",
+                    409,
+                )
         if replay_owner is not None:
             raise DomainError(
                 "plan_preparation_unknown",
@@ -564,6 +600,11 @@ class Worker:
                         else {}
                     ),
                     **(
+                        {"flow_source_entailment_version": source_instruction["流向来源蕴含版本"]}
+                        if "流向来源蕴含版本" in source_instruction
+                        else {}
+                    ),
+                    **(
                         {"scene_grounding_version": source_instruction["场景证据契约版本"]}
                         if "场景证据契约版本" in source_instruction
                         else {}
@@ -670,10 +711,37 @@ class Worker:
                 max_output,
                 on_text=on_text,
                 cancelled=self.cancelled,
-                run_limit=payload.get("budget_limit"),
+                run_limit=run_limit,
                 schema=(contract or schema.model_json_schema()) if schema else None,
             )
         except BaseException as error:
+            from .providers import RequestNotSent
+
+            if (
+                self.task["kind"]
+                in {"source_interpretation_correction", "source_corrected_candidate_recheck"}
+                and isinstance(error, RequestNotSent)
+                and error.task_id == self.task["id"]
+                and error.account == payload["account"]
+            ):
+                dispatched = self.db.all(
+                    "SELECT id FROM task_events WHERE task_id=? AND kind='step_dispatched' "
+                    "AND json_extract(payload,'$.fingerprint')=? ORDER BY id DESC LIMIT 1",
+                    (self.task["id"], fingerprint),
+                )
+                if dispatched:
+                    self.db.emit(
+                        self.task["id"],
+                        "step_not_sent",
+                        {
+                            "fingerprint": fingerprint,
+                            "dispatch_event_id": dispatched[0]["id"],
+                            "phase": error.phase,
+                            "account": error.account,
+                            "code": error.code,
+                        },
+                        self.attempt,
+                    )
             partial = getattr(error, "partial_text", "")
             trace = failure_trace(error, self.settings, self.budget, self.task)
             if partial or trace:
@@ -1924,6 +1992,14 @@ class Worker:
                 await self.module()
             elif task["kind"] == "candidate_recheck":
                 from .candidate_recheck import run
+
+                await run(self)
+            elif task["kind"] == "source_interpretation_correction":
+                from .source_interpretation_correction import run
+
+                await run(self)
+            elif task["kind"] == "source_corrected_candidate_recheck":
+                from .source_corrected_candidate_recheck import run
 
                 await run(self)
             else:

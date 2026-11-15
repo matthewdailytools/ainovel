@@ -115,6 +115,9 @@ class FlowObservations(StrictModel):
 async def independent_flows(
     worker, items, text, checks, *, source_label="作者原话", version=LEGACY_VERSION, source_text=None
 ):
+    from .flow_entailment import enabled as entailment_enabled
+
+    verify_sources = entailment_enabled(worker, version)
     expected = [
         item
         for item in items
@@ -170,43 +173,61 @@ async def independent_flows(
                 issues.append("明确流向必须有逐字正文依据。")
         return issues
 
+    observation_instruction = {
+        "动作": "只从本次正文独立提取物品与信息流向",
+        "本次正文": text,
+        "实体别名对照": entities,
+        "待识别物品名称": objects,
+        "可引用原文": units,
+        **({"情节核对契约版本": VERSION} if version == VERSION else {}),
+        **({"角色限定版本": identity_context["version"]} if identity_context else {}),
+        **(
+            {
+                "角色流向观察版本": OBSERVATION_GUIDANCE_VERSION,
+                "独立角色映射": (
+                    "名称表中的原话称谓可以与正文中的姓名、尊称或简称不同。只依据本次正文核对其身份范围，"
+                    "例如本次已核实限定是‘某地的一位工匠’，正文明确此人在该地点从事对应手艺，且当前来源范围内"
+                    "能够区分该角色时，应引用对应正文将其映射到该称谓编号；不能仅因姓名不同一律填unknown。"
+                    "‘一位／某位’不要求证明该地点只有一人，也不要求新增姓名。确有多位符合者、身份范围"
+                    "不符或依据不足才填unknown，并说明无法区分之处。不能因物品交给谁或看似符合预期就猜身份；"
+                    "此调用未提供预期方向，不得补造。不得把正文姓名或动作回填为原话身份限定，"
+                    "也不得把未核实限定称为已核实。supplier始终是给出方、recipient始终是取得方，索取者是recipient。"
+                ),
+            }
+            if version == VERSION
+            else {}
+        ),
+        "要求": "只提取正文实际给出、索取、交换、借还或传递的方向，不判断是否符合任何作者要求。supplier是给出方，recipient是取得方；交易失败也须区分原本提议的方向。offered/requested是当前提出的方向，completed是已交付，未来计划为planned，拒绝项为refused。只能据原文明确信息映射实体编号；不能映射则unknown，其他物品为other。引用FLOW编号。",
+    }
+    if verify_sources:
+        from .flow_entailment import OBJECT_GUIDANCE, OBSERVATION_VERSION, VERSION as ENTAILMENT_VERSION
+
+        observation_instruction["角色流向观察版本"] = OBSERVATION_VERSION
+        observation_instruction["流向来源蕴含版本"] = ENTAILMENT_VERSION
+        observation_instruction["独立角色映射"] = observation_instruction["独立角色映射"].replace(
+            "supplier始终是给出方、recipient始终是取得方，索取者是recipient。",
+            "supplier与recipient按待识别内容本身的给出及接收方向识别，不能无条件把发问人当取得方。",
+        )
+        observation_instruction["要求"] += "内容所指口径优先于笼统索取者口径。" + OBJECT_GUIDANCE
     observed = await worker.grounded(
-        {
-            "动作": "只从本次正文独立提取物品与信息流向",
-            "本次正文": text,
-            "实体别名对照": entities,
-            "待识别物品名称": objects,
-            "可引用原文": units,
-            **({"情节核对契约版本": VERSION} if version == VERSION else {}),
-            **({"角色限定版本": identity_context["version"]} if identity_context else {}),
-            **(
-                {
-                    "角色流向观察版本": OBSERVATION_GUIDANCE_VERSION,
-                    "独立角色映射": (
-                        "名称表中的原话称谓可以与正文中的姓名、尊称或简称不同。只依据本次正文核对其身份范围，"
-                        "例如本次已核实限定是‘某地的一位工匠’，正文明确此人在该地点从事对应手艺，且当前来源范围内"
-                        "能够区分该角色时，应引用对应正文将其映射到该称谓编号；不能仅因姓名不同一律填unknown。"
-                        "‘一位／某位’不要求证明该地点只有一人，也不要求新增姓名。确有多位符合者、身份范围"
-                        "不符或依据不足才填unknown，并说明无法区分之处。不能因物品交给谁或看似符合预期就猜身份；"
-                        "此调用未提供预期方向，不得补造。不得把正文姓名或动作回填为原话身份限定，"
-                        "也不得把未核实限定称为已核实。supplier始终是给出方、recipient始终是取得方，索取者是recipient。"
-                    ),
-                }
-                if version == VERSION
-                else {}
-            ),
-            "要求": "只提取正文实际给出、索取、交换、借还或传递的方向，不判断是否符合任何作者要求。supplier是给出方，recipient是取得方；交易失败也须区分原本提议的方向。offered/requested是当前提出的方向，completed是已交付，未来计划为planned，拒绝项为refused。只能据原文明确信息映射实体编号；不能映射则unknown，其他物品为other。引用FLOW编号。",
-        },
+        observation_instruction,
         FlowObservations,
         {"scope": "仅候选与无方向的名称表；未提供作者预期、方案或旧结论"},
         validate,
         contract=schema,
     )
+    source_review = None
+    usable_flows = observed["flows"]
+    if verify_sources:
+        from .flow_entailment import review_flows, unresolved_for_item
+
+        source_review = await review_flows(worker, text, entities, objects, observed["flows"])
+        usable_flows = source_review.get("supported_observations", [])
     rows = {row["item_id"]: row for row in checks}
     for item in expected:
         relevant = [
             flow
-            for flow in observed["flows"]
+            for flow in usable_flows
             if flow["object_id"] == object_ids[item["transfer_object"]]
             and flow["certainty"] == "explicit"
             and flow["stage"] in {"offered", "requested", "completed"}
@@ -284,6 +305,27 @@ async def independent_flows(
                     "policy": "补充观察仅阻止宣称一致，不认定unknown身份或新增作者条件。",
                 },
             )
+        elif (
+            source_review is not None
+            and row["result"] == "pass"
+            and (
+                unresolved := unresolved_for_item(
+                    source_review, item, object_ids[item["transfer_object"]], entity_ids
+                )
+            )
+        ):
+            row.update(
+                result="unknown",
+                reason="相关流向观察的对象、双方、阶段或原文蕴含仍无法确认；已有正向例子不能掩盖未核实观察。",
+                repair="保留原稿、独立观察和来源复核，不自动改写正文；先核对未确认的原文支持。",
+                guard_override={
+                    "code": "flow_source_unverified",
+                    "expected_supplier": item["supplier"],
+                    "expected_recipient": item["recipient"],
+                    "object": item["transfer_object"],
+                    "unresolved": unresolved,
+                },
+            )
         elif not forward and row["result"] == "pass":
             row.update(
                 result="unknown",
@@ -300,7 +342,16 @@ async def independent_flows(
         "entities": entities,
         "objects": objects,
         **observed,
-        **({"role_observation_version": OBSERVATION_GUIDANCE_VERSION} if version == VERSION else {}),
+        **(
+            {
+                "role_observation_version": OBSERVATION_VERSION
+                if verify_sources
+                else OBSERVATION_GUIDANCE_VERSION
+            }
+            if version == VERSION
+            else {}
+        ),
+        **({"source_entailment": source_review} if source_review is not None else {}),
         **({"source_identity_context": identity_context} if identity_context else {}),
     }
 
@@ -463,6 +514,10 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
             from .candidate_recheck import verified_author_contract
 
             contract = verified_author_contract(worker, author_text, number, prepared_contract)
+        elif source_kind == "author_plot" and worker.task["kind"] == "source_corrected_candidate_recheck":
+            from .source_corrected_candidate_recheck import verified_author_contract
+
+            contract = verified_author_contract(worker, author_text, number, prepared_contract)
         elif source_kind == "workflow_plan":
             contract = frozen_contract(worker, author_text, number, prepared_contract)
         else:
@@ -501,6 +556,11 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
                 issues.append("须说明理由；通过或不符还须写出本稿实际发生了什么。")
         return issues
 
+    source_correction = (
+        worker.task["result"]["source_corrected_recheck_snapshot"]["source_correction_metadata"]
+        if (getattr(worker, "task", None) or {}).get("kind") == "source_corrected_candidate_recheck"
+        else None
+    )
     compared = await worker.grounded(
         {
             "动作": "逐项对照作者情节解释与本次正文",
@@ -509,6 +569,19 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
             "本次候选": text,
             "可引用原文": units,
             **source_metadata(source_kind, version),
+            **(
+                {
+                    "显式来源解释纠偏元数据": deepcopy(source_correction),
+                    "纠偏解释边界": (
+                        "元数据只说明已独立核对的事项性质和主体回指，不改原事件字段。"
+                        "narrative_requirement核对文本是否按原话交代内容与顺序，不新增某个角色必须讲话的义务；"
+                        "未绑定角色不等于事件未知，也不把真正未定的行动者选择改成文本指令。"
+                        "正文履约仍须本次PLOT原文证明，未知保持，不从候选反改源意。"
+                    ),
+                }
+                if source_correction is not None
+                else {}
+            ),
             **(
                 {
                     "情节阶段对照版本": COMPARISON_GUIDANCE_VERSION,
@@ -608,6 +681,7 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
         "direction_guard": direction_guard,
         **compared,
         "interpretation_note": contract["note"],
+        **({"source_correction": deepcopy(source_correction)} if source_correction is not None else {}),
         "status": status,
         "findings": findings,
         "policy": f"解释来自{source_label}，仍须作者核对；不写入故事事实，不自动采用候选。",

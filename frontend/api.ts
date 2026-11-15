@@ -157,6 +157,7 @@ export type Task = {
     character_field_repair_version?: string
     plot_contract_version?: string
     source_identity_context_version?: string
+    flow_source_entailment_version?: string
     candidate_recheck_snapshot?: unknown
     workflow_plan_preparation_version?: string
     workflow_plan_open_details_version?: string

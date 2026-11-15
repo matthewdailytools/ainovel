@@ -1,4 +1,5 @@
 import { readSourceIdentityContext, type SourceIdentityContext } from './sourceIdentity'
+import { readSourceFlowReview, type SourceFlowReview } from './SourceFlowDetails'
 export const PLOT_AUDIT_VERSION = 'author-plot-audit/2'
 export const PLOT_AUDIT_V1_VERSION = 'author-plot-audit/1'
 export const isBoundPlotAuditVersion = (value: unknown) =>
@@ -32,6 +33,7 @@ type PlotGuard = {
   policy?: string
 }
 export type PlotAudit = {
+  source_flow_review?: SourceFlowReview
   source_identity_context?: SourceIdentityContext
   status: 'model_pass' | 'failed' | 'unverified'
   summary: string
@@ -216,7 +218,9 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
       (check.original_model_check !== undefined && (!original || original.item_id !== check.item_id)) ||
       (check.guard_override !== undefined && !guard) ||
       (guard?.code === 'restricted_recipient_unverified' &&
-        (value.version !== PLOT_AUDIT_VERSION || check.result !== 'unknown' || !original))
+        (value.version !== PLOT_AUDIT_VERSION || check.result !== 'unknown' || !original)) ||
+      (guard?.code === 'flow_source_unverified' &&
+        (value.version !== PLOT_AUDIT_VERSION || check.result !== 'unknown' || original?.result !== 'pass'))
     )
       return undefined
     checks.push({
@@ -299,6 +303,24 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
     }
   }
   let identity: SourceIdentityContext | undefined
+  let flowReview: SourceFlowReview | undefined
+  if (
+    object(value.direction_guard) &&
+    value.direction_guard.role_observation_version !== undefined &&
+    value.direction_guard.role_observation_version !== 'source-role-observation/1' &&
+    value.direction_guard.role_observation_version !== 'source-role-observation/2'
+  )
+    return undefined
+  if (
+    object(value.direction_guard) &&
+    (value.direction_guard.source_entailment !== undefined ||
+      value.direction_guard.role_observation_version === 'source-role-observation/2')
+  ) {
+    flowReview = readSourceFlowReview(value.direction_guard)
+    if (!flowReview || value.version !== PLOT_AUDIT_VERSION) return undefined
+  }
+  if (checks.some((check) => check.guard_override?.code === 'flow_source_unverified') && !flowReview)
+    return undefined
   if (object(value.direction_guard) && value.direction_guard.source_identity_context !== undefined) {
     identity = readSourceIdentityContext(value.direction_guard.source_identity_context)
     if (
@@ -310,6 +332,7 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
       return undefined
   }
   return {
+    ...(flowReview ? { source_flow_review: flowReview } : {}),
     ...(identity ? { source_identity_context: identity } : {}),
     status: value.status,
     summary: String(value.summary),

@@ -11,6 +11,7 @@ from .db import DomainError, dumps
 from .domain import char_count
 from .models import Input
 from .plot_review import attach_plot_review, review_passed
+from .flow_entailment import KEY as FLOW_KEY, VERSION as FLOW_VERSION
 
 VERSION = "candidate-recheck/1"
 
@@ -73,7 +74,9 @@ def assisted_contract(source, parent, plot):
     return contract
 
 
-def freeze(domain, request, *, conditional_policy=None, applicability_version=None):
+def freeze(
+    domain, request, *, conditional_policy=None, applicability_version=None, flow_entailment_version=None
+):
     from .plot_audit import VERSION as PLOT_VERSION
     from .plot_identity_context import VERSION as IDENTITY_VERSION
     from .workflow_plan_preparation import VERSION as PREPARATION_VERSION, frozen_contract
@@ -161,6 +164,12 @@ def freeze(domain, request, *, conditional_policy=None, applicability_version=No
                 "book_applicability_version", "独立触发核对政策无法确认，未新增旧任务调用。", 409
             )
         policy[APPLICABILITY_KEY] = applicability_version
+    if flow_entailment_version is not None:
+        if flow_entailment_version != FLOW_VERSION:
+            raise DomainError(
+                "flow_entailment_version", "复检的流向来源核对政策无法确认，未升级旧检查。", 409
+            )
+        policy[FLOW_KEY] = flow_entailment_version
     return {
         "version": VERSION,
         **policy,
@@ -201,6 +210,8 @@ def validate(worker):
         APPLICABILITY_KEY
     ):
         raise DomainError("book_applicability_version", "复检任务与来源的独立触发政策不符，未派发。", 409)
+    if expected is not None and expected.get(FLOW_KEY) != worker.task["result"].get(FLOW_KEY):
+        raise DomainError("flow_entailment_version", "复检任务与冻结的流向来源核对政策不符，未派发。", 409)
     if (
         expected is None
         or freeze(
@@ -208,6 +219,7 @@ def validate(worker):
             worker.task["payload"],
             conditional_policy=expected.get(KEY),
             applicability_version=expected.get(APPLICABILITY_KEY),
+            flow_entailment_version=expected.get(FLOW_KEY),
         )
         != expected
     ):

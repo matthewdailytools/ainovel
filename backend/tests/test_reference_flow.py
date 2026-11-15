@@ -9,6 +9,7 @@ from ainovel.db import DomainError, dumps
 from ainovel.library import Library
 from ainovel.reference import overlap_report, session
 from ainovel.worker import Worker
+from helpers.flow_entailment_fixture import flow_entailment_output
 
 SOURCE = "😀渡口掌柜先问用途，又把水路图收回袖中。他只肯给半幅图，却记下了来客的目的地。"
 TEXT = "她指着闸门外露的螺栓，请管事翻出维修记录。记录未能取到，她没有动手修门，只把测得的磨损方向记在纸上。"
@@ -44,6 +45,12 @@ class Model:
         self.requests.append(deepcopy(value))
         task = value["任务"]
         action = task.get("动作")
+        if flow_review := flow_entailment_output(task):
+            return {
+                "text": dumps(flow_review),
+                "usage": {"input": 1, "output": 1},
+                "call_id": f"offline-reference-flow-entailment-{len(self.requests)}",
+            }
         if action == "拆解所选原文写法":
             result = {
                 "cards": [

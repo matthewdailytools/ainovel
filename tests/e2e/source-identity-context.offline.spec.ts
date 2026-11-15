@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { assertActualDoubleText } from './helpers/actualTextScale'
 
 const source = 'source-identity-e2e：沈砚从渡口一位修船匠借得旧尺，约定后日归还。'
 const version = 'source-identity-context/1'
@@ -33,6 +34,7 @@ test('补写可主动核对原角色限定，独立报告保留原解释与原�
   const task = await response.json()
   expect(task.payload.source_identity_context).toBe(true)
   expect(task.result.source_identity_context_version).toBe(version)
+  expect(task.result.flow_source_entailment_version).toBe('source-flow-entailment/1')
   await expect
     .poll(async () => (await (await page.request.get(`/api/tasks/${task.id}`)).json()).status, {
       timeout: 25000,
@@ -47,12 +49,79 @@ test('补写可主动核对原角色限定，独立报告保留原解释与原�
   await page.getByText('情节逐项核对 · 模型标一致，仍须作者核对', { exact: true }).click()
   const details = page.getByRole('region', { name: '原话角色限定核对', exact: true })
   await expect(details).toContainText('渡口一位修船匠')
+  expect(audit.direction_guard.source_entailment.version).toBe('source-flow-entailment/1')
+  expect(audit.direction_guard.source_entailment.checks).toHaveLength(1)
+  const flowSummary = page.getByText('正文流向观察的出处复核 · 1项', { exact: true })
+  await flowSummary.focus()
+  await flowSummary.press('Enter')
+  const flowDetails = flowSummary.locator('..')
+  await expect(flowDetails).toContainText('原文支持')
+  await expect(flowDetails).toContainText('渡口一位修船匠')
+  await expect(flowDetails).toContainText('原观察引用')
+  await expect(flowDetails).toContainText('出处复核')
+  await expect(flowDetails).toContainText('来源未知不等于正文违约')
+  await flowDetails.screenshot({ path: info.outputPath('source-flow-desktop.png') })
   await page.setViewportSize({ width: 320, height: 800 })
-  await page.evaluate(() => (document.documentElement.style.fontSize = '200%'))
+  await assertActualDoubleText(
+    page,
+    {
+      paragraph: flowDetails.locator('p').first(),
+      quote: flowDetails.locator('blockquote').first(),
+      small: flowDetails.locator('p.small').first(),
+      summary: flowSummary,
+      button: page.getByRole('button', { name: '保存', exact: true }),
+    },
+    info,
+  )
   await expect(details).toBeVisible()
+  await expect(flowDetails).toBeVisible()
+  await flowDetails.screenshot({ path: info.outputPath('source-flow-320-200.png') })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy()
   await page.screenshot({ path: info.outputPath('source-identity-320-200.png'), fullPage: true })
   expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content).toBe('')
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  const object = (value: unknown): value is Record<string, unknown> =>
+    !!value && typeof value === 'object' && !Array.isArray(value)
+  const malformed = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(malformed)
+    if (!object(value) || value.id !== artifact.id || !object(value.payload)) return value
+    const plot = value.payload.plot_audit
+    if (!object(plot) || !object(plot.direction_guard) || !object(plot.direction_guard.source_entailment))
+      return value
+    return {
+      ...value,
+      payload: {
+        ...value.payload,
+        plot_audit: {
+          ...plot,
+          direction_guard: {
+            ...plot.direction_guard,
+            source_entailment: {
+              ...plot.direction_guard.source_entailment,
+              status: { toString: null },
+            },
+          },
+        },
+      },
+    }
+  }
+  await page.route(/\/api\/artifacts(?:\/|\?)/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    const response = await route.fetch()
+    await route.fulfill({ response, json: malformed(await response.json()) })
+  })
+  await page.reload()
+  await page.getByRole('combobox', { name: '比较候选', exact: true }).selectOption(artifact.id)
+  const invalid = page.getByRole('region', { name: '情节逐项核对', exact: true })
+  await expect(invalid).toContainText('情节核对报告格式无法核对，不能视为一致；原始报告仍保留。')
+  await expect(page.getByRole('textbox', { name: '候选内容', exact: true })).toBeEditable()
+  // Finish in-flight polling handlers before Playwright disposes their responses.
+  await page.unrouteAll({ behavior: 'wait' })
+  expect(errors).toEqual([])
+  // The corrupted JSON is only a browser fixture; stored candidate/report remain intact.
+  const unchanged = await (await page.request.get(`/api/artifacts/${artifact.id}`)).json()
+  expect(unchanged.payload.plot_audit.direction_guard.source_entailment.status).toBe('supported')
 })
 
 for (const mode of ['assisted', 'automatic'] as const) {

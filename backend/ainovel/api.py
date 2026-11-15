@@ -855,6 +855,12 @@ def create_app(settings=None, schema_only=False):
 
     register_plan_restart_routes(app, domain, budget, provider_ready)
 
+    from .source_interpretation_correction import register_routes as register_source_correction_routes
+    from .source_corrected_candidate_recheck import register_routes as register_corrected_recheck_routes
+
+    register_source_correction_routes(app, domain, budget, provider_ready)
+    register_corrected_recheck_routes(app, domain, budget, provider_ready)
+
     @app.get("/api/artifacts")
     def artifacts(branch_id: str, chapter_id: str | None = None):
         rows = db.all(
@@ -887,6 +893,10 @@ def create_app(settings=None, schema_only=False):
 
     @app.patch("/api/artifacts/{artifact_id}")
     def edit_candidate(artifact_id: str, data: CandidateEdit):
+        from .source_interpretation_correction import READONLY_KINDS
+
+        if domain.artifact(artifact_id)["kind"] in READONLY_KINDS:
+            raise DomainError("source_correction_readonly", "来源解释与复检回执只读，原报告保持。", 409)
         with db.connect(True) as tx:
             row = tx.execute("SELECT * FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
             if not row or row["status"] != "candidate":
@@ -961,7 +971,11 @@ def create_app(settings=None, schema_only=False):
 
     @app.post("/api/artifacts/{artifact_id}/reject")
     def reject(artifact_id: str, data: CandidateVersionInput | None = None):
-        if domain.artifact(artifact_id)["kind"] == "candidate_recheck":
+        if domain.artifact(artifact_id)["kind"] in {
+            "candidate_recheck",
+            "source_interpretation_correction",
+            "source_corrected_candidate_recheck",
+        }:
             raise DomainError("candidate_recheck_readonly", "候选复检报告只读，原报告及关联保持。", 409)
         with db.connect(True) as tx:
             row = tx.execute("SELECT status,payload FROM artifacts WHERE id=?", (artifact_id,)).fetchone()

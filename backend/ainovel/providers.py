@@ -11,6 +11,14 @@ from .settings import CONTEXT_SAFETY_TOKENS
 from .openai_schema import VERSION as WIRE_SCHEMA_VERSION, strict_schema
 
 
+class RequestNotSent(DomainError):
+    """Authoritative adapter evidence: rejection occurred before HTTP sending."""
+
+    def __init__(self, error, task_id, account, phase):
+        super().__init__(error.code, error.message, error.status)
+        self.task_id, self.account, self.phase = task_id, account, phase
+
+
 class ModelClient:
     def __init__(self, settings, budget, transport=None):
         self.settings, self.budget, self.transport = settings, budget, transport
@@ -29,10 +37,17 @@ class ModelClient:
     ):
         provider = self.settings.providers.get(account)
         if not provider or not provider.key:
-            raise DomainError("configuration", "所选模型账户未配置密钥。")
+            raise RequestNotSent(
+                DomainError("configuration", "所选模型账户未配置密钥。"), task_id, account, "configuration"
+            )
         if type(max_output) is not int or max_output <= 0:
-            raise DomainError("configuration", "单次输出上限必须为正整数。")
-        max_output = provider.output_limit(max_output, structured=schema is not None)
+            raise RequestNotSent(
+                DomainError("configuration", "单次输出上限必须为正整数。"), task_id, account, "configuration"
+            )
+        try:
+            max_output = provider.output_limit(max_output, structured=schema is not None)
+        except DomainError as error:
+            raise RequestNotSent(error, task_id, account, "configuration") from error
         output, usage, completed = "", None, False
         received_terminal = False
         input_tokens = output_tokens = None
@@ -110,17 +125,32 @@ class ModelClient:
                 "request_bytes": request_bytes,
             }
         if request_bytes > provider.max_input_bytes:
-            raise DomainError("context_limit", "包括结构契约的请求超过账户字节上限，未截断或付费调用。")
+            raise RequestNotSent(
+                DomainError("context_limit", "包括结构契约的请求超过账户字节上限，未截断或付费调用。"),
+                task_id,
+                account,
+                "context_limit",
+            )
         # Bytes are deliberately a conservative token upper bound, not a model
         # tokenizer estimate. A window is only taken from explicit configuration.
         if (
             provider.context_window_tokens is not None
             and request_bytes + max_output + CONTEXT_SAFETY_TOKENS > provider.context_window_tokens
         ):
-            raise DomainError(
-                "context_limit", "请求字节数、预留输出与安全余量超过已配置模型窗口，未截断或付费调用。"
+            raise RequestNotSent(
+                DomainError(
+                    "context_limit", "请求字节数、预留输出与安全余量超过已配置模型窗口，未截断或付费调用。"
+                ),
+                task_id,
+                account,
+                "context_limit",
             )
-        reservation = self.budget.reserve(provider, task_id, request_bytes + 2048, max_output, run_limit)
+        try:
+            reservation = self.budget.reserve(provider, task_id, request_bytes + 2048, max_output, run_limit)
+        except DomainError as error:
+            # This exception is raised on the actual no-send branch. Neither an
+            # empty ledger nor a generic 'budget' string is used to infer it.
+            raise RequestNotSent(error, task_id, account, "budget_reserve") from error
         sent = False
         try:
             if cancelled and cancelled():

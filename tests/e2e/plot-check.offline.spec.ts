@@ -24,7 +24,14 @@ type Audit = {
   }[]
   findings?: unknown[]
   direction_guard?: {
+    role_observation_version?: string
     flows: { object_id: string; supplier_id: string; recipient_id: string; stage: string; evidence: string }[]
+    source_entailment?: {
+      version: string
+      input_sha256: string
+      status: string
+      checks: { flow_id: string; result: string; evidence: string; verified_fields: string[] }[]
+    }
   }
 }
 type Artifact = {
@@ -51,6 +58,7 @@ type Task = {
     next_chapter?: number
     pending_structure?: object
     plot_contract_version?: string
+    flow_source_entailment_version?: string
   }
 }
 
@@ -271,6 +279,7 @@ test('v2仅向守卫：正向与unknown接收者并存保留原pass并降未知�
   const started: Task = await submitted.json()
   expect(started.branch_id).not.toBe(novel.branch_id)
   expect(started.result.plot_contract_version).toBe('author-plot-audit/2')
+  expect(started.result.flow_source_entailment_version).toBe('source-flow-entailment/1')
   await expect
     .poll(async () => (await read<Task>(page, `/api/tasks/${started.id}`)).status)
     .toBe('needs_review')
@@ -323,8 +332,74 @@ test('v2仅向守卫：正向与unknown接收者并存保留原pass并降未知�
   expect(chapters).toHaveLength(1)
   expect(await read(page, `/api/chapters/${chapters[0].id}`)).toMatchObject({ content: '', revision: 0 })
   expect(await read(page, `/api/chapters/${chapter.id}`)).toEqual(original)
-  const transcript = await read<{ steps: unknown[] }>(page, `/api/tasks/${task.id}/transcript`)
-  expect(transcript.steps).toHaveLength(5)
+  expect(task.result.flow_source_entailment_version).toBe('source-flow-entailment/1')
+  expect(audit.direction_guard!.role_observation_version).toBe('source-role-observation/2')
+  const sourceReview = audit.direction_guard!.source_entailment!
+  expect(sourceReview.version).toBe(task.result.flow_source_entailment_version)
+  expect(sourceReview.status).toBe('supported')
+  expect(sourceReview.checks.map((row) => [row.flow_id, row.result])).toEqual([
+    ['F01', 'supported'],
+    ['F02', 'supported'],
+  ])
+  for (const check of sourceReview.checks) {
+    expect(new Set(check.verified_fields)).toEqual(
+      new Set(['object_id', 'supplier_id', 'recipient_id', 'stage', 'certainty', 'evidence']),
+    )
+    expect(check.evidence.trim()).not.toBe('')
+    expect(candidate.payload.text).toContain(check.evidence)
+  }
+  const transcript = await read<{ steps: { fingerprint: string; result: { text: string } }[] }>(
+    page,
+    `/api/tasks/${task.id}/transcript`,
+  )
+  const eventsResponse = await page.request.get(`/api/tasks/${task.id}/events`)
+  expect(eventsResponse.ok(), await eventsResponse.text()).toBeTruthy()
+  const dispatches = (await eventsResponse.text())
+    .split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => JSON.parse(line.slice(6)))
+    .filter((row) => row.kind === 'step_dispatched') as {
+    kind: string
+    payload: { fingerprint: string; action: string; schema: string | null; request: Record<string, unknown> }
+  }[]
+  expect(dispatches.map((row) => [row.payload.action, row.payload.schema])).toEqual([
+    ['按章纲写完整正文', null],
+    ['审查正文', 'ConditionalReview'],
+    ['仅依据作者原话整理本场景情节', 'ScopedAuthorPlot'],
+    ['逐项对照作者情节解释与本次正文', 'PlotAudit'],
+    ['只从本次正文独立提取物品与信息流向', 'FlowObservations'],
+    ['独立核对正文流向观察的来源蕴含', 'FlowChecks'],
+  ])
+  expect(dispatches[4].payload.request).toMatchObject({
+    flow_role_observation_version: 'source-role-observation/2',
+    flow_source_entailment_version: task.result.flow_source_entailment_version,
+  })
+  expect(dispatches[5].payload.request.flow_source_entailment_version).toBe(sourceReview.version)
+  expect(new Set(transcript.steps.map((step) => step.fingerprint))).toEqual(
+    new Set(dispatches.map((row) => row.payload.fingerprint)),
+  )
+  expect(transcript.steps).toHaveLength(6) // Includes the frozen source check; no repair, memory or next chapter.
+  const sourceStep = transcript.steps.find((step) => step.fingerprint === dispatches[5].payload.fingerprint)!
+  const checked = JSON.parse(sourceStep.result.text) as {
+    input_sha256: string
+    checks: { flow_id: string; result: string; evidence: string; verified_fields: string[] }[]
+  }
+  expect(checked.input_sha256).toBe(sourceReview.input_sha256)
+  expect(checked.checks).toHaveLength(sourceReview.checks.length)
+  const quotedUnits = dispatches[5].payload.request.quoted_units as {
+    source_id: string
+    start: number
+    end: number
+  }[]
+  expect(quotedUnits).toEqual(expect.any(Array))
+  for (const [index, check] of checked.checks.entries()) {
+    const { evidence: sourceId, ...rawCheck } = check
+    const { evidence: resolvedEvidence, ...publishedCheck } = sourceReview.checks[index]
+    expect(rawCheck).toEqual(publishedCheck)
+    const unit = quotedUnits.find((row) => row.source_id === sourceId)!
+    expect(unit).toBeDefined()
+    expect(candidate.payload.text!.slice(unit.start, unit.end)).toBe(resolvedEvidence)
+  }
   await testInfo.attach('v2-exclusive-recipient-unknown.json', {
     body: JSON.stringify({ task, candidate, transcript }, null, 2),
     contentType: 'application/json',

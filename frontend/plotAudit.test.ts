@@ -376,9 +376,9 @@ test('仅正文补写、本章审稿与workflow接受开启，新开关明确费
     createElement(PlotAuditOption, { checked: false, onChange: () => undefined }),
   )
   expect(html).not.toContain('checked=""')
-  expect(html).toContain('通常增加解析和对照两步模型调用')
-  expect(html).toContain('流向可能再增加一次')
-  expect(html).toContain('每轮复检均增加费用')
+  expect(html).toContain('通常增加解析和对照调用')
+  expect(html).toContain('新任务另核对观察的原文出处')
+  expect(html).toContain('每步及有限格式修正均增加模型费用')
   expect(renderToStaticMarkup(createElement(FrozenPlotAuditPolicy, { enabled: undefined }))).toContain(
     '未开启',
   )

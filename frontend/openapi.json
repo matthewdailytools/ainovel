@@ -1795,6 +1795,190 @@
         }
       }
     },
+    "/api/artifacts/{artifact_id}/source-interpretation-correction-preview": {
+      "get": {
+        "summary": "Correction Preview",
+        "operationId": "correction_preview_api_artifacts__artifact_id__source_interpretation_correction_preview_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}/source-interpretation-corrections": {
+      "post": {
+        "summary": "Create Correction",
+        "operationId": "create_correction_api_artifacts__artifact_id__source_interpretation_corrections_post",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CorrectionInput" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}/source-interpretation-corrections/{client_request_id}": {
+      "get": {
+        "summary": "Correction Request",
+        "operationId": "correction_request_api_artifacts__artifact_id__source_interpretation_corrections__client_request_id__get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          },
+          {
+            "name": "client_request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Client Request Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}/recheck-source-correction-preview": {
+      "get": {
+        "summary": "Recheck Preview",
+        "operationId": "recheck_preview_api_artifacts__artifact_id__recheck_source_correction_preview_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          },
+          {
+            "name": "receipt_id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "title": "Receipt Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}/recheck-source-correction": {
+      "post": {
+        "summary": "Create Recheck",
+        "operationId": "create_recheck_api_artifacts__artifact_id__recheck_source_correction_post",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/RecheckCorrectionInput" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}/recheck-source-correction/{client_request_id}": {
+      "get": {
+        "summary": "Recheck Request",
+        "operationId": "recheck_request_api_artifacts__artifact_id__recheck_source_correction__client_request_id__get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          },
+          {
+            "name": "client_request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Client Request Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/artifacts": {
       "get": {
         "summary": "Artifacts",
@@ -3398,6 +3582,51 @@
         "required": ["client_request_id", "account", "reason"],
         "title": "ContinuationInput"
       },
+      "CorrectionInput": {
+        "properties": {
+          "source_identity_context": {
+            "type": "boolean",
+            "const": false,
+            "title": "Source Identity Context",
+            "default": false
+          },
+          "candidate_revision": { "type": "integer", "minimum": 0, "title": "Candidate Revision" },
+          "account": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          },
+          "preview_basis_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Preview Basis Sha256"
+          },
+          "item_ids": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Item Ids"
+          },
+          "reason": { "type": "string", "maxLength": 2000, "title": "Reason", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "candidate_revision",
+          "account",
+          "client_request_id",
+          "preview_basis_sha256",
+          "item_ids"
+        ],
+        "title": "CorrectionInput"
+      },
       "CreateReference": {
         "properties": {
           "unit_id": { "type": "string", "title": "Unit Id" },
@@ -4027,6 +4256,44 @@
         "type": "object",
         "required": ["chapter_id", "cursor", "base_revision"],
         "title": "ReadingInput"
+      },
+      "RecheckCorrectionInput": {
+        "properties": {
+          "source_identity_context": {
+            "type": "boolean",
+            "const": false,
+            "title": "Source Identity Context",
+            "default": false
+          },
+          "candidate_revision": { "type": "integer", "minimum": 0, "title": "Candidate Revision" },
+          "account": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          },
+          "preview_basis_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Preview Basis Sha256"
+          },
+          "receipt_id": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Receipt Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "candidate_revision",
+          "account",
+          "client_request_id",
+          "preview_basis_sha256",
+          "receipt_id"
+        ],
+        "title": "RecheckCorrectionInput"
       },
       "ReconfirmationInput": {
         "properties": {

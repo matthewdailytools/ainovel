@@ -24,6 +24,11 @@ from helpers.character_review_fixture import character_review_output  # noqa: E4
 from helpers.plan_execution_fixture import plan_execution_output  # noqa: E402
 from helpers.ideation_fixture import complete_idea_output  # noqa: E402
 from helpers.source_identity_fixture import source_identity_output  # noqa: E402
+from helpers.flow_entailment_fixture import flow_entailment_output  # noqa: E402
+from helpers.source_correction_fixture import (  # noqa: E402
+    source_correction_output,
+    source_correction_body_output,
+)
 
 CHARACTER_REPAIR_FIXTURE = "character-field-repair-e2e"
 CHARACTER_LATE_FIELD_FIXTURE = "fixture-late-character-field"
@@ -48,6 +53,8 @@ EXCLUSIVE_BODY = (
 class Model(ReferenceModel):
     def __init__(self):
         super().__init__()
+        self.flow_review_calls = 0
+        self.source_correction_calls = 0
         self.book_tasks = set()
         self.book_model = BookModel()
         self.character_repair_tasks = {}
@@ -59,6 +66,23 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        source_result = source_correction_output(instruction)
+        if source_result is None:
+            source_result = source_correction_body_output(instruction)
+        if source_result is not None:
+            self.source_correction_calls += 1
+            return {
+                "text": json.dumps(source_result, ensure_ascii=False),
+                "usage": {"input": 1, "output": 1},
+                "call_id": f"offline-source-correction-{self.source_correction_calls}",
+            }
+        if flow_review := flow_entailment_output(instruction):
+            self.flow_review_calls += 1
+            return {
+                "text": json.dumps(flow_review, ensure_ascii=False),
+                "usage": {"input": 1, "output": 1},
+                "call_id": f"offline-flow-entailment-{self.flow_review_calls}",
+            }
         source_instruction = instruction
         while "原始任务" in source_instruction:
             source_instruction = source_instruction["原始任务"]
@@ -560,6 +584,7 @@ class Model(ReferenceModel):
 def main():
     # Model is also imported via spec_from_file_location; only server startup needs fixture routes.
     from e2e_scene_reconfirmation_fixture import register_scene_reconfirmation_fixture
+    from e2e_source_correction_fixture import register_source_correction_fixture
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8877)
@@ -584,6 +609,7 @@ def main():
         )
         app = create_app(settings)
         register_scene_reconfirmation_fixture(app, settings, location)
+        register_source_correction_fixture(app, settings, location)
         original = app.router.lifespan_context
 
         @asynccontextmanager

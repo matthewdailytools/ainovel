@@ -382,7 +382,11 @@ class Domain:
                     "参考分析和方案请在参考工作区核对后保存为本次采用内容；此动作不采纳正文。",
                     409,
                 )
-            if artifact["kind"] == "candidate_recheck":
+            if artifact["kind"] in {
+                "candidate_recheck",
+                "source_interpretation_correction",
+                "source_corrected_candidate_recheck",
+            }:
                 raise DomainError(
                     "candidate_recheck_readonly", "候选复检报告只读，请回到其目标候选决定是否采纳。", 409
                 )
@@ -651,7 +655,9 @@ class Domain:
         profile = self.genre_profile(branch_id)
         contract = self.author_contract(branch_id)
         initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
-        if kind in {"workflow", "candidate_recheck"}:
+        from .flow_entailment import KEY as FLOW_KEY, VERSION as FLOW_VERSION
+
+        if kind in {"workflow", "candidate_recheck", "source_corrected_candidate_recheck"}:
             from .conditional_review import KEY as CONDITIONAL_KEY, VERSION as CONDITIONAL_VERSION
             from .book_applicability import KEY as APPLICABILITY_KEY, VERSION as APPLICABILITY_VERSION
 
@@ -673,6 +679,7 @@ class Domain:
                 payload,
                 conditional_policy=initial[CONDITIONAL_KEY],
                 applicability_version=initial[APPLICABILITY_KEY],
+                flow_entailment_version=FLOW_VERSION,
             )
             initial.update(
                 candidate_recheck_version=VERSION,
@@ -680,7 +687,27 @@ class Domain:
                 genre_profile_snapshot=snapshot["genre_profile_snapshot"],
                 author_contract_snapshot=snapshot["author_contract_snapshot"],
                 plot_contract_version="author-plot-audit/2",
+                **{FLOW_KEY: snapshot[FLOW_KEY]},
             )
+        if kind in {"source_interpretation_correction", "source_corrected_candidate_recheck"}:
+            from . import source_interpretation_correction as source_correction
+            from . import source_corrected_candidate_recheck as corrected_recheck
+
+            module = source_correction if kind == source_correction.KIND else corrected_recheck
+            snapshot = module.freeze(self, payload)
+            correction_key = (
+                "source_correction" if kind == source_correction.KIND else "source_corrected_recheck"
+            )
+            initial.update(
+                **{correction_key + "_version": module.VERSION, correction_key + "_snapshot": snapshot},
+                genre_profile_snapshot=snapshot["genre_profile_snapshot"],
+                author_contract_snapshot=snapshot["author_contract_snapshot"],
+                plot_contract_version="author-plot-audit/2",
+            )
+            if kind == corrected_recheck.KIND:
+                from .flow_entailment import KEY as CORRECTED_FLOW_KEY
+
+                initial[CORRECTED_FLOW_KEY] = snapshot[CORRECTED_FLOW_KEY]
         if (
             kind == "module"
             and payload.get("action") == "story.extract"
@@ -699,6 +726,7 @@ class Domain:
             from .plot_audit import VERSION as PLOT_CONTRACT_VERSION
 
             initial["plot_contract_version"] = PLOT_CONTRACT_VERSION
+            initial[FLOW_KEY] = FLOW_VERSION
             if payload.get("source_identity_context") is True:
                 from .plot_identity_context import VERSION as IDENTITY_CONTEXT_VERSION
 
@@ -797,10 +825,18 @@ class Domain:
                         payload,
                         conditional_policy=selection.get(CONDITIONAL_KEY),
                         applicability_version=selection.get(APPLICABILITY_KEY),
+                        flow_entailment_version=selection.get(FLOW_KEY),
                     )
                     != selection
                 ):
                     raise DomainError("candidate_changed", "复检来源在排队时改变，未创建任务。", 409)
+            if kind in {"source_interpretation_correction", "source_corrected_candidate_recheck"}:
+                module = source_correction if kind == source_correction.KIND else corrected_recheck
+                correction_key = (
+                    "source_correction" if kind == source_correction.KIND else "source_corrected_recheck"
+                )
+                if module.freeze(self, payload) != initial[correction_key + "_snapshot"]:
+                    raise DomainError("source_correction_changed", "来源纠偏依据在提交时改变。", 409)
             db.execute(
                 "INSERT INTO tasks(id,kind,novel_id,branch_id,status,payload,result,created,updated) VALUES(?,?,?,?,?,?,?,?,?)",
                 (

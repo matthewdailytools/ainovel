@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from ainovel.candidate_recheck import freeze
 from ainovel.conditional_review import KEY, VERSION
+from ainovel.flow_entailment import KEY as FLOW_KEY
 from ainovel.book_applicability import KEY as APPLICABILITY_KEY, ACTION as APPLICABILITY_ACTION
 from ainovel.db import dumps
 from ainovel.models import Completion, Review
@@ -452,8 +453,10 @@ def test_already_queued_legacy_recheck_keeps_legacy_snapshot_and_report_shape(
     original = deepcopy(task["result"])
     original.pop(KEY)
     original.pop(APPLICABILITY_KEY)
+    original.pop(FLOW_KEY)
     original["candidate_recheck_snapshot"] = freeze(domain, task["payload"])
     assert KEY not in original["candidate_recheck_snapshot"]
+    assert FLOW_KEY not in original["candidate_recheck_snapshot"]
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(original), task["id"]))
     asyncio.run(Worker(settings, RecheckModel()).run_once())

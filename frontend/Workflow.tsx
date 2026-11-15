@@ -622,6 +622,7 @@ export function WorkflowPage({
                     enabled={task.payload.plot_contract_check}
                     identityEnabled={task.payload.source_identity_context}
                     identityVersion={task.result.source_identity_context_version}
+                    flowVersion={task.result.flow_source_entailment_version}
                     mode={task.payload.mode}
                     version={task.result.plot_contract_version}
                   />

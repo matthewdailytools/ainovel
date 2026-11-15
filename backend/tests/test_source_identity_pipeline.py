@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from ainovel.models import ModuleInput
+from ainovel.flow_entailment import ACTION as FLOW_ENTAILMENT_ACTION
 from ainovel.worker import Worker
 from helpers.source_identity_fixture import SOURCE, BODY
 from test_candidate_recheck import queue_recheck
@@ -84,8 +85,9 @@ def test_module_real_worker_has_two_source_only_steps_and_never_writes_manuscrip
 
 
 @pytest.mark.parametrize("interruption", ["cancel", "edit"])
-def test_label_check_late_return_cannot_publish_after_cancel_or_edit(
-    settings, domain, story, client, interruption
+@pytest.mark.parametrize("stage", ["独立核对原话角色称谓限定", FLOW_ENTAILMENT_ACTION])
+def test_source_check_late_return_cannot_publish_after_cancel_or_edit(
+    settings, domain, story, client, interruption, stage
 ):
     payload = workflow_payload(story)
     payload.update(plot_contract_check=True)
@@ -100,7 +102,7 @@ def test_label_check_late_return_cannot_publish_after_cancel_or_edit(
     text = original["payload"]["text"] + "\n另一窗口保存的编辑。"
 
     def hook(instruction, tid):
-        if instruction.get("动作") != "独立核对原话角色称谓限定":
+        if instruction.get("动作") != stage:
             return
         assert tid == child
         if interruption == "cancel":
@@ -122,7 +124,7 @@ def test_label_check_late_return_cannot_publish_after_cancel_or_edit(
         assert after["payload"]["text"] == text and after["candidate_revision"] == 1
     assert not domain.db.all("SELECT * FROM artifacts WHERE task_id=?", (child,))
     assert not domain.db.all("SELECT * FROM facts")
-    assert model.frames[-1]["任务"]["动作"] == "独立核对原话角色称谓限定"
+    assert model.frames[-1]["任务"]["动作"] == stage
 
 
 @pytest.mark.parametrize("mode", ["assisted", "automatic"])

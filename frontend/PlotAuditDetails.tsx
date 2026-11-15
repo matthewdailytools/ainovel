@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { isBoundPlotAuditVersion, PLOT_AUDIT_V1_VERSION, plotAuditState, readPlotAudit } from './plotAudit'
 import { SourceIdentityDetails, SourceIdentityOption, SOURCE_IDENTITY_VERSION } from './sourceIdentity'
+import { SourceFlowDetails, FLOW_ENTAILMENT_VERSION } from './SourceFlowDetails'
 
 export function PlotAuditOption({
   checked,
@@ -27,7 +28,7 @@ export function PlotAuditOption({
         额外逐项核对本次情节
       </label>
       <p className="small muted">
-        通常增加解析和对照两步模型调用；物品或信息流向可能再增加一次，格式或引用修正也可能增加调用，每轮复检均增加费用。歧义或未知保留待核对，模型解释不形成作者新条件，手动采用仍由作者决定。
+        通常增加解析和对照调用；物品或信息流向还需独立观察，新任务另核对观察的原文出处。每步及有限格式修正均增加模型费用。歧义或未知保留待核对，模型解释不形成作者新条件，手动采用仍由作者决定。
       </p>
       {onIdentityChange && (
         <SourceIdentityOption
@@ -46,12 +47,14 @@ export function FrozenPlotAuditPolicy({
   version,
   identityEnabled,
   identityVersion,
+  flowVersion,
 }: {
   enabled: unknown
   mode?: string
   version?: unknown
   identityEnabled?: unknown
   identityVersion?: unknown
+  flowVersion?: unknown
 }) {
   const actualVersion = version === undefined ? PLOT_AUDIT_V1_VERSION : version
   return (
@@ -73,6 +76,12 @@ export function FrozenPlotAuditPolicy({
             ? '已开启原话角色限定补充与独立核对（额外模型费用），版本source-identity-context/1。'
             : '角色限定补充的冻结版本无法确认，待核对。'
           : '未额外补充原话角色限定，旧任务不自动升级。')}
+      {enabled === true &&
+        (flowVersion === FLOW_ENTAILMENT_VERSION
+          ? '已冻结正文流向观察的独立出处复核（额外模型费用），区分提问本身与所求答案。'
+          : flowVersion === undefined
+            ? '未启用新版流向出处复核，旧任务保持原政策。'
+            : '流向出处复核的冻结版本无法确认，待核对。')}
     </p>
   )
 }
@@ -199,6 +208,7 @@ export function PlotAuditDetails({
         )}
         <p>{audit.interpretation_note}</p>
         {audit.source_identity_context && <SourceIdentityDetails value={audit.source_identity_context} />}
+        {audit.source_flow_review && <SourceFlowDetails review={audit.source_flow_review} />}
         {audit.binding?.version === PLOT_AUDIT_V1_VERSION && (
           <p>此v1报告未含限定接收者补充；可按原有范围核对绑定内容，未执行v2补充核对。</p>
         )}

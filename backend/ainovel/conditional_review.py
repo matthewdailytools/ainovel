@@ -54,6 +54,20 @@ def enabled(task):
 
 
 def book_conditions(task):
+    if task["kind"] == "source_corrected_candidate_recheck":
+        from .book_applicability import KEY as APPLICABILITY_KEY, VERSION as APPLICABILITY_VERSION
+
+        snapshot = task["result"].get("source_corrected_recheck_snapshot", {})
+        if (
+            not enabled(task)
+            or snapshot.get(KEY) != VERSION
+            or snapshot.get(APPLICABILITY_KEY) != APPLICABILITY_VERSION
+            or task["result"].get(APPLICABILITY_KEY) != APPLICABILITY_VERSION
+            or not isinstance(snapshot.get("book_fixed"), list)
+            or any(not isinstance(condition, str) for condition in snapshot["book_fixed"])
+        ):
+            raise DomainError("conditional_policy", "显式来源纠偏复检的全书条件及适用性冻结来源不符。", 409)
+        return snapshot["book_fixed"]
     if not enabled(task):
         return []
     if task["kind"] == "workflow":

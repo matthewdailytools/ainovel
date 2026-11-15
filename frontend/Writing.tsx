@@ -36,6 +36,17 @@ import {
   CandidateRecheckReport,
   candidateRecheckSourceMode,
 } from './candidateRecheck'
+import {
+  SourceCorrectionPanel,
+  SourceCorrectionArtifact,
+  SourceCorrectionTaskNotice,
+} from './SourceCorrectionPanel'
+import {
+  isCorrectionReceiptKind,
+  correctionKindLabel,
+  SOURCE_CORRECTION_KIND,
+  CORRECTED_RECHECK_KIND,
+} from './sourceCorrection'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { latestArtifact, refreshArtifactList } from './artifactRefresh'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
@@ -557,6 +568,22 @@ export function Writing({
     visibleArtifacts.find((a) => a.id === candidateId) ||
     visibleArtifacts.find((a) => a.status === 'candidate') ||
     visibleArtifacts[0]
+  const visitSourceCandidate = (target: Artifact) => {
+    void doAction(async () => {
+      if (!confirmLeave() || !target.chapter_id) return
+      if (current.current?.id !== target.chapter_id) {
+        if (current.current) await save()
+        await loadChapter(target.chapter_id)
+      }
+      if (current.current?.id !== target.chapter_id) return
+      setArtifacts((rows) =>
+        rows.some((row) => row.id === target.id)
+          ? rows.map((row) => (row.id === target.id ? latestArtifact(row, target) : row))
+          : [target, ...rows],
+      )
+      setCandidateId(target.id)
+    })
+  }
   return (
     <div className="writing-layout">
       <aside className="chapter-sidebar">
@@ -1134,20 +1161,29 @@ export function Writing({
         {activeTask && (
           <div className="notice" role="status">
             <strong>
-              {activeTask.kind === 'candidate_recheck' ? '候选复检 · ' : ''}
+              {correctionKindLabel(activeTask.kind) ||
+                (activeTask.kind === 'candidate_recheck' ? '候选复检 · ' : '')}
               {label(activeTask.status)}
             </strong>
             <p>关闭浏览器不取消本机任务。</p>
             {activeTask.kind === 'candidate_recheck' && (
               <p>正在按原任务冻结契约复核候选，不自动改稿、采纳或继续整书。</p>
             )}
-            <FrozenPlotAuditPolicy
-              enabled={activeTask.payload.plot_contract_check}
-              identityEnabled={activeTask.payload.source_identity_context}
-              identityVersion={activeTask.result.source_identity_context_version}
-              version={activeTask.result.plot_contract_version}
-              mode={candidateRecheckSourceMode(activeTask)}
-            />
+            <SourceCorrectionTaskNotice task={activeTask} />
+            {activeTask.kind !== SOURCE_CORRECTION_KIND && (
+              <FrozenPlotAuditPolicy
+                enabled={activeTask.kind === CORRECTED_RECHECK_KIND || activeTask.payload.plot_contract_check}
+                identityEnabled={activeTask.payload.source_identity_context}
+                identityVersion={activeTask.result.source_identity_context_version}
+                flowVersion={activeTask.result.flow_source_entailment_version}
+                version={activeTask.result.plot_contract_version}
+                mode={
+                  activeTask.kind === CORRECTED_RECHECK_KIND
+                    ? 'assisted'
+                    : candidateRecheckSourceMode(activeTask)
+                }
+              />
+            )}
             {activeTask.result.author_contract_snapshot && (
               <details>
                 <summary>本次任务冻结的创作约定</summary>
@@ -1195,13 +1231,19 @@ export function Writing({
                   {label(task.status)} · {task.id.slice(0, 8)}
                 </strong>
                 <p>{task.error}</p>
-                <FrozenPlotAuditPolicy
-                  enabled={task.payload.plot_contract_check}
-                  identityEnabled={task.payload.source_identity_context}
-                  identityVersion={task.result.source_identity_context_version}
-                  version={task.result.plot_contract_version}
-                  mode={candidateRecheckSourceMode(task)}
-                />
+                <SourceCorrectionTaskNotice task={task} />
+                {task.kind !== SOURCE_CORRECTION_KIND && (
+                  <FrozenPlotAuditPolicy
+                    enabled={task.kind === CORRECTED_RECHECK_KIND || task.payload.plot_contract_check}
+                    identityEnabled={task.payload.source_identity_context}
+                    identityVersion={task.result.source_identity_context_version}
+                    flowVersion={task.result.flow_source_entailment_version}
+                    version={task.result.plot_contract_version}
+                    mode={
+                      task.kind === CORRECTED_RECHECK_KIND ? 'assisted' : candidateRecheckSourceMode(task)
+                    }
+                  />
+                )}
                 <button
                   disabled={busy}
                   onClick={() =>
@@ -1245,12 +1287,22 @@ export function Writing({
                   {visibleArtifacts.map((a, i) => (
                     <option key={a.id} value={a.id}>
                       候选 {visibleArtifacts.length - i} ·{' '}
-                      {a.kind === 'candidate_recheck' ? '候选复检报告' : a.kind} · {label(a.status)}
+                      {correctionKindLabel(a.kind) ||
+                        (a.kind === 'candidate_recheck' ? '候选复检报告' : a.kind)}{' '}
+                      · {isCorrectionReceiptKind(a.kind) ? '只读记录' : label(a.status)}
                     </option>
                   ))}
                 </select>
               </label>
-              {candidate?.kind === 'candidate_recheck' ? (
+              {candidate && isCorrectionReceiptKind(candidate.kind) ? (
+                <SourceCorrectionArtifact
+                  key={candidate.id}
+                  artifact={candidate}
+                  branchId={branch.id}
+                  disabled={busy || opening}
+                  onTarget={visitSourceCandidate}
+                />
+              ) : candidate?.kind === 'candidate_recheck' ? (
                 <CandidateRecheckReport
                   key={candidate.id}
                   artifact={candidate}
@@ -1285,6 +1337,24 @@ export function Writing({
                   modelReady={modelReady}
                   revisionDisabled={!!activeTask || busy}
                   recheckDisabled={!!activeTask || opening}
+                  sourceArtifacts={artifacts}
+                  onSourceStarted={(task) => {
+                    setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])
+                    setCandidateId(candidate.id)
+                  }}
+                  onSourceRefresh={async () => {
+                    const target = current.current?.id
+                    const load = loadSequence.current
+                    const comparison = candidateRequest.current
+                    const latest = await api<Artifact[]>(`/artifacts?branch_id=${branch.id}`)
+                    if (
+                      alive.current &&
+                      current.current?.id === target &&
+                      loadSequence.current === load &&
+                      candidateRequest.current === comparison
+                    )
+                      setArtifacts((rows) => refreshArtifactList(rows, latest))
+                  }}
                   manuscriptUnsaved={text !== chapter?.content || !!recovery}
                   directionDisabled={!!activeTask || busy || opening || !!feedbackHandoff}
                   onDirection={loadAdviceDirection}
@@ -1336,6 +1406,9 @@ function Candidate({
   onIntentSettings,
   revisionDisabled,
   recheckDisabled,
+  sourceArtifacts,
+  onSourceStarted,
+  onSourceRefresh,
   manuscriptUnsaved,
   novelId,
   branchId,
@@ -1356,6 +1429,9 @@ function Candidate({
   onIntentSettings: () => void
   revisionDisabled: boolean
   recheckDisabled: boolean
+  sourceArtifacts: Artifact[]
+  onSourceStarted: (task: Task) => void
+  onSourceRefresh: () => Promise<void>
   manuscriptUnsaved: boolean
   novelId: string
   branchId: string
@@ -1554,6 +1630,21 @@ function Candidate({
           unsaved={manuscriptUnsaved || candidateChanged || edit !== (artifact.payload.text || '')}
           perform={perform}
           onStarted={onStarted}
+        />
+      )}
+      {artifact.kind === 'chapter_draft' && artifact.status === 'candidate' && (
+        <SourceCorrectionPanel
+          artifact={artifact}
+          chapter={chapter}
+          novelId={novelId}
+          branchId={branchId}
+          account={account}
+          modelReady={modelReady}
+          disabled={recheckDisabled || busy}
+          unsaved={manuscriptUnsaved || candidateChanged || edit !== (artifact.payload.text || '')}
+          artifacts={sourceArtifacts}
+          onTask={onSourceStarted}
+          onRefresh={onSourceRefresh}
         />
       )}
       {['text_patch', 'chapter_draft'].includes(artifact.kind) && (

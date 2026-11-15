@@ -215,6 +215,7 @@ def test_new_queue_marks_v2_but_old_nonce_replay_does_not_upgrade_existing_task(
     assert queued["result"]["plot_contract_version"] == VERSION
     legacy = deepcopy(queued["result"])
     legacy.pop("plot_contract_version")
+    legacy.pop("flow_source_entailment_version", None)
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(legacy), queued["id"]))
     replay = domain.queue("module", payload, story["branch_id"])
@@ -268,6 +269,7 @@ def test_v1_reference_schema_and_paid_parse_step_recover_without_new_scope_calls
     queued = domain.queue("module", payload, story["branch_id"])
     legacy = deepcopy(queued["result"])
     legacy.pop("plot_contract_version")
+    legacy.pop("flow_source_entailment_version", None)
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(legacy), queued["id"]))
     model = Integrated()
