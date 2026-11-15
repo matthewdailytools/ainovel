@@ -11,7 +11,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_scope": "本项的实际写作总投入/作者体验仍未测量；不能用保存回归替代使用收益。"
   },
   {
@@ -26,7 +26,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_evidence": [
       "2026-11-14-real-epub.md"
     ],
@@ -44,7 +44,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_evidence": [
       "2026-11-13-reference-repeats.md",
       "2026-11-13-author-review-feedback.md"
@@ -63,7 +63,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_evidence": [
       "2026-11-14-books-coldstart.md"
     ],
@@ -81,7 +81,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md"
     ],
@@ -99,7 +99,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md"
     ],
@@ -117,7 +117,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_scope": "36章导入保留；六轮旧失败后，相同两章第七轮2次CNY0.241526形成34记录/12场景待审候选，116逐字来源/145段覆盖及引用范围通过；16事件order未知、after空及群体身份待整理，0采用。真实十章/跨卷/作者整体质量仍待验。",
     "quality_evidence": [
       "2026-11-15-longform-import-and-reverse.md",
@@ -139,13 +139,14 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_evidence": [
       "2026-11-15-assisted-candidate-recheck.md",
       "2026-11-15-source-identity-context.md",
-      "2026-11-15-chapter-adherence-and-maintenance.md"
+      "2026-11-15-chapter-adherence-and-maintenance.md",
+      "2026-11-15-memory-selection-and-races.md"
     ],
-    "quality_scope": "真实最小修订及复检已执行，原稿/旧检查保留；作者未认可文学或收益。"
+    "quality_scope": "真实候选正文与记忆可分选，复检同版列表变化和空列表以hash/显式重读保护；0/6真实回执可恢复，派生事实语义和作者文学/收益仍需核定。"
   },
   {
     "id": "PV09",
@@ -159,13 +160,14 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_evidence": [
       "2026-11-15-second-chapter-review-candidates.md",
       "2026-11-15-source-identity-context.md",
-      "2026-11-15-chapter-adherence-and-maintenance.md"
+      "2026-11-15-chapter-adherence-and-maintenance.md",
+      "2026-11-15-memory-selection-and-races.md"
     ],
-    "quality_scope": "新36章仅首章采用；R5第二章正文守约/7情节通过，记忆时段及话语归属待核，候选rev1保留未采用，整书未通过。"
+    "quality_scope": "新36章已采用两章；第二章仅正文rev1/零facts，原6记忆待核；维护paused next3、88引用合格但自述/时段需更正，整书未通过。"
   },
   {
     "id": "PV10",
@@ -179,13 +181,14 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-assisted-candidate-recheck.md",
-      "2026-11-15-chapter-adherence-and-maintenance.md"
+      "2026-11-15-chapter-adherence-and-maintenance.md",
+      "2026-11-15-memory-selection-and-races.md"
     ],
-    "quality_scope": "旧独立十章阶段closed=false保留；新36章已采用两章，32k维护到paused/next3，无第三章，派生记忆待更正及结构语义另核，整书未通过。"
+    "quality_scope": "旧十章阶段closed=false保留；新36章已采用两章并维护paused next3，无第三章，派生记忆/结构时段更正待完成，整书未通过。"
   },
   {
     "id": "PV11",
@@ -199,7 +202,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_scope": "实际费用/故障/恢复属于工程稳定性；使用总投入尚未完整测量，不据此作文学或收益通过。"
   },
   {
@@ -214,7 +217,7 @@
     "status_as_of": "2026-11-15",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-15-chapter-adherence-and-maintenance.md",
+    "latest_regression_evidence": "2026-11-15-memory-selection-and-races.md",
     "quality_scope": "工程中文/键盘/缩放已有范围；真实作者输入法、辅助技术和体验评估不能由替身事件推定。"
   }
 ]

@@ -4728,5 +4728,148 @@
     "result": "unverified",
     "record": "2026-11-15-chapter-adherence-and-maintenance.md",
     "fix_of": "chapter-adherence-full-55e313a-001"
+  },
+  {
+    "id": "memory-selection-initial-contract-failed-001",
+    "date": "2026-11-15",
+    "commit": "543b8d8+local",
+    "module": "记忆选择修复前契约复现",
+    "scenario": "新选择字段原接口422，首轮复现日志保留；原正文/候选不改。",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": ""
+  },
+  {
+    "id": "memory-selection-reread-choice-failed-001",
+    "date": "2026-11-15",
+    "commit": "543b8d8+local",
+    "module": "同版复检后选择自动全选缺陷",
+    "scenario": "已选部分/全不选，同owner新token到达会回全选且可采新facts；独立只读审查确认，尚未发布时发现。",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": ""
+  },
+  {
+    "id": "memory-selection-empty-list-race-failed-001",
+    "date": "2026-11-15",
+    "commit": "543b8d8+local",
+    "module": "空记忆缺hash实际错采复现",
+    "scenario": "隔离DB同candidateRevision从0到1facts，旧无hash人工请求实际写入未显示fact；加旧空hash409且0写。",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": ""
+  },
+  {
+    "id": "memory-selection-source-gates-fixed-001",
+    "date": "2026-11-15",
+    "commit": "0191f7c",
+    "module": "选择来源与显式重读保护",
+    "scenario": "51后端专项、21前端专项；所有正文人工请求含空列表绑定hash，同owner变化硬门禁且非空转空可显式重读，nonce/旧响应隔离。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": "memory-selection-empty-list-race-failed-001"
+  },
+  {
+    "id": "memory-selection-first-browser-contract-held-001",
+    "date": "2026-11-15",
+    "commit": "0191f7c+旧reference用例",
+    "module": "首轮参考流程用例待补作者步骤",
+    "scenario": "后端1709/前端251/48通过，browser66pass1fail；旧reference编辑后未执行新增重读，外显按钮可操作，原失败/trace保留。",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": "memory-selection-reread-choice-failed-001"
+  },
+  {
+    "id": "memory-selection-full-verified-001",
+    "date": "2026-11-15",
+    "commit": "0191f7c",
+    "module": "记忆选择全项目最终验证",
+    "scenario": "1709后端415.95s/墙419.312，251前端/48既有，67无头墙312.25；两轮385各自稳定，仅reference.spec补作者步骤，生产源/后端tests/dist7相同。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": "memory-selection-first-browser-contract-held-001"
+  },
+  {
+    "id": "memory-selection-source-and-rollout-001",
+    "date": "2026-11-15",
+    "commit": "0191f7c",
+    "module": "c970实恢后发布0191与qaJ",
+    "scenario": "385/378Git精确绑定0191，文档仅CRLF规范；c970实恢后更新8766，30业务表/usage/3任务/7配置和旧assets保留，未改环境与无关文件。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": "memory-selection-full-verified-001"
+  },
+  {
+    "id": "memory-selection-daily-one-adoption-001",
+    "date": "2026-11-15",
+    "commit": "0191f7c",
+    "module": "真实半自动仅正文一次采纳",
+    "scenario": "UI实际6条全不选+理由，唯一nonce c0c3…正式ch2rev0到1、facts0、原6memory/report/history保留，未resume且0模型调用。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": "chapter-adherence-r5-memory-held-001"
+  },
+  {
+    "id": "memory-selection-daily-post-ui-locator-failed-001",
+    "date": "2026-11-15",
+    "commit": "0191f7c",
+    "module": "采纳后首脚本定位报告超时",
+    "scenario": "唯一accept已提交且receipt/正文/任务/usage后置检查通过，随后默认报告面板缺目标回执控件超时；保留dispatch/failed，不重发不换nonce。",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": "memory-selection-daily-one-adoption-001"
+  },
+  {
+    "id": "memory-selection-daily-readonly-recovery-001",
+    "date": "2026-11-15",
+    "commit": "0191f7c",
+    "module": "只读补核原回执与六项省略",
+    "scenario": "SQL/API/saved receipt原nonce一致；显式选0df accepted显示0/6与每项原引文，320body30/keyboard，全部task/usage保持且0写0model，非重采纳。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": "memory-selection-daily-post-ui-locator-failed-001"
+  },
+  {
+    "id": "memory-selection-assisted-maintained-paused-001",
+    "date": "2026-11-15",
+    "commit": "0191f7c",
+    "module": "半自动第二章维护到真实暂停",
+    "scenario": "原16k前两次长度16384后第三14095/char1080，4调用.495586全结；paused next3无pending/marker，不写章3；88引用合格但自述与时段语义另需保守更正。",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": "memory-selection-daily-readonly-recovery-001"
+  },
+  {
+    "id": "memory-selection-final-restored-receipt-001",
+    "date": "2026-11-15",
+    "commit": "0191f7c",
+    "module": "9a8b实际恢复新正文与回执",
+    "scenario": "9a8b实恢全部30业务表+usage证据哈希相同，直接读原nonce/0选6省略/原6memory/history与两维护paused；DS31.247374未知0净48.752626。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": "memory-selection-assisted-maintained-paused-001"
+  },
+  {
+    "id": "memory-selection-precise-ci-terminal-001",
+    "date": "2026-11-15",
+    "commit": "0191f7c",
+    "module": "0191精确双CI成功",
+    "scenario": "branch43685063602/main43685273803 completed success；55与543各自双CI终态另存，不借旧绿灯。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-memory-selection-and-races.md",
+    "fix_of": "memory-selection-full-verified-001"
   }
 ]
