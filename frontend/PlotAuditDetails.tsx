@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { isBoundPlotAuditVersion, PLOT_AUDIT_V1_VERSION, plotAuditState, readPlotAudit } from './plotAudit'
 import { SourceIdentityDetails, SourceIdentityOption, SOURCE_IDENTITY_VERSION } from './sourceIdentity'
-import { SourceFlowDetails, FLOW_ENTAILMENT_VERSION } from './SourceFlowDetails'
+import { SourceFlowDetails, FLOW_ENTAILMENT_VERSION, isSourceFlowVersion } from './SourceFlowDetails'
 
 export function PlotAuditOption({
   checked,
@@ -77,8 +77,8 @@ export function FrozenPlotAuditPolicy({
             : '角色限定补充的冻结版本无法确认，待核对。'
           : '未额外补充原话角色限定，旧任务不自动升级。')}
       {enabled === true &&
-        (flowVersion === FLOW_ENTAILMENT_VERSION
-          ? '已冻结正文流向观察的独立出处复核（额外模型费用），区分提问本身与所求答案。'
+        (isSourceFlowVersion(flowVersion)
+          ? `已冻结正文流向观察的独立出处复核（额外模型费用），区分提问本身与所求答案；政策${String(flowVersion)}。${flowVersion === FLOW_ENTAILMENT_VERSION ? '本版另保留有原文依据的参与者排除与实例关联。' : ''}`
           : flowVersion === undefined
             ? '未启用新版流向出处复核，旧任务保持原政策。'
             : '流向出处复核的冻结版本无法确认，待核对。')}

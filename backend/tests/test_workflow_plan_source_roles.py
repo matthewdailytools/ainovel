@@ -70,6 +70,29 @@ def resolved(value):
     return value
 
 
+def historical_role_row(worker, plot, chapter):
+    """Published Role1 rows keep their old frame; new execution defaults have separate tests."""
+    from ainovel.workflow_plan_preparation import bindings
+    from ainovel.workflow_plan_context import KEY as CONTEXT_KEY, freeze
+
+    row = {
+        **bindings(worker, plot, chapter),
+        OPEN_KEY: "workflow-plan-open-details/1",
+        KEY: VERSION,
+        "status": "interpreting",
+        "round": 0,
+        "effective_plot": plot["plot"],
+        "effective_plot_sha256": sha(plot["plot"]),
+        "interpretations": [],
+        "choices": [],
+        "preservation_checks": [],
+        "reason": "",
+    }
+    row[CONTEXT_KEY] = freeze(worker, row, chapter)
+    worker.task["result"].setdefault("plot_preparations", {})[str(plot["number"])] = row
+    worker.checkpoint(worker.task["result"])
+
+
 def seed_failed(
     settings, domain, story, *, guidance=False, chapters=1, number=1, future_positions=(), account=None
 ):
@@ -89,6 +112,7 @@ def seed_failed(
         worker.attempt = worker.task["attempt"]
         plot = worker.task["result"]["plan"]["chapters"][number - 1]
         chapter = domain.chapter(current["result"]["plot_preparations"][str(number)]["chapter_id"])
+        historical_role_row(worker, plot, chapter)
     else:
         worker, plot, chapter, _ = open_worker(settings, domain, story, legacy=True)
         plot["plot"] = SOURCE
@@ -460,6 +484,7 @@ def test_explicit_child_executes_new_source_interpretation_and_independent_full_
     worker.attempt = worker.task["attempt"]
     assert worker.task["id"] == child["id"]
     plot = child["result"]["plan"]["chapters"][0]
+    historical_role_row(worker, plot, domain.chapter(story["chapter_id"]))
     effective, contract = asyncio.run(prepare(worker, plot, domain.chapter(story["chapter_id"])))
     assert len(frames) == 2
     assert frames[0]["任务"][KEY] == VERSION
@@ -565,6 +590,7 @@ def test_repaired_stage_is_decided_by_independent_all_p_source_review_not_first_
     worker = Worker(settings, ModelClient(settings, old_worker.budget, httpx.MockTransport(handler)))
     worker.task = worker.claim()
     worker.attempt = worker.task["attempt"]
+    historical_role_row(worker, child["result"]["plan"]["chapters"][0], domain.chapter(story["chapter_id"]))
     result = asyncio.run(
         prepare(worker, child["result"]["plan"]["chapters"][0], domain.chapter(story["chapter_id"]))
     )
@@ -646,6 +672,7 @@ def test_deepseek_native_wire_freezes_roles_schema_repairs_and_unknown_no_resend
     worker = Worker(settings, ModelClient(settings, old_worker.budget, httpx.MockTransport(handler)))
     worker.task = worker.claim()
     worker.attempt = worker.task["attempt"]
+    historical_role_row(worker, child["result"]["plan"]["chapters"][0], domain.chapter(story["chapter_id"]))
     if timeout:
         with pytest.raises(DomainError):
             asyncio.run(

@@ -5,6 +5,7 @@ import {
   canonical,
   emptyChapterMatches,
   OPEN_DETAILS_VERSION,
+  RECIPIENT_SCOPE_VERSION,
   object,
   readPendingRestart,
   readRestartChild,
@@ -299,6 +300,97 @@ function openFixture(tagged = false) {
   }
   return result
 }
+
+function scopeFixture() {
+  const fixture = openFixture(true),
+    row = preparationRow(fixture.source)
+  row.workflow_plan_recipient_scope_version = RECIPIENT_SCOPE_VERSION
+  row.effective_plot_sha256 = 'd'.repeat(64)
+  const response = {
+    version: RECIPIENT_SCOPE_VERSION,
+    status: 'supported',
+    source_sha256: row.effective_plot_sha256,
+    input_sha256: 'f'.repeat(64),
+    inventory: {
+      input_sha256: 'f'.repeat(64),
+      observations: [{ kind: 'named_destination' }],
+      unit_checks: [{ status: 'covered' }],
+    },
+  }
+  const phases = row.phases as Record<string, unknown>
+  phases['recipient_scope:0'] = {
+    status: 'completed',
+    owner_task_id: fixture.source.id,
+    attempt: 1,
+    response_sha256: 'e'.repeat(64),
+    response,
+  }
+  return { ...fixture, row, phases, response }
+}
+
+function preparationRow(task: Task) {
+  const row = object(object(task.result.plot_preparations)?.['4'])
+  if (!row) throw new Error('缺少准备行夹具')
+  return row
+}
+
+describe('先行接收范围来源观察后的重新准备预览', () => {
+  it('新行已完成来源观察、解释仍失败时可读取正式依据，原nonce保持', () => {
+    const { source, preview, pending } = scopeFixture()
+    expect(canPreviewRestart(source)).toBe(true)
+    expect(readRestartPreview(preview, source)).toEqual(preview)
+    const owner = canonical([source.novel_id, source.branch_id, source.id])
+    expect(readPendingRestart(structuredClone(pending), owner)).toEqual(pending)
+    expect(pending.request.client_request_id).toBe('stable-test-nonce')
+    expect(preview.known_invalid_steps.call_ids).toHaveLength(3)
+  })
+
+  it.each([
+    'missing-marker',
+    'future-marker',
+    'missing-inventory',
+    'extra-phase',
+    'unfinished',
+    'bad-hash',
+    'missing-owner',
+    'unknown-receipt',
+    'wrong-version',
+    'wrong-source',
+    'wrong-token',
+    'unknown-observation',
+    'unknown-unit',
+    'empty-coverage',
+    'interpret-response',
+    'legacy-downgrade',
+  ])('不放开未决、未知或不一致的预览：%s', (change) => {
+    const { source, row, phases, response } = scopeFixture()
+    const slot = phases['recipient_scope:0'] as Record<string, unknown>
+    if (change === 'missing-marker') delete row.workflow_plan_recipient_scope_version
+    if (change === 'future-marker') row.workflow_plan_recipient_scope_version = 'future'
+    if (change === 'missing-inventory') delete phases['recipient_scope:0']
+    if (change === 'extra-phase') phases['choose:1'] = { status: 'started' }
+    if (change === 'unfinished') slot.status = 'started'
+    if (change === 'bad-hash') slot.response_sha256 = 'bad'
+    if (change === 'missing-owner') delete slot.owner_task_id
+    if (change === 'unknown-receipt') response.status = 'needs_review'
+    if (change === 'wrong-version') response.version = 'future'
+    if (change === 'wrong-source') response.source_sha256 = 'b'.repeat(64)
+    if (change === 'wrong-token') response.inventory.input_sha256 = 'a'.repeat(64)
+    if (change === 'unknown-observation') response.inventory.observations[0].kind = 'unknown'
+    if (change === 'unknown-unit') response.inventory.unit_checks[0].status = 'unknown'
+    if (change === 'empty-coverage') response.inventory.unit_checks = []
+    if (change === 'interpret-response') (phases['interpret:0'] as Record<string, unknown>).response = {}
+    if (change === 'legacy-downgrade') {
+      delete row.workflow_plan_recipient_scope_version
+      delete row.workflow_plan_source_roles_version
+      delete source.payload.workflow_plan_source_roles_version
+      delete source.result.workflow_plan_source_roles_version
+      delete source.result.workflow_plan_open_details_version
+      delete source.result.plan_preparation_restart
+    }
+    expect(canPreviewRestart(source)).toBe(false)
+  })
+})
 
 describe('当前开放章纲初次解释的显式新版重核', () => {
   it.each([false, true])('仅初次解释时允许读取server依据，来源已带同版marker=%s', (tagged) => {

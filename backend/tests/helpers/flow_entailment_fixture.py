@@ -20,4 +20,9 @@ def flow_entailment_output(instruction):
             for row in instruction["待核对观察提案"]
         ],
         "note": "只验证新来源核对的接线与持久化，不声称内容质量。",
+        **(
+            {"participants": [], "instances": []}
+            if instruction.get("流向来源蕴含版本") == "source-flow-entailment/2"
+            else {}
+        ),
     }

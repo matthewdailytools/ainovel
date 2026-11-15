@@ -8,7 +8,7 @@ import json
 import pytest
 
 from ainovel.db import DomainError, dumps
-from ainovel.flow_entailment import ACTION, KEY, VERSION, review_flows
+from ainovel.flow_entailment import ACTION, KEY, LEGACY_VERSION as FLOW_LEGACY_VERSION, VERSION, review_flows
 from ainovel.models import ModuleInput
 from ainovel.plot_audit import VERSION as PLOT_VERSION, LEGACY_VERSION, independent_flows
 from ainovel.worker import Worker
@@ -58,7 +58,9 @@ def flow(supplier="甲", recipient="乙", *, stage="completed", obj=OBJECT, cert
 
 
 class Model:
-    def __init__(self, flows=None, verdicts=None, *, marker=VERSION, version=PLOT_VERSION, mutate=None):
+    def __init__(
+        self, flows=None, verdicts=None, *, marker=FLOW_LEGACY_VERSION, version=PLOT_VERSION, mutate=None
+    ):
         self.task = {"result": {"plot_contract_version": version}}
         if marker is not None:
             self.task["result"][KEY] = marker
@@ -338,6 +340,11 @@ def test_supported_review_is_durable_across_worker_instances_without_model_repla
                             for row in instruction["待核对观察提案"]
                         ],
                         "note": "工程回归",
+                        **(
+                            {"participants": [], "instances": []}
+                            if instruction.get("流向来源蕴含版本") == VERSION
+                            else {}
+                        ),
                     }
                 ),
                 "call_id": "durable-flow-fixture",

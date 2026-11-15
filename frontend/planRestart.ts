@@ -5,6 +5,7 @@ export const RESTART_VERSION = 'workflow-plan-restart/1'
 export const OPEN_DETAILS_VERSION = 'workflow-plan-open-details/1'
 export const SOURCE_ROLES_VERSION = 'workflow-plan-source-roles/1'
 export const SOURCE_ROLES_CREATION_VERSION = 'workflow-plan-source-roles-creation/1'
+export const RECIPIENT_SCOPE_VERSION = 'workflow-plan-recipient-scope/1'
 export type RestartInput = components['schemas']['PlanRestartInput']
 export type RestartBasis = Pick<
   RestartInput,
@@ -152,6 +153,49 @@ export function sourceRolesAnchorsMatch(task: Task) {
   )
 }
 
+function initialInterpretationPhases(row: Record<string, unknown>, phases: Record<string, unknown>) {
+  const version = row.workflow_plan_recipient_scope_version
+  if (version === undefined) return Object.keys(phases).join(',') === 'interpret:0'
+  if (
+    version !== RECIPIENT_SCOPE_VERSION ||
+    row.workflow_plan_source_roles_version !== SOURCE_ROLES_VERSION ||
+    Object.keys(phases).sort().join(',') !== 'interpret:0,recipient_scope:0'
+  )
+    return false
+  const slot = object(phases['recipient_scope:0']),
+    receipt = object(slot?.response),
+    inventory = object(receipt?.inventory)
+  // This only exposes the read-only preview. The server verifies source spans,
+  // receipt hashes and checkpoint lineage before returning an actionable basis.
+  return Boolean(
+    slot?.status === 'completed' &&
+    string(slot.owner_task_id) &&
+    integer(slot.attempt) &&
+    hash(slot.response_sha256) &&
+    receipt?.version === version &&
+    receipt.status === 'supported' &&
+    hash(receipt.source_sha256) &&
+    receipt.source_sha256 === row.effective_plot_sha256 &&
+    hash(receipt.input_sha256) &&
+    inventory?.input_sha256 === receipt.input_sha256 &&
+    Array.isArray(inventory.observations) &&
+    inventory.observations.every((value) =>
+      [
+        'recipient_exclusivity',
+        'named_destination',
+        'specific_recipient_exclusion',
+        'action_permission',
+        'explicitly_unrestricted',
+      ].includes(String(object(value)?.kind)),
+    ) &&
+    Array.isArray(inventory.unit_checks) &&
+    inventory.unit_checks.length > 0 &&
+    inventory.unit_checks.every((value) =>
+      ['covered', 'not_scope_related'].includes(String(object(value)?.status)),
+    ),
+  )
+}
+
 export function canPreviewRestart(task: Task) {
   const row = preparation(task)
   const openVersion = object(task.result)?.workflow_plan_open_details_version,
@@ -161,7 +205,12 @@ export function canPreviewRestart(task: Task) {
     initial = object(phases?.['interpret:0']),
     roleAnchor = sourceRolesAnchorsMatch(task)
   const legacy =
-    openVersion === undefined && rolesVersion === undefined && payloadRolesVersion === undefined && roleAnchor
+    openVersion === undefined &&
+    rolesVersion === undefined &&
+    payloadRolesVersion === undefined &&
+    row?.workflow_plan_recipient_scope_version === undefined &&
+    phases?.['recipient_scope:0'] === undefined &&
+    roleAnchor
   const initialOpen =
     openVersion === OPEN_DETAILS_VERSION &&
     (rolesVersion === undefined || rolesVersion === SOURCE_ROLES_VERSION) &&
@@ -169,7 +218,8 @@ export function canPreviewRestart(task: Task) {
     row?.workflow_plan_source_roles_version === rolesVersion &&
     roleAnchor &&
     !!phases &&
-    Object.keys(phases).length === 1 &&
+    !!row &&
+    initialInterpretationPhases(row, phases) &&
     !!initial &&
     !('response' in initial)
   return (

@@ -7,6 +7,21 @@ def plan_execution_output(instruction):
     while isinstance(instruction.get("原始任务"), dict):
         instruction = instruction["原始任务"]
     action = instruction.get("动作")
+    if action == "独立观察AI章纲接收范围来源":
+        return {
+            "input_sha256": instruction["input_sha256"],
+            "observations": [],
+            "unit_checks": [
+                {
+                    "source_id": unit["source_id"],
+                    "status": "not_scope_related",
+                    "observation_ids": [],
+                    "reason": "仅确定性工程替身；专项语义回归另给真实范围观察。",
+                }
+                for unit in instruction["可引用原文"]
+            ],
+            "note": "工程替身，不代表来源语义已通过真实模型评估。",
+        }
     if action == "写前解释AI工作章纲":
         baseline = instruction["写前准备契约"].get("原始事项")
         if baseline:
@@ -36,6 +51,9 @@ def plan_execution_output(instruction):
                     "scope_condition": "",
                 }
             ]
+        if "接收范围核对执行版本" in instruction:
+            for item in items:
+                item["scope_observation_ids"] = []
         return {"items": items, "note": "确定性工程替身，不代表真实语义保持或创作质量通过。"}
     if action == CHOICE_ACTION:
         return {

@@ -112,6 +112,24 @@ def checkpoint(domain, current, request):
     ):
         raise DomainError("plan_restart_checkpoint", "须保留完整原规划并只重做当前未写章节。", 409)
     row = progress.get("plot_preparations", {}).get(str(number))
+    from types import SimpleNamespace
+    from . import workflow_plan_recipient_scope as recipient_scope
+
+    scope_execution = row is not None and recipient_scope.enabled(
+        SimpleNamespace(task=current, domain=domain, db=domain.db), row
+    )
+    allowed_phases = {"recipient_scope:0", "interpret:0"} if scope_execution else {"interpret:0"}
+    if scope_execution:
+        inventory_slot = row.get("phases", {}).get("recipient_scope:0", {})
+        inventory = inventory_slot.get("response")
+        if (
+            inventory_slot.get("status") != "completed"
+            or inventory is None
+            or inventory_slot.get("response_sha256") != sha(inventory)
+            or not recipient_scope.inventory_valid(inventory, row["original_plot"])
+            or inventory["status"] != "supported"
+        ):
+            raise DomainError("unknown_result", "先行接收范围观察未完成或仍未知，不重发旧步骤。", 409)
     if (
         not row
         or row.get("round") != 0
@@ -119,7 +137,7 @@ def checkpoint(domain, current, request):
         or row.get("interpretations")
         or row.get("choices")
         or row.get("preservation_checks")
-        or set(row.get("phases", {})) != {"interpret:0"}
+        or set(row.get("phases", {})) != allowed_phases
     ):
         raise DomainError(
             "plan_restart_checkpoint", "仅重做尚无有效首轮解释的已知失败步骤；不清除选择或保持核对失败。", 409
@@ -238,7 +256,27 @@ def known_invalid_phase(domain, usage, current, row, *, open_phase=False):
         )
     ]
     new_dispatches = [d for d in dispatched if d["fingerprint"] not in old]
-    schema = OpenPlanInterpretation if open_phase else ScopedAuthorPlot
+    from types import SimpleNamespace
+    from . import workflow_plan_recipient_scope as recipient_scope
+    from .plot_audit import ScopeBoundOpenPlanInterpretation
+
+    scope_execution = recipient_scope.enabled(SimpleNamespace(task=current, domain=domain, db=domain.db), row)
+    inventory = (
+        row.get("phases", {}).get("recipient_scope:0", {}).get("response") if scope_execution else None
+    )
+    if scope_execution and (
+        not open_phase
+        or not recipient_scope.inventory_valid(inventory, row["original_plot"])
+        or inventory["status"] != "supported"
+    ):
+        raise DomainError("unknown_result", "先行范围观察不完整或未知，不重发旧解释。", 409)
+    schema = (
+        ScopeBoundOpenPlanInterpretation
+        if scope_execution
+        else OpenPlanInterpretation
+        if open_phase
+        else ScopedAuthorPlot
+    )
     if {d["fingerprint"] for d in new_dispatches} != {s["fingerprint"] for s in replies} or any(
         d.get("action") != "写前解释AI工作章纲" or d.get("schema") != schema.__name__ for d in new_dispatches
     ):
@@ -249,6 +287,7 @@ def known_invalid_phase(domain, usage, current, row, *, open_phase=False):
             not isinstance(d.get("request"), dict)
             or d["request"].get(ROLE_KEY) != current["result"].get(ROLE_KEY)
             or d["request"].get(KEY) != VERSION
+            or (scope_execution and d["request"].get(recipient_scope.KEY) != recipient_scope.VERSION)
             for d in new_dispatches
         )
     ):
@@ -280,12 +319,14 @@ def known_invalid_phase(domain, usage, current, row, *, open_phase=False):
             for item in value["items"]:
                 resolve_field(item, "author_evidence", sources)
             invalid = (
-                repair_state.validate(value)
+                repair_state.validate(recipient_scope.core_value(value) if scope_execution else value)
                 if repair_state is not None
                 else open_plan_issues(value, source)
                 if open_phase
                 else author_contract_issues(value, source, scoped=True)
             )
+            if scope_execution:
+                invalid.extend(recipient_scope.binding_issues(value, inventory))
         except (KeyError, ValueError, TypeError) as error:
             raise DomainError(
                 "unknown_result", "旧解释格式或连续来源无法核对，未创建重做任务。", 409

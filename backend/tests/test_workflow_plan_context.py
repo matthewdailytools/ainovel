@@ -11,6 +11,7 @@ from ainovel.story_graph import SaveRecord, save_record
 from ainovel.workflow_plan_context import KEY as CONTEXT_KEY
 from ainovel.workflow_plan_open_details import KEY as OPEN_KEY
 from ainovel.workflow_plan_preparation import CHECK_ACTION, CHOICE_ACTION, prepare
+from ainovel.workflow_plan_recipient_scope import ACTION as SCOPE_ACTION
 from test_workflow_plan_open_details import OpenModel, SOURCE
 from test_workflow_plan_preparation import PreparationModel, claimed
 
@@ -177,9 +178,13 @@ def test_choice_and_compatibility_check_receive_frozen_adopted_context_but_inter
     assert "content" not in frozen["data"]["chapter"]
     for frame in worker.client.preparation_frames:
         action, context = frame["任务"]["动作"], frame["上下文"]
-        if action == "写前解释AI工作章纲":
+        if action in ("写前解释AI工作章纲", SCOPE_ACTION):
             assert set(context) == {"scope"}
             assert "creative_context" not in dumps(frame) and "WORLD_MARKER" not in dumps(frame)
+            if action == SCOPE_ACTION:
+                assert frame["任务"]["本章工作章纲原文"].startswith(SOURCE)
+                assert "recipient_scope_inventory" not in frame["任务"]
+                assert "原始事项" not in frame["任务"]
         else:
             assert action in (CHECK_ACTION, CHOICE_ACTION)
             assert context["creative_context_sha256"] == frozen["sha256"]
@@ -201,6 +206,8 @@ def test_choice_and_compatibility_check_receive_frozen_adopted_context_but_inter
             assert not context["longform"]["states"]  # no invented current story order
             assert book_context["planned"]["id"] in [r["id"] for r in context["longform"]["plans"]]
             assert book_context["mixed"]["id"] not in [r["id"] for r in context["longform"]["events"]]
+    actions = [frame["任务"]["动作"] for frame in worker.client.preparation_frames]
+    assert actions.index(SCOPE_ACTION) < actions.index("写前解释AI工作章纲")
     requests = [
         json.loads(r["payload"])["request"]
         for r in domain.db.all(

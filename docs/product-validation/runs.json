@@ -6873,5 +6873,71 @@
     "result": "passed",
     "record": "2026-11-16-unknown-scene-reason-and-auto5-review.md",
     "fix_of": ""
+  },
+  {
+    "id": "scope-flow2-full-first-20261116",
+    "date": "2026-11-16",
+    "commit": "156ca4d+source-scope-flow2",
+    "module": "全项目回归",
+    "scenario": "首轮2266通过/1F/1E及113通过/1F，绑定字段与构建竞争留档",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-source-scope-and-flow-instance-checks.md",
+    "fix_of": ""
+  },
+  {
+    "id": "scope-flow2-full-final-20261116",
+    "date": "2026-11-16",
+    "commit": "156ca4d+source-scope-flow2",
+    "module": "全项目回归",
+    "scenario": "2300后端/509前端/116无头/48Node及355同源、7dist通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-source-scope-and-flow-instance-checks.md",
+    "fix_of": "scope-flow2-full-first-20261116"
+  },
+  {
+    "id": "scope-flow2-ui-20261116",
+    "date": "2026-11-16",
+    "commit": "156ca4d+source-scope-flow2",
+    "module": "流向与来源工作台",
+    "scenario": "新版本及旧nonce、非空局部关系、原文、键盘和320实际文字2倍",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-source-scope-and-flow-instance-checks.md",
+    "fix_of": ""
+  },
+  {
+    "id": "scope-flow2-old-prepared-20261116",
+    "date": "2026-11-16",
+    "commit": "156ca4d+source-scope-flow2",
+    "module": "候选复检",
+    "scenario": "旧FLOW1的原only/来源保持，显式新FLOW2复检与历史审计",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-source-scope-and-flow-instance-checks.md",
+    "fix_of": ""
+  },
+  {
+    "id": "scope-flow2-model-not-run-20261116",
+    "date": "2026-11-16",
+    "commit": "156ca4d+source-scope-flow2",
+    "module": "真实模型质量",
+    "scenario": "新来源与局部流向执行的真实质量尚未评测、文学和收益未验证",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-16-source-scope-and-flow-instance-checks.md",
+    "fix_of": ""
+  },
+  {
+    "id": "unknown-reason-ci-156ca4d-20261116",
+    "date": "2026-11-16",
+    "commit": "156ca4d",
+    "module": "全项目CI",
+    "scenario": "精确156ca4d远端2234/471/111/48全部success",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-source-scope-and-flow-instance-checks.md",
+    "fix_of": ""
   }
 ]

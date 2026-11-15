@@ -26,7 +26,7 @@ class RecheckCorrectionInput(CandidateRecheckInput):
     receipt_id: str = Field(min_length=1, max_length=100)
 
 
-def freeze(domain, request, *, verify_basis=True):
+def freeze(domain, request, *, verify_basis=True, flow_entailment_version=FLOW_VERSION):
     from .conditional_review import VERSION as CONDITIONAL_VERSION
     from .book_applicability import VERSION as APPLICABILITY_VERSION
 
@@ -35,7 +35,7 @@ def freeze(domain, request, *, verify_basis=True):
         request,
         conditional_policy=CONDITIONAL_VERSION,
         applicability_version=APPLICABILITY_VERSION,
-        flow_entailment_version=FLOW_VERSION,
+        flow_entailment_version=flow_entailment_version,
     )
     receipt = domain.artifact(request["receipt_id"])
     payload = receipt["payload"]
@@ -124,7 +124,12 @@ def validate(worker):
             expected.get(key) != worker.task["result"].get(key)
             for key in (CONDITIONAL_KEY, APPLICABILITY_KEY)
         )
-        or freeze(worker.domain, worker.task["payload"]) != expected
+        or freeze(
+            worker.domain,
+            worker.task["payload"],
+            flow_entailment_version=expected.get(FLOW_KEY),
+        )
+        != expected
     ):
         raise DomainError(
             "source_correction_changed", "显式来源纠偏复检的依据已变化，保留原结果并停止。", 409

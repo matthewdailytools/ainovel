@@ -10,7 +10,7 @@ import pytest
 from ainovel.budget import Budget
 from ainovel.conditional_review import KEY as CONDITIONAL_KEY, VERSION as CONDITIONAL_VERSION
 from ainovel.db import DomainError, dumps, uid
-from ainovel.flow_entailment import KEY, VERSION, enabled
+from ainovel.flow_entailment import KEY, VERSION, OBSERVATION_VERSION, enabled
 from ainovel.flow_policy_continuation import continue_policy
 from ainovel.source_interpretation_correction import bounded_run_limit
 from ainovel.worker import Worker
@@ -376,7 +376,7 @@ def test_child_next_chapter_runs_new_observation_and_source_check_without_old_re
     assert done["result"]["next_chapter"] == 2
     candidate = domain.artifact(done["result"]["waiting_artifact"])
     audit = candidate["payload"]["plot_audit"]
-    assert audit["direction_guard"]["role_observation_version"] == "source-role-observation/2"
+    assert audit["direction_guard"]["role_observation_version"] == OBSERVATION_VERSION
     assert audit["direction_guard"]["source_entailment"]["version"] == VERSION
     assert audit["checks"][0]["guard_override"]["code"] == "restricted_recipient_unverified"
     assert candidate["payload"]["memory"] == {} and not candidate["payload"]["review_passed"]

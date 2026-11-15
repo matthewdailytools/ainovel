@@ -34,7 +34,7 @@ test('补写可主动核对原角色限定，独立报告保留原解释与原�
   const task = await response.json()
   expect(task.payload.source_identity_context).toBe(true)
   expect(task.result.source_identity_context_version).toBe(version)
-  expect(task.result.flow_source_entailment_version).toBe('source-flow-entailment/1')
+  expect(task.result.flow_source_entailment_version).toBe('source-flow-entailment/2')
   await expect
     .poll(async () => (await (await page.request.get(`/api/tasks/${task.id}`)).json()).status, {
       timeout: 25000,
@@ -49,8 +49,11 @@ test('补写可主动核对原角色限定，独立报告保留原解释与原�
   await page.getByText('情节逐项核对 · 模型标一致，仍须作者核对', { exact: true }).click()
   const details = page.getByRole('region', { name: '原话角色限定核对', exact: true })
   await expect(details).toContainText('渡口一位修船匠')
-  expect(audit.direction_guard.source_entailment.version).toBe('source-flow-entailment/1')
+  expect(audit.direction_guard.source_entailment.version).toBe('source-flow-entailment/2')
   expect(audit.direction_guard.source_entailment.checks).toHaveLength(1)
+  expect(audit.direction_guard.role_observation_version).toBe('source-role-observation/3')
+  expect(audit.direction_guard.source_entailment.participants).toEqual([])
+  expect(audit.direction_guard.source_entailment.instances).toEqual([])
   const flowSummary = page.getByText('正文流向观察的出处复核 · 1项', { exact: true })
   await flowSummary.focus()
   await flowSummary.press('Enter')

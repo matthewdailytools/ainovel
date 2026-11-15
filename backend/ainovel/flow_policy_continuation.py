@@ -17,7 +17,7 @@ from .conditional_continuation import (
     unresolved_call,
 )
 from .db import DomainError, dumps, uid
-from .flow_entailment import KEY, VERSION
+from .flow_entailment import KEY, VERSION, LEGACY_VERSION, SUPPORTED_VERSIONS
 from .models import Input
 from .modules import MODULES
 
@@ -42,7 +42,7 @@ def is_body_action(action):
 class FlowContinuationInput(Input):
     client_request_id: str = Field(min_length=8, max_length=128)
     preview_basis_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    flow_source_entailment_version: Literal["source-flow-entailment/1"]
+    flow_source_entailment_version: Literal["source-flow-entailment/1", "source-flow-entailment/2"]
     reason: str = Field(min_length=1, max_length=2000)
 
 
@@ -61,7 +61,8 @@ def previous(domain, parent, request, tx=None):
     if (
         row["kind"] != "workflow"
         or row["branch_id"] != parent["branch_id"]
-        or result.get(KEY) != VERSION
+        or request.get(KEY) not in SUPPORTED_VERSIONS
+        or result.get(KEY) != request.get(KEY)
         or result.get("continued_from") != parent["id"]
         or receipt.get("version") != CONTINUATION_VERSION
         or receipt.get("source_task_id") != parent["id"]
@@ -77,9 +78,9 @@ def checkpoint(domain, current):
         current["kind"] != "workflow"
         or payload.get("plot_contract_check") is not True
         or state.get("plot_contract_version") != "author-plot-audit/2"
-        or KEY in state
+        or (KEY in state and state[KEY] != LEGACY_VERSION)
     ):
-        raise DomainError("flow_checkpoint", "仅未启用新流向政策的v2整书检查点可显式新建批次。", 409)
+        raise DomainError("flow_checkpoint", "仅未启用当前流向政策的v2整书检查点可显式新建批次。", 409)
     branch = adopted_checkpoint(domain, current)
     number = state["next_chapter"]
     if number > payload["chapters"]:
@@ -286,7 +287,7 @@ def preview(domain, budget, current):
         "source_task_id": current["id"],
         "branch_id": current["branch_id"],
         "story_revision": branch["story_revision"],
-        "source_flow_policy": "legacy",
+        "source_flow_policy": current["result"].get(KEY, "legacy"),
         "source_policies": {
             KEY: None,
             **{key: value for key, value in current["result"].items() if key.endswith("_version")},
@@ -342,7 +343,7 @@ def continue_policy(domain, budget, current, request):
         progress["flow_policy_continuation"] = {
             "version": CONTINUATION_VERSION,
             "source_task_id": current["id"],
-            "source_flow_policy": "legacy",
+            "source_flow_policy": current["result"].get(KEY, "legacy"),
             "source_payload_sha256": sha(current["payload"]),
             "source_progress_sha256": sha(current["result"]),
             "plan_sha256": sha(progress["plan"]),

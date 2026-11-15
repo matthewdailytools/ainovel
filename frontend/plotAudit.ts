@@ -308,13 +308,15 @@ export function readPlotAudit(value: unknown): PlotAudit | undefined {
     object(value.direction_guard) &&
     value.direction_guard.role_observation_version !== undefined &&
     value.direction_guard.role_observation_version !== 'source-role-observation/1' &&
-    value.direction_guard.role_observation_version !== 'source-role-observation/2'
+    value.direction_guard.role_observation_version !== 'source-role-observation/2' &&
+    value.direction_guard.role_observation_version !== 'source-role-observation/3'
   )
     return undefined
   if (
     object(value.direction_guard) &&
     (value.direction_guard.source_entailment !== undefined ||
-      value.direction_guard.role_observation_version === 'source-role-observation/2')
+      value.direction_guard.role_observation_version === 'source-role-observation/2' ||
+      value.direction_guard.role_observation_version === 'source-role-observation/3')
   ) {
     flowReview = readSourceFlowReview(value.direction_guard)
     if (!flowReview || value.version !== PLOT_AUDIT_VERSION) return undefined

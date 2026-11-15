@@ -69,7 +69,7 @@ async function readAndDecide(page: Page) {
     .fill('原生隔离验证：只为后续新审查启用新版出处核对，原稿和旧费用保留。')
   await region(page)
     .getByRole('checkbox', {
-      name: '明确为新子任务选择 source-flow-entailment/1，接受后续新增核对及费用',
+      name: '明确为新子任务选择 source-flow-entailment/2，接受后续新增核对及费用',
       exact: true,
     })
     .check()
@@ -105,7 +105,7 @@ test('真实API与Worker从维护完成的旧检查点创建并开始子任务�
   expect(response.status(), await response.text()).toBe(202)
   const child: Task = await response.json()
   expect(child.status).toBe('queued')
-  expect(child.result.flow_source_entailment_version).toBe('source-flow-entailment/1')
+  expect(child.result.flow_source_entailment_version).toBe('source-flow-entailment/2')
   expect(child.result.repair_round).toBe(1)
   expect(child.result.plan).toEqual(before.current.task.result.plan)
   expect(child.payload.adoption).toBe('manual')
@@ -209,7 +209,7 @@ test('真实后章模块已发送未知且无候选时，旧预览提交409并�
   await expect(region(page).getByRole('textbox', { name: REASON })).toHaveValue(reason)
   await expect(
     region(page).getByRole('checkbox', {
-      name: '明确为新子任务选择 source-flow-entailment/1，接受后续新增核对及费用',
+      name: '明确为新子任务选择 source-flow-entailment/2，接受后续新增核对及费用',
       exact: true,
     }),
   ).toBeChecked()

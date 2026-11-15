@@ -9,10 +9,16 @@ import httpx
 import pytest
 
 from ainovel.db import DomainError, dumps
+from ainovel.flow_entailment import VERSION as FLOW_VERSION
 from ainovel.models import WorkflowInput
 from ainovel.worker import Worker
 from ainovel.providers import ModelClient
 from ainovel.workflow_plan_preparation import prepare
+from ainovel.workflow_plan_recipient_scope import (
+    ACTION as SCOPE_ACTION,
+    KEY as SCOPE_KEY,
+    VERSION as SCOPE_VERSION,
+)
 from ainovel.workflow_plan_restart import restart
 from ainovel.workflow_plan_source_roles import (
     KEY,
@@ -25,6 +31,7 @@ from ainovel.workflow_plan_source_roles import (
     sha,
 )
 from helpers.historical_plan_task import queue_historical_plan
+from helpers.plan_execution_fixture import plan_execution_output
 from test_openai_schema import completed
 from test_conditional_continuation import legacy_checkpoint as legacy_checkpoint
 from test_flow_policy_continuation import parent as parent
@@ -88,15 +95,31 @@ def fresh_failed(settings, domain, story, *, client=None, chapters=1, number=1, 
     sent = []
 
     def handler(request):
-        sent.append(json.loads(request.content))
-        output = proposal()
-        output["note"] = f"完整无效的第{len(sent)}次解释"
+        wire = json.loads(request.content)
+        sent.append(wire)
+        raw = wire["messages"][1]["content"] if account == "deepseek" else wire["input"][-1]["content"]
+        frame = json.loads(raw.split("\n只返回")[0])
+        instruction = frame["任务"]
+        if instruction["动作"] == SCOPE_ACTION:
+            output = plan_execution_output(instruction)
+        else:
+            assert instruction["动作"] == "写前解释AI工作章纲"
+            output = proposal()
+            output["note"] = f"完整无效的第{len(sent) - 1}次解释"
+            if "接收范围核对执行版本" in instruction:
+                for item in output["items"]:
+                    item["scope_observation_ids"] = []
         return deepseek_completed(output) if account == "deepseek" else completed(dumps(output))
 
     worker.client = ModelClient(settings, worker.budget, httpx.MockTransport(handler))
     with pytest.raises(DomainError, match="两轮引用修正"):
         asyncio.run(prepare(worker, plot, chapter))
-    assert len(sent) == 3
+    assert len(sent) == 4
+    row = domain.task(queued["id"])["result"]["plot_preparations"][str(number)]
+    assert row[SCOPE_KEY] == SCOPE_VERSION
+    assert row["phases"]["recipient_scope:0"]["status"] == "completed"
+    assert len(row["phases"]["interpret:0"]["before_calls"]) == 1
+    assert len(domain.db.all("SELECT * FROM task_steps WHERE task_id=?", (queued["id"],))) == 4
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET status='blocked_runtime' WHERE id=?", (queued["id"],))
     return worker, domain.task(queued["id"]), sent
@@ -184,16 +207,28 @@ def test_legacy_nonce_and_account_continuation_do_not_gain_current_default(domai
     assert KEY not in child["payload"] and KEY not in child["result"] and CREATION_KEY not in child["result"]
 
 
+@pytest.mark.parametrize("account", ["openai_1", "deepseek"])
 def test_fresh_source_default_and_explicit_restart_keep_creation_distinct_and_prior_ledger(
-    settings, domain, story, client
+    settings, domain, story, client, account
 ):
-    worker, current, wires = fresh_failed(settings, domain, story, client=client, chapters=36, number=5)
+    worker, current, wires = fresh_failed(
+        settings, domain, story, client=client, chapters=36, number=5, account=account
+    )
     witness = current["payload"][CREATION_KEY]
     assert witness["task_id"] == current["id"] and "plan_preparation_restart" not in current["result"]
     old_usage = worker.budget.report()
     old_steps = domain.db.all("SELECT * FROM task_steps")
     response = client.get(f"/api/tasks/{current['id']}/reprepare-plan-preview")
     assert response.status_code == 200, response.text
+    with worker.budget.db() as tx:
+        original_calls = [
+            dict(row) for row in tx.execute("SELECT * FROM calls WHERE task_id=?", (current["id"],))
+        ]
+    assert len(original_calls) == 4 and all(row["status"] == "settled" for row in original_calls)
+    assert (
+        response.json()["budget"]["source_task_settled"]
+        == sum(row["charged"] for row in original_calls) / 1_000_000
+    )
     child = restart(
         domain,
         worker.budget,
@@ -201,6 +236,9 @@ def test_fresh_source_default_and_explicit_restart_keep_creation_distinct_and_pr
         {**restart_request(domain, current), **response.json()["request_basis"]},
     )
     assert child["payload"][CREATION_KEY] == child["result"][CREATION_KEY] == witness
+    assert child["payload"]["budget_limit"] == pytest.approx(
+        current["payload"]["budget_limit"] - response.json()["budget"]["source_task_settled"]
+    )
     assert child["result"]["plan_preparation_restart"]["source_task_id"] == current["id"]
     assert validate_task(child, domain)
     assert worker.budget.report() == old_usage and domain.db.all("SELECT * FROM task_steps") == old_steps
@@ -219,7 +257,7 @@ def test_fresh_source_default_and_explicit_restart_keep_creation_distinct_and_pr
     )
     assert grandchild["result"]["plan_preparation_restart"] == child["result"]["plan_preparation_restart"]
     assert grandchild["payload"][CREATION_KEY] == witness and validate_task(grandchild, domain)
-    assert worker.budget.report() == old_usage and len(wires) == 3
+    assert worker.budget.report() == old_usage and len(wires) == 4
 
 
 @pytest.mark.parametrize(
@@ -336,7 +374,7 @@ def test_flow_legacy_continuation_never_invokes_fresh_default(client, parent):
             "client_request_id": "legacy-flow-no-default-roles",
             "reason": "显式流向政策续跑",
             "preview_basis_sha256": preview.json()["preview_basis_sha256"],
-            "flow_source_entailment_version": "source-flow-entailment/1",
+            "flow_source_entailment_version": FLOW_VERSION,
         },
     )
     assert response.status_code == 202, response.text
@@ -416,7 +454,10 @@ def test_real_fresh_run_limit_and_shared_cap_are_distinct_zero_dispatch_boundari
     assert report["calls"] == [] and report["settled"] == 0
     assert report["remaining"] == (20 if scope == "run" else 0)
     assert domain.task(task["id"])["payload"] == task["payload"]
-    phase = domain.task(task["id"])["result"]["plot_preparations"]["1"]["phases"]["interpret:0"]
+    row = domain.task(task["id"])["result"]["plot_preparations"]["1"]
+    assert row[SCOPE_KEY] == SCOPE_VERSION
+    assert "interpret:0" not in row["phases"]
+    phase = row["phases"]["recipient_scope:0"]
     assert phase["status"] == "not_sent" and phase["not_sent_code"] == "budget"
 
 

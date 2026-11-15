@@ -4,6 +4,7 @@ import {
   canonical,
   FLOW_CONTINUATION_VERSION,
   FLOW_VERSION,
+  FLOW_LEGACY_VERSION,
   flowUnavailableReason,
   readFlowBudget,
   readFlowPreview,
@@ -151,6 +152,38 @@ function fixture() {
   return { source, preview, pending, child, config }
 }
 describe('FLOW explicit continuation protocol', () => {
+  it('permits an explicit current-policy child from a frozen v1 checkpoint', () => {
+    const f = fixture()
+    f.source.result.flow_source_entailment_version = FLOW_LEGACY_VERSION
+    f.preview.source_flow_policy = FLOW_LEGACY_VERSION
+    f.preview.source_policies.flow_source_entailment_version = FLOW_LEGACY_VERSION
+    const receipt = (f.child.result as Record<string, unknown>).flow_policy_continuation as Record<
+      string,
+      unknown
+    >
+    receipt.source_flow_policy = FLOW_LEGACY_VERSION
+    expect(flowUnavailableReason(f.source)).toBe('')
+    expect(readFlowPreview(f.preview, f.source)).toEqual(f.preview)
+    expect(readPendingFlow(f.pending, canonical(['novel', 'branch', 'parent']))).toEqual(f.pending)
+    expect(readFlowChild(f.child, f.pending)).toEqual(f.child)
+    expect(f.source.result.flow_source_entailment_version).toBe(FLOW_LEGACY_VERSION)
+  })
+  it('restores an unresolved v1 nonce for receipt lookup without turning it into a fresh v2 decision', () => {
+    const f = fixture()
+    f.preview.flow_source_entailment_version = FLOW_LEGACY_VERSION
+    f.pending.request.flow_source_entailment_version = FLOW_LEGACY_VERSION
+    f.child.result.flow_source_entailment_version = FLOW_LEGACY_VERSION
+    const receipt = (f.child.result as Record<string, unknown>).flow_policy_continuation as Record<
+      string,
+      unknown
+    >
+    receipt.request = structuredClone(f.pending.request)
+    expect(readFlowPreview(f.preview, f.source)).toBeUndefined()
+    expect(readPendingFlow(f.pending, canonical(['novel', 'branch', 'parent']))).toEqual(f.pending)
+    expect(readFlowChild(f.child, f.pending)).toEqual(f.child)
+    f.child.result.flow_source_entailment_version = FLOW_VERSION
+    expect(readFlowChild(f.child, f.pending)).toBeUndefined()
+  })
   it('rejects a preview that silently drops the independently frozen conditional policy', () => {
     const f = fixture()
     delete f.preview.source_policies.conditional_book_policy_version

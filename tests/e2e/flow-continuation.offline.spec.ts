@@ -7,7 +7,7 @@ const READ = '读取新版政策续跑依据'
 const REREAD = '重新读取新版政策依据'
 const CONFIRM = '确认使用新版政策依据，保留输入'
 const REASON = '本次新版流向政策续跑原因'
-const POLICY = '明确为新子任务选择 source-flow-entailment/1，接受后续新增核对及费用'
+const POLICY = '明确为新子任务选择 source-flow-entailment/2，接受后续新增核对及费用'
 const SUBMIT = '创建并开始新版流向政策子批次'
 const LOOKUP = '查询原政策提交回执'
 type Row = Record<string, unknown>
@@ -121,7 +121,7 @@ function preview(t: Task): Preview {
   }
   return {
     version: 'workflow-flow-policy-continuation/1',
-    flow_source_entailment_version: 'source-flow-entailment/1',
+    flow_source_entailment_version: 'source-flow-entailment/2',
     source_task_id: t.id,
     branch_id: t.branch_id,
     story_revision: 12,
@@ -180,7 +180,7 @@ async function setup(context: BrowserContext, page: Page) {
         result: {
           ...structuredClone(parent.result),
           continued_from: parent.id,
-          flow_source_entailment_version: 'source-flow-entailment/1',
+          flow_source_entailment_version: r.flow_source_entailment_version,
           flow_policy_continuation: {
             version: 'workflow-flow-policy-continuation/1',
             source_task_id: parent.id,
@@ -366,7 +366,7 @@ async function setup(context: BrowserContext, page: Page) {
           'reason',
         ])
         expect(r.headers()['x-ainovel-csrf']).toBe('toy-csrf')
-        expect(body.flow_source_entailment_version).toBe('source-flow-entailment/1')
+        expect(body.flow_source_entailment_version).toBe('source-flow-entailment/2')
         w.posts.push(body)
         const value = await w.onPost?.(body)
         if (value?.abort) return route.abort()
@@ -528,6 +528,53 @@ test('未知POST与重载只查原nonce，404不生成新请求', async ({ page,
   await expect(page.getByRole('region', { name: '新版流向政策子任务回执' })).toBeVisible()
   expect(w.posts).toHaveLength(1)
   expect(w.lookups).toEqual([nonce, nonce])
+})
+test('旧FLOW/1待查提交在新版界面仅查原nonce，既不换版本也不补发POST', async ({ page, context }) => {
+  const w = await setup(context, page)
+  const legacyRequest: Request = {
+    client_request_id: 'historical-flow-v1-browser-nonce',
+    preview_basis_sha256: w.previews.parent.preview_basis_sha256,
+    flow_source_entailment_version: 'source-flow-entailment/1',
+    reason: '旧版本已有未知提交，只读查证原回执。',
+  }
+  const config = await page.evaluate(async () => (await fetch('/api/config')).json())
+  const capsule = {
+    request: legacyRequest,
+    source: structuredClone(w.originals.parent),
+    context: {
+      preview: {
+        ...structuredClone(w.previews.parent),
+        flow_source_entailment_version: 'source-flow-entailment/1',
+      },
+      account: config.accounts[0],
+      shared: config.budget[0],
+    },
+  }
+  const child = w.commit(legacyRequest)
+  expect(child.result.flow_source_entailment_version).toBe('source-flow-entailment/1')
+  await page.evaluate((pending) => {
+    const owner = JSON.stringify(['novel-flow', 'branch-a', 'parent'])
+    sessionStorage.setItem(
+      `ainovel-flow-continuation:${owner}`,
+      JSON.stringify({
+        version: 1,
+        reason: pending.request.reason,
+        selectedPolicy: true,
+        outcome: 'unverified',
+        pending,
+      }),
+    )
+  }, capsule)
+  await page.reload()
+  await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  await page.getByRole('combobox', { name: '本作品批次', exact: true }).selectOption('parent')
+  await expect(panel(page).getByRole('button', { name: LOOKUP, exact: true })).toBeVisible()
+  await panel(page).getByRole('button', { name: LOOKUP, exact: true }).click()
+  await expect(page.getByRole('region', { name: '新版流向政策子任务回执' })).toContainText(
+    'source-flow-entailment/1',
+  )
+  expect(w.posts).toEqual([])
+  expect(w.lookups).toEqual([legacyRequest.client_request_id])
 })
 test('非法200目标不冒充成功，只读查回原绑定任务', async ({ page, context }) => {
   const w = await setup(context, page)

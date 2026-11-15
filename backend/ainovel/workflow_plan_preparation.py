@@ -126,6 +126,48 @@ def check_receipt(worker, row, plot, chapter):
     from .workflow_plan_source_roles import check_row as check_roles
 
     roles = check_roles(worker.task, row, getattr(worker, "domain", None))
+    from . import workflow_plan_recipient_scope as recipient_scope
+
+    scope_execution = recipient_scope.enabled(worker, row)
+    if scope_execution:
+        owners = lineage(worker)
+        text = row["original_plot"]
+        for index in range(row.get("round", 0) + 1):
+            if index:
+                choice = row["choices"][index - 1]
+                text += f"\n\n【AI开放细节附注·第{index}轮；非作者新增锁定】\n{choice['addendum']}"
+            slot = row.get("phases", {}).get(f"recipient_scope:{index}", {})
+            inventory = slot.get("response")
+            if inventory is not None and (
+                slot.get("status") != "completed"
+                or slot.get("owner_task_id") not in owners
+                or slot.get("response_sha256") != sha(inventory)
+                or not recipient_scope.inventory_valid(inventory, text)
+            ):
+                raise DomainError("plan_preparation_changed", "先行来源范围观察与本轮原文不一致。", 409)
+            interpretation = next((r for r in row.get("interpretations", []) if r["round"] == index), None)
+            if interpretation is not None:
+                interpretation_slot = row.get("phases", {}).get(f"interpret:{index}", {})
+                response = interpretation_slot.get("response", {})
+                if (
+                    interpretation_slot.get("status") != "completed"
+                    or interpretation_slot.get("owner_task_id") not in owners
+                    or interpretation_slot.get("response_sha256") != sha(response)
+                    or interpretation.get("source_sha256") != sha(text)
+                    or interpretation.get("contract") != response.get("contract")
+                    or interpretation.get("open_details") != response.get("open_details")
+                ):
+                    raise DomainError("plan_preparation_changed", "本轮解释与完整原步骤回执不一致。", 409)
+                if interpretation.get("recipient_scope_bindings") != interpretation_slot.get(
+                    "response", {}
+                ).get("recipient_scope_bindings"):
+                    raise DomainError("plan_preparation_changed", "范围解释绑定与原步骤回执不一致。", 409)
+                if inventory is None or not recipient_scope.bindings_valid(
+                    interpretation["contract"], interpretation.get("recipient_scope_bindings"), inventory
+                ):
+                    raise DomainError(
+                        "plan_preparation_changed", "本轮来源范围观察或解释绑定无法核实，未生成正文。", 409
+                    )
     if roles:
         from .workflow_plan_source_roles import VERSION as ROLE_VERSION
 
@@ -344,6 +386,10 @@ async def prepare(worker, plot, chapter):
             from .workflow_plan_context import KEY as CONTEXT_KEY, freeze as freeze_creative_context
 
             row[CONTEXT_KEY] = freeze_creative_context(worker, row, chapter)
+        if ROLE_KEY in row:
+            from .workflow_plan_recipient_scope import freeze as freeze_scope_execution
+
+            freeze_scope_execution(worker, row)
         worker.checkpoint(result)
     check_receipt(worker, row, plot, chapter)
     if row["status"] == "ready":
@@ -370,6 +416,22 @@ async def prepare(worker, plot, chapter):
         while True:
             round_number = row["round"]
             initial = row["interpretations"][0]["contract"] if row["interpretations"] else None
+            from . import workflow_plan_recipient_scope as recipient_scope
+
+            scope_execution = recipient_scope.enabled(worker, row)
+            scope_inventory = None
+            if scope_execution:
+                scope_inventory = await phase(
+                    worker,
+                    row,
+                    f"recipient_scope:{round_number}",
+                    "interpreting",
+                    lambda: recipient_scope.observe(worker, row["effective_plot"]),
+                )
+                if not recipient_scope.inventory_valid(scope_inventory, row["effective_plot"]):
+                    raise DomainError("plan_preparation_changed", "本轮接收范围来源观察无法核实。", 409)
+                if scope_inventory["status"] != "supported":
+                    return stop(worker, row, "接收范围来源观察仍有未知，未推断排他限制或生成正文。")
             interpretation = await phase(
                 worker,
                 row,
@@ -384,6 +446,14 @@ async def prepare(worker, plot, chapter):
                         "round": round_number,
                         **({OPEN_KEY: OPEN_VERSION} if OPEN_KEY in row else {}),
                         **({ROLE_KEY: ROLE_VERSION} if ROLE_KEY in row else {}),
+                        **(
+                            {
+                                recipient_scope.KEY: recipient_scope.VERSION,
+                                "recipient_scope_inventory": scope_inventory,
+                            }
+                            if scope_execution
+                            else {}
+                        ),
                         **(
                             {"item_count": len(initial["items"]), "原始事项": indexed(initial)}
                             if initial is not None
@@ -400,6 +470,11 @@ async def prepare(worker, plot, chapter):
                         "round": round_number,
                         "source_sha256": row["effective_plot_sha256"],
                         "contract": deepcopy(contract),
+                        **(
+                            {"recipient_scope_bindings": deepcopy(interpretation["recipient_scope_bindings"])}
+                            if scope_execution
+                            else {}
+                        ),
                         **({"open_details": deepcopy(open_details)} if OPEN_KEY in row else {}),
                         **(
                             {"source_role_repair": deepcopy(interpretation["source_role_repair"])}

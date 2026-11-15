@@ -5,6 +5,8 @@ import { object } from './planRestart'
 import {
   canonical,
   FLOW_VERSION,
+  FLOW_LEGACY_VERSION,
+  isFlowVersion,
   FLOW_CONTINUATION_VERSION,
   flowUnavailableReason,
   readFlowPreview,
@@ -26,8 +28,9 @@ export function FlowContinuationReceipt({ task }: { task: Task }) {
     request = object(receipt?.request)
   if (
     receipt?.version !== FLOW_CONTINUATION_VERSION ||
-    task.result.flow_source_entailment_version !== FLOW_VERSION ||
+    !isFlowVersion(task.result.flow_source_entailment_version) ||
     !request ||
+    request.flow_source_entailment_version !== task.result.flow_source_entailment_version ||
     typeof receipt.source_task_id !== 'string'
   )
     return null
@@ -36,7 +39,7 @@ export function FlowContinuationReceipt({ task }: { task: Task }) {
       <h4>新版流向政策子任务已建立</h4>
       <p>
         原任务：{receipt.source_task_id}，已标记转入续跑并追加子任务链接；仅本子任务后续新审查冻结{' '}
-        {FLOW_VERSION}
+        {task.result.flow_source_entailment_version}
         。原任务载荷、旧稿、旧报告和原政策保持，不追认旧检查通过。
       </p>
       <p>决定原因：{String(request.reason)}</p>
@@ -343,7 +346,10 @@ export function FlowContinuationPanel({
   if (
     task.kind !== 'workflow' ||
     task.payload.plot_contract_check !== true ||
-    (task.result.flow_source_entailment_version !== undefined && !pending.current && !created)
+    (task.result.flow_source_entailment_version !== undefined &&
+      task.result.flow_source_entailment_version !== FLOW_LEGACY_VERSION &&
+      !pending.current &&
+      !created)
   )
     return null
   return (

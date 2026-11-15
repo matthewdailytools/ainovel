@@ -8,12 +8,16 @@ from pydantic import Field
 
 from .db import DomainError, dumps
 from .evidence import resolve_field, source_schema, source_units
+from .flow_association import GUIDANCE, InstanceRelation, UnmappedParticipant
 from .models import Input
 
 KEY = "flow_source_entailment_version"
-VERSION = "source-flow-entailment/1"
+LEGACY_VERSION = "source-flow-entailment/1"
+VERSION = "source-flow-entailment/2"
+SUPPORTED_VERSIONS = (LEGACY_VERSION, VERSION)
 ACTION = "独立核对正文流向观察的来源蕴含"
-OBSERVATION_VERSION = "source-role-observation/2"
+LEGACY_OBSERVATION_VERSION = "source-role-observation/2"
+OBSERVATION_VERSION = "source-role-observation/3"
 
 # Names alone do not decide whether a request denotes the speech act or the
 # requested answer/object. This guidance is independent of the expected plot.
@@ -49,12 +53,25 @@ class FlowChecks(Input):
     note: str = Field(max_length=2000)
 
 
+class AssociatedFlowChecks(FlowChecks):
+    participants: list[UnmappedParticipant] = Field(max_length=24)
+    instances: list[InstanceRelation] = Field(max_length=24)
+
+
+def execution_version(worker):
+    return ((getattr(worker, "task", None) or {}).get("result") or {}).get(KEY)
+
+
+def observation_version(worker):
+    return LEGACY_OBSERVATION_VERSION if execution_version(worker) == LEGACY_VERSION else OBSERVATION_VERSION
+
+
 def enabled(worker, version=None):
     result = (getattr(worker, "task", None) or {}).get("result") or {}
     if KEY not in result:
         return False
     if (
-        result[KEY] != VERSION
+        result[KEY] not in SUPPORTED_VERSIONS
         or result.get("plot_contract_version") != "author-plot-audit/2"
         or (version is not None and version != "author-plot-audit/2")
     ):
@@ -89,13 +106,16 @@ def check_issues(value, identifiers, token, sources, text):
 
 async def review_flows(worker, text, entities, objects, observations):
     """One batch checks all relevant observations, including favorable ones."""
+    version = execution_version(worker)
+    if version not in SUPPORTED_VERSIONS:
+        raise DomainError("flow_entailment_version", "流向来源核对的冻结版本无法确认，未升级旧报告。", 409)
     proposals = [
         {"flow_id": f"F{index:02}", **deepcopy(flow)}
         for index, flow in enumerate(observations, 1)
         if flow["object_id"] in objects
     ]
     binding = {
-        "version": VERSION,
+        "version": version,
         "text": text,
         "entities": entities,
         "objects": objects,
@@ -104,23 +124,42 @@ async def review_flows(worker, text, entities, objects, observations):
     token = hashlib.sha256(dumps(binding).encode()).hexdigest()
     if not proposals:
         return {
-            "version": VERSION,
+            "version": version,
             "input_sha256": token,
             "status": "not_applicable",
             "proposals": [],
             "checks": [],
+            **({"participants": [], "instances": []} if version == VERSION else {}),
         }
     units = source_units(text, "ENTAIL")
     sources = {unit["source_id"]: unit for unit in units}
     identifiers = [row["flow_id"] for row in proposals]
-    contract = source_schema(FlowChecks.model_json_schema(), units)
+    schema = AssociatedFlowChecks if version == VERSION else FlowChecks
+    contract = source_schema(schema.model_json_schema(), units)
     contract["properties"]["input_sha256"]["enum"] = [token]
     contract["properties"]["checks"].update(minItems=len(proposals), maxItems=len(proposals))
     contract["$defs"]["FlowCheck"]["properties"]["flow_id"]["enum"] = identifiers
+    if version == VERSION:
+        for name in ("UnmappedParticipant", "InstanceRelation"):
+            properties = contract["$defs"][name]["properties"]
+            for key in ("flow_id", "left_flow_id", "right_flow_id"):
+                if key in properties:
+                    properties[key]["enum"] = identifiers
+            if "excluded_entity_ids" in properties:
+                properties["excluded_entity_ids"]["items"]["enum"] = list(entities)
+
+    def validate(value):
+        errors = check_issues(value, identifiers, token, sources, text)
+        if version == VERSION:
+            from .flow_association import issues
+
+            errors.extend(issues(value, proposals, entities, sources, text))
+        return errors
+
     checked = await worker.grounded(
         {
             "动作": ACTION,
-            "流向来源蕴含版本": VERSION,
+            "流向来源蕴含版本": version,
             "input_sha256": token,
             "本次正文": text,
             "实体别名对照": entities,
@@ -136,17 +175,18 @@ async def review_flows(worker, text, entities, objects, observations):
                 "unknown": "对象所指、角色映射、阶段或原引文支持不足且没有明确反证；不猜测，不改写正文或观察来通过。",
             },
             "要求": "只核实每条观察是否由本次正文支持，不判断是否符合任何情节要求。名称表没有预期方向；不得补造角色身份或依旧报告认定。逐项检查object_id实际所指、supplier_id、recipient_id、stage、certainty和原引文所述行为。原观察证据也只是待核实提案，不能循环佐证；可回到本次全文核对但须定位连续原文。supported须全部实质断言受支持；unknown和contradicted均为有效结果，不为通过而删项或重造方向。只返回原flow_id的判断，不生成替代观察、不读取全书未来、规划或作者期望。",
+            **(GUIDANCE if version == VERSION else {}),
         },
-        FlowChecks,
+        schema,
         {"scope": "仅本次正文、无方向名称表与观察提案；未提供原情节、预期方向、逐项对照结论或旧报告"},
-        lambda value: check_issues(value, identifiers, token, sources, text),
+        validate,
         contract=contract,
         max_output=8192,
         diagnostic_label="正文流向观察来源蕴含核对",
     )
     verdicts = {row["flow_id"]: row for row in checked["checks"]}
     return {
-        "version": VERSION,
+        "version": version,
         "input_sha256": token,
         "status": "supported"
         if all(row["result"] == "supported" for row in checked["checks"])
@@ -154,7 +194,7 @@ async def review_flows(worker, text, entities, objects, observations):
         "proposals": proposals,
         **checked,
         "supported_observations": [
-            {key: value for key, value in row.items() if key != "flow_id"}
+            {key: value for key, value in row.items() if version == VERSION or key != "flow_id"}
             for row in proposals
             if verdicts[row["flow_id"]]["result"] == "supported"
         ],
@@ -166,6 +206,9 @@ def unresolved_for_item(report, item, object_id, entity_ids):
     checks = {row["flow_id"]: row for row in report["checks"]}
     stages = {"completed"} if item["transfer_scope"] == "completed" else {"offered", "requested", "completed"}
     supplier, recipient = entity_ids[item["supplier"]], entity_ids[item["recipient"]]
+    from .flow_association import anchors, different_physical_instance, excluded_participant
+
+    matching_instances = anchors(report, item, object_id, entity_ids)
     unresolved = []
     for flow in report["proposals"]:
         row = checks[flow["flow_id"]]
@@ -184,9 +227,15 @@ def unresolved_for_item(report, item, object_id, entity_ids):
             continue
 
         def could_be(field, entity):
+            if excluded_participant(report, flow, field, entity):
+                return False
             return field not in verified or flow[field] == "unknown" or flow[field] == entity
 
-        reverse_possible = could_be("supplier_id", recipient) and could_be("recipient_id", supplier)
+        reverse_possible = (
+            could_be("supplier_id", recipient)
+            and could_be("recipient_id", supplier)
+            and not different_physical_instance(report, flow, matching_instances)
+        )
         outside_only = (
             item.get("recipient_scope") == "only"
             and could_be("supplier_id", supplier)

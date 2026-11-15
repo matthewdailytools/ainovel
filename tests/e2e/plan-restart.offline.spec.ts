@@ -7,6 +7,7 @@ const SUMMARY = '补齐AI粗纲未明确的工作细节并重新核对'
 const SOURCE_ROLES_SUMMARY = '重做写前核对，保留原规划与费用'
 const SOURCE_ROLES_SUBMIT = '创建并开始新任务'
 const SOURCE_ROLES_VERSION = 'workflow-plan-source-roles/1'
+const RECIPIENT_SCOPE_VERSION = 'workflow-plan-recipient-scope/1'
 const READ = '读取写前重核依据'
 const REREAD = '重新读取写前重核依据'
 const CONFIRM = '确认使用新依据，保留原因'
@@ -96,6 +97,47 @@ type World = {
   commit: (parent: string, request: RestartRequest) => MockTask
 }
 const worlds = new WeakMap<Page, World>()
+function withCompletedScopeObservation(world: World) {
+  const source = world.tasks.find((task) => task.id === PARENT)
+  if (!source) throw new Error('Missing source task')
+  source.payload.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+  source.result.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+  source.result.plan_preparation_restart = {
+    version: 'workflow-plan-restart/1',
+    workflow_plan_source_roles_version: SOURCE_ROLES_VERSION,
+    request: { workflow_plan_source_roles_version: SOURCE_ROLES_VERSION },
+  }
+  const row = source.result.plot_preparations['4']
+  row.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+  row.workflow_plan_recipient_scope_version = RECIPIENT_SCOPE_VERSION
+  row.effective_plot_sha256 = row.original_plot_sha256
+  const response = {
+    version: RECIPIENT_SCOPE_VERSION,
+    status: 'supported',
+    source_sha256: row.original_plot_sha256,
+    input_sha256: hash('scope-original-source'),
+    inventory: {
+      input_sha256: hash('scope-original-source'),
+      observations: [{ kind: 'action_permission' }],
+      unit_checks: [{ status: 'covered' }],
+    },
+  }
+  row.phases = {
+    'recipient_scope:0': {
+      status: 'completed',
+      owner_task_id: PARENT,
+      attempt: 1,
+      response_sha256: hash(JSON.stringify(response)),
+      response,
+    },
+    'interpret:0': { status: 'started', owner_task_id: PARENT, attempt: 1 },
+  }
+  world.originals[PARENT] = structuredClone(source)
+  world.previews[PARENT].budget.source_task_settled = 0.14
+  world.previews[PARENT].budget.lineage_settled = 0.14
+  world.previews[PARENT].budget.remaining_run_limit = 0.86
+  return response
+}
 function gate() {
   let release = () => {}
   const promise = new Promise<void>((resolve) => {
@@ -216,6 +258,7 @@ function restartBody(route: Route, sourceRoles = false): RestartRequest {
   return body as RestartRequest
 }
 async function setup(context: BrowserContext, page: Page, sourceRoles = false) {
+  const origin = test.info().project.use.baseURL || ORIGIN
   const sources = [task(PARENT), task(SECOND_TASK), task(OTHER_TASK, SECOND_BRANCH)]
   if (sourceRoles)
     for (const source of sources) {
@@ -317,7 +360,7 @@ async function setup(context: BrowserContext, page: Page, sourceRoles = false) {
   await context.route('**/*', async (route) => {
     const request = route.request(),
       url = new URL(request.url())
-    if (url.origin !== ORIGIN) {
+    if (url.origin !== origin) {
       world.external.push(request.url())
       return route.abort('blockedbyclient')
     }
@@ -1027,3 +1070,42 @@ test('OpenPlan320实际文字翻倍与键盘：中文组合Enter不提交，新m
   expect(world.posts[0].request.reason).toBe(entered)
   expect(world.posts[0].request.workflow_plan_source_roles_version).toBe(SOURCE_ROLES_VERSION)
 })
+
+test('新接收范围行：先行观察已完成后仍可读取正式重做依据，原3笔解释失败与观察费用保持', async ({
+  context,
+  page,
+}) => {
+  const world = await setup(context, page, true)
+  withCompletedScopeObservation(world)
+  const original = structuredClone(world.originals[PARENT])
+  const panel = await open(page, true, SOURCE_ROLES_SUMMARY)
+  await read(page, panel, SOURCE_ROLES_PLOT)
+  await panel
+    .getByRole('textbox', { name: REASON, exact: true })
+    .fill('保留已完成来源观察及旧解释，按原规划重做。')
+  await panel.getByRole('button', { name: SOURCE_ROLES_SUBMIT, exact: true }).click()
+  await expect(page.getByRole('region', { name: '写前重核新任务回执', exact: true })).toBeVisible()
+  expect(world.posts).toHaveLength(1)
+  expect(world.originals[PARENT]).toEqual(original)
+  expect(world.previews[PARENT].known_invalid_steps.call_ids).toHaveLength(3)
+  const child = world.tasks.find((task) => task.id.startsWith('toy-child-'))
+  expect(child?.payload.budget_limit).toBe(0.86)
+  expect(child?.result.plan).toEqual(original.result.plan)
+  expect(world.posts[0].request).not.toHaveProperty('workflow_plan_recipient_scope_version')
+})
+
+for (const problem of ['incomplete', 'unknown'] as const) {
+  test(`接收范围${problem}时保留门禁，不请求预览或创建新任务`, async ({ context, page }) => {
+    const world = await setup(context, page, true)
+    const response = withCompletedScopeObservation(world)
+    if (problem === 'incomplete') {
+      const source = world.tasks.find((task) => task.id === PARENT)!
+      const phases = source.result.plot_preparations['4'].phases as Row
+      ;(phases['recipient_scope:0'] as Row).status = 'started'
+    } else response.inventory.unit_checks[0].status = 'unknown'
+    const panel = await open(page, true, SOURCE_ROLES_SUMMARY)
+    await expect(panel.getByRole('button', { name: READ, exact: true })).toBeDisabled()
+    expect(world.previewReads[PARENT] || 0).toBe(0)
+    expect(world.posts).toHaveLength(0)
+  })
+}

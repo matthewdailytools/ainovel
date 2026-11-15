@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
+import { assertActualDoubleText } from './helpers/actualTextScale'
 
 const instruction = '她检查闸门，借旧尺复测并记下读数，不修门。'
 const originalText = '她检查闸门，不修门。😀𠮷'
@@ -92,9 +93,9 @@ async function createFromUi(page: Page, title: string) {
   return { novel, chapter, original }
 }
 
-async function moduleFromUi(page: Page, action: string) {
+async function moduleFromUi(page: Page, action: string, source = instruction) {
   await page.getByRole('combobox', { name: '这次要做什么', exact: true }).selectOption(action)
-  await page.getByLabel('情节或具体要求', { exact: true }).fill(instruction)
+  await page.getByLabel('情节或具体要求', { exact: true }).fill(source)
   const option = page.getByRole('checkbox', { name: '额外逐项核对本次情节', exact: true })
   await expect(option).not.toBeChecked()
   await option.check()
@@ -162,6 +163,189 @@ test('普通补写：显式情节核对展示原话、AI解释和正文证据；
     body: JSON.stringify({ before: artifact, after: edited }, null, 2),
     contentType: 'application/json',
   })
+})
+
+test('匿名渲染夹具：非空身份排除与副本关联保留出处，键盘和320实际2倍可读', async ({ page }, info) => {
+  const { chapter, original } = await createFromUi(page, '后台验证 · 非空流向关联仅测渲染')
+  const source = '林舟把检测记录抄一份寄往设备核验站，回执未到。'
+  const { artifact, task } = await moduleFromUi(page, 'writing.expand_plot', source)
+  const first = '林舟把检测记录抄件寄往设备核验站，回执还没有收到。'
+  const second = '修理师傅陈伯看着林舟另抄一份随身副本，折好递还林舟；这不是已寄出的那份。'
+  const body = first + '\n\n' + second
+  const participantReason = '连续原文中陈伯与林舟是不同参与者；不推测其余身份。'
+  const instanceReason = '原文明确另一份实物，不代表所载信息内容不同。'
+  const fields = ['object_id', 'supplier_id', 'recipient_id', 'stage', 'certainty', 'evidence']
+  const flows = [
+    {
+      object_id: 'O01',
+      supplier_id: 'E01',
+      recipient_id: 'E02',
+      stage: 'completed',
+      certainty: 'explicit',
+      evidence: first,
+      note: '匿名渲染夹具的寄件观察。',
+    },
+    {
+      object_id: 'O01',
+      supplier_id: 'unknown',
+      recipient_id: 'E01',
+      stage: 'completed',
+      certainty: 'explicit',
+      evidence: second,
+      note: '匿名渲染夹具的后来副本观察，非模型输出质量证据。',
+    },
+  ]
+  const audit = {
+    ...artifact.payload.plot_audit!,
+    status: 'unverified',
+    source: { kind: 'author_instruction', text_sha256: sha(source) },
+    candidate_sha256: sha(body),
+    candidate_revision: 0,
+    items: [
+      {
+        id: 'P01',
+        author_evidence: source,
+        actor: '林舟',
+        action: '抄写并寄出',
+        object: '检测记录',
+        direction: '林舟向设备核验站',
+        result: '寄出；回执未到',
+        certainty: 'explicit',
+        transfer_object: '检测记录抄件',
+        supplier: '林舟',
+        recipient: '设备核验站',
+        transfer_scope: 'completed',
+        recipient_scope: 'unspecified',
+        scope_condition: '',
+      },
+    ],
+    checks: [
+      {
+        item_id: 'P01',
+        result: 'unknown',
+        observed: '匿名合成展示，不提供整份语义结论。',
+        evidence: first,
+        reason: '只测UI渲染，不代表模型或作者认可。',
+        repair: '',
+      },
+    ],
+    findings: [],
+    summary: '匿名合成合法报告，仅测渲染；原后台数据保持。',
+    direction_guard: {
+      status: 'observed',
+      role_observation_version: 'source-role-observation/3',
+      entities: { E01: '林舟', E02: '设备核验站' },
+      objects: { O01: '检测记录抄件' },
+      flows,
+      source_entailment: {
+        version: 'source-flow-entailment/2',
+        input_sha256: sha(
+          JSON.stringify({
+            version: 'source-flow-entailment/2',
+            text: body,
+            entities: { E01: '林舟', E02: '设备核验站' },
+            objects: { O01: '检测记录抄件' },
+            proposals: flows.map((flow, i) => ({ flow_id: `F0${i + 1}`, ...flow })),
+          }),
+        ),
+        status: 'supported',
+        proposals: flows.map((flow, i) => ({ flow_id: `F0${i + 1}`, ...flow })),
+        checks: flows.map((flow, i) => ({
+          flow_id: `F0${i + 1}`,
+          result: 'supported',
+          verified_fields: fields,
+          evidence: flow.evidence,
+          reason: '匿名报告结构用例，不能视作模型识别能力。',
+        })),
+        participants: [
+          {
+            flow_id: 'F02',
+            side: 'supplier_id',
+            status: 'known_other',
+            label: '修理师傅陈伯',
+            excluded_entity_ids: ['E01'],
+            evidence: second,
+            reason: participantReason,
+          },
+        ],
+        instances: [
+          {
+            left_flow_id: 'F01',
+            right_flow_id: 'F02',
+            result: 'different',
+            kind: 'physical',
+            evidence: second,
+            reason: instanceReason,
+          },
+        ],
+        note: '匿名渲染fixture；局部身份及实例排除不代表本章或文学通过。',
+      },
+    },
+  }
+  const synthetic = {
+    ...artifact,
+    candidate_revision: 0,
+    payload: { ...artifact.payload, text: body, plot_audit: audit, review_passed: false },
+  }
+  const forbidden: string[] = []
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && /\/(accept|resume|modules)(?:\?|$)/u.test(request.url()))
+      forbidden.push(request.url())
+  })
+  let fixtureReads = 0
+  await page.route(`**/api/artifacts/${artifact.id}`, (route) => {
+    fixtureReads++
+    return route.fulfill({ json: synthetic })
+  })
+  const artifactList = new RegExp(`/api/artifacts\\?branch_id=${task.branch_id}$`)
+  await page.route(artifactList, async (route) => {
+    const response = await route.fetch()
+    const rows: Artifact[] = await response.json()
+    return route.fulfill({ json: rows.map((row) => (row.id === artifact.id ? synthetic : row)) })
+  })
+  // Both existing read endpoints show the same synthetic report. Re-entering
+  // the existing workspace preserves its normal draft-buffer protection.
+  await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await page.getByRole('button', { name: '写作', exact: true }).click()
+  await page.getByRole('combobox', { name: '比较候选', exact: true }).selectOption(artifact.id)
+  await expect.poll(() => fixtureReads).toBeGreaterThan(0)
+  const panel = page.getByRole('region', { name: '情节逐项核对', exact: true })
+  const summary = panel.getByText('情节逐项核对 · 待核对（含歧义或未知）', { exact: true })
+  await expect(summary).toBeVisible()
+  await summary.focus()
+  await summary.press('Enter')
+  const flowSummary = panel.getByText('正文流向观察的出处复核 · 2项', { exact: true })
+  await flowSummary.focus()
+  await flowSummary.press('Enter')
+  await expect(flowSummary).toBeFocused()
+  const details = flowSummary.locator('..')
+  const participant = details.locator('article').filter({ hasText: '给出方身份排除核对' })
+  const instance = details.locator('article').filter({ hasText: '不同实例' })
+  await expect(participant).toContainText('修理师傅陈伯可与以下称谓区分：林舟')
+  await expect(participant).toContainText(participantReason)
+  await expect(participant.locator('blockquote')).toHaveText(second)
+  await expect(instance).toContainText(instanceReason)
+  await expect(instance.locator('blockquote')).toHaveText(second)
+  await expect(details).toContainText('不同实物不豁免“仅向”同一内容的限制')
+  await details.screenshot({ path: info.outputPath('nonempty-relations-desktop.png') })
+  await page.setViewportSize({ width: 320, height: 800 })
+  await assertActualDoubleText(
+    page,
+    {
+      paragraph: details.locator('p').first(),
+      quote: participant.locator('blockquote'),
+      small: details.locator('p.small').last(),
+      summary: flowSummary,
+      button: page.getByRole('button', { name: '保存', exact: true }),
+    },
+    info,
+  )
+  await details.screenshot({ path: info.outputPath('nonempty-relations-320-actual2x.png') })
+  expect(await read(page, `/api/artifacts/${artifact.id}`)).toEqual(artifact)
+  expect(await read(page, `/api/chapters/${chapter.id}`)).toEqual(original)
+  expect(forbidden).toEqual([])
+  await page.unroute(`**/api/artifacts/${artifact.id}`)
+  await page.unroute(artifactList)
 })
 
 test('保存稿审查：显式情节核对绑定当前章、修订、内容哈希，原稿保持', async ({ page }, testInfo) => {
@@ -279,7 +463,7 @@ test('v2仅向守卫：正向与unknown接收者并存保留原pass并降未知�
   const started: Task = await submitted.json()
   expect(started.branch_id).not.toBe(novel.branch_id)
   expect(started.result.plot_contract_version).toBe('author-plot-audit/2')
-  expect(started.result.flow_source_entailment_version).toBe('source-flow-entailment/1')
+  expect(started.result.flow_source_entailment_version).toBe('source-flow-entailment/2')
   await expect
     .poll(async () => (await read<Task>(page, `/api/tasks/${started.id}`)).status)
     .toBe('needs_review')
@@ -332,8 +516,8 @@ test('v2仅向守卫：正向与unknown接收者并存保留原pass并降未知�
   expect(chapters).toHaveLength(1)
   expect(await read(page, `/api/chapters/${chapters[0].id}`)).toMatchObject({ content: '', revision: 0 })
   expect(await read(page, `/api/chapters/${chapter.id}`)).toEqual(original)
-  expect(task.result.flow_source_entailment_version).toBe('source-flow-entailment/1')
-  expect(audit.direction_guard!.role_observation_version).toBe('source-role-observation/2')
+  expect(task.result.flow_source_entailment_version).toBe('source-flow-entailment/2')
+  expect(audit.direction_guard!.role_observation_version).toBe('source-role-observation/3')
   const sourceReview = audit.direction_guard!.source_entailment!
   expect(sourceReview.version).toBe(task.result.flow_source_entailment_version)
   expect(sourceReview.status).toBe('supported')
@@ -368,10 +552,10 @@ test('v2仅向守卫：正向与unknown接收者并存保留原pass并降未知�
     ['仅依据作者原话整理本场景情节', 'ScopedAuthorPlot'],
     ['逐项对照作者情节解释与本次正文', 'PlotAudit'],
     ['只从本次正文独立提取物品与信息流向', 'FlowObservations'],
-    ['独立核对正文流向观察的来源蕴含', 'FlowChecks'],
+    ['独立核对正文流向观察的来源蕴含', 'AssociatedFlowChecks'],
   ])
   expect(dispatches[4].payload.request).toMatchObject({
-    flow_role_observation_version: 'source-role-observation/2',
+    flow_role_observation_version: 'source-role-observation/3',
     flow_source_entailment_version: task.result.flow_source_entailment_version,
   })
   expect(dispatches[5].payload.request.flow_source_entailment_version).toBe(sourceReview.version)

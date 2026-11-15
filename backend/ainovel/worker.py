@@ -356,6 +356,7 @@ class Worker:
             "仅从原情节纠偏事项主体与指令性质",
             "独立核对来源解释纠偏与全部事项保持",
             "独立观察全书条件在本章是否触发",
+            "独立观察AI章纲接收范围来源",
         }:
             # No implicit enrichment: source interpretation receives only its
             # source scope. New plan choice/check stages explicitly supply their
@@ -651,6 +652,11 @@ class Worker:
                             "workflow_plan_creative_context_sha256": source_instruction["写前创作上下文摘要"],
                         }
                         if "写前创作上下文版本" in source_instruction
+                        else {}
+                    ),
+                    **(
+                        {"workflow_plan_recipient_scope_version": source_instruction["接收范围核对执行版本"]}
+                        if "接收范围核对执行版本" in source_instruction
                         else {}
                     ),
                     **(
@@ -1102,6 +1108,15 @@ class Worker:
                     "本阶段没有正文。只回到给定的AI工作章纲连续原话修正解释，不读取候选或未来稿。"
                     "条件不能拼接、概括或补造；确实未指定的双方／物品槽按open_fields规则保留待选择，"
                     "不能猜人、删除传递事件、换对象或把原阶段／否定／只／仅／未知改掉来通过校验。"
+                )
+            if (
+                instruction.get("接收范围核对执行版本") == "workflow-plan-recipient-scope/1"
+                and instruction.get("动作") == "独立观察AI章纲接收范围来源"
+            ):
+                current["引用修正要求"] = (
+                    "本阶段没有正文或P卡。只依据本次本章工作章纲连续原话修正来源观察和引用编号；"
+                    "命名目的地、一份材料、另项许可或排除某一人不等于排除其他全部接收者。"
+                    "没有可支持的范围归属时保留unknown，不补造排他、不扩大原角色、物品、条件和阶段。"
                 )
             if repair_feedback is not None:
                 current.update(repair_feedback())

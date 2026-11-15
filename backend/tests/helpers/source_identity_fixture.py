@@ -100,6 +100,7 @@ def source_identity_output(instruction):
                     "transfer_scope": "completed",
                     "recipient_scope": "unspecified",
                     "scope_condition": "",
+                    **({"scope_observation_ids": []} if "接收范围核对执行版本" in instruction else {}),
                 }
             ],
             "note": "工程夹具刻意保留泛称，检验独立身份限定链路。",

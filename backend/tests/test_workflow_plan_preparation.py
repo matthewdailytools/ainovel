@@ -136,7 +136,7 @@ def test_new_automatic_prepares_before_prose_keeps_original_and_reuses_frozen_in
     assert not any(f["任务"].get("动作") == "仅依据作者原话整理本场景情节" for f in model.frames)
     for frame in model.preparation_frames:
         assert "本次候选" not in dumps(frame) and "沈砚向陆栖画出" not in dumps(frame)
-        if frame["任务"]["动作"] == "写前解释AI工作章纲":
+        if frame["任务"]["动作"] in {"写前解释AI工作章纲", "独立观察AI章纲接收范围来源"}:
             assert "recent" not in frame["上下文"] and "chapter" not in frame["上下文"]
             assert "genre_profile" not in frame["上下文"]
         else:
@@ -302,7 +302,9 @@ def test_initial_interpretation_distinguishes_narrative_unknown_without_solving_
     model = PreparationModel()
     worker, plot, chapter, _ = claimed(settings, domain, story, model=model)
     asyncio.run(prepare(worker, plot, chapter))
-    instruction = model.preparation_frames[0]["任务"]
+    instruction = next(
+        f["任务"] for f in model.preparation_frames if f["任务"].get("动作") == "写前解释AI工作章纲"
+    )
     assert "明确保留多种可能" in instruction["执行明确性"] and "绝不能" in instruction["执行明确性"]
     assert "原因继续未知" in instruction["本章工作章纲（AI规划）"]
     check = next(f["任务"] for f in model.preparation_frames if f["任务"].get("动作") == CHECK_ACTION)
@@ -326,13 +328,13 @@ def test_finished_step_crash_before_receipt_reuses_paid_cache_without_reissuing(
     monkeypatch.setattr(worker, "checkpoint", crash)
     with pytest.raises(RuntimeError):
         asyncio.run(prepare(worker, plot, chapter))
-    assert model.calls == 1
+    assert model.calls == 2  # source inventory plus paid interpretation
     restored = domain.task(task["id"])
     assert "response" not in restored["result"]["plot_preparations"]["1"]["phases"]["interpret:0"]
     worker.task = restored
     monkeypatch.setattr(worker, "checkpoint", original)
     effective, contract = asyncio.run(prepare(worker, plot, chapter))
-    assert model.calls == 2  # one new independent check; interpretation comes from paid cache
+    assert model.calls == 3  # inventory and interpretation come from paid cache; only preservation is new
     assert frozen_contract(worker, effective["plot"], 1, contract) == contract
 
 
@@ -426,7 +428,7 @@ def test_real_adapter_proven_not_sent_failures_can_explicitly_resume_without_res
         asyncio.run(prepare(worker, plot, chapter))
     assert caught.value.code == kind and not bodies
     result = domain.task(task["id"])["result"]
-    assert result["plot_preparations"]["1"]["phases"]["interpret:0"]["status"] == "not_sent"
+    assert result["plot_preparations"]["1"]["phases"]["recipient_scope:0"]["status"] == "not_sent"
     assert worker.budget.report()[0]["settled"] == 0
     settings.providers["openai_1"] = provider
     monkeypatch.setattr(worker.budget, "reserve", original_reserve)
@@ -450,8 +452,8 @@ def test_real_adapter_proven_not_sent_failures_can_explicitly_resume_without_res
     effective, contract = asyncio.run(prepare(next_worker, plot, chapter))
     row = next_worker.task["result"]["plot_preparations"]["1"]
     assert row["round"] == 0 and len(row["choices"]) == 0
-    assert row["phases"]["interpret:0"]["not_sent_history"][0]["code"] == kind
-    assert len(bodies) == 2 and frozen_contract(next_worker, effective["plot"], 1, contract) == contract
+    assert row["phases"]["recipient_scope:0"]["not_sent_history"][0]["code"] == kind
+    assert len(bodies) == 3 and frozen_contract(next_worker, effective["plot"], 1, contract) == contract
 
 
 @pytest.mark.parametrize("boundary", ["pause", "cancel", "lease", "attempt", "source"])
@@ -577,7 +579,7 @@ def test_real_unknown_timeout_keeps_money_hold_and_cannot_be_relabelled_not_sent
     before = worker.budget.report()[0]
     assert len(captured) == 1 and before["reserved_unknown"] > 0
     restored = domain.task(task["id"])
-    assert restored["result"]["plot_preparations"]["1"]["phases"]["interpret:0"]["status"] == "started"
+    assert restored["result"]["plot_preparations"]["1"]["phases"]["recipient_scope:0"]["status"] == "started"
     worker.task = restored
     assert asyncio.run(prepare(worker, plot, chapter)) is None
     assert len(captured) == 1
@@ -595,7 +597,7 @@ def test_known_local_error_after_a_reserved_call_does_not_claim_whole_phase_unse
     worker.client = ReservedFailure()
     with pytest.raises(DomainError):
         asyncio.run(prepare(worker, plot, chapter))
-    slot = domain.task(task["id"])["result"]["plot_preparations"]["1"]["phases"]["interpret:0"]
+    slot = domain.task(task["id"])["result"]["plot_preparations"]["1"]["phases"]["recipient_scope:0"]
     assert slot["status"] == "started" and "not_sent_code" not in slot
 
 
@@ -658,5 +660,5 @@ def test_pending_phase_account_switch_is_rejected_without_locking_original_and_c
     worker.task = domain.task(task["id"])
     monkeypatch.setattr(worker, "checkpoint", original)
     effective, contract = asyncio.run(prepare(worker, plot, chapter))
-    assert worker.client.calls == 2
+    assert worker.client.calls == 3  # inventory + cached interpretation + independent preservation
     assert frozen_contract(worker, effective["plot"], 1, contract) == contract

@@ -1,7 +1,12 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, test } from 'vitest'
-import { FLOW_ENTAILMENT_VERSION, readSourceFlowReview, SourceFlowDetails } from './SourceFlowDetails'
+import {
+  FLOW_ENTAILMENT_LEGACY_VERSION,
+  FLOW_ENTAILMENT_VERSION,
+  readSourceFlowReview,
+  SourceFlowDetails,
+} from './SourceFlowDetails'
 import { FrozenPlotAuditPolicy } from './PlotAuditDetails'
 import { readPlotAudit } from './plotAudit'
 
@@ -11,7 +16,7 @@ function guard() {
     entities: { E01: '林芷', E02: '许舟' },
     objects: { O01: '修船办法的询问' },
     source_entailment: {
-      version: FLOW_ENTAILMENT_VERSION,
+      version: FLOW_ENTAILMENT_LEGACY_VERSION,
       input_sha256: 'a'.repeat(64),
       status: 'supported',
       note: '只查本次正文。',

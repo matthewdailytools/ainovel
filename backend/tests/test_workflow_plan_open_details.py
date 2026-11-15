@@ -65,6 +65,8 @@ class OpenModel(PreparationModel):
                 row["scope_condition"] = "原话未指定接收人"
             if self.same_side and not open_slot:
                 row["recipient"] = "门吏"
+            if "接收范围核对执行版本" in instruction:
+                row["scope_observation_ids"] = []
             output = {"items": [row], "note": "只据AI粗章纲，开放槽不属于事实或作者锁定。"}
         elif action == CHOICE_ACTION:
             output = {

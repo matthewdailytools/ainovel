@@ -4115,7 +4115,7 @@
           },
           "flow_source_entailment_version": {
             "type": "string",
-            "const": "source-flow-entailment/1",
+            "enum": ["source-flow-entailment/1", "source-flow-entailment/2"],
             "title": "Flow Source Entailment Version"
           },
           "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" }

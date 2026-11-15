@@ -3,7 +3,11 @@ import type { Account, Money, Task } from './api'
 import { canonical, object, sourceSignature } from './planRestart'
 
 export { canonical, sourceSignature }
-export const FLOW_VERSION = 'source-flow-entailment/1'
+export const FLOW_LEGACY_VERSION = 'source-flow-entailment/1'
+export const FLOW_VERSION = 'source-flow-entailment/2'
+export type FlowVersion = typeof FLOW_LEGACY_VERSION | typeof FLOW_VERSION
+export const isFlowVersion = (value: unknown): value is FlowVersion =>
+  value === FLOW_LEGACY_VERSION || value === FLOW_VERSION
 export const FLOW_CONTINUATION_VERSION = 'workflow-flow-policy-continuation/1'
 export type FlowContinuationInput = components['schemas']['FlowContinuationInput']
 type ForeignCall = {
@@ -32,11 +36,11 @@ export type FlowBudget = {
 }
 export type FlowPreview = {
   version: typeof FLOW_CONTINUATION_VERSION
-  flow_source_entailment_version: typeof FLOW_VERSION
+  flow_source_entailment_version: FlowVersion
   source_task_id: string
   branch_id: string
   story_revision: number
-  source_flow_policy: 'legacy'
+  source_flow_policy: 'legacy' | typeof FLOW_LEGACY_VERSION
   source_policies: Record<string, unknown>
   next_chapter: number
   plan_sha256: string
@@ -71,8 +75,13 @@ export function flowUnavailableReason(task: Task): string {
     task.result.plot_contract_version !== 'author-plot-audit/2'
   )
     return '本入口只支持已冻结v2情节核对的整书任务。'
-  if (task.result.flow_source_entailment_version !== undefined)
+  if (task.result.flow_source_entailment_version === FLOW_VERSION)
     return '本任务已冻结新版流向政策，无需重复创建政策任务。'
+  if (
+    task.result.flow_source_entailment_version !== undefined &&
+    task.result.flow_source_entailment_version !== FLOW_LEGACY_VERSION
+  )
+    return '本任务的流向政策版本无法确认，请先核对原任务。'
   if (task.result.continued_to) return '原任务已有续跑任务，请打开已有子任务，不能重复创建。'
   if (task.status !== 'paused')
     return task.status === 'needs_review'
@@ -140,16 +149,23 @@ export function readFlowBudget(value: unknown): FlowBudget | undefined {
   return row as FlowBudget
 }
 
-export function readFlowPreview(value: unknown, task: Task): FlowPreview | undefined {
+export function readFlowPreview(
+  value: unknown,
+  task: Task,
+  targetVersion: FlowVersion = FLOW_VERSION,
+): FlowPreview | undefined {
   const row = object(value)
   if (
     !row ||
+    (task.result.flow_source_entailment_version !== undefined &&
+      (task.result.flow_source_entailment_version !== FLOW_LEGACY_VERSION ||
+        targetVersion === FLOW_LEGACY_VERSION)) ||
     row.version !== FLOW_CONTINUATION_VERSION ||
-    row.flow_source_entailment_version !== FLOW_VERSION ||
+    row.flow_source_entailment_version !== targetVersion ||
     row.source_task_id !== task.id ||
     row.branch_id !== task.branch_id ||
     row.account !== task.payload.account ||
-    row.source_flow_policy !== 'legacy' ||
+    row.source_flow_policy !== (task.result.flow_source_entailment_version ?? 'legacy') ||
     !object(row.source_policies) ||
     canonical(row.source_policies) !==
       canonical({
@@ -229,7 +245,7 @@ export function readFlowChild(value: unknown, pending: PendingFlow): Task | unde
     payload.budget_limit !== budget.remaining_run_limit ||
     budget.provider !== preview.budget.provider ||
     progress.continued_from !== source.id ||
-    progress.flow_source_entailment_version !== FLOW_VERSION ||
+    progress.flow_source_entailment_version !== pending.request.flow_source_entailment_version ||
     Object.entries(source.result).some(
       ([key, value]) =>
         key.endsWith('_version') &&
@@ -239,7 +255,7 @@ export function readFlowChild(value: unknown, pending: PendingFlow): Task | unde
     canonical(progress.plan) !== canonical(source.result.plan) ||
     receipt.version !== FLOW_CONTINUATION_VERSION ||
     receipt.source_task_id !== source.id ||
-    receipt.source_flow_policy !== 'legacy' ||
+    receipt.source_flow_policy !== preview.source_flow_policy ||
     !hash(receipt.source_payload_sha256) ||
     !hash(receipt.source_progress_sha256) ||
     receipt.plan_sha256 !== preview.plan_sha256 ||
@@ -265,7 +281,8 @@ export function readPendingFlow(value: unknown, owner: string): PendingFlow | un
     !object(source.result)
   )
     return undefined
-  const preview = readFlowPreview(context.preview, source as Task)
+  if (!isFlowVersion(request.flow_source_entailment_version)) return undefined
+  const preview = readFlowPreview(context.preview, source as Task, request.flow_source_entailment_version)
   if (
     !preview ||
     !readFlowContext(preview, {
@@ -276,7 +293,6 @@ export function readPendingFlow(value: unknown, owner: string): PendingFlow | un
     request.client_request_id.length < 8 ||
     request.client_request_id.length > 128 ||
     request.preview_basis_sha256 !== preview.preview_basis_sha256 ||
-    request.flow_source_entailment_version !== FLOW_VERSION ||
     !text(request.reason) ||
     request.reason.length > 2000 ||
     Object.keys(request).sort().join(',') !==

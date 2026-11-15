@@ -2353,9 +2353,9 @@ export interface components {
       preview_basis_sha256: string
       /**
        * Flow Source Entailment Version
-       * @constant
+       * @enum {string}
        */
-      flow_source_entailment_version: 'source-flow-entailment/1'
+      flow_source_entailment_version: 'source-flow-entailment/1' | 'source-flow-entailment/2'
       /** Reason */
       reason: string
     }

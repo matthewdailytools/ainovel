@@ -11,7 +11,7 @@ from .db import DomainError, dumps
 from .domain import char_count
 from .models import Input
 from .plot_review import attach_plot_review, review_passed
-from .flow_entailment import KEY as FLOW_KEY, VERSION as FLOW_VERSION
+from .flow_entailment import KEY as FLOW_KEY, SUPPORTED_VERSIONS as FLOW_VERSIONS
 
 VERSION = "candidate-recheck/1"
 
@@ -165,7 +165,7 @@ def freeze(
             )
         policy[APPLICABILITY_KEY] = applicability_version
     if flow_entailment_version is not None:
-        if flow_entailment_version != FLOW_VERSION:
+        if flow_entailment_version not in FLOW_VERSIONS:
             raise DomainError(
                 "flow_entailment_version", "复检的流向来源核对政策无法确认，未升级旧检查。", 409
             )

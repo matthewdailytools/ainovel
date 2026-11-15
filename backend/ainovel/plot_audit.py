@@ -83,6 +83,15 @@ class OpenPlanInterpretation(StrictModel):
     note: str = Field(max_length=2000)
 
 
+class ScopeBoundOpenPlanItem(OpenPlanItem):
+    scope_observation_ids: list[str] = Field(max_length=24)
+
+
+class ScopeBoundOpenPlanInterpretation(StrictModel):
+    items: list[ScopeBoundOpenPlanItem] = Field(max_length=12)
+    note: str = Field(max_length=2000)
+
+
 class PlotCheck(StrictModel):
     item_id: str = Field(min_length=1, max_length=20)
     result: Literal["pass", "fail", "unknown"]
@@ -136,6 +145,16 @@ async def independent_flows(
             sorted({item[key] for item in expected for key in ("supplier", "recipient")}), 1
         )
     }
+    if verify_sources:
+        from .flow_entailment import VERSION as ENTAILMENT_VERSION, execution_version as flow_version
+
+        if flow_version(worker) == ENTAILMENT_VERSION:
+            # Source roles need not assert a handover to be available as names.
+            # The body observer still verifies aliases; a role is not a fact.
+            names = {item[key] for item in expected for key in ("supplier", "recipient")}
+            extra_names = sorted({item.get("actor", "") for item in items} - names - {""})
+            names.update(extra_names[: max(0, 24 - len(names))])
+            entities = {f"E{i:02}": name for i, name in enumerate(sorted(names), 1)}
     objects = {
         f"O{i:02}": name for i, name in enumerate(sorted({item["transfer_object"] for item in expected}), 1)
     }
@@ -200,10 +219,10 @@ async def independent_flows(
         "要求": "只提取正文实际给出、索取、交换、借还或传递的方向，不判断是否符合任何作者要求。supplier是给出方，recipient是取得方；交易失败也须区分原本提议的方向。offered/requested是当前提出的方向，completed是已交付，未来计划为planned，拒绝项为refused。只能据原文明确信息映射实体编号；不能映射则unknown，其他物品为other。引用FLOW编号。",
     }
     if verify_sources:
-        from .flow_entailment import OBJECT_GUIDANCE, OBSERVATION_VERSION, VERSION as ENTAILMENT_VERSION
+        from .flow_entailment import OBJECT_GUIDANCE, execution_version as flow_version, observation_version
 
-        observation_instruction["角色流向观察版本"] = OBSERVATION_VERSION
-        observation_instruction["流向来源蕴含版本"] = ENTAILMENT_VERSION
+        observation_instruction["角色流向观察版本"] = observation_version(worker)
+        observation_instruction["流向来源蕴含版本"] = flow_version(worker)
         observation_instruction["独立角色映射"] = observation_instruction["独立角色映射"].replace(
             "supplier始终是给出方、recipient始终是取得方，索取者是recipient。",
             "supplier与recipient按待识别内容本身的给出及接收方向识别，不能无条件把发问人当取得方。",
@@ -251,6 +270,19 @@ async def independent_flows(
             and flow["recipient_id"] == entity_ids[item["supplier"]]
             and flow["stage"] in stages
         ]
+        if source_review is not None:
+            from .flow_association import anchors, different_physical_instance
+
+            references = anchors(source_review, item, object_ids[item["transfer_object"]], entity_ids)
+            reverse = [
+                flow
+                for flow in reverse
+                if not different_physical_instance(
+                    source_review,
+                    flow,
+                    references,
+                )
+            ]
         row = rows[item["id"]]
         original_check = deepcopy(row) if version == VERSION else None
         if identity_context and any(
@@ -344,7 +376,7 @@ async def independent_flows(
         **observed,
         **(
             {
-                "role_observation_version": OBSERVATION_VERSION
+                "role_observation_version": observation_version(worker)
                 if verify_sources
                 else OBSERVATION_GUIDANCE_VERSION
             }
@@ -470,9 +502,30 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
         raise DomainError("plan_source_roles_version", "写前来源角色解释输入与冻结政策不一致。", 409)
     if roles and not open_details:
         raise DomainError("plan_source_roles_version", "来源角色解释仅适用新版开放细节写前准备。", 409)
+    from . import workflow_plan_recipient_scope as recipient_scope
+
+    scope_execution = preparation is not None and recipient_scope.KEY in preparation
+    inventory = preparation.get("recipient_scope_inventory") if scope_execution else None
+    if scope_execution:
+        if (
+            preparation[recipient_scope.KEY] != recipient_scope.VERSION
+            or not roles
+            or not recipient_scope.inventory_valid(inventory, author_text)
+            or inventory["status"] != "supported"
+        ):
+            raise DomainError("plan_scope_version", "写前范围来源观察缺失、未知或版本不符，未派发解释。", 409)
+        schema = ScopeBoundOpenPlanInterpretation
     repair_state = RepairState(author_text, open_plan_issues) if roles else None
     author_contract = schema.model_json_schema()
-    item_type = "OpenPlanItem" if open_details else "ScopedPlotItem" if scoped else "PlotItem"
+    item_type = (
+        "ScopeBoundOpenPlanItem"
+        if scope_execution
+        else "OpenPlanItem"
+        if open_details
+        else "ScopedPlotItem"
+        if scoped
+        else "PlotItem"
+    )
     author_contract["$defs"][item_type]["properties"]["author_evidence"]["enum"] = list(author_sources)
 
     if roles:
@@ -488,6 +541,15 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
                 "只填本项原话支持的传递角色／内容；纯许可无传递时留空，不能为满足only守卫臆造。"
             )
 
+    if scope_execution:
+        fields = author_contract["$defs"][item_type]["properties"]
+        ids = [o["observation_id"] for o in inventory["inventory"]["observations"]]
+        if ids:
+            fields["scope_observation_ids"]["items"]["enum"] = ids
+        else:
+            fields["scope_observation_ids"]["maxItems"] = 0
+        fields["recipient_scope"]["description"] += recipient_scope.GUIDANCE
+
     def validate_author(value):
         for item in value["items"]:
             resolve_field(item, "author_evidence", author_sources)
@@ -496,13 +558,26 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
             if len(value["items"]) != preparation["item_count"]:
                 issues.append("写前复解释必须按原P编号顺序逐项保留全部事项，不得删除、合并或遗漏歧义项。")
         issues.extend(
-            repair_state.validate(value)
+            repair_state.validate(recipient_scope.core_value(value) if scope_execution else value)
             if roles
             else open_plan_issues(value, author_text)
             if open_details
             else author_contract_issues(value, author_text, scoped=scoped)
         )
+        if scope_execution:
+            issues.extend(recipient_scope.binding_issues(value, inventory))
         return issues
+
+    def repair_feedback():
+        result = repair_state.feedback()
+        if scope_execution:
+            result.update(
+                {
+                    "接收范围核对执行版本": recipient_scope.VERSION,
+                    "接收范围修正边界": recipient_scope.GUIDANCE,
+                }
+            )
+        return result
 
     source_label = "本章工作章纲（AI规划）" if source_kind == "workflow_plan" else "作者原话"
     # No candidate, reference excerpt, application plan or old review reaches this call.
@@ -514,6 +589,16 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
             **source_metadata(source_kind, version),
             **({OPEN_KEY: OPEN_VERSION, "开放执行槽解释": OPEN_GUIDANCE} if open_details else {}),
             **({ROLE_KEY: ROLE_VERSION, "来源角色与限制范围解释": ROLE_GUIDANCE} if roles else {}),
+            **(
+                {
+                    "接收范围核对执行版本": recipient_scope.VERSION,
+                    "先行来源范围观察（AI观察，不是作者条件）": inventory,
+                    "接收范围来源绑定": recipient_scope.GUIDANCE
+                    + "每项scope_observation_ids只引用先行观察O编号，全部观察须被原义对应事项保持；没有相关观察可空。only/unrestricted须有同一物品、双方和阶段的来源观察，不可借别项许可或禁止；先行观察仍非原话真值，发现来源歧义应保留而非伪造通过。",
+                }
+                if scope_execution
+                else {}
+            ),
             **(
                 {
                     "写前准备契约版本": preparation["version"],
@@ -530,10 +615,18 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
         validate_author,
         contract=author_contract,
         **({"diagnostic_label": "AI工作章纲写前解释"} if open_details else {}),
-        **({"repair_feedback": repair_state.feedback} if roles else {}),
+        **(
+            {"repair_feedback": repair_feedback if scope_execution else repair_state.feedback}
+            if roles
+            else {}
+        ),
     )
     if roles:
-        return {**normalize_open_plan(contract), "source_role_repair": repair_state.receipt()}
+        return {
+            **normalize_open_plan(recipient_scope.core_value(contract) if scope_execution else contract),
+            "source_role_repair": repair_state.receipt(),
+            **({"recipient_scope_bindings": recipient_scope.bindings(contract)} if scope_execution else {}),
+        }
     return normalize_open_plan(contract) if open_details else contract
 
 
