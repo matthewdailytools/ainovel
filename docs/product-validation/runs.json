@@ -4090,5 +4090,115 @@
     "result": "passed",
     "record": "2026-11-15-workbench-actual-text-scale.md",
     "fix_of": "new-novel-form-full-after-001"
+  },
+  {
+    "id": "reference-wrap-011-ci-success-001",
+    "date": "2026-11-15",
+    "commit": "01126c7",
+    "module": "参考历史宽度源码双CI",
+    "scenario": "main43641160115/分支43641076144均success：1456后端869.74/812.49秒、208前端、53无头4.7/5.0分钟；不推为未测新建表单通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-relative-event-context.md",
+    "fix_of": "workbench-font-full-53-001"
+  },
+  {
+    "id": "novel-799-ci-race-failed-001",
+    "date": "2026-11-15",
+    "commit": "79906aa",
+    "module": "新建用例远端提前读取",
+    "scenario": "main43641908418/分支43641844602均1456后端/208前端通过、53浏览器通过1失败；旧作品已选值误当新建完成，读取列表尚未新增，失败日志保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-relative-event-context.md",
+    "fix_of": "new-novel-form-full-after-001"
+  },
+  {
+    "id": "novel-081-ci-green-unfixed-001",
+    "date": "2026-11-15",
+    "commit": "0818942",
+    "module": "同产品字节偶发远端通过",
+    "scenario": "0818942双CI均success；只改归档而新建等待未改，不能据此判旧竞态已修",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-relative-event-context.md",
+    "fix_of": "novel-799-ci-race-failed-001"
+  },
+  {
+    "id": "novel-post-receipt-before-001",
+    "date": "2026-11-15",
+    "commit": "0818942+working-tree",
+    "module": "固定延迟复现新建竞态",
+    "scenario": "先创建已有作品和原稿，延迟POST500ms，原等待仍提前读取；定向失败与trace保留，0模型",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-relative-event-context.md",
+    "fix_of": "novel-799-ci-race-failed-001"
+  },
+  {
+    "id": "novel-post-receipt-fixed-001",
+    "date": "2026-11-15",
+    "commit": "9919c71",
+    "module": "新建明确等待本次回执",
+    "scenario": "等待POST201及返回ID；新增总数/全部旧作品/旧正文断言保留，两次Enter仅1请求；固定延迟与相对查询等5专项通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-relative-event-context.md",
+    "fix_of": "novel-post-receipt-before-001"
+  },
+  {
+    "id": "relative-state-first-semantic-failures-001",
+    "date": "2026-11-15",
+    "commit": "0818942+working-tree",
+    "module": "相对状态开发中边界失败",
+    "scenario": "并行实际变化仍返回旧确定值、较晚断言结束后旧值恢复分别被定向测试检出；两次失败日志保留，未称旧日常发生事故",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-relative-event-context.md",
+    "fix_of": ""
+  },
+  {
+    "id": "relative-event-full-001",
+    "date": "2026-11-15",
+    "commit": "9919c71",
+    "module": "事件锚点完整工程回归",
+    "scenario": "新增30/相关136；完整1486后端372.53秒、208前端/48既有、56隔离无头284.475秒；214/268清单稳定绑定，历史当时372；版本/UTF16/旧响应/计划/冲突/循环及1800链覆盖",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-relative-event-context.md",
+    "fix_of": "relative-state-first-semantic-failures-001"
+  },
+  {
+    "id": "relative-daily-harness-first-001",
+    "date": "2026-11-15",
+    "commit": "9919c71",
+    "module": "日常脚本入口与依据夹具",
+    "scenario": "私有浏览器首次缺baseURL、其次寻找不在当前断言路径的较早事件；均留错因，不修改产品迎合夹具，0模型",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-15-relative-event-context.md",
+    "fix_of": ""
+  },
+  {
+    "id": "relative-event-daily-001",
+    "date": "2026-11-15",
+    "commit": "9919c71",
+    "module": "相对事件日常作者任务",
+    "scenario": "71993d实恢后部署BK5，独立人工10记录/6无整数事件/3状态，8API及6无头情况通过；金额变化/失效不恢复/视角/未知/回源/键盘/320实际30px、0写/模型，原图和费用保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-relative-event-context.md",
+    "fix_of": "relative-daily-harness-first-001"
+  },
+  {
+    "id": "relative-event-restore-001",
+    "date": "2026-11-15",
+    "commit": "9919c71",
+    "module": "相对样例及全数据恢复",
+    "scenario": "815531实恢新章10记录全部payload，旧11类领域表旧行保持；新1作品1版本1章2修订10记录10历史17依赖；原父任务needs_review及全usage哈希不变，0模型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-15-relative-event-context.md",
+    "fix_of": "relative-event-daily-001"
   }
 ]
