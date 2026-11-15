@@ -6763,5 +6763,38 @@
     "result": "unverified",
     "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
     "fix_of": ""
+  },
+  {
+    "id": "source-roles-9b-live-restore-001",
+    "date": "2026-11-16",
+    "commit": "9b2839a8b151574bbf844768d09e065aa5d7b560",
+    "module": "reliability",
+    "scenario": "新正式ee7df备份并实际隔离恢复40domain+2usage、266章232任务9场景回执25原件，场景API及paid3读回，0provider/Worker",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-9b283-runtime-and-readonly.md",
+    "fix_of": ""
+  },
+  {
+    "id": "source-roles-9b-live-deploy-001",
+    "date": "2026-11-16",
+    "commit": "9b2839a8b151574bbf844768d09e065aa5d7b560",
+    "module": "reliability",
+    "scenario": "8766已从Git9b/a0实现的562文件不可变包更新，Dcxa served SHA/native/API Worker链匹配，旧rows/usage/main保持，0模型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-9b283-runtime-and-readonly.md",
+    "fix_of": "plan-source-roles-runtime-pending-001"
+  },
+  {
+    "id": "source-roles-9b-readonly-window-001",
+    "date": "2026-11-16",
+    "commit": "9b2839a8b151574bbf844768d09e065aa5d7b560",
+    "module": "workflow",
+    "scenario": "日常8.321秒84GET/SSE，所有owned浏览器已关；42表/25原件/562运行文件/525main保持；3a预览200，semi版本差异409，0非GET/外源/模型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-9b283-runtime-and-readonly.md",
+    "fix_of": ""
   }
 ]
