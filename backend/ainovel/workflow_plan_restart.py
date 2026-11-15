@@ -7,6 +7,7 @@ step or receipt. All three invalid replies must be complete and settled first.
 from copy import deepcopy
 import json
 from time import time
+from typing import Literal
 
 from pydantic import Field, StrictInt
 
@@ -14,9 +15,16 @@ from .conditional_continuation import lineage, receipt_budget
 from .db import DomainError, dumps, uid
 from .evidence import resolve_field, source_units
 from .models import Input
-from .plot_audit import ScopedAuthorPlot, author_contract_issues
+from .plot_audit import ScopedAuthorPlot, OpenPlanInterpretation, author_contract_issues, open_plan_issues
 from .workflow_plan_open_details import KEY, VERSION
 from .workflow_plan_preparation import sha
+from .workflow_plan_source_roles import (
+    KEY as ROLE_KEY,
+    VERSION as ROLE_VERSION,
+    RepairState,
+    validate_task as role_task,
+    check_row as check_role_row,
+)
 
 RESTART_VERSION = "workflow-plan-restart/1"
 
@@ -27,9 +35,16 @@ class PlanRestartInput(Input):
     chapter: StrictInt = Field(ge=1, le=10000)
     base_story_revision: StrictInt = Field(ge=0)
     base_progress_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    workflow_plan_source_roles_version: Literal["workflow-plan-source-roles/1"] | None = None
+
+
+def normalized(request):
+    # No optional server field is inserted into an old nonce's frozen request.
+    return {key: value for key, value in request.items() if key != ROLE_KEY or value is not None}
 
 
 def previous(domain, parent, request, tx=None):
+    request = normalized(request)
     sql = "SELECT t.id,t.result FROM task_requests r JOIN tasks t ON t.id=r.task_id WHERE r.key=?"
     rows = (
         list(tx.execute(sql, (request["client_request_id"],)))
@@ -46,11 +61,19 @@ def previous(domain, parent, request, tx=None):
         or receipt.get("request") != request
     ):
         raise DomainError("idempotency", "该提交标识已用于不同的写前重做决定。", 409)
-    return domain.task(row["id"])
+    child = domain.task(row["id"])
+    if request.get(ROLE_KEY) == ROLE_VERSION:
+        role_task(child, domain)
+    return child
 
 
 def checkpoint(domain, current, request):
     progress, payload = current["result"], current["payload"]
+    new_roles = request.get(ROLE_KEY) == ROLE_VERSION
+    if ROLE_KEY in request and request[ROLE_KEY] not in (None, ROLE_VERSION):
+        raise DomainError("plan_source_roles_version", "无法识别本次写前重做解释版本。", 409)
+    if new_roles:
+        role_task(current, domain)
     if (
         current["kind"] != "workflow"
         or current["status"] not in ("blocked_runtime", "paused")
@@ -58,7 +81,7 @@ def checkpoint(domain, current, request):
         or payload.get("plot_contract_check") is not True
         or progress.get("plot_contract_version") != "author-plot-audit/2"
         or progress.get("workflow_plan_preparation_version") != "workflow-plan-preparation/1"
-        or KEY in progress
+        or (progress.get(KEY) != VERSION if new_roles else KEY in progress)
         or any(
             progress.get(k)
             for k in (
@@ -101,6 +124,8 @@ def checkpoint(domain, current, request):
         raise DomainError(
             "plan_restart_checkpoint", "仅重做尚无有效首轮解释的已知失败步骤；不清除选择或保持核对失败。", 409
         )
+    if new_roles:
+        check_role_row(current, row, domain)
     plot = next(p for p in plan if p["number"] == number)
     chapter = domain.chapter(row["chapter_id"], current["branch_id"])
     from .workflow_plan_preparation import bindings
@@ -141,10 +166,63 @@ def checkpoint(domain, current, request):
         e["kind"] == "chapter_started" and json.loads(e["payload"]).get("number") == number for e in events
     ):
         raise DomainError("plan_preparation_late", "本章已进入正文生成，不支持写前新代际重做。", 409)
+    if new_roles:
+        from .flow_policy_continuation import is_body_action
+
+        if any(not str(key).isdigit() or int(key) > number for key in progress.get("plot_preparations", {})):
+            raise DomainError(
+                "plan_preparation_late", "后续章节已有写前准备，不能清除或混用其冻结政策。", 409
+            )
+        future = domain.db.all(
+            "SELECT id,revision,content FROM chapters WHERE branch_id=? AND archived=0 AND position>=?",
+            (current["branch_id"], number),
+        )
+        future_ids = {
+            c["id"]
+            for c in domain.db.all(
+                "SELECT id FROM chapters WHERE branch_id=? AND position>=?", (current["branch_id"], number)
+            )
+        }
+        if any(c["revision"] or c["content"] for c in future) or any(
+            domain.db.all(
+                "SELECT id FROM artifacts WHERE chapter_id=? AND kind IN ('chapter_draft','text_patch')",
+                (c["id"],),
+            )
+            for c in future
+        ):
+            raise DomainError(
+                "plan_preparation_late", "本章或后章已有正式稿、修订或候选，不能跨阶段重做写前解释。", 409
+            )
+        events = domain.db.all(
+            "SELECT e.kind,e.payload FROM task_events e JOIN tasks t ON t.id=e.task_id "
+            "WHERE t.branch_id=? AND t.kind IN ('workflow','module') "
+            "AND e.kind IN ('chapter_started','step_dispatched')",
+            (current["branch_id"],),
+        )
+        for event in events:
+            data = json.loads(event["payload"])
+            if not isinstance(data, dict):
+                continue
+            target = data.get("request", {})
+            target = target.get("target_version", {}) if isinstance(target, dict) else {}
+            if (
+                event["kind"] == "chapter_started"
+                and type(data.get("number")) is int
+                and data["number"] >= number
+            ) or (
+                event["kind"] == "step_dispatched"
+                and is_body_action(data.get("action"))
+                and isinstance(target, dict)
+                and isinstance(target.get("id"), str)
+                and target["id"] in future_ids
+            ):
+                raise DomainError(
+                    "plan_preparation_late", "本章或后章已有正文生成或修订派发，不重做写前解释。", 409
+                )
     return branch, row, tasks
 
 
-def known_invalid_phase(domain, usage, current, row):
+def known_invalid_phase(domain, usage, current, row, *, open_phase=False):
     slot = row["phases"]["interpret:0"]
     if slot.get("owner_task_id") != current["id"] or slot.get("status") != "started" or "response" in slot:
         raise DomainError("unknown_result", "原写前步骤身份或回执状态无法确认，未重发。", 409)
@@ -160,12 +238,24 @@ def known_invalid_phase(domain, usage, current, row):
         )
     ]
     new_dispatches = [d for d in dispatched if d["fingerprint"] not in old]
+    schema = OpenPlanInterpretation if open_phase else ScopedAuthorPlot
     if {d["fingerprint"] for d in new_dispatches} != {s["fingerprint"] for s in replies} or any(
-        d.get("action") != "写前解释AI工作章纲" or d.get("schema") != "ScopedAuthorPlot"
-        for d in new_dispatches
+        d.get("action") != "写前解释AI工作章纲" or d.get("schema") != schema.__name__ for d in new_dispatches
     ):
         raise DomainError("unknown_result", "写前派发与完整解释回执不能一一核对，未重发。", 409)
+    if open_phase and (
+        len(new_dispatches) != 3
+        or any(
+            not isinstance(d.get("request"), dict)
+            or d["request"].get(ROLE_KEY) != current["result"].get(ROLE_KEY)
+            or d["request"].get(KEY) != VERSION
+            for d in new_dispatches
+        )
+    ):
+        raise DomainError("unknown_result", "原派发模板版本、次数或开放槽身份无法核实，未重发。", 409)
     calls = [dict(c) for c in usage.execute("SELECT * FROM calls WHERE task_id=?", (current["id"],))]
+    if open_phase and not set(slot.get("before_calls", [])) <= {c["id"] for c in calls}:
+        raise DomainError("unknown_result", "原阶段调用前像缺失，未重发。", 409)
     new_calls = [c for c in calls if c["id"] not in slot.get("before_calls", [])]
     if (
         len(replies) != 3
@@ -176,13 +266,26 @@ def known_invalid_phase(domain, usage, current, row):
     source = row["original_plot"]
     sources = {u["source_id"]: u for u in source_units(source, "AUTHOR")}
     receipt_ids = []
+    repair_state = (
+        RepairState(source, open_plan_issues) if open_phase and role_task(current, domain) else None
+    )
+    # New guidance's repair anchors depend on dispatch order, not fingerprint order.
+    if open_phase:
+        by_fingerprint = {s["fingerprint"]: s for s in replies}
+        replies = [by_fingerprint[d["fingerprint"]] for d in new_dispatches]
     for step in replies:
         try:
             response = json.loads(step["result"])
-            value = ScopedAuthorPlot.model_validate(json.loads(response["text"])).model_dump()
+            value = schema.model_validate(json.loads(response["text"])).model_dump()
             for item in value["items"]:
                 resolve_field(item, "author_evidence", sources)
-            invalid = author_contract_issues(value, source, scoped=True)
+            invalid = (
+                repair_state.validate(value)
+                if repair_state is not None
+                else open_plan_issues(value, source)
+                if open_phase
+                else author_contract_issues(value, source, scoped=True)
+            )
         except (KeyError, ValueError, TypeError) as error:
             raise DomainError(
                 "unknown_result", "旧解释格式或连续来源无法核对，未创建重做任务。", 409
@@ -198,6 +301,8 @@ def known_invalid_phase(domain, usage, current, row):
 
 
 def restart(domain, budget, current, request):
+    request = normalized(request)
+    new_roles = request.get(ROLE_KEY) == ROLE_VERSION
     prior = previous(domain, current["id"], request)
     if prior is not None:
         return prior
@@ -207,18 +312,22 @@ def restart(domain, budget, current, request):
         raise DomainError("configuration", "原执行配置不存在，未换账户或重置预算。", 409)
     with budget.db(True) as usage:
         costs = receipt_budget(domain, usage, ancestors, current, source)
-        proof = known_invalid_phase(domain, usage, current, old_row)
+        proof = known_invalid_phase(domain, usage, current, old_row, open_phase=new_roles)
         payload = {
             **deepcopy(current["payload"]),
             "client_request_id": request["client_request_id"],
             "budget_limit": costs["remaining_run_limit"],
+            **({ROLE_KEY: ROLE_VERSION} if new_roles else {}),
         }
         progress = deepcopy(current["result"])
         del progress["plot_preparations"][str(request["chapter"])]
         progress.update(continued_from=current["id"], **{KEY: VERSION})
+        if new_roles:
+            progress[ROLE_KEY] = ROLE_VERSION
         progress["plan_preparation_restart"] = {
             "version": RESTART_VERSION,
             KEY: VERSION,
+            **({ROLE_KEY: ROLE_VERSION} if new_roles else {}),
             "source_task_id": current["id"],
             "request": deepcopy(request),
             "previous_preparation": deepcopy(old_row),
@@ -254,6 +363,9 @@ def restart(domain, budget, current, request):
                 raise DomainError("active_task", "本工作版本仍有活动任务，未创建重做。", 409)
             # Re-read source and adopted configuration under the manuscript lock.
             checkpoint(domain, current, request)
+            if new_roles:
+                if known_invalid_phase(domain, usage, current, old_row, open_phase=True) != proof:
+                    raise DomainError("task_changed", "原完整回执在提交期间改变，未创建重做。", 409)
             identifier, now = uid(), time()
             tx.execute(
                 "INSERT INTO tasks(id,kind,novel_id,branch_id,status,payload,result,created,updated) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -286,10 +398,12 @@ def restart(domain, budget, current, request):
 
 
 def preview(domain, budget, current):
+    new_roles = KEY in current["result"]
     basis = {
         "chapter": current["result"].get("next_chapter"),
         "base_story_revision": domain.branch(current["branch_id"])["story_revision"],
         "base_progress_sha256": sha(current["result"]),
+        **({ROLE_KEY: ROLE_VERSION} if new_roles else {}),
     }
     branch, row, ancestors = checkpoint(domain, current, {**basis, "reason": "只读核对写前失败检查点"})
     source = budget.settings.providers.get(current["payload"]["account"])
@@ -297,10 +411,11 @@ def preview(domain, budget, current):
         raise DomainError("configuration", "原执行配置不存在，未准备重做。", 409)
     with budget.db() as usage:
         costs = receipt_budget(domain, usage, ancestors, current, source)
-        proof = known_invalid_phase(domain, usage, current, row)
+        proof = known_invalid_phase(domain, usage, current, row, open_phase=new_roles)
     return {
         "version": RESTART_VERSION,
         KEY: VERSION,
+        **({ROLE_KEY: ROLE_VERSION} if new_roles else {}),
         "task_id": current["id"],
         "branch_id": branch["id"],
         "chapter_id": row["chapter_id"],
@@ -337,12 +452,14 @@ def register_routes(app, domain, budget, provider_ready):
             ):
                 raise DomainError("idempotency", "该请求标识不属于这个写前重做检查点。", 409)
             task = domain.task(rows[0]["id"])
+            if receipt.get("request", {}).get(ROLE_KEY) == ROLE_VERSION:
+                role_task(task, domain)
         return {"source_task_id": task_id, "client_request_id": client_request_id, "task": task}
 
     @app.post("/api/tasks/{task_id}/reprepare-plan", status_code=202)
     def reprepare_plan(task_id: str, data: PlanRestartInput):
         current = domain.task(task_id)
-        request = data.model_dump()
+        request = data.model_dump(exclude_none=True)
         found = previous(domain, task_id, request)
         if found is not None:
             return found

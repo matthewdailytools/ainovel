@@ -12,6 +12,8 @@ import {
   readRestartLookup,
   readRestartPreview,
   RESTART_VERSION,
+  SOURCE_ROLES_VERSION,
+  sourceRolesAnchorsMatch,
   sourceSignature,
   type PendingRestart,
   type RestartPreview,
@@ -26,9 +28,15 @@ export function PlanRestartReceipt({ task }: { task: Task }) {
   const receipt = object(object(task.result)?.plan_preparation_restart)
   const request = object(receipt?.request),
     budget = object(receipt?.budget)
+  const sourceRolesVersion = receipt?.workflow_plan_source_roles_version
   if (
     receipt?.version !== RESTART_VERSION ||
     object(task.result)?.workflow_plan_open_details_version !== OPEN_DETAILS_VERSION ||
+    (sourceRolesVersion !== undefined && sourceRolesVersion !== SOURCE_ROLES_VERSION) ||
+    object(task.result)?.workflow_plan_source_roles_version !== sourceRolesVersion ||
+    object(task.payload)?.workflow_plan_source_roles_version !== sourceRolesVersion ||
+    request?.workflow_plan_source_roles_version !== sourceRolesVersion ||
+    !sourceRolesAnchorsMatch(task) ||
     !request ||
     typeof receipt.source_task_id !== 'string'
   )
@@ -41,6 +49,15 @@ export function PlanRestartReceipt({ task }: { task: Task }) {
         章检查点，原章纲、旧失败与累计费用保留；尚不表示正文或文学质量通过。
       </p>
       <p>重核原因：{typeof request.reason === 'string' ? request.reason : '请查看原始回执。'}</p>
+      {sourceRolesVersion === SOURCE_ROLES_VERSION && (
+        <>
+          <p>本任务重新核对原章纲的角色与限制范围；许可不代表已经交付，原事件、阶段和接收限制仍须保持。</p>
+          <p>
+            新任务会按原策略自动开始，写前核对通过后继续正文与后续流程；
+            {task.payload.adoption === 'automatic' ? '本章检查通过后自动采纳。' : '逐章由作者确认采纳。'}
+          </p>
+        </>
+      )}
       <p className="small">
         原任务已付：{String(budget?.source_task_settled ?? '待核对')}；新任务沿用剩余额度：
         {String(budget?.remaining_run_limit ?? '服务商共享上限')}，不更换账户或重置费用。
@@ -96,6 +113,9 @@ export function PlanRestartPanel({
   const targetMatches = task.branch_id === activeBranchId
   const sourceChanged = !!preview && previewSource.current !== sourceSignature(task)
   const capable = canPreviewRestart(task)
+  const sourceRolesMode =
+    object(task.result)?.workflow_plan_open_details_version === OPEN_DETAILS_VERSION ||
+    preview?.workflow_plan_source_roles_version === SOURCE_ROLES_VERSION
   const hasRestart =
     task.kind === 'workflow' &&
     task.payload.mode === 'automatic' &&
@@ -360,11 +380,19 @@ export function PlanRestartPanel({
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary>补齐AI粗纲未明确的工作细节并重新核对</summary>
+      <summary>
+        {sourceRolesMode ? '重做写前核对，保留原规划与费用' : '补齐AI粗纲未明确的工作细节并重新核对'}
+      </summary>
       <section aria-label="AI粗纲写前重核">
-        <p>
-          只为本章原AI工作规划尚未明确的执行细节新建任务；保留全部原事项、固定条件与旧失败。选择是工作计划，不是已发生事实，文学质量与整书完成仍另行验证。
-        </p>
+        {sourceRolesMode ? (
+          <p>
+            为尚未开始正文的本章初次解释新建任务，核对原章纲中的角色与限制范围；完整原规划、明确事件、阶段、固定条件、旧失败及费用保留。通过后按原策略继续正文与后续流程。许可不等于资料已经交付，也不能清空原有接收限制。
+          </p>
+        ) : (
+          <p>
+            只为本章原AI工作规划尚未明确的执行细节新建任务；保留全部原事项、固定条件与旧失败。选择是工作计划，不是已发生事实，文学质量与整书完成仍另行验证。
+          </p>
+        )}
         {!targetMatches && (
           <p role="status">
             所选批次属于其他工作版本，请先在顶栏选择对应版本再使用写前重核。原原因与未核实提交仍保留。
@@ -372,7 +400,9 @@ export function PlanRestartPanel({
         )}
         {!capable && !uncertain && !completed && (
           <p className="small">
-            仅旧政策、全自动且尚未开始正文的已知写前解释失败可使用；服务端会核对三份完整已结调用与空稿来源。
+            {sourceRolesMode
+              ? '仅全自动尚未开始正文的初次解释失败可使用。服务端会核对三份完整已结调用；已有选择或保持核对不能借此清空轮次。'
+              : '仅旧政策、全自动且尚未开始正文的已知写前解释失败可使用；服务端会核对三份完整已结调用与空稿来源。'}
           </p>
         )}
         <button
@@ -410,8 +440,16 @@ export function PlanRestartPanel({
               {amount(preview.budget.remaining_run_limit, currency)}，共享预算和历史费用不重置。
             </p>
             <p className="small">
-              重核会产生后续模型调用；仅追加开放细节选择和严格逐项保持核对，最多两轮选择。不改写原章纲或当前稿件，不把缺失参与者猜成已确定。
+              {preview.workflow_plan_source_roles_version === SOURCE_ROLES_VERSION
+                ? '创建后会自动开始并产生后续模型调用，先重新解释原章纲，再按原政策处理开放细节与严格保持核对，最多两轮选择；通过后继续正文与后续流程，原章纲和已有正文保留。'
+                : '重核会产生后续模型调用；仅追加开放细节选择和严格逐项保持核对，最多两轮选择。不改写原章纲或当前稿件，不把缺失参与者猜成已确定。'}
             </p>
+            {preview.workflow_plan_source_roles_version === SOURCE_ROLES_VERSION && (
+              <p className="small">
+                沿用原采纳策略：
+                {task.payload.adoption === 'automatic' ? '本章检查通过后自动采纳。' : '逐章由作者确认采纳。'}
+              </p>
+            )}
             <details>
               <summary>三次已结失败调用与来源</summary>
               <ul>
@@ -427,6 +465,9 @@ export function PlanRestartPanel({
                     request_basis: preview.request_basis,
                     known_invalid_steps: preview.known_invalid_steps,
                     budget: preview.budget,
+                    ...(preview.workflow_plan_source_roles_version
+                      ? { workflow_plan_source_roles_version: preview.workflow_plan_source_roles_version }
+                      : {}),
                   },
                   null,
                   2,
@@ -451,7 +492,7 @@ export function PlanRestartPanel({
             </label>
             <div className="actions">
               <button className="primary" type="button" disabled={!canSubmit} onClick={() => void submit()}>
-                创建新任务重新核对
+                {sourceRolesMode ? '创建并开始新任务' : '创建新任务重新核对'}
               </button>
               {uncertain && (
                 <button type="button" disabled={busy || disabled} onClick={() => void lookup()}>

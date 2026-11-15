@@ -2503,6 +2503,8 @@ export interface components {
       base_story_revision: number
       /** Base Progress Sha256 */
       base_progress_sha256: string
+      /** Workflow Plan Source Roles Version */
+      workflow_plan_source_roles_version?: 'workflow-plan-source-roles/1' | null
     }
     /** Plot */
     Plot: {

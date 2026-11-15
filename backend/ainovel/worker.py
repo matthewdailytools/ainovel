@@ -271,6 +271,9 @@ class Worker:
         contract=None,
     ):
         payload = self.task["payload"]
+        from .workflow_plan_source_roles import validate_task as validate_roles
+
+        validate_roles(self.task, self.domain)
         from .flow_entailment import enabled as flow_entailment_enabled
 
         flow_entailment_enabled(self)
@@ -626,6 +629,15 @@ class Worker:
                             ]
                         }
                         if "workflow_plan_open_details_version" in source_instruction
+                        else {}
+                    ),
+                    **(
+                        {
+                            "workflow_plan_source_roles_version": source_instruction[
+                                "workflow_plan_source_roles_version"
+                            ]
+                        }
+                        if "workflow_plan_source_roles_version" in source_instruction
                         else {}
                     ),
                     **(
@@ -1060,6 +1072,7 @@ class Worker:
         contract=None,
         *,
         diagnostic_label=None,
+        repair_feedback=None,
     ):
         current = instruction
         units = instruction.get("可引用原文", instruction.get("可替换原文", []))
@@ -1087,6 +1100,8 @@ class Worker:
                     "条件不能拼接、概括或补造；确实未指定的双方／物品槽按open_fields规则保留待选择，"
                     "不能猜人、删除传递事件、换对象或把原阶段／否定／只／仅／未知改掉来通过校验。"
                 )
+            if repair_feedback is not None:
+                current.update(repair_feedback())
             if instruction.get("固定条件检查格式版本") == "fixed-check-id/1":
                 from .review_condition_ids import REPAIR_GUIDANCE
 

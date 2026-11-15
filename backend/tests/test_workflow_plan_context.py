@@ -151,14 +151,15 @@ def book_context(settings, domain, story, client):
 
 
 def worker_for(settings, domain, book, model=None, *, legacy=False):
-    worker, plot, chapter, task = claimed(settings, domain, book, model=model or OpenModel())
+    worker, plot, chapter, task = claimed(
+        settings, domain, book, model=model or OpenModel(), legacy=legacy, chapters=2
+    )
     plot.update(number=2, plot=SOURCE)
     worker.task["result"]["plan"]["chapters"] = [
         {"number": 1, "title": "前章", "plot": "检查旧灯", "fixed": []},
         plot,
     ]
     worker.task["result"]["next_chapter"] = 2
-    worker.task["payload"]["chapters"] = 2
     if legacy:
         worker.task["result"].pop(OPEN_KEY)
     worker.checkpoint(worker.task["result"])

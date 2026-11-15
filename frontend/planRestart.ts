@@ -3,11 +3,17 @@ import type { Task } from './api'
 
 export const RESTART_VERSION = 'workflow-plan-restart/1'
 export const OPEN_DETAILS_VERSION = 'workflow-plan-open-details/1'
+export const SOURCE_ROLES_VERSION = 'workflow-plan-source-roles/1'
+export const SOURCE_ROLES_CREATION_VERSION = 'workflow-plan-source-roles-creation/1'
 export type RestartInput = components['schemas']['PlanRestartInput']
-export type RestartBasis = Pick<RestartInput, 'chapter' | 'base_story_revision' | 'base_progress_sha256'>
+export type RestartBasis = Pick<
+  RestartInput,
+  'chapter' | 'base_story_revision' | 'base_progress_sha256' | 'workflow_plan_source_roles_version'
+>
 export type RestartPreview = {
   version: typeof RESTART_VERSION
   workflow_plan_open_details_version: typeof OPEN_DETAILS_VERSION
+  workflow_plan_source_roles_version?: typeof SOURCE_ROLES_VERSION
   task_id: string
   branch_id: string
   chapter_id: string
@@ -76,15 +82,103 @@ export function preparation(task: Task) {
   return object(object(task.result.plot_preparations)?.[String(task.result.next_chapter)])
 }
 
+export type SourceRolesCreation = {
+  version: typeof SOURCE_ROLES_CREATION_VERSION
+  task_id: string
+  novel_id: string
+  branch_id: string
+  guidance_version: typeof SOURCE_ROLES_VERSION
+  source_payload_sha256: string
+}
+
+export function readSourceRolesCreation(task: Task): SourceRolesCreation | null | undefined {
+  const payload = object(task.payload)?.workflow_plan_source_roles_creation,
+    result = object(task.result)?.workflow_plan_source_roles_creation
+  if (payload === undefined && result === undefined) return null
+  const row = object(payload)
+  if (
+    !row ||
+    canonical(payload) !== canonical(result) ||
+    Object.keys(row).sort().join(',') !==
+      'branch_id,guidance_version,novel_id,source_payload_sha256,task_id,version' ||
+    row.version !== SOURCE_ROLES_CREATION_VERSION ||
+    row.guidance_version !== SOURCE_ROLES_VERSION ||
+    !string(row.task_id) ||
+    row.novel_id !== task.novel_id ||
+    row.branch_id !== task.branch_id ||
+    !hash(row.source_payload_sha256) ||
+    object(task.payload)?.workflow_plan_source_roles_version !== SOURCE_ROLES_VERSION ||
+    object(task.result)?.workflow_plan_source_roles_version !== SOURCE_ROLES_VERSION
+  )
+    return undefined
+  return row as SourceRolesCreation
+}
+
+export function sourceRolesAnchorsMatch(task: Task) {
+  const rolesVersion = object(task.result)?.workflow_plan_source_roles_version,
+    payloadRolesVersion = object(task.payload)?.workflow_plan_source_roles_version,
+    receiptValue = object(task.result)?.plan_preparation_restart,
+    receipt = object(receiptValue),
+    receiptRolesVersion = receipt?.workflow_plan_source_roles_version,
+    receiptRequestRolesVersion = object(receipt?.request)?.workflow_plan_source_roles_version,
+    creation = readSourceRolesCreation(task)
+  if (creation === undefined) return false
+  if (rolesVersion === undefined)
+    return (
+      creation === null &&
+      payloadRolesVersion === undefined &&
+      receiptRolesVersion === undefined &&
+      receiptRequestRolesVersion === undefined
+    )
+  if (rolesVersion !== SOURCE_ROLES_VERSION || payloadRolesVersion !== rolesVersion) return false
+  if (creation === null)
+    return (
+      receipt?.version === RESTART_VERSION &&
+      receiptRolesVersion === rolesVersion &&
+      receiptRequestRolesVersion === rolesVersion
+    )
+  const parent = task.result.continued_from
+  if (creation.task_id === task.id) return parent === undefined && receiptValue === undefined
+  // This is a snapshot boundary check. The formal preview validates the origin's
+  // continued_from lineage in storage before it returns an actionable basis.
+  if (!string(parent) || parent === task.id) return false
+  if (receiptValue === undefined) return true
+  return (
+    receipt?.version === RESTART_VERSION &&
+    receiptRolesVersion === rolesVersion &&
+    receiptRequestRolesVersion === rolesVersion &&
+    string(receipt.source_task_id) &&
+    receipt.source_task_id !== task.id
+  )
+}
+
 export function canPreviewRestart(task: Task) {
   const row = preparation(task)
+  const openVersion = object(task.result)?.workflow_plan_open_details_version,
+    rolesVersion = object(task.result)?.workflow_plan_source_roles_version,
+    payloadRolesVersion = object(task.payload)?.workflow_plan_source_roles_version,
+    phases = object(row?.phases),
+    initial = object(phases?.['interpret:0']),
+    roleAnchor = sourceRolesAnchorsMatch(task)
+  const legacy =
+    openVersion === undefined && rolesVersion === undefined && payloadRolesVersion === undefined && roleAnchor
+  const initialOpen =
+    openVersion === OPEN_DETAILS_VERSION &&
+    (rolesVersion === undefined || rolesVersion === SOURCE_ROLES_VERSION) &&
+    payloadRolesVersion === rolesVersion &&
+    row?.workflow_plan_source_roles_version === rolesVersion &&
+    roleAnchor &&
+    !!phases &&
+    Object.keys(phases).length === 1 &&
+    !!initial &&
+    !('response' in initial)
   return (
     task.kind === 'workflow' &&
     task.payload.mode === 'automatic' &&
     task.payload.plot_contract_check === true &&
     task.result.plot_contract_version === 'author-plot-audit/2' &&
     task.result.workflow_plan_preparation_version === 'workflow-plan-preparation/1' &&
-    object(task.result)?.workflow_plan_open_details_version === undefined &&
+    (legacy || initialOpen) &&
     ['paused', 'blocked_runtime'].includes(task.status) &&
     !task.result.waiting_artifact &&
     !task.result.waiting_structure &&
@@ -101,8 +195,13 @@ export function readRestartPreview(value: unknown, task: Task): RestartPreview |
     budget = object(row?.budget)
   const proof = object(row?.known_invalid_steps),
     prior = preparation(task)
+  const rolesVersion = basis?.workflow_plan_source_roles_version,
+    sourceRolesVersion = row?.workflow_plan_source_roles_version
+  const sourceRoles = rolesVersion === SOURCE_ROLES_VERSION && sourceRolesVersion === rolesVersion
+  const legacy = rolesVersion === undefined && sourceRolesVersion === undefined
   if (
     !row ||
+    !canPreviewRestart(task) ||
     row.version !== RESTART_VERSION ||
     row.workflow_plan_open_details_version !== OPEN_DETAILS_VERSION ||
     row.task_id !== task.id ||
@@ -114,7 +213,13 @@ export function readRestartPreview(value: unknown, task: Task): RestartPreview |
     basis.chapter !== task.result.next_chapter ||
     !integer(basis.base_story_revision) ||
     !hash(basis.base_progress_sha256) ||
-    Object.keys(basis).sort().join(',') !== 'base_progress_sha256,base_story_revision,chapter' ||
+    (!legacy && !sourceRoles) ||
+    (sourceRoles && task.result.workflow_plan_open_details_version !== OPEN_DETAILS_VERSION) ||
+    (legacy && object(task.result)?.workflow_plan_open_details_version !== undefined) ||
+    Object.keys(basis).sort().join(',') !==
+      (sourceRoles
+        ? 'base_progress_sha256,base_story_revision,chapter,workflow_plan_source_roles_version'
+        : 'base_progress_sha256,base_story_revision,chapter') ||
     !string(row.original_plot) ||
     !hash(row.original_plot_sha256) ||
     !hash(row.old_preparation_sha256) ||
@@ -152,12 +257,16 @@ export function emptyChapterMatches(value: unknown, preview: RestartPreview) {
   )
 }
 
-function inheritedPayload(value: unknown) {
+function inheritedPayload(value: unknown, sourceRoles: boolean) {
   const row = object(value)
   return (
     row &&
     Object.fromEntries(
-      Object.entries(row).filter(([key]) => !['client_request_id', 'budget_limit'].includes(key)),
+      Object.entries(row).filter(
+        ([key]) =>
+          !['client_request_id', 'budget_limit'].includes(key) &&
+          !(sourceRoles && key === 'workflow_plan_source_roles_version'),
+      ),
     )
   )
 }
@@ -168,6 +277,7 @@ export function readRestartChild(value: unknown, pending: PendingRestart): Task 
     progress = object(row?.result)
   const receipt = object(progress?.plan_preparation_restart),
     source = pending.source
+  const rolesVersion = object(pending.request)?.workflow_plan_source_roles_version
   if (
     !row ||
     !string(row.id) ||
@@ -184,14 +294,27 @@ export function readRestartChild(value: unknown, pending: PendingRestart): Task 
     !progress ||
     payload.mode !== 'automatic' ||
     payload.account !== source.payload.account ||
-    canonical(inheritedPayload(payload)) !== canonical(inheritedPayload(source.payload)) ||
+    canonical(inheritedPayload(payload, rolesVersion === SOURCE_ROLES_VERSION)) !==
+      canonical(inheritedPayload(source.payload, rolesVersion === SOURCE_ROLES_VERSION)) ||
     payload.client_request_id !== pending.request.client_request_id ||
     payload.budget_limit !== pending.preview.budget.remaining_run_limit ||
     progress.continued_from !== source.id ||
     progress.workflow_plan_open_details_version !== OPEN_DETAILS_VERSION ||
+    (rolesVersion !== undefined && rolesVersion !== SOURCE_ROLES_VERSION) ||
+    rolesVersion !== pending.preview.workflow_plan_source_roles_version ||
+    progress.workflow_plan_source_roles_version !== rolesVersion ||
+    payload.workflow_plan_source_roles_version !== rolesVersion ||
+    !sourceRolesAnchorsMatch(row as Task) ||
+    Object.entries(source.result).some(
+      ([key, field]) =>
+        key.endsWith('_version') &&
+        key !== 'workflow_plan_source_roles_version' &&
+        canonical(progress[key]) !== canonical(field),
+    ) ||
     canonical(progress.plan) !== canonical(source.result.plan) ||
     !receipt ||
     receipt.version !== RESTART_VERSION ||
+    receipt.workflow_plan_source_roles_version !== rolesVersion ||
     receipt.source_task_id !== source.id ||
     canonical(receipt.request) !== canonical(pending.request) ||
     receipt.previous_preparation_sha256 !== pending.preview.old_preparation_sha256 ||
@@ -221,6 +344,7 @@ export function readPendingRestart(value: unknown, owner: string): PendingRestar
     request = object(row?.request)
   const payload = object(source?.payload),
     result = object(source?.result)
+  const rolesVersion = request?.workflow_plan_source_roles_version
   if (
     !source ||
     !payload ||
@@ -239,7 +363,12 @@ export function readPendingRestart(value: unknown, owner: string): PendingRestar
     request.reason.length > 2000 ||
     !integer(request.chapter) ||
     !integer(request.base_story_revision) ||
-    !hash(request.base_progress_sha256)
+    !hash(request.base_progress_sha256) ||
+    (rolesVersion !== undefined && rolesVersion !== SOURCE_ROLES_VERSION) ||
+    Object.keys(request).sort().join(',') !==
+      (rolesVersion === SOURCE_ROLES_VERSION
+        ? 'base_progress_sha256,base_story_revision,chapter,client_request_id,reason,workflow_plan_source_roles_version'
+        : 'base_progress_sha256,base_story_revision,chapter,client_request_id,reason')
   )
     return undefined
   const task = source as Task,
@@ -251,6 +380,9 @@ export function readPendingRestart(value: unknown, owner: string): PendingRestar
         chapter: request.chapter,
         base_story_revision: request.base_story_revision,
         base_progress_sha256: request.base_progress_sha256,
+        ...(rolesVersion === SOURCE_ROLES_VERSION
+          ? { workflow_plan_source_roles_version: rolesVersion }
+          : {}),
       })
   )
     return undefined

@@ -455,9 +455,38 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
         ):
             raise DomainError("plan_open_details_version", "开放槽仅用于已冻结政策的全自动写前解释。", 409)
         schema = OpenPlanInterpretation
+    from .workflow_plan_source_roles import (
+        KEY as ROLE_KEY,
+        VERSION as ROLE_VERSION,
+        GUIDANCE as ROLE_GUIDANCE,
+        RepairState,
+        validate_task as role_task,
+    )
+
+    roles = role_task(worker.task, getattr(worker, "domain", None)) if preparation is not None else False
+    if preparation is not None and (
+        (ROLE_KEY in preparation) != roles or (roles and preparation[ROLE_KEY] != ROLE_VERSION)
+    ):
+        raise DomainError("plan_source_roles_version", "写前来源角色解释输入与冻结政策不一致。", 409)
+    if roles and not open_details:
+        raise DomainError("plan_source_roles_version", "来源角色解释仅适用新版开放细节写前准备。", 409)
+    repair_state = RepairState(author_text, open_plan_issues) if roles else None
     author_contract = schema.model_json_schema()
     item_type = "OpenPlanItem" if open_details else "ScopedPlotItem" if scoped else "PlotItem"
     author_contract["$defs"][item_type]["properties"]["author_evidence"]["enum"] = list(author_sources)
+
+    if roles:
+        fields = author_contract["$defs"][item_type]["properties"]
+        fields["recipient_scope"]["description"] = (
+            "仅指本项实际／尝试／计划传递的接收范围；许可／禁止动作或物品范围的只，不自动是only接收范围。"
+        )
+        fields["transfer_scope"]["description"] = (
+            "依原传递本身区分completed、attempted、planned、none；许可另抄／携带不等于许可者交付副本，回执未到不撤销已寄出。"
+        )
+        for key in ("supplier", "transfer_object"):
+            fields[key]["description"] = (
+                "只填本项原话支持的传递角色／内容；纯许可无传递时留空，不能为满足only守卫臆造。"
+            )
 
     def validate_author(value):
         for item in value["items"]:
@@ -467,7 +496,9 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
             if len(value["items"]) != preparation["item_count"]:
                 issues.append("写前复解释必须按原P编号顺序逐项保留全部事项，不得删除、合并或遗漏歧义项。")
         issues.extend(
-            open_plan_issues(value, author_text)
+            repair_state.validate(value)
+            if roles
+            else open_plan_issues(value, author_text)
             if open_details
             else author_contract_issues(value, author_text, scoped=scoped)
         )
@@ -482,6 +513,7 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
             "可引用原文": author_units,
             **source_metadata(source_kind, version),
             **({OPEN_KEY: OPEN_VERSION, "开放执行槽解释": OPEN_GUIDANCE} if open_details else {}),
+            **({ROLE_KEY: ROLE_VERSION, "来源角色与限制范围解释": ROLE_GUIDANCE} if roles else {}),
             **(
                 {
                     "写前准备契约版本": preparation["version"],
@@ -498,7 +530,10 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
         validate_author,
         contract=author_contract,
         **({"diagnostic_label": "AI工作章纲写前解释"} if open_details else {}),
+        **({"repair_feedback": repair_state.feedback} if roles else {}),
     )
+    if roles:
+        return {**normalize_open_plan(contract), "source_role_repair": repair_state.receipt()}
     return normalize_open_plan(contract) if open_details else contract
 
 

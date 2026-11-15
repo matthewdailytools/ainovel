@@ -60,14 +60,20 @@ class PreparationModel(PlotModel):
         return {"text": dumps(output), "usage": {"input": 1, "output": 1}, "call_id": f"prepare-{self.calls}"}
 
 
-def queued(domain, story, *, mode="automatic", enabled=True):
+def queued(domain, story, *, mode="automatic", enabled=True, legacy=False, chapters=None):
     payload = workflow_payload(story, mode=mode)
     payload.update(plot_contract_check=enabled, client_request_id="prep-original")
+    if chapters is not None:
+        payload["chapters"] = chapters
+    if legacy:
+        from helpers.historical_plan_task import queue_historical_plan
+
+        return queue_historical_plan(domain, payload, story["branch_id"])
     return domain.queue("workflow", payload, story["branch_id"])
 
 
-def claimed(settings, domain, story, *, model=None):
-    task = queued(domain, story)
+def claimed(settings, domain, story, *, model=None, legacy=False, chapters=None):
+    task = queued(domain, story, legacy=legacy, chapters=chapters)
     worker = Worker(settings, model or PreparationModel())
     worker.task = worker.claim()
     worker.attempt = worker.task["attempt"]
@@ -353,7 +359,7 @@ def test_dispatch_checkpoint_without_complete_cache_stops_without_new_calls(
 def test_legacy_nonce_replay_does_not_add_policy(domain, story):
     from ainovel.workflow_plan_open_details import KEY as OPEN_KEY
 
-    task = queued(domain, story)
+    task = queued(domain, story, legacy=True)
     old = deepcopy(task["result"])
     old.pop("workflow_plan_preparation_version")
     old.pop(OPEN_KEY)
@@ -367,7 +373,7 @@ def test_legacy_nonce_replay_does_not_add_policy(domain, story):
 def test_account_continuation_inherits_frozen_policy_including_absence(settings, domain, story, legacy):
     from ainovel.workflow_plan_open_details import KEY as OPEN_KEY
 
-    task = queued(domain, story)
+    task = queued(domain, story, legacy=legacy)
     result = deepcopy(task["result"])
     if legacy:
         result.pop("workflow_plan_preparation_version")
@@ -389,14 +395,21 @@ def test_account_continuation_inherits_frozen_policy_including_absence(settings,
 @pytest.mark.parametrize("kind", ["configuration", "budget", "unpriced", "context_limit"])
 @pytest.mark.parametrize("switch_account", [False, True])
 def test_real_adapter_proven_not_sent_failures_can_explicitly_resume_without_resetting_rounds(
-    settings, domain, story, kind, switch_account
+    settings, domain, story, kind, switch_account, monkeypatch
 ):
     worker, plot, chapter, task = claimed(settings, domain, story)
     provider = settings.providers["openai_1"]
+    original_reserve = worker.budget.reserve
     if kind == "configuration":
         settings.providers["openai_1"] = replace(provider, key="")
     elif kind == "budget":
-        worker.task["payload"]["budget_limit"] = 0
+        # Inject an exhausted effective run envelope at the real reservation
+        # boundary; keep this fresh task's frozen payload and shared cap intact.
+        def exhausted_run(provider, task_id, input_upper, max_output, run_limit=None):
+            assert run_limit == worker.task["payload"].get("budget_limit")
+            return original_reserve(provider, task_id, input_upper, max_output, run_limit=0)
+
+        monkeypatch.setattr(worker.budget, "reserve", exhausted_run)
     elif kind == "unpriced":
         settings.providers["openai_1"] = replace(provider, input_rate=None)
     else:
@@ -416,6 +429,7 @@ def test_real_adapter_proven_not_sent_failures_can_explicitly_resume_without_res
     assert result["plot_preparations"]["1"]["phases"]["interpret:0"]["status"] == "not_sent"
     assert worker.budget.report()[0]["settled"] == 0
     settings.providers["openai_1"] = provider
+    monkeypatch.setattr(worker.budget, "reserve", original_reserve)
     # These are the existing explicit user recovery paths, not a worker retry.
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET status='blocked_runtime' WHERE id=?", (task["id"],))

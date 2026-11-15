@@ -5,11 +5,13 @@ import {
   canonical,
   emptyChapterMatches,
   OPEN_DETAILS_VERSION,
+  object,
   readPendingRestart,
   readRestartChild,
   readRestartLookup,
   readRestartPreview,
   RESTART_VERSION,
+  SOURCE_ROLES_VERSION,
   sourceSignature,
   type PendingRestart,
   type RestartPreview,
@@ -245,5 +247,170 @@ describe('写前重核创建回执与未知结果', () => {
     expect(sourceSignature(copy)).toBe(sourceSignature(source))
     copy.result.expected_story_revision = 39
     expect(sourceSignature(copy)).not.toBe(sourceSignature(source))
+  })
+})
+
+function openFixture(tagged = false) {
+  const result = fixture(),
+    { source, preview, pending, child } = result
+  source.status = 'blocked_runtime'
+  source.result.workflow_plan_open_details_version = OPEN_DETAILS_VERSION
+  source.result.flow_source_entailment_version = 'source-flow-entailment/1'
+  source.result.conditional_book_policy_version = 'conditional-book-check/1'
+  source.result.plan = {
+    chapters: Array.from({ length: 36 }, (_, index) => ({
+      number: index + 1,
+      plot: index === 3 ? preview.original_plot : `原创第${index + 1}章安排`,
+    })),
+  }
+  const row = object(object(source.result.plot_preparations)?.['4'])
+  if (!row) throw new Error('缺少初次解释夹具')
+  row.phases = { 'interpret:0': { started: true, action: '严格核对AI工作章纲' } }
+  if (tagged) {
+    source.payload.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+    source.result.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+    row.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+    source.result.plan_preparation_restart = {
+      version: RESTART_VERSION,
+      workflow_plan_source_roles_version: SOURCE_ROLES_VERSION,
+      request: { workflow_plan_source_roles_version: SOURCE_ROLES_VERSION },
+    }
+  }
+  preview.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+  preview.request_basis.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+  pending.request = { ...pending.request, workflow_plan_source_roles_version: SOURCE_ROLES_VERSION }
+  child.payload = {
+    ...source.payload,
+    ...{ client_request_id: pending.request.client_request_id },
+    budget_limit: preview.budget.remaining_run_limit,
+    workflow_plan_source_roles_version: SOURCE_ROLES_VERSION,
+  }
+  child.result = {
+    ...source.result,
+    continued_from: source.id,
+    plot_preparations: {},
+    workflow_plan_source_roles_version: SOURCE_ROLES_VERSION,
+    plan_preparation_restart: {
+      ...(child.result.plan_preparation_restart as Record<string, unknown>),
+      workflow_plan_source_roles_version: SOURCE_ROLES_VERSION,
+      request: pending.request,
+      previous_preparation: structuredClone(row),
+    },
+  }
+  return result
+}
+
+describe('当前开放章纲初次解释的显式新版重核', () => {
+  it.each([false, true])('仅初次解释时允许读取server依据，来源已带同版marker=%s', (tagged) => {
+    const { source, preview, pending, child } = openFixture(tagged)
+    expect(canPreviewRestart(source)).toBe(true)
+    expect(readRestartPreview(preview, source)).toEqual(preview)
+    expect(readRestartChild(child, pending)).toEqual(child)
+    expect((child.result.plan as { chapters: unknown[] }).chapters).toHaveLength(36)
+    expect(child.payload.budget_limit).toBe(1.5)
+  })
+  it.each([
+    'missing-phase',
+    'response',
+    'choice',
+    'preservation',
+    'round',
+    'status',
+    'unknown-task',
+    'mismatched-payload',
+    'missing-row-marker',
+    'unknown-row',
+    'missing-receipt-marker',
+    'unknown-receipt-request',
+    'whole-marker-downgrade',
+  ])('不放开已有后续步骤或不一致冻结：%s', (change) => {
+    const { source } = openFixture(true)
+    const row = object(object(source.result.plot_preparations)?.['4'])
+    if (!row) throw new Error('缺少初次解释夹具')
+    const phases = row.phases as Record<string, Record<string, unknown>>
+    if (change === 'missing-phase') delete row.phases
+    if (change === 'response') phases['interpret:0'].response = { items: [] }
+    if (change === 'choice') phases['choose:1'] = { started: true }
+    if (change === 'preservation') phases['preserve:1'] = { started: true }
+    if (change === 'round') row.round = 1
+    if (change === 'status') row.status = 'choosing'
+    if (change === 'unknown-task') source.result.workflow_plan_source_roles_version = 'future'
+    if (change === 'mismatched-payload') delete source.payload.workflow_plan_source_roles_version
+    if (change === 'missing-row-marker') delete row.workflow_plan_source_roles_version
+    if (change === 'unknown-row') row.workflow_plan_source_roles_version = 'future'
+    const receipt = source.result.plan_preparation_restart as Record<string, unknown>
+    if (change === 'missing-receipt-marker') delete receipt.workflow_plan_source_roles_version
+    if (change === 'unknown-receipt-request')
+      (receipt.request as Record<string, unknown>).workflow_plan_source_roles_version = 'future'
+    if (change === 'whole-marker-downgrade') {
+      delete source.payload.workflow_plan_source_roles_version
+      delete source.result.workflow_plan_source_roles_version
+      delete row.workflow_plan_source_roles_version
+    }
+    expect(canPreviewRestart(source)).toBe(false)
+  })
+  it.each(['top-missing', 'basis-missing', 'future', 'null', 'legacy-source', 'extra-basis'])(
+    '新preview必须上下marker与来源类型一致：%s',
+    (change) => {
+      const { source, preview } = openFixture(),
+        value = structuredClone(preview)
+      if (change === 'top-missing') delete value.workflow_plan_source_roles_version
+      if (change === 'basis-missing') delete value.request_basis.workflow_plan_source_roles_version
+      if (change === 'future') Object.assign(value, { workflow_plan_source_roles_version: 'future' })
+      if (change === 'null') value.request_basis.workflow_plan_source_roles_version = null
+      if (change === 'legacy-source') delete source.result.workflow_plan_open_details_version
+      if (change === 'extra-basis') Object.assign(value.request_basis, { account: 'other' })
+      expect(readRestartPreview(value, source)).toBeUndefined()
+    },
+  )
+  it.each(['payload', 'result', 'receipt', 'request', 'preview', 'flow', 'condition'])(
+    '新child不能丢失所选marker或原政策：%s',
+    (change) => {
+      const { pending, child } = openFixture(),
+        value = structuredClone(child),
+        receipt = value.result.plan_preparation_restart as Record<string, unknown>
+      if (change === 'payload') delete value.payload.workflow_plan_source_roles_version
+      if (change === 'result') delete value.result.workflow_plan_source_roles_version
+      if (change === 'receipt') delete receipt.workflow_plan_source_roles_version
+      if (change === 'request')
+        (receipt.request as Record<string, unknown>).workflow_plan_source_roles_version = 'future'
+      if (change === 'preview') delete pending.preview.workflow_plan_source_roles_version
+      if (change === 'flow') delete value.result.flow_source_entailment_version
+      if (change === 'condition') value.result.conditional_book_policy_version = 'future'
+      expect(readRestartChild(value, pending)).toBeUndefined()
+    },
+  )
+  it('legacy回执不能偷偷带新marker，原pending仍按原nonce读取', () => {
+    const { pending, child } = fixture(),
+      changed = structuredClone(child)
+    changed.payload.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+    changed.result.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+    expect(readRestartChild(changed, pending)).toBeUndefined()
+    const owner = canonical([pending.source.novel_id, pending.source.branch_id, pending.source.id])
+    expect(readPendingRestart(pending, owner)).toEqual(pending)
+    expect(readPendingRestart(pending, owner)?.request).not.toHaveProperty(
+      'workflow_plan_source_roles_version',
+    )
+  })
+  it('新版原提交刷新保留marker与nonce，404/null只表示尚未查到', () => {
+    const { pending, child } = openFixture(),
+      owner = canonical([pending.source.novel_id, pending.source.branch_id, pending.source.id]),
+      stored = JSON.parse(JSON.stringify(pending))
+    expect(readPendingRestart(stored, owner)).toEqual(pending)
+    const lookup = {
+      source_task_id: pending.source.id,
+      client_request_id: pending.request.client_request_id,
+      task: null,
+    }
+    expect(readRestartLookup(lookup, pending)).toBeNull()
+    expect(readRestartLookup({ ...lookup, task: child }, pending)).toEqual(child)
+    for (const patch of [
+      { workflow_plan_source_roles_version: null },
+      { workflow_plan_source_roles_version: 'future' },
+      { account: 'other' },
+    ])
+      expect(
+        readPendingRestart({ ...pending, request: { ...pending.request, ...patch } }, owner),
+      ).toBeUndefined()
   })
 })

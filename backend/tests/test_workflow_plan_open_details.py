@@ -86,8 +86,8 @@ class OpenModel(PreparationModel):
         return {"text": dumps(output), "usage": {"input": 1, "output": 1}, "call_id": f"open-{self.calls}"}
 
 
-def open_worker(settings, domain, story, model=None):
-    worker, plot, chapter, task = claimed(settings, domain, story, model=model or OpenModel())
+def open_worker(settings, domain, story, model=None, *, legacy=False):
+    worker, plot, chapter, task = claimed(settings, domain, story, model=model or OpenModel(), legacy=legacy)
     plot["plot"] = SOURCE
     worker.task["result"]["plan"]["chapters"][0] = deepcopy(plot)
     worker.checkpoint(worker.task["result"])
@@ -252,7 +252,7 @@ def test_partial_or_unknown_policy_is_not_treated_as_legacy(settings, domain, st
 
 
 def known_failed(settings, domain, story):
-    worker, plot, chapter, task = open_worker(settings, domain, story)
+    worker, plot, chapter, task = open_worker(settings, domain, story, legacy=True)
     worker.task["result"].pop(KEY)
     worker.task["payload"]["budget_limit"] = 1
     with domain.db.connect(True) as tx:

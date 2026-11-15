@@ -4288,6 +4288,10 @@
             "type": "string",
             "pattern": "^[0-9a-f]{64}$",
             "title": "Base Progress Sha256"
+          },
+          "workflow_plan_source_roles_version": {
+            "anyOf": [{ "type": "string", "const": "workflow-plan-source-roles/1" }, { "type": "null" }],
+            "title": "Workflow Plan Source Roles Version"
           }
         },
         "additionalProperties": false,

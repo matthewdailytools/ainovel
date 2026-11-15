@@ -235,14 +235,21 @@ def test_account_continuation_preserves_frozen_contract_without_upgrading(marker
         account="openai_1",
         plot_contract_check=True,
     ).model_dump()
-    current = domain.queue("workflow", payload, story["branch_id"])
+    if marker != VERSION:
+        from helpers.historical_plan_task import queue_historical_plan
+
+        current = queue_historical_plan(
+            domain, payload, story["branch_id"], preparation=False, open_details=False, plot_version=marker
+        )
+    else:
+        current = domain.queue("workflow", payload, story["branch_id"])
     progress = deepcopy(current["result"])
     if marker != VERSION:
         # Historical plot contracts predate both before-prose policies.
-        progress.pop("workflow_plan_preparation_version")
-        progress.pop("workflow_plan_open_details_version")
+        assert "workflow_plan_preparation_version" not in progress
+        assert "workflow_plan_open_details_version" not in progress
     if marker is None:
-        progress.pop("plot_contract_version")
+        assert "plot_contract_version" not in progress
     else:
         progress["plot_contract_version"] = marker
     with domain.db.connect(True) as tx:

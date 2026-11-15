@@ -637,11 +637,19 @@ class Domain:
         rows = self.db.all("SELECT task_id FROM task_requests WHERE key=?", (key,))
         if rows:
             task = self.task(rows[0]["task_id"])
+            if kind == "workflow" and task["kind"] == "workflow":
+                from .workflow_plan_source_roles import replay_payload
+
+                payload = replay_payload(self, payload, previous=task)
             if task["kind"] != kind or not same_task_payload(task["payload"], payload):
                 raise DomainError("idempotency", "该提交标识已用于不同输入，未创建新任务。", 409)
             return task
 
     def queue(self, kind, payload, branch_id=None):
+        if kind == "workflow":
+            from .workflow_plan_source_roles import replay_payload
+
+            payload = replay_payload(self, payload)
         if kind == "source_interpretation_correction":
             from .source_interpretation_correction import versioned_payload
 
@@ -649,6 +657,7 @@ class Domain:
         previous = self.find_request(kind, payload)
         if previous:
             return previous
+        requested_payload = payload
         branch_id = branch_id or payload["branch_id"]
         self.branch(branch_id, payload["novel_id"])
         if payload.get("chapter_id"):
@@ -744,6 +753,9 @@ class Domain:
                 from .workflow_plan_open_details import KEY as OPEN_KEY, VERSION as OPEN_VERSION
 
                 initial[OPEN_KEY] = OPEN_VERSION
+                from .workflow_plan_source_roles import freeze_creation
+
+                payload, initial = freeze_creation(task_id, payload["novel_id"], branch_id, payload, initial)
         if kind == "workflow" and payload.get("character_field_repair") is True:
             from .character_repair import V2_VERSION as CHARACTER_REPAIR_VERSION
 
@@ -789,7 +801,12 @@ class Domain:
                 prior = db.execute("SELECT task_id FROM task_requests WHERE key=?", (key,)).fetchone()
                 if prior:
                     previous = self.task(prior[0])
-                    if previous["kind"] != kind or not same_task_payload(previous["payload"], payload):
+                    comparable = (
+                        replay_payload(self, requested_payload, previous=previous)
+                        if kind == "workflow"
+                        else payload
+                    )
+                    if previous["kind"] != kind or not same_task_payload(previous["payload"], comparable):
                         raise DomainError("idempotency", "提交标识已用于不同输入。", 409)
                     return previous
             revision = db.execute("SELECT story_revision FROM branches WHERE id=?", (branch_id,)).fetchone()[
@@ -858,6 +875,10 @@ class Domain:
                 ),
             )
             self.db.event(db, task_id, "queued", {"kind": kind})
+            if kind == "workflow" and "workflow_plan_source_roles_creation" in initial:
+                from .workflow_plan_source_roles import creation_event
+
+                creation_event(self.db, db, task_id, payload, initial)
             if kind == "source_interpretation_correction" and source_correction.SHAPE_KEY in initial:
                 self.db.event(
                     db,
@@ -897,6 +918,10 @@ class Domain:
         from .workflow_plan_open_details import validate_task as validate_open_details
 
         validate_open_details(current)
+        from .workflow_plan_source_roles import validate_task as validate_roles, inherit_payload
+
+        validate_roles(current, self)
+        payload = inherit_payload(current, payload)
         frozen_output = current["payload"].get("structure_max_output_tokens", 8192)
         if "structure_max_output_tokens" in payload and (
             type(payload["structure_max_output_tokens"]) is not int

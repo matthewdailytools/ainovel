@@ -161,6 +161,8 @@ export type Task = {
     candidate_recheck_snapshot?: unknown
     workflow_plan_preparation_version?: string
     workflow_plan_open_details_version?: string
+    workflow_plan_source_roles_version?: string
+    workflow_plan_source_roles_creation?: unknown
     plan_preparation_restart?: unknown
     expected_story_revision?: number
     plot_preparations?: unknown
@@ -181,6 +183,8 @@ export type Task = {
     character_field_repair?: boolean
     plot_contract_check?: boolean
     source_identity_context?: boolean
+    workflow_plan_source_roles_version?: string
+    workflow_plan_source_roles_creation?: unknown
   }
 }
 export type Account = {

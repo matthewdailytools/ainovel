@@ -1,8 +1,12 @@
 import { expect, test, type BrowserContext, type Locator, type Page, type Route } from '@playwright/test'
 import { createHash } from 'node:crypto'
+import { assertActualDoubleText } from './helpers/actualTextScale'
 
 const ORIGIN = 'http://127.0.0.1:8877'
 const SUMMARY = '补齐AI粗纲未明确的工作细节并重新核对'
+const SOURCE_ROLES_SUMMARY = '重做写前核对，保留原规划与费用'
+const SOURCE_ROLES_SUBMIT = '创建并开始新任务'
+const SOURCE_ROLES_VERSION = 'workflow-plan-source-roles/1'
 const READ = '读取写前重核依据'
 const REREAD = '重新读取写前重核依据'
 const CONFIRM = '确认使用新依据，保留原因'
@@ -16,6 +20,8 @@ const PARENT = 'toy-parent-a'
 const SECOND_TASK = 'toy-parent-a2'
 const OTHER_TASK = 'toy-parent-b'
 const PLOT = '许棠在驿站整理账页，提到旧账缺口，把疑问记在纸条上，未移交账本。'
+const SOURCE_ROLES_PLOT =
+  '许棠把寄出的清单记入账页。监管员只允许她另抄副页携带，不许取走原页；原回执尚未送达。'
 const hash = (text: string) => createHash('sha256').update(text).digest('hex')
 type Row = Record<string, unknown>
 type Preparation = Row & { chapter_id: string; original_plot: string; original_plot_sha256: string }
@@ -36,10 +42,16 @@ type MockTask = {
     plot_preparations: Record<string, Preparation>
   }
 }
-type Basis = { chapter: number; base_story_revision: number; base_progress_sha256: string }
+type Basis = {
+  chapter: number
+  base_story_revision: number
+  base_progress_sha256: string
+  workflow_plan_source_roles_version?: typeof SOURCE_ROLES_VERSION
+}
 type Preview = {
   version: string
   workflow_plan_open_details_version: string
+  workflow_plan_source_roles_version?: typeof SOURCE_ROLES_VERSION
   task_id: string
   branch_id: string
   chapter_id: string
@@ -185,17 +197,14 @@ function preview(source: MockTask): Preview {
 function record(value: unknown): value is Row {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
-function restartBody(route: Route): RestartRequest {
+function restartBody(route: Route, sourceRoles = false): RestartRequest {
   const body: unknown = route.request().postDataJSON()
   expect(record(body)).toBeTruthy()
   if (!record(body)) throw new Error('Expected JSON object')
-  expect(Object.keys(body).sort()).toEqual([
-    'base_progress_sha256',
-    'base_story_revision',
-    'chapter',
-    'client_request_id',
-    'reason',
-  ])
+  const keys = ['base_progress_sha256', 'base_story_revision', 'chapter', 'client_request_id', 'reason']
+  if (sourceRoles) keys.push('workflow_plan_source_roles_version')
+  expect(Object.keys(body).sort()).toEqual(keys.sort())
+  if (sourceRoles) expect(body.workflow_plan_source_roles_version).toBe(SOURCE_ROLES_VERSION)
   expect(typeof body.client_request_id).toBe('string')
   expect(String(body.client_request_id).length).toBeGreaterThanOrEqual(8)
   expect(String(body.client_request_id).length).toBeLessThanOrEqual(128)
@@ -206,13 +215,41 @@ function restartBody(route: Route): RestartRequest {
   expect(route.request().headers()['x-ainovel-csrf']).toBe('toy-csrf')
   return body as RestartRequest
 }
-async function setup(context: BrowserContext, page: Page) {
+async function setup(context: BrowserContext, page: Page, sourceRoles = false) {
   const sources = [task(PARENT), task(SECOND_TASK), task(OTHER_TASK, SECOND_BRANCH)]
+  if (sourceRoles)
+    for (const source of sources) {
+      source.payload.chapters = 36
+      source.result.workflow_plan_open_details_version = 'workflow-plan-open-details/1'
+      source.result.flow_source_entailment_version = 'source-flow-entailment/1'
+      source.result.conditional_book_policy_version = 'conditional-book-check/1'
+      const row = source.result.plot_preparations['4']
+      row.original_plot = SOURCE_ROLES_PLOT
+      row.original_plot_sha256 = hash(SOURCE_ROLES_PLOT)
+      source.result.plan = {
+        title: '驿站旧账',
+        chapters: Array.from({ length: 36 }, (_, index) => ({
+          number: index + 1,
+          title: '原创安排' + (index + 1),
+          plot: index === 3 ? SOURCE_ROLES_PLOT : '原规划保留的后续安排' + (index + 1),
+          fixed: [],
+        })),
+      }
+    }
   const originals = Object.fromEntries(sources.map((s) => [s.id, structuredClone(s)]))
   const world: World = {
     tasks: structuredClone(sources),
     originals,
-    previews: Object.fromEntries(sources.map((s) => [s.id, preview(s)])),
+    previews: Object.fromEntries(
+      sources.map((s) => {
+        const value = preview(s)
+        if (sourceRoles) {
+          value.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+          value.request_basis.workflow_plan_source_roles_version = SOURCE_ROLES_VERSION
+        }
+        return [s.id, value]
+      }),
+    ),
     calls: [],
     posts: [],
     unmatched: [],
@@ -234,14 +271,17 @@ async function setup(context: BrowserContext, page: Page) {
           ...structuredClone(old.payload),
           budget_limit: basis.budget.remaining_run_limit,
           client_request_id: request.client_request_id,
+          ...(sourceRoles ? { workflow_plan_source_roles_version: SOURCE_ROLES_VERSION } : {}),
         },
         result: {
           ...structuredClone(old.result),
           plot_preparations: {},
           continued_from: parent,
           workflow_plan_open_details_version: 'workflow-plan-open-details/1',
+          ...(sourceRoles ? { workflow_plan_source_roles_version: SOURCE_ROLES_VERSION } : {}),
           plan_preparation_restart: {
             version: 'workflow-plan-restart/1',
+            ...(sourceRoles ? { workflow_plan_source_roles_version: SOURCE_ROLES_VERSION } : {}),
             source_task_id: parent,
             request: structuredClone(request),
             previous_preparation_sha256: basis.old_preparation_sha256,
@@ -416,7 +456,7 @@ async function setup(context: BrowserContext, page: Page) {
         return reply(custom?.json ?? world.previews[parent], custom?.status ?? 200)
       }
       if (method === 'POST' && action === 'reprepare-plan') {
-        const body = restartBody(route)
+        const body = restartBody(route, sourceRoles)
         world.posts.push({ parent, request: structuredClone(body) })
         const custom = await world.onPost?.(parent, body)
         if (custom?.abort) return route.abort('failed')
@@ -443,25 +483,25 @@ async function setup(context: BrowserContext, page: Page) {
   })
   return world
 }
-async function open(page: Page, select = true) {
+async function open(page: Page, select = true, summary = SUMMARY) {
   await page.goto('/')
   await expect(page.getByRole('combobox', { name: '作品', exact: true })).toHaveValue(NOVEL)
   await expect(page.getByRole('combobox', { name: '工作版本', exact: true })).toHaveValue(BRANCH)
   await page.getByRole('button', { name: '整书创作', exact: true }).click()
   if (select) await page.getByRole('combobox', { name: '本作品批次', exact: true }).selectOption(PARENT)
-  return openPanel(page)
+  return openPanel(page, summary)
 }
-async function openPanel(page: Page) {
-  const summary = page.getByText(SUMMARY, { exact: true })
+async function openPanel(page: Page, title = SUMMARY) {
+  const summary = page.getByText(title, { exact: true })
   await expect(summary).toBeVisible()
   const panel = summary.locator('..')
   if ((await panel.getAttribute('open')) === null) await summary.click()
   return panel
 }
-async function read(page: Page, panel: Locator) {
+async function read(page: Page, panel: Locator, plot = PLOT) {
   await panel.getByRole('button', { name: READ, exact: true }).click()
   await expect(panel.getByRole('textbox', { name: REASON, exact: true })).toBeVisible()
-  await expect(panel.getByText(PLOT, { exact: true })).toBeVisible()
+  await expect(panel.getByText(plot, { exact: true })).toBeVisible()
 }
 test.afterEach(async ({ page }, info) => {
   const world = worlds.get(page)
@@ -747,4 +787,243 @@ test('320窄屏真实文字翻倍、键盘和中文组合输入：可读依据�
       modelCalls: 0,
     }),
   })
+})
+
+test('当前OpenPlan初次失败：新版重核保留36章与FLOW条件政策，双击只发一次显式marker', async ({
+  context,
+  page,
+}, info) => {
+  const world = await setup(context, page, true),
+    original = structuredClone(world.originals[PARENT]),
+    pending = gate()
+  world.onPost = async () => {
+    await pending.promise
+    return undefined
+  }
+  const panel = await open(page, true, SOURCE_ROLES_SUMMARY)
+  await read(page, panel, SOURCE_ROLES_PLOT)
+  await expect(panel).toContainText('许可不等于资料已经交付')
+  await expect(panel).toContainText('通过后继续正文与后续流程')
+  await expect(panel).toContainText('沿用原采纳策略：本章检查通过后自动采纳。')
+  await panel.getByText('三次已结失败调用与来源', { exact: true }).click()
+  for (const identifier of world.previews[PARENT].known_invalid_steps.call_ids)
+    await expect(panel).toContainText(identifier)
+  await expect(panel.locator('pre.report')).toContainText(SOURCE_ROLES_VERSION)
+  await expect(panel).toContainText('0.12')
+  await expect(panel).toContainText('0.88')
+  const screenshot = info.outputPath('open-plan-source-roles-desktop.png')
+  await panel.screenshot({ path: screenshot })
+  await panel
+    .getByRole('textbox', { name: REASON, exact: true })
+    .fill('只重核许可与交付范围解释，保留原规划与费用。')
+  try {
+    const submit = panel.getByRole('button', { name: SOURCE_ROLES_SUBMIT, exact: true })
+    await submit.evaluate((element) => {
+      if (!(element instanceof HTMLButtonElement)) throw new Error('Expected button')
+      element.click()
+      element.click()
+    })
+    await expect.poll(() => world.posts.length).toBe(1)
+    await expect(submit).toBeDisabled()
+    expect(world.posts[0].request).toMatchObject(world.previews[PARENT].request_basis)
+    expect(world.posts[0].request.workflow_plan_source_roles_version).toBe(SOURCE_ROLES_VERSION)
+  } finally {
+    pending.release()
+  }
+  await expect(page.getByRole('region', { name: '写前重核新任务回执', exact: true })).toBeVisible()
+  const child = world.receipts.get(PARENT + '/' + world.posts[0].request.client_request_id)!
+  expect(child.payload.chapters).toBe(36)
+  expect(child.result.plan).toEqual(original.result.plan)
+  expect(child.result.flow_source_entailment_version).toBe('source-flow-entailment/1')
+  expect(child.result.conditional_book_policy_version).toBe('conditional-book-check/1')
+  expect(child.result.workflow_plan_source_roles_version).toBe(SOURCE_ROLES_VERSION)
+  expect(world.originals[PARENT]).toEqual(original)
+})
+
+test('OpenPlan新版409保留原因，必须明确确认新basis后才提交另一个nonce', async ({ context, page }) => {
+  const world = await setup(context, page, true)
+  world.onPost = () =>
+    world.posts.length === 1
+      ? { status: 409, json: { error: '来源已变更', code: 'story_changed' } }
+      : undefined
+  let panel = await open(page, true, SOURCE_ROLES_SUMMARY)
+  await read(page, panel, SOURCE_ROLES_PLOT)
+  const reason = '保留原许可和原文阶段，只重做初次解释。'
+  await panel.getByRole('textbox', { name: REASON, exact: true }).fill(reason)
+  await panel.getByRole('button', { name: SOURCE_ROLES_SUBMIT, exact: true }).click()
+  await expect(panel.getByRole('button', { name: SOURCE_ROLES_SUBMIT, exact: true })).toBeDisabled()
+  await expect(panel.getByRole('textbox', { name: REASON, exact: true })).toHaveValue(reason)
+  const first = structuredClone(world.posts[0].request)
+  world.previews[PARENT].request_basis.base_progress_sha256 = hash(PARENT + '-basis-2')
+  await panel.getByRole('button', { name: REREAD, exact: true }).click()
+  await expect(panel.getByRole('button', { name: CONFIRM, exact: true })).toBeVisible()
+  expect(world.posts).toHaveLength(1)
+  await expect(panel.getByRole('button', { name: SOURCE_ROLES_SUBMIT, exact: true })).toBeDisabled()
+  await panel.getByRole('button', { name: CONFIRM, exact: true }).click()
+  await panel.getByRole('button', { name: SOURCE_ROLES_SUBMIT, exact: true }).click()
+  await expect(page.getByRole('region', { name: '写前重核新任务回执', exact: true })).toBeVisible()
+  expect(world.posts).toHaveLength(2)
+  expect(world.posts[1].request.client_request_id).not.toBe(first.client_request_id)
+  expect(world.posts[1].request.reason).toBe(reason)
+  expect(world.posts[1].request.workflow_plan_source_roles_version).toBe(SOURCE_ROLES_VERSION)
+  expect(world.posts[1].request.base_progress_sha256).toBe(
+    world.previews[PARENT].request_basis.base_progress_sha256,
+  )
+})
+
+test('OpenPlan新marker提交未知后刷新，只查原nonce，null不改版或重发', async ({ context, page }) => {
+  const world = await setup(context, page, true)
+  world.onPost = (parent, request) => {
+    world.commit(parent, request)
+    return { abort: true }
+  }
+  world.onLookup = (parent, nonce, count) =>
+    count === 1
+      ? { status: 404, json: { error: '尚未查到原标识', code: 'not_found' } }
+      : count === 2
+        ? { json: { source_task_id: parent, client_request_id: nonce, task: null } }
+        : undefined
+  let panel = await open(page, true, SOURCE_ROLES_SUMMARY)
+  await read(page, panel, SOURCE_ROLES_PLOT)
+  await panel.getByRole('textbox', { name: REASON, exact: true }).fill('未知只保留原标识与原版本。')
+  await panel.getByRole('button', { name: SOURCE_ROLES_SUBMIT, exact: true }).click()
+  await expect(panel.getByRole('button', { name: LOOKUP, exact: true })).toBeVisible()
+  const original = structuredClone(world.posts[0])
+  await page.reload()
+  await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  await page.getByRole('combobox', { name: '本作品批次', exact: true }).selectOption(PARENT)
+  panel = await openPanel(page, SOURCE_ROLES_SUMMARY)
+  await expect(panel.getByRole('textbox', { name: REASON, exact: true })).toHaveValue(original.request.reason)
+  await panel.getByRole('button', { name: LOOKUP, exact: true }).click()
+  await expect(panel.getByRole('button', { name: LOOKUP, exact: true })).toBeEnabled()
+  expect(world.posts).toEqual([original])
+  await panel.getByRole('button', { name: LOOKUP, exact: true }).click()
+  await expect(panel.getByRole('button', { name: LOOKUP, exact: true })).toBeEnabled()
+  expect(world.posts).toEqual([original])
+  await expect(page.getByRole('region', { name: '写前重核新任务回执', exact: true })).toHaveCount(0)
+  await panel.getByRole('button', { name: LOOKUP, exact: true }).click()
+  await expect(page.getByRole('region', { name: '写前重核新任务回执', exact: true })).toBeVisible()
+  expect(world.posts).toEqual([original])
+  expect(
+    world.calls.filter((call) => call.path.includes('/plan-restarts/')).map((call) => call.path),
+  ).toEqual([
+    `/tasks/${PARENT}/plan-restarts/${original.request.client_request_id}`,
+    `/tasks/${PARENT}/plan-restarts/${original.request.client_request_id}`,
+    `/tasks/${PARENT}/plan-restarts/${original.request.client_request_id}`,
+  ])
+})
+
+test('OpenPlan畸形202缺新marker不能冒充成功，GET原回执才显示保存的child', async ({ context, page }) => {
+  const world = await setup(context, page, true)
+  world.onPost = (parent, request) => {
+    const value = structuredClone(world.commit(parent, request))
+    delete value.payload.workflow_plan_source_roles_version
+    return { status: 202, json: value }
+  }
+  const panel = await open(page, true, SOURCE_ROLES_SUMMARY)
+  await read(page, panel, SOURCE_ROLES_PLOT)
+  await panel.getByRole('textbox', { name: REASON, exact: true }).fill('保存原请求，校对完整的新版本回执。')
+  await panel.getByRole('button', { name: SOURCE_ROLES_SUBMIT, exact: true }).click()
+  await expect(panel.getByRole('button', { name: LOOKUP, exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: '写前重核新任务回执', exact: true })).toHaveCount(0)
+  expect(world.posts).toHaveLength(1)
+  await panel.getByRole('button', { name: LOOKUP, exact: true }).click()
+  await expect(page.getByRole('region', { name: '写前重核新任务回执', exact: true })).toBeVisible()
+  expect(world.posts).toHaveLength(1)
+})
+
+test('OpenPlan旧preview晚返回不污染新任务，也不丢新任务的原因', async ({ context, page }) => {
+  const world = await setup(context, page, true),
+    pending = gate()
+  world.onPreview = async (parent) => {
+    if (parent === PARENT) await pending.promise
+    return undefined
+  }
+  let panel = await open(page, true, SOURCE_ROLES_SUMMARY)
+  await panel.getByRole('button', { name: READ, exact: true }).click()
+  await expect.poll(() => world.previewReads[PARENT]).toBe(1)
+  await page.getByRole('combobox', { name: '本作品批次', exact: true }).selectOption(SECOND_TASK)
+  panel = await openPanel(page, SOURCE_ROLES_SUMMARY)
+  await read(page, panel, SOURCE_ROLES_PLOT)
+  await panel.getByRole('textbox', { name: REASON, exact: true }).fill('新任务自己的原因。')
+  pending.release()
+  await expect(panel.getByRole('textbox', { name: REASON, exact: true })).toHaveValue('新任务自己的原因。')
+  await expect(panel).toContainText(world.previews[SECOND_TASK].known_invalid_steps.call_ids[0])
+  expect(world.posts).toHaveLength(0)
+})
+
+test('OpenPlan已有选择或保持核对时界面明确禁用，不能清空轮次重做', async ({ context, page }) => {
+  const world = await setup(context, page, true)
+  const source = world.tasks.find((row) => row.id === PARENT)!
+  source.result.plot_preparations['4'].round = 1
+  source.result.plot_preparations['4'].status = 'choosing'
+  source.result.plot_preparations['4'].phases = {
+    'interpret:0': { response: {} },
+    'choose:1': { status: 'started' },
+  }
+  const panel = await open(page, true, SOURCE_ROLES_SUMMARY)
+  await expect(panel.getByRole('button', { name: READ, exact: true })).toBeDisabled()
+  await expect(panel).toContainText('已有选择或保持核对不能借此清空轮次')
+  expect(world.previewReads[PARENT] || 0).toBe(0)
+  expect(world.posts).toHaveLength(0)
+})
+
+test('OpenPlan重读时marker不匹配保留原因和旧依据，不猜补版本发请求', async ({ context, page }) => {
+  const world = await setup(context, page, true)
+  const panel = await open(page, true, SOURCE_ROLES_SUMMARY)
+  await read(page, panel, SOURCE_ROLES_PLOT)
+  await panel.getByRole('textbox', { name: REASON, exact: true }).fill('版本不一致仍保留这份原因。')
+  world.onPreview = (_parent, count) => {
+    if (count < 2) return undefined
+    const invalid = structuredClone(world.previews[PARENT])
+    delete invalid.workflow_plan_source_roles_version
+    return { json: invalid }
+  }
+  await panel.getByRole('button', { name: REREAD, exact: true }).click()
+  await expect(panel.getByRole('alert')).toBeVisible()
+  await expect(panel.getByRole('textbox', { name: REASON, exact: true })).toHaveValue(
+    '版本不一致仍保留这份原因。',
+  )
+  await expect(panel.getByRole('button', { name: SOURCE_ROLES_SUBMIT, exact: true })).toBeDisabled()
+  expect(world.posts).toHaveLength(0)
+})
+
+test('OpenPlan320实际文字翻倍与键盘：中文组合Enter不提交，新marker仅显式按钮派发', async ({
+  context,
+  page,
+}, info) => {
+  const world = await setup(context, page, true)
+  await page.setViewportSize({ width: 320, height: 900 })
+  const panel = await open(page, true, SOURCE_ROLES_SUMMARY)
+  await read(page, panel, SOURCE_ROLES_PLOT)
+  await panel.getByText('三次已结失败调用与来源', { exact: true }).click()
+  const reason = panel.getByRole('textbox', { name: REASON, exact: true }),
+    submit = panel.getByRole('button', { name: SOURCE_ROLES_SUBMIT, exact: true })
+  await reason.fill('保留许可原话😀𠮷，不增加交付。')
+  await assertActualDoubleText(
+    page,
+    {
+      reason,
+      submit,
+      original: panel.locator('pre.stream'),
+      source: panel.locator('pre.report'),
+    },
+    info,
+  )
+  await reason.scrollIntoViewIfNeeded()
+  const screenshot = info.outputPath('open-plan-source-roles-320-actual2x.png')
+  await panel.screenshot({ path: screenshot })
+  await reason.focus()
+  await reason.dispatchEvent('compositionstart', { data: '许' })
+  await page.keyboard.press('Enter')
+  await reason.dispatchEvent('compositionend', { data: '许' })
+  expect(world.posts).toHaveLength(0)
+  const entered = (await reason.inputValue()).trim()
+  await submit.focus()
+  await expect(submit).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('region', { name: '写前重核新任务回执', exact: true })).toBeVisible()
+  expect(world.posts).toHaveLength(1)
+  expect(world.posts[0].request.reason).toBe(entered)
+  expect(world.posts[0].request.workflow_plan_source_roles_version).toBe(SOURCE_ROLES_VERSION)
 })

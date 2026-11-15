@@ -51,6 +51,9 @@ def enabled(worker):
     from .workflow_plan_open_details import enabled as open_enabled
 
     open_enabled(worker)
+    from .workflow_plan_source_roles import validate_task as role_task
+
+    role_task(worker.task, getattr(worker, "domain", None))
     if "workflow_plan_preparation_version" not in worker.task["result"]:
         return False
     marker = worker.task["result"]["workflow_plan_preparation_version"]
@@ -120,6 +123,22 @@ def constraints(worker, plot):
 def check_receipt(worker, row, plot, chapter):
     from .workflow_plan_open_details import KEY, VERSION as OPEN_VERSION
 
+    from .workflow_plan_source_roles import check_row as check_roles
+
+    roles = check_roles(worker.task, row, getattr(worker, "domain", None))
+    if roles:
+        from .workflow_plan_source_roles import VERSION as ROLE_VERSION
+
+        if any(
+            r.get("source_role_repair", {}).get("version") != ROLE_VERSION
+            or r.get("source_role_repair")
+            != row.get("phases", {})
+            .get(f"interpret:{r['round']}", {})
+            .get("response", {})
+            .get("source_role_repair")
+            for r in row.get("interpretations", [])
+        ):
+            raise DomainError("plan_preparation_changed", "本章来源解释差异记录缺失或版本不符。", 409)
     if KEY in row and (row[KEY] != OPEN_VERSION or worker.task["result"].get(KEY) != OPEN_VERSION):
         raise DomainError("plan_preparation_changed", "本章开放细节解释政策无法确认。", 409)
     if KEY in row:
@@ -297,6 +316,8 @@ async def prepare(worker, plot, chapter):
     result = worker.task["result"]
     from .workflow_plan_open_details import KEY as OPEN_KEY, VERSION as OPEN_VERSION
 
+    from .workflow_plan_source_roles import KEY as ROLE_KEY, VERSION as ROLE_VERSION
+
     rows = result.setdefault("plot_preparations", {})
     row = rows.get(str(plot["number"]))
     if row is None:
@@ -309,6 +330,7 @@ async def prepare(worker, plot, chapter):
         row = rows[str(plot["number"])] = {
             **bindings(worker, plot, chapter),
             **({OPEN_KEY: OPEN_VERSION} if OPEN_KEY in result else {}),
+            **({ROLE_KEY: ROLE_VERSION} if ROLE_KEY in result else {}),
             "status": "interpreting",
             "round": 0,
             "effective_plot": plot["plot"],
@@ -361,6 +383,7 @@ async def prepare(worker, plot, chapter):
                         "version": VERSION,
                         "round": round_number,
                         **({OPEN_KEY: OPEN_VERSION} if OPEN_KEY in row else {}),
+                        **({ROLE_KEY: ROLE_VERSION} if ROLE_KEY in row else {}),
                         **(
                             {"item_count": len(initial["items"]), "原始事项": indexed(initial)}
                             if initial is not None
@@ -378,6 +401,11 @@ async def prepare(worker, plot, chapter):
                         "source_sha256": row["effective_plot_sha256"],
                         "contract": deepcopy(contract),
                         **({"open_details": deepcopy(open_details)} if OPEN_KEY in row else {}),
+                        **(
+                            {"source_role_repair": deepcopy(interpretation["source_role_repair"])}
+                            if ROLE_KEY in row
+                            else {}
+                        ),
                     }
                 )
                 worker.checkpoint(result)
@@ -404,6 +432,17 @@ async def prepare(worker, plot, chapter):
                         "有效章纲": row["effective_plot"],
                         "初轮全部事项": indexed(initial),
                         "本轮全部事项": indexed(contract),
+                        **(
+                            {
+                                ROLE_KEY: ROLE_VERSION,
+                                "来源解释修正差异（不是原话真值）": deepcopy(
+                                    row["interpretations"][-1]["source_role_repair"]
+                                ),
+                                "来源逐项核对": "每个P均独立回到原始本章和有效章纲判断语义，不能只比较两份AI解释。原许可／禁止及动作／对象中的只不等于实际资料接收范围；实际仅向接收限制仍须保留。特别核对解释修正差异的阶段、双方、对象、许可范围及否定：前次提案未报错不证明其正确，确有原话依据的纠错允许通过；没有来源依据的漂移fail、不能确认unknown。寄出与收到回执是不同事件，回执未到不撤销已经寄出的阶段。所有P都须核对，无差异也不豁免。",
+                            }
+                            if ROLE_KEY in row
+                            else {}
+                        ),
                         "不可更改的来源": fixed,
                         "要求": "独立核对每个初轮事项与同编号本轮事项的语义保持，含原文中尚未展开的事项，不得靠删项、合并、换义消除歧义。原明确事件、否定、尝试/完成/未来阶段、只/仅接收范围和时点限制必须保持。剧情明确保留未知时不得提前解谜；附注只可细化本事项开放细节，不新增脱离原计划事件。逐项按原P编号顺序各一次，不符fail、无法判断unknown；constraints_check独立核对作者简报/固定条件/采用约定和完整原规划前后衔接，不能因附注自称保持就pass。"
                         + (

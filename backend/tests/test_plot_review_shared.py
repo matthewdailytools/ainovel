@@ -14,6 +14,7 @@ from ainovel.models import ModuleInput, WorkflowInput
 from ainovel.plot_audit import VERSION
 from ainovel.plot_review import module_plot_source
 from ainovel.worker import Worker
+from helpers.historical_plan_task import queue_historical_plan
 from test_workflow_scope import SegmentModel, workflow_payload
 
 AUTHOR = "沈砚留下复测标记，只向师傅提出怀疑，尚未确定造假者。"
@@ -153,16 +154,12 @@ def test_workflow_unverified_does_not_force_revision_and_plan_origin_remains_exp
     request["plot_contract_check"] = True
     if mode == "assisted":
         request["plots"][0]["plot"] = AUTHOR
-    queued = domain.queue("workflow", request, story["branch_id"])
-    if mode == "automatic":
-        # Frozen pre-preparation tasks retain the exact post-draft audit path.
-        legacy = {
-            k: v
-            for k, v in queued["result"].items()
-            if k not in {"workflow_plan_preparation_version", "workflow_plan_open_details_version"}
-        }
-        with domain.db.connect(True) as tx:
-            tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(legacy), queued["id"]))
+    # A historical task predates creation witnesses; do not create then strip a fresh task.
+    queued = (
+        queue_historical_plan(domain, request, story["branch_id"], preparation=False, open_details=False)
+        if mode == "automatic"
+        else domain.queue("workflow", request, story["branch_id"])
+    )
     model = PlotModel(verdict, certainty)
 
     async def unexpected(*args, **kwargs):
@@ -274,15 +271,8 @@ def test_automatic_failure_report_names_workflow_plan_instead_of_author_lock(
 ):
     request = workflow_payload(story, mode="automatic")
     request["plot_contract_check"] = True
-    queued = domain.queue("workflow", request, story["branch_id"])
     # This test is the old frozen workflow/report compatibility contract.
-    legacy = {
-        k: v
-        for k, v in queued["result"].items()
-        if k not in {"workflow_plan_preparation_version", "workflow_plan_open_details_version"}
-    }
-    with domain.db.connect(True) as tx:
-        tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(legacy), queued["id"]))
+    queued = queue_historical_plan(domain, request, story["branch_id"], preparation=False, open_details=False)
     model = PlotModel()
 
     async def unchanged(self, text, *args):
