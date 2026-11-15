@@ -6576,5 +6576,192 @@
     "result": "not_run",
     "record": "2026-11-16-0ec97-runtime-source2-and-ci.md",
     "fix_of": ""
+  },
+  {
+    "id": "assisted4-agent-l3-proxy-text-save-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "workflow",
+    "scenario": "原候选r1仅正文试用保存、memory空索引；AI未知及来源失败保持，0调用，不代表真人作者认可",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted4-maintenance-paused5-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "workflow",
+    "scenario": "原父任务只维护后暂停next5：9记录与2未知场景；1已结CNY0.155264，无5正文或派发",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted4-maintenance-reason-quality-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "story",
+    "scenario": "独立代理发现无依据借期/零线冲突理由；current unknown场景仍待窄入口，原模型历史保持",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted4-maintenance-utterance-quality-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "story",
+    "scenario": "独立代理发现一条状态把堤上收尺话语写成回铺后，原文位置已有连续UTF16依据",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted4-maintenance-utterance-fixed-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "story",
+    "scenario": "正式PUT一次state0到1仅修话语位置，raw历史/正文/scene/task/usage保持，0模型且parent仍paused5",
+    "phase": "quality",
+    "result": "passed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": "assisted4-maintenance-utterance-quality-001"
+  },
+  {
+    "id": "auto-flow5-preparation-source-role-failure-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "workflow",
+    "scenario": "真实FLOW子任务3a738在5写前误读许可范围为资料only交付，3已结CNY0.148704；无正文或正文修订",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-source-roles-sealed-independent-001",
+    "date": "2026-11-16",
+    "commit": "a0eb3170b30efc3da6fe2cd7b97b59da5eaa9716",
+    "module": "reliability",
+    "scenario": "来源角色/修正差异/全P独立核对，205组合及125+1独立检查；3份旧paid提示schema/cache逐字兼容",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-source-roles-fresh-creation-native-001",
+    "date": "2026-11-16",
+    "commit": "a0eb3170b30efc3da6fe2cd7b97b59da5eaa9716",
+    "module": "workflow",
+    "scenario": "新创建见证及同分支继承：正式隔离API真实POST丢响应后刷新按原nonce GET查证，再预览child，0paid",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-source-roles-root-initial-fixture-001",
+    "date": "2026-11-16",
+    "commit": "a0eb3170b30efc3da6fe2cd7b97b59da5eaa9716",
+    "module": "reliability",
+    "scenario": "ROOT首轮2194通过3失败：旧测试创建fresh后删政策模拟历史，正确触发新守卫；原失败保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-source-roles-historical-fixture-retest-001",
+    "date": "2026-11-16",
+    "commit": "a0eb3170b30efc3da6fe2cd7b97b59da5eaa9716",
+    "module": "reliability",
+    "scenario": "仅改历史快照构造，业务断言不删；相关21通过，原首次Ruff格式提醒及修正保留",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": "plan-source-roles-root-initial-fixture-001"
+  },
+  {
+    "id": "plan-source-roles-root-final-static-001",
+    "date": "2026-11-16",
+    "commit": "a0eb3170b30efc3da6fe2cd7b97b59da5eaa9716",
+    "module": "reliability",
+    "scenario": "ROOT最终456前端/48Node、API类型格式Ruff和89模块构建通过；DcxaFpmD七dist冻结",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-source-roles-root-final-backend-001",
+    "date": "2026-11-16",
+    "commit": "a0eb3170b30efc3da6fe2cd7b97b59da5eaa9716",
+    "module": "reliability",
+    "scenario": "ROOT最终全量2197通过，backend-only console路径；保留既有Starlette及私有入口弃用提示，341输入稳定",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": "plan-source-roles-root-initial-fixture-001"
+  },
+  {
+    "id": "plan-source-roles-root-final-browser-001",
+    "date": "2026-11-16",
+    "commit": "a0eb3170b30efc3da6fe2cd7b97b59da5eaa9716",
+    "module": "workflow",
+    "scenario": "ROOT最终整个项目103无头通过，无skip/retry/flaky；341输入三阶段完全相同，7dist保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "ci-ca92-full-success-001",
+    "date": "2026-11-16",
+    "commit": "ca92efe8bb02dafac19be9e8cec90f7a33dee6d0",
+    "module": "reliability",
+    "scenario": "ca92完整远端CI success：2119后端/407前端/95无头/48Node，非本轮新源CI；原0ec失败不改写",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": "flow-0ec97-ci-import-failed-001"
+  },
+  {
+    "id": "plan-source-roles-runtime-pending-001",
+    "date": "2026-11-16",
+    "commit": "a0eb3170b30efc3da6fe2cd7b97b59da5eaa9716",
+    "module": "reliability",
+    "scenario": "本轮源码发布与新源远端CI仍待另有证据，当前日常仍0ec97，不把推送冒充部署",
+    "phase": "stability",
+    "result": "not_run",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "plan-source-roles-live-quality-pending-001",
+    "date": "2026-11-16",
+    "commit": "a0eb3170b30efc3da6fe2cd7b97b59da5eaa9716",
+    "module": "workflow",
+    "scenario": "新版写前来源指导尚未真实重做3a738，旧失败不重发；真实语义改善不能据Mock判通过",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
+  },
+  {
+    "id": "longform-current-milestones-pending-001",
+    "date": "2026-11-16",
+    "commit": "0ec97f153123b8244615610df95dd6e27a7586f4",
+    "module": "workflow",
+    "scenario": "新连续十章/跨卷/两部新36章与恢复、其余作者文学和总投入收益仍待验；原18/15待审保留",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-16-plan-source-roles-and-checkpoint-progress.md",
+    "fix_of": ""
   }
 ]
