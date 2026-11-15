@@ -222,11 +222,16 @@ def validate_task(task, domain):
     expected = {KEY: VERSION, "snapshot_sha256": sha(witness), "payload_sha256": sha(origin["payload"])}
     if len(rows) != 1 or json.loads(rows[0]["payload"]) != expected:
         raise DomainError("authored_scope_version", "作者来源独立创建事件无法核对，未派发。", 409)
+    from .author_source_clarification import validate_task as validate_clarification
+
+    validate_clarification(task, domain, chain)
     return True
 
 
 def select(task, text, kind, number=None):
-    entries = task["result"][SNAPSHOT]["sources"]
+    from .author_source_clarification import source_entry
+
+    entries = [source_entry(task, e) for e in task["result"][SNAPSHOT]["sources"]]
     if number is None and task["kind"] == "workflow":
         number = task["result"].get("next_chapter")
     found = [
@@ -425,6 +430,9 @@ def executable(task):
 
 
 def continuation(domain, current):
+    from .author_source_clarification import continuation as check_clarification_continuation
+
+    check_clarification_continuation(current)
     if validate_task(current, domain) and any(
         s.get("status") not in {"completed", "not_sent"}
         for r in current["result"].get(RECEIPTS, {}).values()

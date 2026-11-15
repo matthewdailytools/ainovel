@@ -855,6 +855,10 @@ def create_app(settings=None, schema_only=False):
 
     register_plan_restart_routes(app, domain, budget, provider_ready)
 
+    from .author_source_clarification import register_routes as register_author_clarification_routes
+
+    register_author_clarification_routes(app, domain, budget, provider_ready)
+
     from .flow_policy_continuation import register_routes as register_flow_policy_routes
 
     register_flow_policy_routes(app, domain, budget, provider_ready)

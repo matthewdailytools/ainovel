@@ -943,6 +943,58 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/tasks/{task_id}/author-source-clarification-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Clarification Preview */
+    get: operations['clarification_preview_api_tasks__task_id__author_source_clarification_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/author-source-clarifications/{client_request_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Clarification Receipt */
+    get: operations['clarification_receipt_api_tasks__task_id__author_source_clarifications__client_request_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/author-source-clarifications': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Clarification Receipt */
+    get: operations['clarification_receipt_api_tasks__task_id__author_source_clarifications_get']
+    put?: never
+    /** Author Source Clarification */
+    post: operations['author_source_clarification_api_tasks__task_id__author_source_clarifications_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/tasks/{task_id}/continue-flow-policy-preview': {
     parameters: {
       query?: never
@@ -2016,6 +2068,30 @@ export interface components {
        * @default
        */
       profile: string
+    }
+    /** ClarificationInput */
+    ClarificationInput: {
+      /**
+       * Version
+       * @constant
+       */
+      version: 'author-source-clarification/1'
+      /** Client Request Id */
+      client_request_id: string
+      /** Preview Basis Sha256 */
+      preview_basis_sha256: string
+      /** Clarification */
+      clarification: string
+      /**
+       * Actor
+       * @enum {string}
+       */
+      actor: 'author' | 'authorized_operator'
+      /**
+       * Reason
+       * @default
+       */
+      reason: string
     }
     /** ConditionalContinuationInput */
     ConditionalContinuationInput: {
@@ -5289,6 +5365,137 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['PlanRestartInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  clarification_preview_api_tasks__task_id__author_source_clarification_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  clarification_receipt_api_tasks__task_id__author_source_clarifications__client_request_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+        client_request_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  clarification_receipt_api_tasks__task_id__author_source_clarifications_get: {
+    parameters: {
+      query: {
+        client_request_id: string
+      }
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  author_source_clarification_api_tasks__task_id__author_source_clarifications_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ClarificationInput']
       }
     }
     responses: {

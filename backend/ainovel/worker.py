@@ -277,6 +277,10 @@ class Worker:
         from .authored_source_scope import validate_task as validate_authored_source
 
         authored_source = validate_authored_source(self.task, self.domain)
+        if self.task["result"].get("author_source_clarification_version") is not None:
+            from .author_source_clarification import ensure_runtime as ensure_clarification_runtime
+
+            ensure_clarification_runtime(self.task, self.domain, self.settings)
         from .flow_entailment import enabled as flow_entailment_enabled
 
         flow_entailment_enabled(self)
@@ -361,6 +365,7 @@ class Worker:
             "独立观察全书条件在本章是否触发",
             "独立观察AI章纲接收范围来源",
             "独立观察作者情节接收范围来源",
+            "独立核对作者补充澄清与原来源保持",
         }:
             # No implicit enrichment: source interpretation receives only its
             # source scope. New plan choice/check stages explicitly supply their
@@ -1159,6 +1164,16 @@ class Worker:
                 current["引用修正要求"] = (
                     "本阶段没有正文或候选。只回到作者本次原话核对连续引用、同一传递及绑定，保留原角色、原件／副本、阶段、条件与否定；目的地、另项许可或排除某人不能改成排他。真未明确保持unknown／ambiguous，不能替作者选人或补出新约束。"
                 )
+            if (
+                instruction.get("author_source_clarification_version") == "author-source-clarification/1"
+                and instruction.get("动作") == "独立核对作者补充澄清与原来源保持"
+            ):
+                current["引用修正要求"] = (
+                    "本步骤没有正文或候选。只回到给定原话、显式补充、固定条件及采用约定逐项核对，"
+                    "evidence_ids只能引用本次ORIGINAL/ADDITION/FIX连续来源编号，不补造或借旧报告。"
+                    "保留所有原话与补充事项及否定、结果、传递阶段和范围；真正改向保留direction_change，"
+                    "不能确认保留unknown，不为修复编号把未明改成通过，也不替作者选择角色。"
+                )
             if repair_feedback is not None:
                 current.update(repair_feedback())
             if instruction.get("固定条件检查格式版本") == "fixed-check-id/1":
@@ -1829,9 +1844,13 @@ class Worker:
                         raise DomainError(
                             "authored_source", "本章作者原情节缺失，未先生成正文再推断要求。", 409
                         )
-                    await interpret_plot(
-                        self, original["plot"], source_kind="author_plot", source_position=number
+                    from .author_source_clarification import effective_plot, before_prose
+
+                    plot = effective_plot(self.task, original)
+                    author_contract = await interpret_plot(
+                        self, plot["plot"], source_kind="author_plot", source_position=number
                     )
+                    await before_prose(self, plot, author_contract)
                 context = self.context(branch_id, chapter["id"])
                 fixed = payload["fixed"] + [item for item in plot["fixed"] if item not in payload["fixed"]]
                 findings = [
@@ -1919,7 +1938,12 @@ class Worker:
                                 raise DomainError(
                                     "workflow_progress", "本章原始作者情节缺失，未从候选反推。", 409
                                 )
-                            source_text, source_kind = original["plot"], "author_plot"
+                            from .author_source_clarification import effective_plot
+
+                            source_text, source_kind = (
+                                effective_plot(self.task, original)["plot"],
+                                "author_plot",
+                            )
                         else:
                             source_text, source_kind = plot["plot"], "workflow_plan"
                         review = await attach_plot_review(

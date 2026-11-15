@@ -42,6 +42,10 @@ def assisted_contract(source, parent, plot):
     from .plot_audit import VERSION as PLOT_VERSION, ScopedAuthorPlot, author_contract_issues
 
     original = next((p for p in parent["payload"]["plots"] if p["number"] == plot["number"]), None)
+    if original is not None and "author_source_clarification_version" in parent["result"]:
+        from .author_source_clarification import effective_plot
+
+        original = effective_plot(parent, original)
     audit = source["payload"].get("plot_audit", source["payload"].get("previous_plot_audit"))
     if (
         original != plot
@@ -137,8 +141,14 @@ def freeze(
         )
         effective_plot = {**deepcopy(plot), "plot": row["effective_plot"]}
     else:
-        contract = assisted_contract(source, parent, plot)
         effective_plot = deepcopy(plot)
+        if "author_source_clarification_version" in progress:
+            from .authored_source_scope import validate_task as validate_author_source
+            from .author_source_clarification import effective_plot as clarified_plot
+
+            validate_author_source(parent, domain)
+            effective_plot = clarified_plot(parent, plot)
+        contract = assisted_contract(source, parent, effective_plot)
     fixed = parent["payload"]["fixed"] + [
         item for item in plot["fixed"] if item not in parent["payload"]["fixed"]
     ]

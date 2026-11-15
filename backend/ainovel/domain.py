@@ -646,6 +646,17 @@ class Domain:
             return task
 
     def queue(self, kind, payload, branch_id=None):
+        if any(
+            key in payload
+            for key in (
+                "author_source_clarification_version",
+                "author_source_clarification",
+                "author_source_clarification_checks",
+            )
+        ):
+            raise DomainError(
+                "author_clarification_version", "补充澄清来源只由专用显式入口冻结，不能注入普通批次。", 409
+            )
         if kind == "workflow":
             from .workflow_plan_source_roles import replay_payload
 

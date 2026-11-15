@@ -25,6 +25,10 @@ import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from
 import { FrozenStructureOutputPolicy, StructureOutputSettings } from './StructureOutputSettings'
 import { PlanPreparationDetails, planPreparationNeedsReview } from './PlanPreparationDetails'
 import { PlanRestartPanel, PlanRestartReceipt } from './PlanRestartPanel'
+import {
+  AuthorSourceClarificationPanel,
+  AuthorSourceClarificationReceipt,
+} from './AuthorSourceClarificationPanel'
 import { FlowContinuationPanel, FlowContinuationReceipt } from './FlowContinuationPanel'
 import {
   DEFAULT_STRUCTURE_OUTPUT_TOKENS,
@@ -79,7 +83,8 @@ export function WorkflowPage({
   const [operationBusy, setBusy] = useState(false)
   const [restartLocked, setRestartLocked] = useState(false)
   const [flowLocked, setFlowLocked] = useState(false)
-  const busy = operationBusy || restartLocked || flowLocked
+  const [clarificationLocked, setClarificationLocked] = useState(false)
+  const busy = operationBusy || restartLocked || flowLocked || clarificationLocked
   const pendingRequest = useRef<{ signature: string; key: string } | null>(null)
   const pendingContinuation = useRef<{ signature: string; key: string } | null>(null)
   const pendingConditionalContinuation = useRef<{
@@ -646,7 +651,7 @@ export function WorkflowPage({
                     currency={
                       accounts.find((entry) => entry.id === task.payload.account)?.currency || '原账户币种'
                     }
-                    disabled={operationBusy || flowLocked}
+                    disabled={operationBusy || flowLocked || clarificationLocked}
                     onLockChange={setRestartLocked}
                     onCreated={async (row) => {
                       setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])
@@ -655,12 +660,26 @@ export function WorkflowPage({
                       await onStarted(row.branch_id)
                     }}
                   />
+                  <AuthorSourceClarificationReceipt task={task} />
+                  <AuthorSourceClarificationPanel
+                    key={JSON.stringify(['author-source-clarification', novel.id, branchId, task.id])}
+                    task={task}
+                    activeBranchId={branchId}
+                    disabled={operationBusy || restartLocked || flowLocked}
+                    onLockChange={setClarificationLocked}
+                    onCreated={async (row) => {
+                      setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])
+                      setSelectedTask(row.id)
+                      setStatus('来源澄清子任务已建立；原情节、待核报告和累计费用保留。')
+                      await onStarted(row.branch_id)
+                    }}
+                  />
                   <FlowContinuationReceipt task={task} />
                   <FlowContinuationPanel
                     key={JSON.stringify(['flow-continuation', novel.id, branchId, task.id])}
                     task={task}
                     activeBranchId={branchId}
-                    disabled={operationBusy || restartLocked}
+                    disabled={operationBusy || restartLocked || clarificationLocked}
                     onLockChange={setFlowLocked}
                     onCreated={async (row) => {
                       setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])

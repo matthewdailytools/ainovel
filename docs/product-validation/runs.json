@@ -7016,5 +7016,93 @@
     "result": "not_run",
     "record": "2026-11-16-authored-source-scope.md",
     "fix_of": ""
+  },
+  {
+    "id": "author-clarification-account-wip-failed-20261116",
+    "date": "2026-11-16",
+    "commit": "721307a+author-clarification",
+    "module": "半自动续接",
+    "scenario": "私有草稿误挡来源保持完成后的正式换账户，两个原生反例保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-author-source-clarification.md",
+    "fix_of": ""
+  },
+  {
+    "id": "author-clarification-account-fixed-20261116",
+    "date": "2026-11-16",
+    "commit": "721307a+author-clarification",
+    "module": "半自动续接",
+    "scenario": "39独立原生及363根受影响测试通过，旧来源／保持／逐币费用保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-author-source-clarification.md",
+    "fix_of": "author-clarification-account-wip-failed-20261116"
+  },
+  {
+    "id": "author-clarification-nonce-path-failed-20261116",
+    "date": "2026-11-16",
+    "commit": "721307a+author-clarification",
+    "module": "任务恢复",
+    "scenario": "合法slash查询404，路径替代仍有LF／percent问题，原red保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-author-source-clarification.md",
+    "fix_of": ""
+  },
+  {
+    "id": "author-clarification-nonce-query-fixed-20261116",
+    "date": "2026-11-16",
+    "commit": "721307a+author-clarification",
+    "module": "任务恢复",
+    "scenario": "11项query正反例与正式API浏览器同nonce查证，不重复POST",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-author-source-clarification.md",
+    "fix_of": "author-clarification-nonce-path-failed-20261116"
+  },
+  {
+    "id": "author-clarification-project-native-20261116",
+    "date": "2026-11-16",
+    "commit": "721307a+author-clarification",
+    "module": "半自动续接",
+    "scenario": "独立临时正式API，未知POST只3次query恢复同queued child，原稿／费用保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-author-source-clarification.md",
+    "fix_of": ""
+  },
+  {
+    "id": "author-clarification-full-root-20261116",
+    "date": "2026-11-16",
+    "commit": "721307a+author-clarification",
+    "module": "全项目稳定性",
+    "scenario": "2374后端／551前端／125全项目无头／48Node通过，374输入及7dist保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-author-source-clarification.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored-source-ci721-passed-20261116",
+    "date": "2026-11-16",
+    "commit": "721307a",
+    "module": "全项目CI",
+    "scenario": "精确721307a远端2324／514／118实际success，不冒称新桥接CI",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-author-source-clarification.md",
+    "fix_of": ""
+  },
+  {
+    "id": "author-clarification-real-quality-not-run-20261116",
+    "date": "2026-11-16",
+    "commit": "721307a+author-clarification",
+    "module": "真实模型质量",
+    "scenario": "新澄清入口尚无真实小说及付费质量结论，日常未更新，文学／收益未验证",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-16-author-source-clarification.md",
+    "fix_of": ""
   }
 ]
