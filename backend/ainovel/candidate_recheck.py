@@ -72,7 +72,7 @@ def assisted_contract(source, parent, plot):
     return contract
 
 
-def freeze(domain, request):
+def freeze(domain, request, *, conditional_policy=None):
     from .plot_audit import VERSION as PLOT_VERSION
     from .plot_identity_context import VERSION as IDENTITY_VERSION
     from .workflow_plan_preparation import VERSION as PREPARATION_VERSION, frozen_contract
@@ -145,8 +145,16 @@ def freeze(domain, request):
         raise DomainError("candidate_length", "候选字数超出原流程范围，请先保存符合范围的候选。", 409)
     domain.check_genre_snapshot(source["branch_id"], progress["genre_profile_snapshot"])
     domain.check_author_contract_snapshot(source["branch_id"], progress["author_contract_snapshot"])
+    policy = {}
+    if conditional_policy is not None:
+        from .conditional_review import KEY, VERSION as CONDITIONAL_VERSION
+
+        if conditional_policy != CONDITIONAL_VERSION:
+            raise DomainError("conditional_policy", "复检政策无法确认，未升级旧检查。", 409)
+        policy = {KEY: conditional_policy, "book_fixed": deepcopy(parent["payload"]["fixed"])}
     return {
         "version": VERSION,
+        **policy,
         "artifact_id": source["id"],
         "candidate_revision": source["candidate_revision"],
         "candidate_payload_sha256": sha(source["payload"]),
@@ -175,7 +183,14 @@ def validate(worker):
     if worker.task["result"].get("candidate_recheck_version") != VERSION:
         raise DomainError("candidate_recheck_version", "候选复检政策无法确认，未升级旧任务。", 409)
     expected = worker.task["result"].get("candidate_recheck_snapshot")
-    if expected is None or freeze(worker.domain, worker.task["payload"]) != expected:
+    from .conditional_review import KEY
+
+    if expected is not None and expected.get(KEY) != worker.task["result"].get(KEY):
+        raise DomainError("conditional_policy", "复检任务与来源的全书条件政策不符，未继续。", 409)
+    if (
+        expected is None
+        or freeze(worker.domain, worker.task["payload"], conditional_policy=expected.get(KEY)) != expected
+    ):
         raise DomainError("candidate_changed", "候选或其冻结来源在复检期间改变，旧结果保留但不发布。", 409)
     return expected
 

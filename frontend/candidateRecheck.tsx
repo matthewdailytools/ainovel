@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type Artifact, type Chapter, type Task } from './api'
 import { PlotAuditDetails } from './PlotAuditDetails'
 import { SourceIdentityOption, SOURCE_IDENTITY_VERSION } from './sourceIdentity'
+import { ConditionalReviewNotice, hasNotTriggeredCheck, notTriggeredLabel } from './ConditionalReviewNotice'
 
 const VERSION = 'candidate-recheck/1'
 const PLOT_VERSION = 'author-plot-audit/2'
@@ -579,7 +580,9 @@ export function CandidateRecheckReport({
       <p>
         {current.status === 'ready'
           ? report.review_passed
-            ? '模型标复检通过，仍须作者核对。'
+            ? hasNotTriggeredCheck(report.review)
+              ? '本轮含未触发约定；请核对本章依据及整书待核对事项，作者仍须审阅。'
+              : '模型标复检通过，仍须作者核对。'
             : '本轮复检仍有未通过或未能核实的项目。'
           : current.status === 'historical'
             ? '历史报告：目标候选已变化，不能作为当前结论。'
@@ -590,6 +593,7 @@ export function CandidateRecheckReport({
         本报告不生成新正文，也不自动采纳或继续整书。模型复检不等于作者文学认可。采纳仍须回到目标候选。
       </p>
       <p>{report.note}</p>
+      <ConditionalReviewNotice value={report.review} />
       {report.previous_candidate && (
         <details>
           <summary>复检前候选与检查记录</summary>
@@ -628,7 +632,13 @@ export function CandidateRecheckReport({
             <article className="fact" key={index}>
               <p>{text(check.condition)}</p>
               <p>
-                {check.result === 'pass' ? '模型标一致' : check.result === 'fail' ? '模型标不符' : '未能核实'}
+                {check.result === 'not_triggered'
+                  ? notTriggeredLabel(check, report.review)
+                  : check.result === 'pass'
+                    ? '模型标一致'
+                    : check.result === 'fail'
+                      ? '模型标不符'
+                      : '未能核实'}
               </p>
               <blockquote>{text(check.evidence)}</blockquote>
             </article>
@@ -656,7 +666,9 @@ export function CandidateRecheckReport({
       />
       <p className="small muted">
         {report.memory_generated
-          ? '本轮全部检查通过后生成了记忆候选；不表示正文已采纳。'
+          ? hasNotTriggeredCheck(report.review)
+            ? '本轮生成了记忆候选；未触发约定仍待整书核对，正文尚未采纳。'
+            : '本轮全部检查通过后生成了记忆候选；不表示正文已采纳。'
           : '本轮没有生成新的记忆候选。'}
       </p>
       <details>

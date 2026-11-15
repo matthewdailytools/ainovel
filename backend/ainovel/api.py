@@ -41,6 +41,11 @@ from .modules import MODULES, public_modules
 from .manual_finalization import register_routes as register_finalization_routes
 from .targeted_revision import validate_targeted_revision
 from .candidate_recheck import CandidateRecheckInput, sha as candidate_sha
+from .conditional_continuation import (
+    ConditionalContinuationInput,
+    continue_policy,
+    previous_request as previous_policy_request,
+)
 
 
 class ReadingInput(Input):
@@ -65,6 +70,7 @@ class ResumeInput(Input):
     regenerate_pending: bool = False
     reason: str = Field(default="", max_length=2000)
     candidate_revision: int = Field(default=0, ge=0)
+    pause_after_maintenance: bool = Field(default=False, strict=True)
 
 
 class ContinuationInput(Input):
@@ -661,6 +667,12 @@ def create_app(settings=None, schema_only=False):
     @app.post("/api/tasks/{task_id}/resume")
     def resume(task_id: str, data: ResumeInput):
         current = domain.task(task_id)
+        if data.pause_after_maintenance and (current["kind"] != "workflow" or data.regenerate_pending):
+            raise DomainError(
+                "pause_after_maintenance",
+                "仅批次已有采纳和维护流程支持完成维护后暂停；不能同时重做候选。",
+                409,
+            )
         if current["status"] not in (
             "paused",
             "blocked_runtime",
@@ -765,6 +777,8 @@ def create_app(settings=None, schema_only=False):
                         }
                     )
                 result["expected_story_revision"] = branch["story_revision"]
+        if data.pause_after_maintenance:
+            result["pause_after_maintenance_requested"] = True
         with db.connect(True) as tx:
             latest = tx.execute("SELECT status,updated FROM tasks WHERE id=?", (task_id,)).fetchone()
             if latest["status"] != current["status"] or latest["updated"] != current["updated"]:
@@ -823,6 +837,16 @@ def create_app(settings=None, schema_only=False):
         ):
             raise DomainError("budget", "续跑子预算不能高于该服务商的共享上限。", 409)
         return domain.continue_workflow(current, payload, data.model_dump())
+
+    @app.post("/api/tasks/{task_id}/continue-conditional-policy", status_code=202)
+    def continue_conditional_policy(task_id: str, data: ConditionalContinuationInput):
+        current = domain.task(task_id)
+        request = data.model_dump(exclude_none=True)
+        previous = previous_policy_request(domain, task_id, request)
+        if previous is not None:
+            return previous
+        provider_ready(data.account or current["payload"]["account"])
+        return continue_policy(domain, budget, current, request)
 
     @app.get("/api/artifacts")
     def artifacts(branch_id: str, chapter_id: str | None = None):

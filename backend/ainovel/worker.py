@@ -515,6 +515,11 @@ class Worker:
                         else {}
                     ),
                     **(
+                        {"conditional_book_policy_version": source_instruction["全书条件适用性政策"]}
+                        if "全书条件适用性政策" in source_instruction
+                        else {}
+                    ),
+                    **(
                         {"plot_contract_version": source_instruction["情节核对契约版本"]}
                         if "情节核对契约版本" in source_instruction
                         else {}
@@ -951,18 +956,30 @@ class Worker:
         raise DomainError("evidence", message)
 
     async def review(self, text, fixed, context, number, instructions=None):
+        from .conditional_review import (
+            ConditionalReview,
+            bind_report,
+            check_issues,
+            eligible_conditions,
+            enabled as conditional_enabled,
+        )
+
         context = self.whole_chapter_context(context)
         context = text_context(context, text, "chapter_review")
         # Explicit author prohibitions apply to every chapter. Soft emotion/hook
         # preferences and book-level results never enter these fixed check slots.
         prohibitions = self.author_snapshot().get("intent_contract", {}).get("prohibitions", [])
         fixed = [*fixed, *[item for item in dict.fromkeys(prohibitions) if item not in fixed]]
+        conditional = conditional_enabled(self.task)
+        eligible = eligible_conditions(self.task, fixed, instructions, prohibitions) if conditional else []
+        schema = ConditionalReview if conditional else Review
         units = source_units(text, f"C{number:03}P")
         sources = {unit["source_id"]: unit for unit in units}
-        contract = source_schema(Review.model_json_schema(), units)
+        contract = source_schema(schema.model_json_schema(), units)
         contract["properties"]["checks"].update(minItems=len(fixed), maxItems=len(fixed))
         if fixed:
-            contract["$defs"]["ReviewCheck"]["properties"]["condition"]["enum"] = list(dict.fromkeys(fixed))
+            check_type = "ConditionalReviewCheck" if conditional else "ReviewCheck"
+            contract["$defs"][check_type]["properties"]["condition"]["enum"] = list(dict.fromkeys(fixed))
 
         def validate(result):
             issues = []
@@ -984,6 +1001,8 @@ class Worker:
                         )
             for index, check in enumerate(result["checks"]):
                 resolve_field(check, "evidence", sources)
+                if conditional:
+                    issues.extend(check_issues(check, index, eligible, text))
                 if check["result"] == "pass":
                     if not check["evidence"].strip():
                         issues.append(
@@ -1007,38 +1026,59 @@ class Worker:
                     issues.append(f"findings[{index}] 引文或章节号无效")
             return issues
 
+        instruction = {
+            "动作": "审查正文",
+            "正文": text,
+            "审查目标": "只审本次正文及相同内容的上下文.chapter.content；source_version_basis仅用于版本校验。原报告与写作要求中的旧引文是待验证意见，不能当作本稿事实。必须重新读取候选，不能把旧稿问题套在已修改的候选上。",
+            "可引用原文": units,
+            "固定条件": fixed,
+            "固定条件检查格式版本": REVIEW_CHECK_VERSION,
+            "固定条件项数": len(fixed),
+            "checks清单边界": "checks只能逐字按顺序覆盖固定条件清单，项数必须等于固定条件项数，每项一次。不得另加‘其他情节覆盖’、作者写作要求、题材提示或其改写；清单外的问题写findings。修正格式时保留原有unknown/fail及依据，不得为满足项数删除真实问题或改成pass。",
+            "条件性约束核对": "区分本章必须完成的结果与‘只有实施A时才须B’的条件。后者若正文明确只准备、尚未实施A，可引用该代表段核对本章仍遵守限制；未出现B的数值本身不是本章违约，不能要求提前实施A。此时pass仅表示本章保持约束，summary须说明未触发、尚未兑现，不能宣称B已经完成。若是否实施A不明确、缺少合适原文，或A已实施而B无法核实，仍填unknown；明确违背列blocker。无条件的本章结果和禁止项不能借‘未触发’跳过，不得仅凭全文未见而pass。",
+            "作者写作要求": instructions or {},
+            "作者明确例外": self.genre_snapshot().get("author_exceptions", []),
+            "作者契约核对": "冻结契约中的prohibitions按本章时点核对，有逐字原文依据的明确违反列blocker。fixed_results和ending是全书约定，仅核对当前章明确触发的结果，不要求每章提前实现终局。情绪目标、钩子、未锁定方向只能给具体suggestion，不追加checks。发现本次指令与作品固定约定冲突应明确指出，不静默覆盖。",
+            "题材审阅政策": "作者例外是明确要求，按本章时点与触发条件核对，不能被频道预设覆盖；有原文依据的明确违反可列blocker。频道重点及题材checks仅作审阅提示，未被作者锁定时只给suggestion，不加入固定checks，不要求每章提前发生全书终局。",
+            "情节覆盖": "同时核对作者写作要求中的本章情节、结果和禁止项。清单之外的问题只写入findings，禁止向checks追加条件。关键事件被拖延到后章或正文与明确要求的结果相反，应指出具体遗漏与原文，不能只检查固定条件清单。不要要求未来章纲在本章提前发生。",
+            "情节核对步骤": [
+                "先从作者明确给定的本章情节提取行动者、动作、对象、前提和结果，再与本次正文逐项比较；固定条件清单不是完整情节的替代。",
+                "对买卖、借还、赠送、交付、委托和信息传递核对谁给出什么、谁取得什么。对象替换或流向反转即使不改变交易成败，也可能改变作者情节。",
+                "核对人物先前已经知道、亲眼见过或明确做过的事，与后文疑问和选择是否矛盾；区分角色有依据的怀疑、叙述确证和读者未知，不把猜测当事实。",
+                "有逐字正文依据的明确违背写入findings的blocker；作者措辞存在多种解释时说明歧义和待核对点，不强行裁定。情绪、写法和题材偏好仍只作suggestion；不得向checks追加隐含条件。",
+            ],
+            "要求": "checks对每条固定条件逐字列出且仅列一次。evidence和findings.quote优先只填「可引用原文」中的source_id编号，后端自动回填该版本原文；不要重写或概括引文。否定条件只有真实代表段落支持判断时才能pass并引用该段；不增加恋爱、没有战斗等不能仅凭空引文或全文未见而pass。没有合适原文依据时填unknown，evidence可空，summary说明未能定位证据；不得伪造原文。条件性约束须保留触发关系：本章明确没有实施受约束行动时，不得仅因前置条件仍待核实而判违规；检查正文是否遵守限制。明确要求本章完成的情节仍须核对是否完成。findings.chapter必须为本次章节号。解释放summary/reason，区分阻断与偏好。未知不冒充pass。",
+            "章节号": number,
+        }
+        if conditional:
+            from .conditional_review import VERSION as CONDITIONAL_VERSION
+
+            instruction.update(
+                全书条件适用性政策=CONDITIONAL_VERSION,
+                允许单列本章未触发的全书约定=eligible,
+                本章未触发政策=(
+                    "只对‘允许单列本章未触发的全书约定’中的原话逐项判断。仅当本章完全未涉及"
+                    "其触发行为、没有发现违约、且本章情节没有要求完成该行为时，可填result=not_triggered、"
+                    "scope=book、applicability=not_triggered、chapter_obligation=not_required，"
+                    "explanation逐项说明未涉及的范围、为什么本章无必达事项及整书仍待核对。"
+                    "完全未出现可留evidence空；有代表段只能引用本次原文。not_triggered不等于pass或全书已兑现。"
+                    "已经触发、触发与否不明、本章情节必达结果、无条件约定、禁止项均不能借未触发跳过。"
+                    "适用性不明仍unknown，明确违反fail并列blocker。有合适原文的pass仍按原证据要求。"
+                    "若与旧‘没有原文填unknown’要求冲突，仅上述清单中确认完全未触发的项采用本政策；"
+                    "不能仅因某数值尚未出现就推定整项未触发，也不能按候选倒改约定。"
+                    "同一全书约定可能含‘第26章必须揭示’等无条件时点要求；到了指定章仍必须核对，"
+                    "不能用该约定另一处‘若涉及’覆盖本章必达事项。章节义务不明用chapter_obligation=uncertain且result=unknown。"
+                ),
+            )
         result = await self.grounded(
-            {
-                "动作": "审查正文",
-                "正文": text,
-                "审查目标": "只审本次正文及相同内容的上下文.chapter.content；source_version_basis仅用于版本校验。原报告与写作要求中的旧引文是待验证意见，不能当作本稿事实。必须重新读取候选，不能把旧稿问题套在已修改的候选上。",
-                "可引用原文": units,
-                "固定条件": fixed,
-                "固定条件检查格式版本": REVIEW_CHECK_VERSION,
-                "固定条件项数": len(fixed),
-                "checks清单边界": "checks只能逐字按顺序覆盖固定条件清单，项数必须等于固定条件项数，每项一次。不得另加‘其他情节覆盖’、作者写作要求、题材提示或其改写；清单外的问题写findings。修正格式时保留原有unknown/fail及依据，不得为满足项数删除真实问题或改成pass。",
-                "条件性约束核对": "区分本章必须完成的结果与‘只有实施A时才须B’的条件。后者若正文明确只准备、尚未实施A，可引用该代表段核对本章仍遵守限制；未出现B的数值本身不是本章违约，不能要求提前实施A。此时pass仅表示本章保持约束，summary须说明未触发、尚未兑现，不能宣称B已经完成。若是否实施A不明确、缺少合适原文，或A已实施而B无法核实，仍填unknown；明确违背列blocker。无条件的本章结果和禁止项不能借‘未触发’跳过，不得仅凭全文未见而pass。",
-                "作者写作要求": instructions or {},
-                "作者明确例外": self.genre_snapshot().get("author_exceptions", []),
-                "作者契约核对": "冻结契约中的prohibitions按本章时点核对，有逐字原文依据的明确违反列blocker。fixed_results和ending是全书约定，仅核对当前章明确触发的结果，不要求每章提前实现终局。情绪目标、钩子、未锁定方向只能给具体suggestion，不追加checks。发现本次指令与作品固定约定冲突应明确指出，不静默覆盖。",
-                "题材审阅政策": "作者例外是明确要求，按本章时点与触发条件核对，不能被频道预设覆盖；有原文依据的明确违反可列blocker。频道重点及题材checks仅作审阅提示，未被作者锁定时只给suggestion，不加入固定checks，不要求每章提前发生全书终局。",
-                "情节覆盖": "同时核对作者写作要求中的本章情节、结果和禁止项。清单之外的问题只写入findings，禁止向checks追加条件。关键事件被拖延到后章或正文与明确要求的结果相反，应指出具体遗漏与原文，不能只检查固定条件清单。不要要求未来章纲在本章提前发生。",
-                "情节核对步骤": [
-                    "先从作者明确给定的本章情节提取行动者、动作、对象、前提和结果，再与本次正文逐项比较；固定条件清单不是完整情节的替代。",
-                    "对买卖、借还、赠送、交付、委托和信息传递核对谁给出什么、谁取得什么。对象替换或流向反转即使不改变交易成败，也可能改变作者情节。",
-                    "核对人物先前已经知道、亲眼见过或明确做过的事，与后文疑问和选择是否矛盾；区分角色有依据的怀疑、叙述确证和读者未知，不把猜测当事实。",
-                    "有逐字正文依据的明确违背写入findings的blocker；作者措辞存在多种解释时说明歧义和待核对点，不强行裁定。情绪、写法和题材偏好仍只作suggestion；不得向checks追加隐含条件。",
-                ],
-                "要求": "checks对每条固定条件逐字列出且仅列一次。evidence和findings.quote优先只填「可引用原文」中的source_id编号，后端自动回填该版本原文；不要重写或概括引文。否定条件只有真实代表段落支持判断时才能pass并引用该段；不增加恋爱、没有战斗等不能仅凭空引文或全文未见而pass。没有合适原文依据时填unknown，evidence可空，summary说明未能定位证据；不得伪造原文。条件性约束须保留触发关系：本章明确没有实施受约束行动时，不得仅因前置条件仍待核实而判违规；检查正文是否遵守限制。明确要求本章完成的情节仍须核对是否完成。findings.chapter必须为本次章节号。解释放summary/reason，区分阻断与偏好。未知不冒充pass。",
-                "章节号": number,
-            },
-            Review,
+            instruction,
+            schema,
             context,
             validate,
             contract=contract,
             diagnostic_label="正文审查检查格式或来源未通过",
         )
-        return result
+        return bind_report(result, eligible) if conditional else result
 
     async def memory(self, text, context):
         context = text_context(context, text, "memory_extraction")
@@ -1197,6 +1237,8 @@ class Worker:
         return text
 
     async def completion_report(self, chapters, payload, plan, scope, previous=()):
+        from .conditional_review import enabled as conditional_enabled
+
         units, reports = completion_sources(chapters, previous)
         sources = {unit["source_id"]: unit for unit in units}
         segment = payload.get("completion_scope", "whole_book") == "segment"
@@ -1205,6 +1247,7 @@ class Worker:
             list(
                 dict.fromkeys(
                     [
+                        *(payload["fixed"] if conditional_enabled(self.task) else []),
                         *author_fields.get("fixed_results", []),
                         *author_fields.get("prohibitions", []),
                         *([author_fields["ending"]] if author_fields.get("ending") else []),
@@ -1422,6 +1465,9 @@ class Worker:
         from .workflow_structure import maintain
 
         if not await maintain(self, result):
+            return
+        if result.pop("pause_after_maintenance_requested", False):
+            self.checkpoint(result, "paused")
             return
         for round_number in range(result.get("repair_round", 0), 3):
             result["repair_round"] = round_number

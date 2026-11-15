@@ -790,6 +790,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/tasks/{task_id}/continue-conditional-policy': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Continue Conditional Policy */
+    post: operations['continue_conditional_policy_api_tasks__task_id__continue_conditional_policy_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/artifacts': {
     parameters: {
       query?: never
@@ -1635,6 +1652,15 @@ export interface components {
        */
       profile: string
     }
+    /** ConditionalContinuationInput */
+    ConditionalContinuationInput: {
+      /** Client Request Id */
+      client_request_id: string
+      /** Reason */
+      reason: string
+      /** Account */
+      account?: string | null
+    }
     /** Confirm */
     Confirm: {
       /** Draft Revision */
@@ -2296,6 +2322,11 @@ export interface components {
        * @default 0
        */
       candidate_revision: number
+      /**
+       * Pause After Maintenance
+       * @default false
+       */
+      pause_after_maintenance: boolean
     }
     /** SaveInput */
     SaveInput: {
@@ -4351,6 +4382,41 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['ContinuationInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  continue_conditional_policy_api_tasks__task_id__continue_conditional_policy_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ConditionalContinuationInput']
       }
     }
     responses: {

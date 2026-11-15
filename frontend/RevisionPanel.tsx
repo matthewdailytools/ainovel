@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Artifact, type Chapter, type Task } from './api'
 import type { Notify } from './App'
+import { notTriggeredLabel } from './ConditionalReviewNotice'
 
 type Finding = {
   chapter: number
@@ -206,7 +207,13 @@ export function RevisionPanel({
             <article className="excerpt" key={index}>
               <strong>
                 {string(check.condition)} ·{' '}
-                {check.result === 'pass' ? '通过' : check.result === 'fail' ? '未通过' : '尚不能确定'}
+                {check.result === 'not_triggered'
+                  ? notTriggeredLabel(check, review.payload)
+                  : check.result === 'pass'
+                    ? '通过'
+                    : check.result === 'fail'
+                      ? '未通过'
+                      : '尚不能确定'}
               </strong>
               {!!check.evidence && <blockquote>{string(check.evidence)}</blockquote>}
             </article>

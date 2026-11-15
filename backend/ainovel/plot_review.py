@@ -6,6 +6,7 @@ import json
 
 from .db import DomainError
 from .plot_audit import VERSION, LEGACY_VERSION, audit_plot
+from .conditional_review import VERSION as CONDITIONAL_VERSION, valid_not_triggered
 
 
 def module_plot_source(request):
@@ -40,16 +41,25 @@ def module_plot_source(request):
 
 def review_passed(review):
     return (
-        all(check["result"] == "pass" for check in review["checks"])
+        all(
+            check["result"] == "pass"
+            or (
+                review.get("conditional_policy_version") == CONDITIONAL_VERSION
+                and valid_not_triggered(check, review.get("conditional_book_conditions", []))
+            )
+            for check in review["checks"]
+        )
         and not any(finding["severity"] == "blocker" for finding in review["findings"])
         and review.get("plot_audit", {}).get("status", "model_pass") == "model_pass"
     )
 
 
 def unresolved_without_blocker(review):
-    return review.get("plot_audit", {}).get("status") == "unverified" and not any(
-        finding["severity"] == "blocker" for finding in review["findings"]
+    unresolved = review.get("plot_audit", {}).get("status") == "unverified" or (
+        review.get("conditional_policy_version") == CONDITIONAL_VERSION
+        and any(check["result"] == "unknown" for check in review["checks"])
     )
+    return unresolved and not any(finding["severity"] == "blocker" for finding in review["findings"])
 
 
 def bind_plot_audit(audit, author_text, text, source_kind, *, candidate_revision=0, target=None):

@@ -128,6 +128,7 @@ export type Task = {
     repair_round?: number
     continued_to?: string
     continued_from?: string
+    conditional_book_policy_version?: string
     waiting_artifact?: string
     waiting_structure?: string
     pending_structure?: { chapter_id: string; revision: number; artifact_id?: string }

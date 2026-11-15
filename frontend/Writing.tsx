@@ -21,6 +21,7 @@ import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
 import { SceneTimePanel } from './SceneTimePanel'
+import { ConditionalReviewNotice } from './ConditionalReviewNotice'
 import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
 import { plotAuditEnabled, plotAuditFromPayload } from './plotAudit'
 import {
@@ -1517,6 +1518,9 @@ function Candidate({
           onStarted={onStarted}
         />
       )}
+      <ConditionalReviewNotice
+        value={artifact.kind === 'review' ? artifact.payload : artifact.payload.review}
+      />
       {!!artifact.payload.review && (
         <details>
           <summary>查看本章检查依据</summary>

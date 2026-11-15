@@ -89,10 +89,11 @@ class CaptureModel:
                 "closed": True,
                 "promises": [
                     {
-                        "condition": "本次主线收束",
+                        "condition": condition,
                         "result": "pass",
                         "evidence": instruction["可引用原文"][0]["source_id"],
                     }
+                    for condition in dict.fromkeys(["本次主线收束", *instruction["必须逐项核对的作者硬约定"]])
                 ],
                 "findings": [],
                 "summary": "工程替身，不是创作验收。",
@@ -300,6 +301,10 @@ def test_workflows_inherit_profile_through_plan_writing_review_repair_memory_and
         assert_profile(request, frozen["source_artifact_id"])
         assert "科幻" not in dumps(request["上下文"]["genre_profile"])
     assert result["result"]["completion"]["genre_profile"]["catalog_version"] == frozen["catalog_version"]
+    assert all(
+        item in [check["condition"] for check in result["result"]["completion"]["promises"]]
+        for item in payload["fixed"]
+    )
 
 
 def test_queued_module_stops_before_call_when_adopted_reader_changes(settings, domain, story):

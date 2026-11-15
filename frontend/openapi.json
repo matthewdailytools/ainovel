@@ -1549,6 +1549,38 @@
         }
       }
     },
+    "/api/tasks/{task_id}/continue-conditional-policy": {
+      "post": {
+        "summary": "Continue Conditional Policy",
+        "operationId": "continue_conditional_policy_api_tasks__task_id__continue_conditional_policy_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ConditionalContinuationInput" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/artifacts": {
       "get": {
         "summary": "Artifacts",
@@ -2960,6 +2992,25 @@
         "required": ["title", "kind"],
         "title": "Character"
       },
+      "ConditionalContinuationInput": {
+        "properties": {
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" },
+          "account": {
+            "anyOf": [{ "type": "string", "maxLength": 100, "minLength": 1 }, { "type": "null" }],
+            "title": "Account"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["client_request_id", "reason"],
+        "title": "ConditionalContinuationInput"
+      },
       "Confirm": {
         "properties": {
           "draft_revision": {
@@ -3724,6 +3775,11 @@
             "minimum": 0,
             "title": "Candidate Revision",
             "default": 0
+          },
+          "pause_after_maintenance": {
+            "type": "boolean",
+            "title": "Pause After Maintenance",
+            "default": false
           }
         },
         "additionalProperties": false,

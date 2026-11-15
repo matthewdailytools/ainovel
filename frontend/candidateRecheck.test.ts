@@ -399,6 +399,37 @@ test('SSR复检报告只读，不提供采纳、恢复或保存稿局部修订�
   expect(onTarget).not.toHaveBeenCalled()
 })
 
+test('新版复检未触发项单列整书待核对，不能以生成记忆冒充全部条件通过', () => {
+  const artifact = reportArtifact()
+  const payload = reportPayload()
+  artifact.payload = {
+    ...payload,
+    review: {
+      ...payload.review,
+      conditional_policy_version: 'conditional-book-check/1',
+      conditional_book_conditions: ['若涉及母亲，须保持她尚不知情。'],
+      checks: [
+        {
+          condition: '若涉及母亲，须保持她尚不知情。',
+          result: 'not_triggered',
+          scope: 'book',
+          applicability: 'not_triggered',
+          chapter_obligation: 'not_required',
+          explanation: '本章未涉及母亲。',
+          evidence: '',
+        },
+      ],
+    },
+  }
+  const html = renderToStaticMarkup(
+    createElement(CandidateRecheckReport, { artifact, branchId: 'branch-1', onTarget: () => undefined }),
+  )
+  expect(html).toContain('本章未触发，整书待核对')
+  expect(html).toContain('整书仍须逐项核对')
+  expect(html).toContain('本轮生成了记忆候选；未触发约定仍待整书核对')
+  expect(html).not.toContain('全部检查通过后生成了记忆候选')
+})
+
 test('SSR申请入口保留额外模型费用说明且未保存状态禁用，不触发请求', () => {
   const perform = vi.fn(async (action: () => Promise<unknown>) => {
     await action()

@@ -600,6 +600,10 @@ class Domain:
         profile = self.genre_profile(branch_id)
         contract = self.author_contract(branch_id)
         initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
+        if kind in {"workflow", "candidate_recheck"}:
+            from .conditional_review import KEY as CONDITIONAL_KEY, VERSION as CONDITIONAL_VERSION
+
+            initial[CONDITIONAL_KEY] = CONDITIONAL_VERSION
         if (kind == "module" and payload.get("action") == "story.extract") or (
             kind == "workflow" and payload.get("structured_maintenance")
         ):
@@ -611,7 +615,7 @@ class Domain:
         if kind == "candidate_recheck":
             from .candidate_recheck import VERSION, freeze
 
-            snapshot = freeze(self, payload)
+            snapshot = freeze(self, payload, conditional_policy=initial[CONDITIONAL_KEY])
             initial.update(
                 candidate_recheck_version=VERSION,
                 candidate_recheck_snapshot=snapshot,
@@ -726,7 +730,7 @@ class Domain:
             if selection := initial.get("candidate_recheck_snapshot"):
                 from .candidate_recheck import freeze
 
-                if freeze(self, payload) != selection:
+                if freeze(self, payload, conditional_policy=selection.get(CONDITIONAL_KEY)) != selection:
                     raise DomainError("candidate_changed", "复检来源在排队时改变，未创建任务。", 409)
             db.execute(
                 "INSERT INTO tasks(id,kind,novel_id,branch_id,status,payload,result,created,updated) VALUES(?,?,?,?,?,?,?,?,?)",

@@ -20,6 +20,7 @@ import { characterFieldRepairEnabled } from './characterFieldRepair'
 import { CharacterFieldRepairOption, FrozenCharacterFieldRepairPolicy } from './CharacterRepairDetails'
 import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
 import { plotAuditFromPayload } from './plotAudit'
+import { CONDITIONAL_REVIEW_VERSION, ConditionalReviewNotice } from './ConditionalReviewNotice'
 import { FrozenStructureOutputPolicy, StructureOutputSettings } from './StructureOutputSettings'
 import { PlanPreparationDetails, planPreparationNeedsReview } from './PlanPreparationDetails'
 import {
@@ -75,17 +76,22 @@ export function WorkflowPage({
   const [busy, setBusy] = useState(false)
   const pendingRequest = useRef<{ signature: string; key: string } | null>(null)
   const pendingContinuation = useRef<{ signature: string; key: string } | null>(null)
+  const pendingConditionalContinuation = useRef<{ signature: string; key: string } | null>(null)
+  const conditionalTarget = useRef('')
   const [selectedTask, setSelectedTask] = useState('')
   const [loadedWaiting, setWaiting] = useState<Artifact>()
   const [incomingWaiting, setIncomingWaiting] = useState<Artifact>()
   const waitingRef = useRef<Artifact | undefined>(undefined)
   const [unknown, setUnknown] = useState(false)
   const [changes, setChanges] = useState(false)
+  const [pauseAfterMaintenance, setPauseAfterMaintenance] = useState(false)
   const [regenerate, setRegenerate] = useState(false)
   const [retryReason, setRetryReason] = useState('')
   const [continueAccount, setContinueAccount] = useState('')
   const [continueLimit, setContinueLimit] = useState('')
   const [continueReason, setContinueReason] = useState('')
+  const [conditionalContinueReason, setConditionalContinueReason] = useState('')
+  const [conditionalContinueAccount, setConditionalContinueAccount] = useState('')
   const [status, setStatus] = useState('')
   const formSignature = JSON.stringify([
     mode,
@@ -137,6 +143,7 @@ export function WorkflowPage({
     visibleTasks.find((t) => t.branch_id === branchId) ||
     visibleTasks[0]
   const waitingId = task?.result.waiting_structure || task?.result.waiting_artifact
+  conditionalTarget.current = `${novel.id}/${task?.id || ''}`
   const waiting = loadedWaiting?.id === waitingId ? loadedWaiting : undefined
   const structureWaiting = !!task?.result.waiting_structure
   const candidateChanged = !!waiting && incomingWaiting?.id === waiting.id
@@ -154,11 +161,14 @@ export function WorkflowPage({
   useEffect(() => {
     setUnknown(false)
     setChanges(false)
+    setPauseAfterMaintenance(false)
     setRegenerate(false)
     setRetryReason('')
     setContinueAccount('')
     setContinueLimit('')
     setContinueReason('')
+    setConditionalContinueReason('')
+    setConditionalContinueAccount('')
   }, [task?.id, task?.status, waitingId])
   useEffect(() => {
     let active = true
@@ -680,6 +690,17 @@ export function WorkflowPage({
                     <input type="checkbox" checked={changes} onChange={(e) => setChanges(e.target.checked)} />
                     前文已修改时，从最早失效章重新检查并按需修订
                   </label>
+                  {task.result.conditional_book_policy_version === undefined &&
+                    ((task.status === 'needs_review' && !!waitingId) || !!task.result.pending_structure) && (
+                      <label className="check">
+                        <input
+                          type="checkbox"
+                          checked={pauseAfterMaintenance}
+                          onChange={(e) => setPauseAfterMaintenance(e.target.checked)}
+                        />
+                        完成已采纳章节维护后暂停
+                      </label>
+                    )}
                   {task.status === 'needs_review' &&
                     (waiting?.status === 'candidate' ||
                       (structureWaiting && waiting?.status === 'rejected')) && (
@@ -730,6 +751,7 @@ export function WorkflowPage({
                           regenerate_pending: regenerate,
                           reason: retryReason,
                           candidate_revision: waiting?.candidate_revision ?? 0,
+                          pause_after_maintenance: pauseAfterMaintenance,
                         })
                         await refresh()
                       })
@@ -742,6 +764,119 @@ export function WorkflowPage({
                       章纲准备尚未通过，请核对执行记录。可在上方调整简报后创建独立批次，本批记录和原稿保留；恢复不会重置开放选择轮次。
                     </p>
                   )}
+                  {task.status === 'paused' &&
+                    task.result.conditional_book_policy_version === undefined &&
+                    !waitingId &&
+                    !task.result.pending_structure &&
+                    !task.result.continued_to && (
+                      <details>
+                        <summary>按新约定从检查点继续</summary>
+                        <p className="small">
+                          创建新任务，保留原设定、规划、已采纳稿、修订和费用记录。明确的全书条件本章完全未触发且没有违约时，单列“本章未触发”，整书仍待核对；本章必须完成的结果、明确违约和适用性不明仍停止。
+                        </p>
+                        <p className="small muted">
+                          先采纳待审章，勾选“完成已采纳章节维护后暂停”并恢复；维护成功停到安全检查点后再使用。默认沿用当前配置，可主动选择同服务商、同币种的其他配置。费用沿原额度累计，不重置预算；未知费用预留未决时停止续跑，仍须核对费用记录。
+                        </p>
+                        <label>
+                          新约定续跑配置
+                          <select
+                            value={conditionalContinueAccount}
+                            onChange={(e) => setConditionalContinueAccount(e.target.value)}
+                          >
+                            <option value="">沿用当前：{task.payload.account}</option>
+                            {accounts
+                              .filter((candidate) => {
+                                const current = accounts.find((entry) => entry.id === task.payload.account)
+                                return (
+                                  current &&
+                                  candidate.id !== current.id &&
+                                  candidate.kind === current.kind &&
+                                  candidate.currency === current.currency
+                                )
+                              })
+                              .map((candidate) => (
+                                <option
+                                  key={candidate.id}
+                                  value={candidate.id}
+                                  disabled={!candidate.configured || !candidate.priced}
+                                >
+                                  {candidate.id} · {candidate.model} · {candidate.currency}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                        <label>
+                          按新约定续跑的原因
+                          <input
+                            value={conditionalContinueReason}
+                            maxLength={2000}
+                            onChange={(e) => setConditionalContinueReason(e.target.value)}
+                          />
+                        </label>
+                        <button
+                          disabled={busy || !conditionalContinueReason.trim()}
+                          onClick={() =>
+                            void perform(async () => {
+                              const reason = conditionalContinueReason.trim()
+                              if (!reason) throw new Error('请填写按新约定续跑的原因。')
+                              const requestedAccount = conditionalContinueAccount || task.payload.account
+                              if (requestedAccount !== task.payload.account) {
+                                const previous = accounts.find((entry) => entry.id === task.payload.account)
+                                const selected = accounts.find((entry) => entry.id === requestedAccount)
+                                if (
+                                  !previous ||
+                                  !selected ||
+                                  selected.kind !== previous.kind ||
+                                  selected.currency !== previous.currency ||
+                                  !selected.configured ||
+                                  !selected.priced
+                                )
+                                  throw new Error('请选择同服务商、同币种且已配置单价的可用配置。')
+                              }
+                              const values = {
+                                reason,
+                                ...(requestedAccount !== task.payload.account
+                                  ? { account: requestedAccount }
+                                  : {}),
+                              }
+                              const signature = JSON.stringify({ source: task.id, ...values })
+                              if (pendingConditionalContinuation.current?.signature !== signature)
+                                pendingConditionalContinuation.current = {
+                                  signature,
+                                  key: crypto.randomUUID(),
+                                }
+                              const target = conditionalTarget.current
+                              const row = await api<Task>(
+                                `/tasks/${task.id}/continue-conditional-policy`,
+                                'POST',
+                                {
+                                  ...values,
+                                  client_request_id: pendingConditionalContinuation.current.key,
+                                },
+                              )
+                              if (
+                                row.kind !== 'workflow' ||
+                                row.novel_id !== novel.id ||
+                                row.branch_id !== task.branch_id ||
+                                row.payload.account !== requestedAccount ||
+                                row.result.continued_from !== task.id ||
+                                row.result.conditional_book_policy_version !== CONDITIONAL_REVIEW_VERSION
+                              )
+                                throw new Error(
+                                  '新政策续跑回执与原检查点不符，已保留原因和提交标识，请核对任务记录。',
+                                )
+                              if (conditionalTarget.current !== target) return
+                              setTasks((prior) => [row, ...prior.filter((t) => t.id !== row.id)])
+                              setSelectedTask(row.id)
+                              pendingConditionalContinuation.current = null
+                              setStatus('已按新约定创建续跑任务；旧稿、旧报告及累计费用保留。')
+                            })
+                          }
+                        >
+                          创建按新约定续跑任务
+                        </button>
+                      </details>
+                    )}
                   {['paused', 'blocked_runtime', 'blocked_creative', 'cancelled'].includes(task.status) &&
                     !waitingId && (
                       <details>
@@ -897,6 +1032,7 @@ export function WorkflowPage({
                       />
                       <details>
                         <summary>本章检查</summary>
+                        <ConditionalReviewNotice value={waiting.payload.review} />
                         <pre>{JSON.stringify(waiting.payload.review, null, 2)}</pre>
                       </details>
                       <button
