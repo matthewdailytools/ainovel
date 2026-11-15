@@ -334,6 +334,7 @@ class Worker:
             "写前解释AI工作章纲",
             "写前明确AI工作章纲开放细节",
             "独立核对AI工作章纲保持",
+            "独立观察全书条件在本章是否触发",
         }:
             # These source-isolated stages must not reinterpret source claims
             # through other adopted settings, genre preferences or old prose.
@@ -391,6 +392,13 @@ class Worker:
                             "错误字段": issues,
                             "根对象必填字段": schema.model_json_schema().get("required", []),
                             "要求": "返回包含全部根对象必填字段的完整JSON对象，不只返回修改片段。missing表示字段缺失，须补回相应字段；不得为修复JSON括号而丢掉reason等其他必填字段。只返回一个根对象，不在根对象闭合后追加字段。严格遵守各字段枚举，按错误字段中的actual与allowed核对；不能把相邻字段的取值混用。不新增或改变事实。回到任务正文校验逐字引文。",
+                            **(
+                                {
+                                    "固定条件编号修正要求": "checks[].condition仍只填原始任务编号表的FIX编号，按表原顺序各一次，不重抄、缩写或改写条件。保留unknown/fail及依据，不为修复格式改成pass；遵守各编号允许的result。"
+                                }
+                                if source_instruction.get("固定条件检查格式版本") == "fixed-check-id/1"
+                                else {}
+                            ),
                             **(
                                 {
                                     "事实字段说明": "kind是领域类别，只能event/knowledge/capability/resource/relationship/promise/world；truth是真实性标记，只能fact/belief/uncertain/plan。belief、uncertain、plan不是kind。角色误信仍保留truth=belief，不升级为作者事实。"
@@ -515,6 +523,11 @@ class Worker:
                         else {}
                     ),
                     **(
+                        {"review_condition_id_version": source_instruction["固定条件编号契约版本"]}
+                        if "固定条件编号契约版本" in source_instruction
+                        else {}
+                    ),
+                    **(
                         {"conditional_book_policy_version": source_instruction["全书条件适用性政策"]}
                         if "全书条件适用性政策" in source_instruction
                         else {}
@@ -522,6 +535,11 @@ class Worker:
                     **(
                         {"conditional_guidance_version": source_instruction["全书条件上下文提示版本"]}
                         if "全书条件上下文提示版本" in source_instruction
+                        else {}
+                    ),
+                    **(
+                        {"book_applicability_version": source_instruction["全书条件适用观察版本"]}
+                        if "全书条件适用观察版本" in source_instruction
                         else {}
                     ),
                     **(
@@ -962,6 +980,10 @@ class Worker:
                 "定位错误": issues,
                 "引用修正要求": "回到本次正文重新核验，引用必须是连续逐字原文。不得编造引文或仅为通过检查删除真实问题；确无证据时标未知，不改造正文。",
             }
+            if instruction.get("固定条件检查格式版本") == "fixed-check-id/1":
+                from .review_condition_ids import REPAIR_GUIDANCE
+
+                current["固定条件编号修正要求"] = REPAIR_GUIDANCE
         message = "两轮引用修正后仍无法回到原文，未采纳或自动推进。"
         if diagnostic_label:
             details = "；".join(issue[:350] for issue in issues[:6])
@@ -997,13 +1019,38 @@ class Worker:
         if fixed:
             check_type = "ConditionalReviewCheck" if conditional else "ReviewCheck"
             contract["$defs"][check_type]["properties"]["condition"]["enum"] = list(dict.fromkeys(fixed))
+        table, actual_ids = [], []
+        applicability = None
+        if conditional:
+            from .review_condition_ids import condition_table, id_contract
+            from .book_applicability import assess, enabled as applicability_enabled
+
+            if applicability_enabled(self):
+                applicability = await assess(self, text, fixed, origins, number, instructions, eligible)
+            assessment = (
+                {check["condition_id"]: check for check in applicability["checks"]}
+                if applicability is not None
+                else None
+            )
+            table = condition_table(fixed, origins, eligible, assessment=assessment)
+            contract = id_contract(contract, table)
 
         def validate(result):
             issues = []
+            if conditional:
+                from .review_condition_ids import resolve_checks
+
+                id_issues, resolved = resolve_checks(result["checks"], table)
+                actual_ids[:] = resolved
+                issues.extend(id_issues)
             if [item["condition"] for item in result["checks"]] != fixed:
                 issues.append(
                     f"checks须严格{len(fixed)}项，实际{len(result['checks'])}项；"
-                    "按固定条件原顺序逐字填写，不添加或改写条件。"
+                    + (
+                        "按固定编号原顺序各一次，后端回填原话；不添加、重排或改写条件。"
+                        if conditional
+                        else "按固定条件原顺序逐字填写，不添加或改写条件。"
+                    )
                 )
                 for index, check in enumerate(result["checks"]):
                     if index >= len(fixed):
@@ -1069,8 +1116,23 @@ class Worker:
         }
         if conditional:
             from .conditional_review import VERSION as CONDITIONAL_VERSION, GUIDANCE_VERSION
+            from .review_condition_ids import VERSION as CONDITION_ID_VERSION, REPAIR_GUIDANCE
 
             instruction.update(
+                固定条件检查格式版本=CONDITION_ID_VERSION,
+                固定条件编号契约版本=CONDITION_ID_VERSION,
+                固定条件编号表=table,
+                固定条件编号规则=REPAIR_GUIDANCE,
+                checks清单边界=(
+                    "checks严格按固定条件编号表原顺序各一次，condition只填FIX编号；项数保持不变。"
+                    "每项只用该编号允许的result；清单外的问题写findings，不新增、遗漏、合并或改写条件。"
+                    "unknown/fail保持原判断及依据，不为通过格式改为pass。"
+                ),
+                要求=(
+                    "checks[].condition只填固定条件编号表的编号，不抄原话。其余原文引用、条件触发、"
+                    "本章义务、情节保持及findings要求全部保留。"
+                    + instruction["要求"].removeprefix("checks对每条固定条件逐字列出且仅列一次。")
+                ),
                 全书条件适用性政策=CONDITIONAL_VERSION,
                 全书条件上下文提示版本=GUIDANCE_VERSION,
                 固定条件来源=origins,
@@ -1096,10 +1158,21 @@ class Worker:
                     "适用性不明仍unknown，明确违反fail并列blocker。有合适原文的pass仍按原证据要求。"
                     "若与旧‘没有原文填unknown’要求冲突，仅上述清单中确认完全未触发的项采用本政策；"
                     "不能仅因某数值尚未出现就推定整项未触发，也不能按候选倒改约定。"
-                    "同一全书约定可能含‘第26章必须揭示’等无条件时点要求；到了指定章仍必须核对，"
+                    "同一全书约定可能另含指定章节的无条件结果要求；到了指定章仍必须核对，"
                     "不能用该约定另一处‘若涉及’覆盖本章必达事项。章节义务不明用chapter_obligation=uncertain且result=unknown。"
                 ),
             )
+            if applicability is not None:
+                instruction.update(
+                    独立适用性观察=applicability,
+                    适用性核对边界=(
+                        "独立观察只判断本章条件前提及本章义务，未判断正文是否通过。"
+                        "按固定编号表允许的result核对：已确认完全未触发且没有本章必达事项的约定只能单列not_triggered，"
+                        "不能借无关原文标triggered/pass或宣称已兑现；仍有疑问用unknown，明确违背用fail。"
+                        "独立观察也可能有误；若本次正文证据与观察矛盾，保留unknown或明确违约及其原文，"
+                        "不得为了符合观察删掉问题或把未知改为pass。"
+                    ),
+                )
         result = await self.grounded(
             instruction,
             schema,
@@ -1108,7 +1181,14 @@ class Worker:
             contract=contract,
             diagnostic_label="正文审查检查格式或来源未通过",
         )
-        return bind_report(result, eligible, origins) if conditional else result
+        if conditional:
+            from .review_condition_ids import bind_ids
+
+            bound = bind_ids(bind_report(result, eligible, origins), table, actual_ids)
+            if applicability is not None:
+                bound["book_applicability"] = applicability
+            return bound
+        return result
 
     async def memory(self, text, context):
         context = text_context(context, text, "memory_extraction")
@@ -1438,8 +1518,12 @@ class Worker:
 
     async def workflow(self):
         payload, result = self.task["payload"], self.task["result"]
+        from .book_applicability import enabled as applicability_enabled
+        from .conditional_review import enabled as conditional_enabled
         from .workflow_plan_preparation import enabled as preparation_enabled, prepare
 
+        conditional_enabled(self.task)
+        applicability_enabled(self)
         prepare_plans = preparation_enabled(self)
         segment = payload.get("completion_scope", "whole_book") == "segment"
         branch_id = self.task["branch_id"]

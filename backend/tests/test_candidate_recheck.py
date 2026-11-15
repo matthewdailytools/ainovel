@@ -12,6 +12,7 @@ from ainovel.budget import Budget
 from ainovel.db import dumps
 from ainovel.providers import ModelClient
 from ainovel.worker import Worker
+from ainovel.book_applicability import ACTION as APPLICABILITY_ACTION
 from test_openai_schema import completed
 from test_plot_review_shared import PlotModel
 from test_workflow_plan_preparation import PreparationModel
@@ -73,7 +74,7 @@ class RecheckModel(PlotModel):
         frame = json.loads(prompt.split("\n只返回")[0])
         instruction = frame["任务"]
         action = instruction.get("动作")
-        assert action in {REVIEW, PLOT, MEMORY}, "复检不能重解释、改章纲或重写正文"
+        assert action in {REVIEW, PLOT, MEMORY, APPLICABILITY_ACTION}, "复检不能重解释、改章纲或重写正文"
         self.actions.append(action)
         if self.hook:
             self.hook(action, task_id)

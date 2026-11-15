@@ -72,7 +72,7 @@ def assisted_contract(source, parent, plot):
     return contract
 
 
-def freeze(domain, request, *, conditional_policy=None):
+def freeze(domain, request, *, conditional_policy=None, applicability_version=None):
     from .plot_audit import VERSION as PLOT_VERSION
     from .plot_identity_context import VERSION as IDENTITY_VERSION
     from .workflow_plan_preparation import VERSION as PREPARATION_VERSION, frozen_contract
@@ -152,6 +152,14 @@ def freeze(domain, request, *, conditional_policy=None):
         if conditional_policy != CONDITIONAL_VERSION:
             raise DomainError("conditional_policy", "复检政策无法确认，未升级旧检查。", 409)
         policy = {KEY: conditional_policy, "book_fixed": deepcopy(parent["payload"]["fixed"])}
+    if applicability_version is not None:
+        from .book_applicability import KEY as APPLICABILITY_KEY, VERSION as APPLICABILITY_VERSION
+
+        if applicability_version != APPLICABILITY_VERSION or not policy:
+            raise DomainError(
+                "book_applicability_version", "独立触发核对政策无法确认，未新增旧任务调用。", 409
+            )
+        policy[APPLICABILITY_KEY] = applicability_version
     return {
         "version": VERSION,
         **policy,
@@ -184,12 +192,23 @@ def validate(worker):
         raise DomainError("candidate_recheck_version", "候选复检政策无法确认，未升级旧任务。", 409)
     expected = worker.task["result"].get("candidate_recheck_snapshot")
     from .conditional_review import KEY
+    from .book_applicability import KEY as APPLICABILITY_KEY
 
     if expected is not None and expected.get(KEY) != worker.task["result"].get(KEY):
         raise DomainError("conditional_policy", "复检任务与来源的全书条件政策不符，未继续。", 409)
+    if expected is not None and expected.get(APPLICABILITY_KEY) != worker.task["result"].get(
+        APPLICABILITY_KEY
+    ):
+        raise DomainError("book_applicability_version", "复检任务与来源的独立触发政策不符，未派发。", 409)
     if (
         expected is None
-        or freeze(worker.domain, worker.task["payload"], conditional_policy=expected.get(KEY)) != expected
+        or freeze(
+            worker.domain,
+            worker.task["payload"],
+            conditional_policy=expected.get(KEY),
+            applicability_version=expected.get(APPLICABILITY_KEY),
+        )
+        != expected
     ):
         raise DomainError("candidate_changed", "候选或其冻结来源在复检期间改变，旧结果保留但不发布。", 409)
     return expected

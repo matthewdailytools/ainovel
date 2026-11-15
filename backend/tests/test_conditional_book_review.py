@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from ainovel.candidate_recheck import freeze
 from ainovel.conditional_review import KEY, VERSION
+from ainovel.book_applicability import KEY as APPLICABILITY_KEY, ACTION as APPLICABILITY_ACTION
 from ainovel.db import dumps
 from ainovel.models import Completion, Review
 from ainovel.plot_review import review_passed, unresolved_without_blocker
@@ -104,7 +105,7 @@ def queue(domain, story, *, fixed=None, chapter_fixed=None, legacy=False, scope=
         payload["plots"][0]["fixed"] = chapter_fixed
     task = domain.queue("workflow", payload, story["branch_id"])
     if legacy:
-        result = {k: v for k, v in task["result"].items() if k != KEY}
+        result = {k: v for k, v in task["result"].items() if k not in {KEY, APPLICABILITY_KEY}}
         with domain.db.connect(True) as tx:
             tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(result), task["id"]))
         task = domain.task(task["id"])
@@ -154,7 +155,7 @@ def test_uncertain_applicability_stops_before_prose_repair_or_memory(settings, d
     assert candidate["payload"]["review"]["checks"][0]["result"] == "unknown"
     assert candidate["payload"]["memory"] == {}
     assert len(model.chapter_reviews) == 1
-    assert model.actions == ["按章纲写完整正文", "审查正文"]
+    assert model.actions == ["按章纲写完整正文", APPLICABILITY_ACTION, "审查正文"]
     assert "未自动修订" in stopped["error"]
     assert domain.chapter(candidate["chapter_id"])["revision"] == 0
     assert not domain.db.all("SELECT * FROM receipts")
@@ -326,7 +327,9 @@ def test_new_recheck_freezes_policy_but_preserves_legacy_parent_and_old_report(
     settings, domain, client, stopped_candidate
 ):
     parent, candidate = stopped_candidate
-    old_progress = {key: value for key, value in parent["result"].items() if key != KEY}
+    old_progress = {
+        key: value for key, value in parent["result"].items() if key not in {KEY, APPLICABILITY_KEY}
+    }
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(old_progress), parent["id"]))
     parent = domain.task(parent["id"])
@@ -360,7 +363,9 @@ def test_explicit_new_recheck_can_classify_a_legacy_candidates_untouched_book_co
     payload = workflow_payload(story, mode="automatic")
     payload.update(fixed=[CONDITION], plot_contract_check=True)
     task = domain.queue("workflow", payload, story["branch_id"])
-    legacy_result = {key: value for key, value in task["result"].items() if key != KEY}
+    legacy_result = {
+        key: value for key, value in task["result"].items() if key not in {KEY, APPLICABILITY_KEY}
+    }
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET result=? WHERE id=?", (dumps(legacy_result), task["id"]))
     initial_model = PreparationModel()
@@ -415,7 +420,12 @@ def test_explicit_new_recheck_can_classify_a_legacy_candidates_untouched_book_co
     asyncio.run(Worker(settings, model).run_once())
     done = domain.task(recheck["id"])
     assert done["status"] == "succeeded", done["error"]
-    assert model.actions == ["审查正文", "逐项对照作者情节解释与本次正文", "从正文提取事实候选与章节摘要"]
+    assert model.actions == [
+        APPLICABILITY_ACTION,
+        "审查正文",
+        "逐项对照作者情节解释与本次正文",
+        "从正文提取事实候选与章节摘要",
+    ]
     updated = domain.artifact(candidate["id"])
     assert updated["payload"]["review_passed"] is True
     assert updated["payload"]["memory"]["facts"]
@@ -441,6 +451,7 @@ def test_already_queued_legacy_recheck_keeps_legacy_snapshot_and_report_shape(
     task = response.json()
     original = deepcopy(task["result"])
     original.pop(KEY)
+    original.pop(APPLICABILITY_KEY)
     original["candidate_recheck_snapshot"] = freeze(domain, task["payload"])
     assert KEY not in original["candidate_recheck_snapshot"]
     with domain.db.connect(True) as tx:

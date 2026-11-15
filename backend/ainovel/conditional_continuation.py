@@ -233,11 +233,14 @@ def continue_policy(domain, budget, current, request):
         }
         progress = deepcopy(current["result"])
         progress.pop("pause_after_maintenance_requested", None)
+        from .book_applicability import KEY as APPLICABILITY_KEY, VERSION as APPLICABILITY_VERSION
+
         progress.update(
             continued_from=current["id"],
-            **{KEY: VERSION},
+            **{KEY: VERSION, APPLICABILITY_KEY: APPLICABILITY_VERSION},
             policy_continuation={
                 "version": VERSION,
+                APPLICABILITY_KEY: APPLICABILITY_VERSION,
                 "source_task_id": current["id"],
                 "source_payload_sha256": sha(current["payload"]),
                 "source_progress_sha256": sha(current["result"]),

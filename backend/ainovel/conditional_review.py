@@ -13,6 +13,9 @@ GUIDANCE_VERSION = "book-condition-context/1"
 
 
 class ConditionalReviewCheck(ReviewCheck):
+    condition: str = Field(
+        description="只填本次固定条件编号表中的FIX编号，按原顺序各一次；不重抄或改写原话。"
+    )
     result: Literal["pass", "fail", "unknown", "not_triggered"] = Field(
         description="not_triggered仅用于本次允许清单中的全书条件，本章完全未触发且没有本章必达事项；并非pass。"
     )

@@ -7,6 +7,7 @@ import pytest
 from ainovel.db import DomainError, dumps
 from ainovel.models import WorkflowInput
 from ainovel.worker import PROMPT_VERSION, Worker
+from ainovel.book_applicability import ACTION as APPLICABILITY_ACTION
 from helpers.character_review_fixture import character_review_output
 
 
@@ -124,6 +125,20 @@ class FakeModel:
         text = "沈砚用旧尺测量潮水，留下可以回查的记录。" * 15
         if (review := character_review_output(instruction)) is not None:
             output = review
+        elif action == APPLICABILITY_ACTION:
+            output = {
+                "checks": [
+                    {
+                        "condition_id": row["condition_id"],
+                        "trigger": "not_triggered",
+                        "chapter_obligation": "not_required",
+                        "trigger_clause": row["condition"],
+                        "evidence": "",
+                        "explanation": "隔离工程样例正文只有测潮，不涉及此条件；整书仍待核对。",
+                    }
+                    for row in instruction["全书条件原话"]
+                ]
+            }
         elif action == "全书滚动规划":
             self.plan_context = data["上下文"]
             output = {
