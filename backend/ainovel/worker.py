@@ -538,6 +538,11 @@ class Worker:
                         else {}
                     ),
                     **(
+                        {"chapter_adherence_version": source_instruction["章节遵守核对版本"]}
+                        if "章节遵守核对版本" in source_instruction
+                        else {}
+                    ),
+                    **(
                         {"book_applicability_version": source_instruction["全书条件适用观察版本"]}
                         if "全书条件适用观察版本" in source_instruction
                         else {}
@@ -1115,7 +1120,11 @@ class Worker:
             "章节号": number,
         }
         if conditional:
-            from .conditional_review import VERSION as CONDITIONAL_VERSION, GUIDANCE_VERSION
+            from .conditional_review import (
+                VERSION as CONDITIONAL_VERSION,
+                GUIDANCE_VERSION,
+                ADHERENCE_VERSION,
+            )
             from .review_condition_ids import VERSION as CONDITION_ID_VERSION, REPAIR_GUIDANCE
 
             instruction.update(
@@ -1123,9 +1132,23 @@ class Worker:
                 固定条件编号契约版本=CONDITION_ID_VERSION,
                 固定条件编号表=table,
                 固定条件编号规则=REPAIR_GUIDANCE,
+                章节遵守核对版本=ADHERENCE_VERSION,
+                章节结果含义=(
+                    "checks[].chapter_result只判断本章当前约束的遵守情况，不是全书履约状态。"
+                    "book来源：核对本章是否明确违背当前适用的限制，以及已到本章的肯定事项是否实际完成；"
+                    "未到本章的整书终局或后续结果不能因为尚未兑现而单独判unknown/fail。"
+                    "例如全书约定在末章公开责任，本章仍在调查且未提前宣布真相，可引用本章代表原文核对当前保持；"
+                    "此处pass只表示本章遵守，整书终局仍保留在book_checks_pending，必须另作全书核对。"
+                    "chapter来源：必须核对本章已锁定的肯定结果实际发生，不能仅凭‘没有违约’通过；"
+                    "prohibition来源仍须核对本章持续禁止是否保持。有明确违背则fail，"
+                    "当前适用性、本章义务或正文依据仍不明就unknown，不得据此自动改pass。"
+                    "逐项保持原话、编号和独立适用性允许范围；not_triggered资格不扩大。"
+                    "只输出chapter_result，不同时输出旧result；后端保存时仍以result记录同一判断，"
+                    "不会把本章pass作为全书已兑现或作者文学认可。"
+                ),
                 checks清单边界=(
                     "checks严格按固定条件编号表原顺序各一次，condition只填FIX编号；项数保持不变。"
-                    "每项只用该编号允许的result；清单外的问题写findings，不新增、遗漏、合并或改写条件。"
+                    "每项chapter_result只用该编号allowed_results允许的取值；清单外的问题写findings，不新增、遗漏、合并或改写条件。"
                     "unknown/fail保持原判断及依据，不为通过格式改为pass。"
                 ),
                 要求=(
@@ -1150,7 +1173,7 @@ class Worker:
                 允许单列本章未触发的全书约定=eligible,
                 本章未触发政策=(
                     "只对‘允许单列本章未触发的全书约定’中的原话逐项判断。仅当本章完全未涉及"
-                    "其触发行为、没有发现违约、且本章情节没有要求完成该行为时，可填result=not_triggered、"
+                    "其触发行为、没有发现违约、且本章情节没有要求完成该行为时，可填chapter_result=not_triggered、"
                     "scope=book、applicability=not_triggered、chapter_obligation=not_required，"
                     "explanation逐项说明未涉及的范围、为什么本章无必达事项及整书仍待核对。"
                     "完全未出现可留evidence空；有代表段只能引用本次原文。not_triggered不等于pass或全书已兑现。"
@@ -1159,7 +1182,7 @@ class Worker:
                     "若与旧‘没有原文填unknown’要求冲突，仅上述清单中确认完全未触发的项采用本政策；"
                     "不能仅因某数值尚未出现就推定整项未触发，也不能按候选倒改约定。"
                     "同一全书约定可能另含指定章节的无条件结果要求；到了指定章仍必须核对，"
-                    "不能用该约定另一处‘若涉及’覆盖本章必达事项。章节义务不明用chapter_obligation=uncertain且result=unknown。"
+                    "不能用该约定另一处‘若涉及’覆盖本章必达事项。章节义务不明用chapter_obligation=uncertain且chapter_result=unknown。"
                 ),
             )
             if applicability is not None:
@@ -1167,7 +1190,7 @@ class Worker:
                     独立适用性观察=applicability,
                     适用性核对边界=(
                         "独立观察只判断本章条件前提及本章义务，未判断正文是否通过。"
-                        "按固定编号表允许的result核对：已确认完全未触发且没有本章必达事项的约定只能单列not_triggered，"
+                        "按固定编号表allowed_results允许的chapter_result核对：已确认完全未触发且没有本章必达事项的约定只能单列not_triggered，"
                         "不能借无关原文标triggered/pass或宣称已兑现；仍有疑问用unknown，明确违背用fail。"
                         "独立观察也可能有误；若本次正文证据与观察矛盾，保留unknown或明确违约及其原文，"
                         "不得为了符合观察删掉问题或把未知改为pass。"

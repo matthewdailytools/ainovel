@@ -258,7 +258,8 @@ def test_nested_anyof_compiles_to_openai_wire_without_losing_source_enums_or_mut
             ["FIX002"],
         ]
         not_triggered = branches[-1]["properties"]
-        assert not_triggered["result"]["enum"] == ["not_triggered"]
+        assert not_triggered["chapter_result"]["enum"] == ["not_triggered"]
+        assert all("result" not in branch["properties"] for branch in branches)
         assert not_triggered["scope"]["enum"] == ["book"]
         assert not_triggered["applicability"]["enum"] == ["not_triggered"]
         assert not_triggered["chapter_obligation"]["enum"] == ["not_required"]
@@ -291,7 +292,7 @@ def test_optional_independent_assessment_restricts_both_wire_and_runtime_without
         result
         for branch in branches
         if branch["properties"]["condition"]["enum"] == ["FIX002"]
-        for result in branch["properties"]["result"]["enum"]
+        for result in branch["properties"]["chapter_result"]["enum"]
     }
     assert wire_allowed == allowed
     for result in ["pass", "fail", "unknown", "not_triggered"]:

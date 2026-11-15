@@ -6,6 +6,7 @@ VERSION = "fixed-check-id/1"
 RESULTS = ["pass", "fail", "unknown"]
 REPAIR_GUIDANCE = (
     "checks[].condition只填写固定条件编号表的FIX编号，严格按表顺序各一次，不能重抄、缩写或改写长原话。"
+    "本章判断只输出chapter_result；编号表allowed_results约束此字段，不输出整书履约结论。"
     "前次产物可能已由后端解引用为原话；重新输出时仍须使用对应编号。保持原有unknown/fail及其依据，"
     "不得为了格式通过改成pass或跳过事项；只有编号表允许的项才可not_triggered，并保留全部适用性字段。"
 )
@@ -44,6 +45,7 @@ def id_contract(contract, table):
     """Keep quote enums; specialize each ID with nested, wire-supported unions."""
     result = deepcopy(contract)
     base = result["$defs"]["ConditionalReviewCheck"]
+    verdict = "chapter_result" if "chapter_result" in base["properties"] else "result"
     if table:
         base["properties"]["condition"]["enum"] = [row["condition_id"] for row in table]
     else:
@@ -53,14 +55,14 @@ def id_contract(contract, table):
         ordinary = deepcopy(base)
         properties = ordinary["properties"]
         properties["condition"]["enum"] = [row["condition_id"]]
-        properties["result"]["enum"] = [value for value in row["allowed_results"] if value != "not_triggered"]
+        properties[verdict]["enum"] = [value for value in row["allowed_results"] if value != "not_triggered"]
         properties["scope"]["enum"] = [row["scope"]]
         variants.append(ordinary)
         if "not_triggered" in row["allowed_results"]:
             conditional = deepcopy(ordinary)
             properties = conditional["properties"]
             for key, value in (
-                ("result", "not_triggered"),
+                (verdict, "not_triggered"),
                 ("scope", "book"),
                 ("applicability", "not_triggered"),
                 ("chapter_obligation", "not_required"),
@@ -74,7 +76,7 @@ def id_contract(contract, table):
     else:
         # A zero-length checks array still needs a valid item schema on the wire.
         checks["items"] = deepcopy(base)
-        checks["items"]["properties"]["result"]["enum"] = RESULTS[:]
+        checks["items"]["properties"][verdict]["enum"] = RESULTS[:]
     return result
 
 

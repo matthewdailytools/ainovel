@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field, model_validator
 
 from .db import DomainError
 from .models import Review, ReviewCheck
@@ -10,6 +10,7 @@ from .models import Review, ReviewCheck
 KEY = "conditional_book_policy_version"
 VERSION = "conditional-book-check/1"
 GUIDANCE_VERSION = "book-condition-context/1"
+ADHERENCE_VERSION = "chapter-adherence/1"
 
 
 class ConditionalReviewCheck(ReviewCheck):
@@ -17,7 +18,8 @@ class ConditionalReviewCheck(ReviewCheck):
         description="只填本次固定条件编号表中的FIX编号，按原顺序各一次；不重抄或改写原话。"
     )
     result: Literal["pass", "fail", "unknown", "not_triggered"] = Field(
-        description="not_triggered仅用于本次允许清单中的全书条件，本章完全未触发且没有本章必达事项；并非pass。"
+        validation_alias=AliasChoices("chapter_result", "result"),
+        description="只判断本章当前遵守情况。book源不要求提前兑现未来全书结果；chapter源仍须核对本章肯定事项实际完成。证据不足仍unknown。not_triggered仅用于允许清单且满足适用性与本章义务资格，不等于pass或全书履约。",
     )
     evidence: str = Field(
         description="pass必须引用本章合法source_id或连续逐字原文。完全未触发且满足本次新政策时可not_triggered并留空，其余证据不足仍unknown；不得编造引文。"
@@ -29,6 +31,15 @@ class ConditionalReviewCheck(ReviewCheck):
     applicability: Literal["triggered", "not_triggered", "uncertain", "unconditional"] = "uncertain"
     chapter_obligation: Literal["required", "not_required", "uncertain"] = "uncertain"
     explanation: str = Field(default="", max_length=5000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def consistent_result_aliases(cls, value):
+        if isinstance(value, dict) and "chapter_result" in value and "result" in value:
+            if value["chapter_result"] != value["result"]:
+                raise ValueError("chapter_result与result不能表示矛盾判断，未选择或改判其中一项。")
+            return {key: item for key, item in value.items() if key != "result"}
+        return value
 
 
 class ConditionalReview(Review):
@@ -113,6 +124,7 @@ def bind_report(review, eligible, origins):
     review.update(
         conditional_policy_version=VERSION,
         conditional_guidance_version=GUIDANCE_VERSION,
+        chapter_adherence_version=ADHERENCE_VERSION,
         conditional_book_conditions=eligible,
         condition_origins=origins,
         book_checks_pending=[
