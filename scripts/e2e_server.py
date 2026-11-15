@@ -558,6 +558,9 @@ class Model(ReferenceModel):
 
 
 def main():
+    # Model is also imported via spec_from_file_location; only server startup needs fixture routes.
+    from e2e_scene_reconfirmation_fixture import register_scene_reconfirmation_fixture
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8877)
     args = parser.parse_args()
@@ -580,6 +583,7 @@ def main():
             port=args.port,
         )
         app = create_app(settings)
+        register_scene_reconfirmation_fixture(app, settings, location)
         original = app.router.lifespan_context
 
         @asynccontextmanager

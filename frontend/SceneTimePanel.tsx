@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, type Chapter } from './api'
 import type { Notify } from './App'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { hasSceneOrderBasis, sceneSaveMessage } from './sceneOrderBasis'
 import { SceneOrderBasisDetails } from './SceneOrderBasisDetails'
+import { SceneReconfirmation } from './SceneReconfirmationPanel'
 
 type Scene = {
   event_id?: string | null
   event_revision?: number | null
   order_basis?: unknown
+  author_reconfirmed?: unknown
   title: string
   source_revision: number
   start: number
@@ -19,9 +21,22 @@ type Scene = {
   character_id: string | null
   note: string
 }
-type Row = { id: string; revision: number; payload: Scene; archived: number; stale: boolean }
+type Row = {
+  id: string
+  revision: number
+  payload: Scene
+  archived: number
+  stale: boolean
+  payload_sha256?: string
+  payload_hash_version?: string
+}
 type Data = { source_revision: number; story_revision: number; scenes: Row[] }
-type Character = { id: string; kind: string; archived: number; payload: { title: string } }
+type Character = {
+  id: string
+  kind: string
+  archived: number
+  payload: { title: string }
+}
 type Context = {
   longform: {
     blocked?: string
@@ -34,7 +49,11 @@ type Context = {
   }
 }
 type Bundle = {
-  scenes: { binding: Row; entry: Context['longform']; exit: Context['longform'] }[]
+  scenes: {
+    binding: Row
+    entry: Context['longform']
+    exit: Context['longform']
+  }[]
   unbound_ranges: { start: number; end: number }[]
   coverage: string
 }
@@ -69,7 +88,13 @@ export function SceneTimePanel({
   const [eventNames, setEventNames] = useState<Record<string, string>>({})
   const [form, setForm] = useState<Scene>(() => fresh(chapter))
   const [editing, setEditing] = useState<Row>()
+  const target = JSON.stringify([branchId, chapter.id, editing?.id])
+  const liveTarget = useRef({ target, epoch: 0 })
+  if (liveTarget.current.target !== target)
+    liveTarget.current = { target, epoch: liveTarget.current.epoch + 1 }
+  const targetEpoch = liveTarget.current.epoch
   const [baseline, setBaseline] = useState(() => JSON.stringify(fresh(chapter)))
+  const [reconfirmDirty, setReconfirmDirty] = useState(false)
   const dirty = JSON.stringify(form) !== baseline
   useLeaveGuard(dirty, '场景时点绑定')
   const [context, setContext] = useState<Context>()
@@ -126,7 +151,7 @@ export function SceneTimePanel({
     }
   }, [open, branchId, chapter.id, chapter.revision, cursor, data?.story_revision, notify])
   async function save(archived = false) {
-    if (busy || !data) return
+    if (busy || !data || (reconfirmDirty && !confirmLeave())) return
     setBusy(true)
     try {
       const result = await api<Data>(
@@ -158,7 +183,7 @@ export function SceneTimePanel({
   return (
     <details className="notice" onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>场景时点与人物当前状态</summary>
-      {open && (
+      {(open || data) && (
         <section aria-label="场景时点绑定">
           <p>
             把本章范围绑定到明确故事时点和信息视角。正文位置沿用选区；未设置故事顺序保持未知。绑定后旧式章序事实不自动成为当前人物知识。
@@ -171,7 +196,7 @@ export function SceneTimePanel({
           <button
             disabled={busy}
             onClick={() => {
-              if (dirty && !confirmLeave()) return
+              if ((dirty || reconfirmDirty) && !confirmLeave()) return
               setBaseline(JSON.stringify(fresh(chapter)))
               setForm(fresh(chapter))
               setEditing(undefined)
@@ -184,7 +209,7 @@ export function SceneTimePanel({
             <article className="fact" key={row.id}>
               <button
                 onClick={() => {
-                  if (dirty && !confirmLeave()) return
+                  if ((dirty || reconfirmDirty) && !confirmLeave()) return
                   setBaseline(JSON.stringify(row.payload))
                   setEditing(row)
                   setForm(structuredClone(row.payload))
@@ -212,6 +237,33 @@ export function SceneTimePanel({
             />
           </label>
           <SceneOrderBasisDetails scene={form} stale={editing?.stale} nameFor={eventNameFor} />
+          {editing && (
+            <SceneReconfirmation
+              key={JSON.stringify([branchId, chapter.id, editing.id])}
+              branchId={branchId}
+              chapterId={chapter.id}
+              scene={editing}
+              nameFor={eventNameFor}
+              disabled={dirty || busy}
+              onDirtyChange={setReconfirmDirty}
+              onSaved={async () => {
+                const updated = await api<Data>(`/branches/${branchId}/chapters/${chapter.id}/scene-times`)
+                const row = updated.scenes.find((item) => item.id === editing.id)
+                if (!row) throw new Error('已保存的场景暂未读到。')
+                if (liveTarget.current.target !== target || liveTarget.current.epoch !== targetEpoch) return
+                setData(updated)
+                setEditing(row)
+                setForm(row.payload)
+                setBaseline(JSON.stringify(row.payload))
+                setBundle(undefined)
+                const revisions = await api<typeof history>(
+                  `/branches/${branchId}/chapters/${chapter.id}/scene-times/${row.id}/history`,
+                )
+                if (liveTarget.current.target === target && liveTarget.current.epoch === targetEpoch)
+                  setHistory(revisions)
+              }}
+            />
+          )}
           {linkedTime && (
             <p>
               事件时点依据随范围保留。可编辑场景名称、说明和信息视角；如需调整范围或故事时点，请先归档此绑定，再新建手工确认范围，原依据与历史保留。
@@ -254,7 +306,12 @@ export function SceneTimePanel({
             <button
               disabled={busy || linkedTime}
               onClick={() =>
-                setForm({ ...form, start: 0, end: chapter.content.length, source_revision: chapter.revision })
+                setForm({
+                  ...form,
+                  start: 0,
+                  end: chapter.content.length,
+                  source_revision: chapter.revision,
+                })
               }
             >
               用当前保存稿整章范围复核
@@ -267,7 +324,10 @@ export function SceneTimePanel({
               value={form.story_order ?? ''}
               readOnly={linkedTime}
               onChange={(e) =>
-                setForm({ ...form, story_order: e.target.value === '' ? null : Number(e.target.value) })
+                setForm({
+                  ...form,
+                  story_order: e.target.value === '' ? null : Number(e.target.value),
+                })
               }
             />
           </label>
@@ -299,7 +359,11 @@ export function SceneTimePanel({
             <select
               value={form.audience}
               onChange={(e) =>
-                setForm({ ...form, audience: e.target.value as Scene['audience'], character_id: null })
+                setForm({
+                  ...form,
+                  audience: e.target.value as Scene['audience'],
+                  character_id: null,
+                })
               }
             >
               <option value="author">作者掌握</option>
@@ -359,8 +423,8 @@ export function SceneTimePanel({
           {history.map((h) => (
             <article key={h.revision}>
               <p>
-                修订{h.revision} · {h.payload.title} · 故事序{h.payload.story_order ?? '未知'} ·{' '}
-                {h.payload.start}—{h.payload.end}
+                修订{h.revision} · {h.payload.title} · 故事序
+                {h.payload.story_order ?? '未知'} · {h.payload.start}—{h.payload.end}
               </p>
               <SceneOrderBasisDetails scene={h.payload} historical nameFor={eventNameFor} />
             </article>
@@ -419,7 +483,8 @@ export function SceneTimePanel({
                 {bundle.scenes.map((s) => (
                   <article key={s.binding.id}>
                     <h4>
-                      {s.binding.payload.title} · 故事序{s.binding.payload.story_order ?? '未知'}
+                      {s.binding.payload.title} · 故事序
+                      {s.binding.payload.story_order ?? '未知'}
                     </h4>
                     <SceneOrderBasisDetails
                       scene={s.binding.payload}

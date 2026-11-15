@@ -968,6 +968,132 @@
         }
       }
     },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/reconfirmation-preview": {
+      "get": {
+        "summary": "Read Preview",
+        "operationId": "read_preview_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__reconfirmation_preview_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/reconfirm": {
+      "post": {
+        "summary": "Author Reconfirm",
+        "operationId": "author_reconfirm_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__reconfirm_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ReconfirmationInput" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/reconfirmations/{key}": {
+      "get": {
+        "summary": "Read Receipt",
+        "operationId": "read_receipt_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__reconfirmations__key__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 8, "maxLength": 128, "title": "Key" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/import-previews/{identifier}/draft": {
       "patch": {
         "summary": "Save Draft",
@@ -2924,6 +3050,88 @@
         "type": "object",
         "title": "AuthorIntentFields"
       },
+      "AuthorReconfirmation": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "const": "scene-author-reconfirmation/1",
+            "title": "Version",
+            "default": "scene-author-reconfirmation/1"
+          },
+          "authority": {
+            "type": "string",
+            "const": "author_confirmation_not_model_review",
+            "title": "Authority",
+            "default": "author_confirmation_not_model_review"
+          },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "request_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Request Sha256" },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" },
+          "confirmed_at": { "type": "number", "title": "Confirmed At" },
+          "source_revision": { "type": "integer", "minimum": 0, "title": "Source Revision" },
+          "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Content Sha256" },
+          "previous_scene_revision": { "type": "integer", "minimum": 0, "title": "Previous Scene Revision" },
+          "scene_revision": { "type": "integer", "minimum": 0, "title": "Scene Revision" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "story_revision": { "type": "integer", "minimum": 0, "title": "Story Revision" },
+          "previous_payload_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Previous Payload Sha256"
+          },
+          "previous_raw_json_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Previous Raw Json Sha256"
+          },
+          "previous_story_time": { "type": "string", "title": "Previous Story Time" },
+          "previous_refs": {
+            "items": { "$ref": "#/components/schemas/EventWitness" },
+            "type": "array",
+            "maxItems": 60,
+            "minItems": 1,
+            "title": "Previous Refs"
+          },
+          "current_refs": {
+            "items": { "$ref": "#/components/schemas/EventWitness" },
+            "type": "array",
+            "maxItems": 60,
+            "minItems": 1,
+            "title": "Current Refs"
+          },
+          "time_evidence": {
+            "items": { "$ref": "#/components/schemas/Source" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Time Evidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "client_request_id",
+          "request_sha256",
+          "reason",
+          "confirmed_at",
+          "source_revision",
+          "content_sha256",
+          "previous_scene_revision",
+          "scene_revision",
+          "base_story_revision",
+          "story_revision",
+          "previous_payload_sha256",
+          "previous_raw_json_sha256",
+          "previous_story_time",
+          "previous_refs",
+          "current_refs"
+        ],
+        "title": "AuthorReconfirmation"
+      },
       "Body_import_book_api_library_import_post": {
         "properties": {
           "file": { "type": "string", "contentMediaType": "application/octet-stream", "title": "File" },
@@ -3116,6 +3324,19 @@
         "type": "object",
         "required": ["unit_id", "start", "end", "quote", "goal"],
         "title": "CreateReference"
+      },
+      "CurrentEventWitness": {
+        "properties": {
+          "ref": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Ref" },
+          "event_id": { "type": "string", "minLength": 1, "title": "Event Id" },
+          "event_revision": { "type": "integer", "minimum": 0, "title": "Event Revision" },
+          "story_order": { "type": "integer", "title": "Story Order" },
+          "record_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Record Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["ref", "event_id", "event_revision", "story_order", "record_sha256"],
+        "title": "CurrentEventWitness"
       },
       "DefinitionInput": {
         "properties": {
@@ -3697,6 +3918,54 @@
         "required": ["chapter_id", "cursor", "base_revision"],
         "title": "ReadingInput"
       },
+      "ReconfirmationInput": {
+        "properties": {
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "base_payload_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Base Payload Sha256"
+          },
+          "source_revision": { "type": "integer", "minimum": 0, "title": "Source Revision" },
+          "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Content Sha256" },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" },
+          "refs": {
+            "items": { "$ref": "#/components/schemas/CurrentEventWitness" },
+            "type": "array",
+            "maxItems": 60,
+            "minItems": 1,
+            "title": "Refs"
+          },
+          "story_time": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Story Time" },
+          "time_evidence": {
+            "items": { "$ref": "#/components/schemas/TimeEvidence" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Time Evidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "client_request_id",
+          "base_story_revision",
+          "base_revision",
+          "base_payload_sha256",
+          "source_revision",
+          "content_sha256",
+          "reason",
+          "refs",
+          "story_time"
+        ],
+        "title": "ReconfirmationInput"
+      },
       "ReferenceAction": {
         "properties": {
           "plot_contract_check": { "type": "boolean", "title": "Plot Contract Check", "default": false },
@@ -3914,6 +4183,9 @@
       },
       "SceneTime": {
         "properties": {
+          "author_reconfirmed": {
+            "anyOf": [{ "$ref": "#/components/schemas/AuthorReconfirmation" }, { "type": "null" }]
+          },
           "order_basis": {
             "anyOf": [{ "$ref": "#/components/schemas/SceneOrderAudit" }, { "type": "null" }]
           },
@@ -4041,6 +4313,19 @@
         "type": "object",
         "required": ["title", "kind", "character_id", "event_id", "category", "key", "value", "audience"],
         "title": "State"
+      },
+      "TimeEvidence": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "start": { "type": "integer", "minimum": 0, "title": "Start" },
+          "end": { "type": "integer", "exclusiveMinimum": 0, "title": "End" },
+          "quote": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Quote" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "revision", "start", "end", "quote"],
+        "title": "TimeEvidence"
       },
       "ValidationError": {
         "properties": {

@@ -5,12 +5,22 @@ import type { Notify } from './App'
 import { StoryExtraction } from './StoryExtraction'
 import { useLeaveGuard } from './leaveGuard'
 import { StoryTimeQuery } from './StoryTimeQuery'
+import { SceneReconfirmationWorkbench } from './SceneReconfirmationWorkbench'
 import type { StoryPayload as Payload, StoryRow as Row } from './storyGraphTypes'
 
 type Schemas = components['schemas']
-type Graph = { story_revision: number; records: Row[]; chapters: Chapter[]; coverage: string }
+type Graph = {
+  story_revision: number
+  records: Row[]
+  chapters: Chapter[]
+  coverage: string
+}
 type Source = Schemas['Source']
-type Choice = { id: string; payload: { title: string }; invalid_reasons?: string[] }
+type Choice = {
+  id: string
+  payload: { title: string }
+  invalid_reasons?: string[]
+}
 const names = {
   character: '人物身份',
   event: '事件',
@@ -30,7 +40,13 @@ const statusNames: Record<string, string> = {
   abandoned: '放弃',
 }
 function fresh(kind: Payload['kind']): Payload {
-  const common = { title: '', notes: '', volume: '', sources: [], depends_on: [] }
+  const common = {
+    title: '',
+    notes: '',
+    volume: '',
+    sources: [],
+    depends_on: [],
+  }
   if (kind === 'character') return { ...common, kind, aliases: [], profile: '' }
   if (kind === 'event')
     return {
@@ -57,7 +73,15 @@ function fresh(kind: Payload['kind']): Payload {
       until_event_id: null,
     }
   if (kind === 'relationship')
-    return { ...common, kind, from_id: '', to_id: '', relation: '', event_id: null, truth: 'planned' }
+    return {
+      ...common,
+      kind,
+      from_id: '',
+      to_id: '',
+      relation: '',
+      event_id: null,
+      truth: 'planned',
+    }
   return {
     ...common,
     kind,
@@ -246,7 +270,12 @@ export function StoryGraph({
           }))
       : graphNodes.flatMap((r) =>
           r.payload.kind === 'event'
-            ? (r.payload.after || []).map((id) => ({ from: id, to: r.id, label: '先于', id: r.id }))
+            ? (r.payload.after || []).map((id) => ({
+                from: id,
+                to: r.id,
+                label: '先于',
+                id: r.id,
+              }))
             : [],
         )
   return (
@@ -261,6 +290,18 @@ export function StoryGraph({
         modelReady={modelReady}
         notify={notify}
         onAdopted={async () => {
+          const next = await api<Graph>(`/branches/${branchId}/story-graph`)
+          setGraph(next)
+          if (!dirty) setBase(next.story_revision)
+          await onSaved()
+        }}
+      />
+      <SceneReconfirmationWorkbench
+        key={branchId}
+        branchId={branchId}
+        chapters={graph.chapters}
+        nameFor={(id) => graph.records.find((row) => row.id === id)?.payload.title || '事件名称暂不可用'}
+        onSaved={async () => {
           const next = await api<Graph>(`/branches/${branchId}/story-graph`)
           setGraph(next)
           if (!dirty) setBase(next.story_revision)
@@ -336,7 +377,8 @@ export function StoryGraph({
                   )
                   .map((r) => (
                     <button key={r.id} onClick={() => select(r)}>
-                      {r.payload.title} · 故事序{(r.payload as Schemas['Event']).story_order ?? '未知'} ·{' '}
+                      {r.payload.title} · 故事序
+                      {(r.payload as Schemas['Event']).story_order ?? '未知'} ·{' '}
                       {statusNames[(r.payload as Schemas['Event']).status || 'unknown']}
                       {r.invalid_reasons.length ? ' · 已失效' : ''}
                     </button>
@@ -504,7 +546,12 @@ export function StoryGraph({
               别名（每行一个）
               <textarea
                 value={(draft.aliases || []).join('\n')}
-                onChange={(e) => setDraft({ ...draft, aliases: e.target.value.split('\n').filter(Boolean) })}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    aliases: e.target.value.split('\n').filter(Boolean),
+                  })
+                }
               />
             </label>
             <label>
@@ -531,7 +578,10 @@ export function StoryGraph({
                 type="number"
                 value={draft.story_order ?? ''}
                 onChange={(e) =>
-                  setDraft({ ...draft, story_order: e.target.value === '' ? null : Number(e.target.value) })
+                  setDraft({
+                    ...draft,
+                    story_order: e.target.value === '' ? null : Number(e.target.value),
+                  })
                 }
               />
             </label>
@@ -546,7 +596,12 @@ export function StoryGraph({
               发生状态
               <select
                 value={draft.status}
-                onChange={(e) => setDraft({ ...draft, status: e.target.value as Schemas['Event']['status'] })}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    status: e.target.value as Schemas['Event']['status'],
+                  })
+                }
               >
                 {['planned', 'actual', 'unknown', 'conflict'].map((s) => (
                   <option key={s} value={s}>
@@ -577,7 +632,10 @@ export function StoryGraph({
               <select
                 value={draft.category}
                 onChange={(e) =>
-                  setDraft({ ...draft, category: e.target.value as Schemas['State']['category'] })
+                  setDraft({
+                    ...draft,
+                    category: e.target.value as Schemas['State']['category'],
+                  })
                 }
               >
                 {Object.entries({
@@ -606,7 +664,10 @@ export function StoryGraph({
               <select
                 value={draft.audience}
                 onChange={(e) =>
-                  setDraft({ ...draft, audience: e.target.value as Schemas['State']['audience'] })
+                  setDraft({
+                    ...draft,
+                    audience: e.target.value as Schemas['State']['audience'],
+                  })
                 }
               >
                 <option value="author">作者掌握</option>
@@ -618,7 +679,12 @@ export function StoryGraph({
               状态性质
               <select
                 value={draft.truth}
-                onChange={(e) => setDraft({ ...draft, truth: e.target.value as Schemas['State']['truth'] })}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    truth: e.target.value as Schemas['State']['truth'],
+                  })
+                }
               >
                 {['actual', 'planned', 'unknown', 'conflict'].map((s) => (
                   <option key={s} value={s}>
@@ -648,7 +714,10 @@ export function StoryGraph({
               <select
                 value={draft.truth}
                 onChange={(e) =>
-                  setDraft({ ...draft, truth: e.target.value as Schemas['Relationship']['truth'] })
+                  setDraft({
+                    ...draft,
+                    truth: e.target.value as Schemas['Relationship']['truth'],
+                  })
                 }
               >
                 {['actual', 'planned', 'unknown', 'conflict'].map((s) => (
@@ -665,7 +734,10 @@ export function StoryGraph({
           {picker(
             '来源章节',
             chapterId,
-            graph.chapters.map((c) => ({ id: c.id, payload: { title: c.title } })),
+            graph.chapters.map((c) => ({
+              id: c.id,
+              payload: { title: c.title },
+            })),
             setChapterId,
           )}
           {sourceChapter && (
@@ -695,7 +767,11 @@ export function StoryGraph({
           <button
             disabled={!selection}
             onClick={() =>
-              selection && setDraft({ ...draft, sources: [...(draft.sources || []), selection] })
+              selection &&
+              setDraft({
+                ...draft,
+                sources: [...(draft.sources || []), selection],
+              })
             }
           >
             关联所选原文
@@ -705,7 +781,12 @@ export function StoryGraph({
           <div key={i}>
             <blockquote>{s.quote}</blockquote>
             <button
-              onClick={() => setDraft({ ...draft, sources: (draft.sources || []).filter((_, j) => i !== j) })}
+              onClick={() =>
+                setDraft({
+                  ...draft,
+                  sources: (draft.sources || []).filter((_, j) => i !== j),
+                })
+              }
             >
               移除来源 {i + 1}
             </button>
@@ -731,7 +812,12 @@ export function StoryGraph({
                 ))}
                 <button
                   disabled={draft.stages.length === 1}
-                  onClick={() => setDraft({ ...draft, stages: draft.stages.filter((_, j) => i !== j) })}
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      stages: draft.stages.filter((_, j) => i !== j),
+                    })
+                  }
                 >
                   移除此阶段（保存后历史保留）
                 </button>

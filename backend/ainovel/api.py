@@ -387,6 +387,9 @@ def create_app(settings=None, schema_only=False):
     from .scene_time import register_routes as register_scene_routes
 
     register_scene_routes(app, domain)
+    from .scene_reconfirmation import register_routes as register_scene_reconfirmation_routes
+
+    register_scene_reconfirmation_routes(app, domain)
     from .manuscript_import import register_routes as register_import_routes
 
     register_import_routes(app, domain)

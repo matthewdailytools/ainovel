@@ -449,6 +449,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/reconfirmation-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Preview */
+    get: operations['read_preview_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__reconfirmation_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/reconfirm': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Author Reconfirm */
+    post: operations['author_reconfirm_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__reconfirm_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/scene-times/{identifier}/reconfirmations/{key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Receipt */
+    get: operations['read_receipt_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__reconfirmations__key__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/import-previews/{identifier}/draft': {
     parameters: {
       query?: never
@@ -1586,6 +1637,53 @@ export interface components {
        */
       ending: string
     }
+    /** AuthorReconfirmation */
+    AuthorReconfirmation: {
+      /**
+       * Version
+       * @default scene-author-reconfirmation/1
+       * @constant
+       */
+      version: 'scene-author-reconfirmation/1'
+      /**
+       * Authority
+       * @default author_confirmation_not_model_review
+       * @constant
+       */
+      authority: 'author_confirmation_not_model_review'
+      /** Client Request Id */
+      client_request_id: string
+      /** Request Sha256 */
+      request_sha256: string
+      /** Reason */
+      reason: string
+      /** Confirmed At */
+      confirmed_at: number
+      /** Source Revision */
+      source_revision: number
+      /** Content Sha256 */
+      content_sha256: string
+      /** Previous Scene Revision */
+      previous_scene_revision: number
+      /** Scene Revision */
+      scene_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Story Revision */
+      story_revision: number
+      /** Previous Payload Sha256 */
+      previous_payload_sha256: string
+      /** Previous Raw Json Sha256 */
+      previous_raw_json_sha256: string
+      /** Previous Story Time */
+      previous_story_time: string
+      /** Previous Refs */
+      previous_refs: components['schemas']['EventWitness'][]
+      /** Current Refs */
+      current_refs: components['schemas']['EventWitness'][]
+      /** Time Evidence */
+      time_evidence?: components['schemas']['Source'][]
+    }
     /** Body_import_book_api_library_import_post */
     Body_import_book_api_library_import_post: {
       /** File */
@@ -1733,6 +1831,19 @@ export interface components {
       branch_id?: string | null
       /** Chapter Id */
       chapter_id?: string | null
+    }
+    /** CurrentEventWitness */
+    CurrentEventWitness: {
+      /** Ref */
+      ref: string
+      /** Event Id */
+      event_id: string
+      /** Event Revision */
+      event_revision: number
+      /** Story Order */
+      story_order: number
+      /** Record Sha256 */
+      record_sha256: string
     }
     /** DefinitionInput */
     DefinitionInput: {
@@ -2209,6 +2320,29 @@ export interface components {
       /** Base Revision */
       base_revision: number
     }
+    /** ReconfirmationInput */
+    ReconfirmationInput: {
+      /** Client Request Id */
+      client_request_id: string
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Base Revision */
+      base_revision: number
+      /** Base Payload Sha256 */
+      base_payload_sha256: string
+      /** Source Revision */
+      source_revision: number
+      /** Content Sha256 */
+      content_sha256: string
+      /** Reason */
+      reason: string
+      /** Refs */
+      refs: components['schemas']['CurrentEventWitness'][]
+      /** Story Time */
+      story_time: string
+      /** Time Evidence */
+      time_evidence?: components['schemas']['TimeEvidence'][]
+    }
     /** ReferenceAction */
     ReferenceAction: {
       /**
@@ -2423,6 +2557,7 @@ export interface components {
     }
     /** SceneTime */
     SceneTime: {
+      author_reconfirmed?: components['schemas']['AuthorReconfirmation'] | null
       order_basis?: components['schemas']['SceneOrderAudit'] | null
       /** Event Id */
       event_id?: string | null
@@ -2551,6 +2686,19 @@ export interface components {
       truth: 'actual' | 'planned' | 'unknown' | 'conflict'
       /** Until Event Id */
       until_event_id?: string | null
+    }
+    /** TimeEvidence */
+    TimeEvidence: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Revision */
+      revision: number
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Quote */
+      quote: string
     }
     /** ValidationError */
     ValidationError: {
@@ -3733,6 +3881,110 @@ export interface operations {
         'application/json': components['schemas']['SaveScene']
       }
     }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_preview_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__reconfirmation_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  author_reconfirm_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__reconfirm_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReconfirmationInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_receipt_api_branches__branch_id__chapters__chapter_id__scene_times__identifier__reconfirmations__key__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+        identifier: string
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
     responses: {
       /** @description Successful Response */
       200: {

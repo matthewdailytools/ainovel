@@ -8,7 +8,8 @@ from pydantic import Field, model_serializer
 
 from .db import DomainError, dumps, uid
 from .story_graph import Strict, graph, graph_snapshot, metadata_revision_compatible, query_context
-from .scene_order import SceneOrderAudit, audit_valid
+from .scene_order import SceneOrderAudit, audit_valid, payload_sha
+from .scene_reconfirmation import AuthorReconfirmation, PAYLOAD_HASH_VERSION
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scene_times(
@@ -18,10 +19,15 @@ CREATE TABLE IF NOT EXISTS scene_time_history(
  scene_id TEXT NOT NULL REFERENCES scene_times(id),revision INTEGER NOT NULL,payload TEXT NOT NULL,
  archived INTEGER NOT NULL,created REAL NOT NULL,PRIMARY KEY(scene_id,revision));
 INSERT OR IGNORE INTO extension_migrations VALUES('scene-time/1',unixepoch());
+CREATE TABLE IF NOT EXISTS scene_reconfirmation_receipts(
+ key TEXT PRIMARY KEY,scene_id TEXT NOT NULL REFERENCES scene_times(id),
+ request_sha256 TEXT NOT NULL,result TEXT NOT NULL,created REAL NOT NULL);
+INSERT OR IGNORE INTO extension_migrations VALUES('scene-author-reconfirmation/1',unixepoch());
 """
 
 
 class SceneTime(Strict):
+    author_reconfirmed: AuthorReconfirmation | None = None
     order_basis: SceneOrderAudit | None = None
     event_id: str | None = None
     event_revision: int | None = Field(default=None, ge=0)
@@ -38,6 +44,8 @@ class SceneTime(Strict):
     @model_serializer(mode="wrap")
     def retain_legacy_serialization(self, handler):
         value = handler(self)
+        if self.author_reconfirmed is None:
+            value.pop("author_reconfirmed", None)
         if self.order_basis is None:
             value.pop("order_basis", None)
         return value
@@ -87,6 +95,8 @@ def scenes(domain, branch_id, chapter_id):
     }
     for row in rows:
         row["payload"] = SceneTime.model_validate_json(row["payload"]).model_dump()
+        row["payload_sha256"] = payload_sha(row["payload"])
+        row["payload_hash_version"] = PAYLOAD_HASH_VERSION
         row["stale"] = row["payload"]["source_revision"] != chapter["revision"] or bool(
             row["payload"]["character_id"] and row["payload"]["character_id"] not in identities
         )
@@ -131,6 +141,13 @@ def save_scene(domain, branch_id, chapter_id, data, identifier=None):
         if creating and (data.base_revision is not None or data.archived):
             raise DomainError("scene_changed", "新场景不能指定旧修订或直接归档。")
         previous = json.loads(old["payload"]) if old else {}
+        if "author_reconfirmed" in data.scene.model_fields_set:
+            if p.get("author_reconfirmed") != previous.get("author_reconfirmed"):
+                raise DomainError(
+                    "scene_reconfirmation_readonly", "人工重新核对记录由专用入口产生，不能伪造或改写。", 409
+                )
+        elif previous.get("author_reconfirmed") is not None:
+            p["author_reconfirmed"] = previous["author_reconfirmed"]
         if not data.archived:
             if previous.get("order_basis") is None:
                 for key in ("event_id", "event_revision"):
@@ -149,12 +166,15 @@ def save_scene(domain, branch_id, chapter_id, data, identifier=None):
                     "event_id",
                     "event_revision",
                 )
-                if any(p.get(key) != previous.get(key) for key in fixed):
+                normalized = SceneTime.model_validate(p).model_dump()
+                previous_normalized = SceneTime.model_validate(previous).model_dump()
+                if any(normalized.get(key) != previous_normalized.get(key) for key in fixed):
                     raise DomainError(
                         "scene_basis_readonly",
                         "提取依据与范围须保留；需要改变时请归档旧绑定并新建手工范围。",
                         409,
                     )
+                p["order_basis"] = previous["order_basis"]
             elif p.get("order_basis") is not None:
                 raise DomainError(
                     "scene_basis_readonly", "事件引用依据只能由提取核对后采用；手工范围不伪造依据。", 409
