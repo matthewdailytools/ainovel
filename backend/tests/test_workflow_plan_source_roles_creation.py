@@ -17,7 +17,7 @@ from ainovel.workflow_plan_preparation import prepare
 from ainovel.workflow_plan_recipient_scope import (
     ACTION as SCOPE_ACTION,
     KEY as SCOPE_KEY,
-    VERSION as SCOPE_VERSION,
+    CURRENT_VERSION as SCOPE_VERSION,
 )
 from ainovel.workflow_plan_restart import restart
 from ainovel.workflow_plan_source_roles import (
@@ -109,6 +109,11 @@ def fresh_failed(settings, domain, story, *, client=None, chapters=1, number=1, 
             if "接收范围核对执行版本" in instruction:
                 for item in output["items"]:
                     item["scope_observation_ids"] = []
+                    if instruction["接收范围核对执行版本"] == "workflow-plan-recipient-scope/2":
+                        item.update(
+                            scope_binding_status="supported",
+                            scope_binding_reason="故意无效解释的工程路由，来源业务守卫仍须拒绝。",
+                        )
         return deepseek_completed(output) if account == "deepseek" else completed(dumps(output))
 
     worker.client = ModelClient(settings, worker.budget, httpx.MockTransport(handler))

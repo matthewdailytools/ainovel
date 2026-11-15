@@ -1,3 +1,4 @@
+from helpers.authored_source_fixture import authored_inventory, bind_authored
 import asyncio
 from copy import deepcopy
 import json
@@ -104,6 +105,12 @@ class Integrated(Model):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         action = value["任务"].get("动作")
+        if fixture := authored_inventory(value["任务"]):
+            return {
+                "text": json.dumps(fixture, ensure_ascii=False),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-authored-source",
+            }
         if action == "按确认参考应用方案原创试写":
             return {"text": TEXT, "usage": {"input": 1, "output": 1}, "call_id": "offline"}
         if action == "仅依据作者原话整理本场景情节":
@@ -161,6 +168,7 @@ class Integrated(Model):
             }
         else:
             return await super().generate(account, task_id, system, prompt, max_output, **kwargs)
+        bind_authored(value["任务"], output)
         return {
             "text": json.dumps(output, ensure_ascii=False),
             "usage": {"input": 1, "output": 1},

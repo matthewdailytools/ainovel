@@ -6,6 +6,7 @@ import {
   emptyChapterMatches,
   OPEN_DETAILS_VERSION,
   RECIPIENT_SCOPE_VERSION,
+  RECIPIENT_SCOPE_CURRENT_VERSION,
   object,
   readPendingRestart,
   readRestartChild,
@@ -335,6 +336,36 @@ function preparationRow(task: Task) {
 }
 
 describe('先行接收范围来源观察后的重新准备预览', () => {
+  it('新版来源观察完成且解释三次结构无效时沿用正式预览与原nonce契约', () => {
+    const { source, row, response, preview, pending } = scopeFixture()
+    row.workflow_plan_recipient_scope_version = RECIPIENT_SCOPE_CURRENT_VERSION
+    response.version = RECIPIENT_SCOPE_CURRENT_VERSION
+    expect(canPreviewRestart(source)).toBe(true)
+    expect(readRestartPreview(preview, source)).toEqual(preview)
+    const owner = canonical([source.novel_id, source.branch_id, source.id])
+    expect(readPendingRestart(structuredClone(pending), owner)).toEqual(pending)
+    expect(pending.request.client_request_id).toBe('stable-test-nonce')
+    expect(pending.request).not.toHaveProperty('workflow_plan_recipient_scope_version')
+  })
+
+  it.each(['mixed-version', 'unknown-inventory', 'semantic-unknown', 'complete-response'])(
+    '新版来源未明或已有完整解释不作为三次无效解释重做：%s',
+    (change) => {
+      const { source, row, phases, response } = scopeFixture()
+      row.workflow_plan_recipient_scope_version = RECIPIENT_SCOPE_CURRENT_VERSION
+      response.version = RECIPIENT_SCOPE_CURRENT_VERSION
+      if (change === 'mixed-version') response.version = RECIPIENT_SCOPE_VERSION
+      if (change === 'unknown-inventory') response.status = 'needs_review'
+      if (change === 'semantic-unknown' || change === 'complete-response') {
+        ;(phases['interpret:0'] as Record<string, unknown>).response = {
+          items: [{ scope_binding_status: change === 'semantic-unknown' ? 'unknown' : 'supported' }],
+        }
+        if (change === 'semantic-unknown') row.status = 'needs_review'
+      }
+      expect(canPreviewRestart(source)).toBe(false)
+    },
+  )
+
   it('新行已完成来源观察、解释仍失败时可读取正式依据，原nonce保持', () => {
     const { source, preview, pending } = scopeFixture()
     expect(canPreviewRestart(source)).toBe(true)

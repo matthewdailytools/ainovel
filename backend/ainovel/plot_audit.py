@@ -83,8 +83,29 @@ class OpenPlanInterpretation(StrictModel):
     note: str = Field(max_length=2000)
 
 
+class ScopeBoundAuthorItem(ScopedPlotItem):
+    scope_observation_ids: list[str] = Field(max_length=24)
+    scope_binding_status: Literal["supported", "unknown"]
+    scope_binding_reason: str = Field(min_length=1, max_length=800)
+
+
+class ScopeBoundAuthorPlot(StrictModel):
+    items: list[ScopeBoundAuthorItem] = Field(max_length=12)
+    note: str = Field(max_length=2000)
+
+
 class ScopeBoundOpenPlanItem(OpenPlanItem):
     scope_observation_ids: list[str] = Field(max_length=24)
+
+
+class ScopeBoundOpenPlanItemV2(ScopeBoundOpenPlanItem):
+    scope_binding_status: Literal["supported", "unknown"]
+    scope_binding_reason: str = Field(min_length=1, max_length=800)
+
+
+class ScopeBoundOpenPlanInterpretationV2(StrictModel):
+    items: list[ScopeBoundOpenPlanItemV2] = Field(max_length=12)
+    note: str = Field(max_length=2000)
 
 
 class ScopeBoundOpenPlanInterpretation(StrictModel):
@@ -463,7 +484,20 @@ def open_plan_issues(value, source):
     return problems
 
 
-async def interpret_plot(worker, author_text, *, source_kind=None, preparation=None):
+async def interpret_plot(
+    worker, author_text, *, source_kind=None, preparation=None, source_position=None, authored_inventory=None
+):
+    from . import authored_source_scope as authored
+
+    authored_enabled = (
+        preparation is None
+        and source_kind in {"author_plot", "author_instruction"}
+        and authored.validate_task(worker.task, getattr(worker, "domain", None))
+    )
+    if authored_enabled and authored_inventory is None:
+        return await authored.prepare(worker, author_text, source_kind, source_position)
+    if authored_inventory is not None and not authored_enabled:
+        raise DomainError("authored_scope_version", "旧任务不能临时加入作者来源范围观察。", 409)
     if not author_text.strip():
         return {"items": [], "note": "缺少作者情节，不能从候选反推。"}
     author_units = source_units(author_text, "AUTHOR")
@@ -508,17 +542,38 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
     inventory = preparation.get("recipient_scope_inventory") if scope_execution else None
     if scope_execution:
         if (
-            preparation[recipient_scope.KEY] != recipient_scope.VERSION
+            preparation[recipient_scope.KEY] not in recipient_scope.SUPPORTED
+            or not isinstance(inventory, dict)
+            or inventory.get("version") != preparation[recipient_scope.KEY]
             or not roles
             or not recipient_scope.inventory_valid(inventory, author_text)
             or inventory["status"] != "supported"
         ):
             raise DomainError("plan_scope_version", "写前范围来源观察缺失、未知或版本不符，未派发解释。", 409)
-        schema = ScopeBoundOpenPlanInterpretation
+        schema = (
+            ScopeBoundOpenPlanInterpretationV2
+            if preparation[recipient_scope.KEY] == recipient_scope.CURRENT_VERSION
+            else ScopeBoundOpenPlanInterpretation
+        )
+    authored_execution = authored_inventory is not None
+    if authored_execution:
+        entry = authored.select(worker.task, author_text, source_kind, source_position)
+        record = worker.task["result"].get(authored.RECEIPTS, {}).get(entry["key"], {})
+        if (
+            not authored.inventory_valid(authored_inventory, entry)
+            or authored_inventory["status"] != "supported"
+            or record.get("phases", {}).get("observe", {}).get("response") != authored_inventory
+        ):
+            raise DomainError("authored_scope_changed", "先行作者来源观察不是本任务已冻结回执。", 409)
+        schema = ScopeBoundAuthorPlot
     repair_state = RepairState(author_text, open_plan_issues) if roles else None
     author_contract = schema.model_json_schema()
     item_type = (
-        "ScopeBoundOpenPlanItem"
+        "ScopeBoundAuthorItem"
+        if authored_execution
+        else "ScopeBoundOpenPlanItemV2"
+        if scope_execution and preparation[recipient_scope.KEY] == recipient_scope.CURRENT_VERSION
+        else "ScopeBoundOpenPlanItem"
         if scope_execution
         else "OpenPlanItem"
         if open_details
@@ -550,6 +605,15 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
             fields["scope_observation_ids"]["maxItems"] = 0
         fields["recipient_scope"]["description"] += recipient_scope.GUIDANCE
 
+    if authored_execution:
+        fields = author_contract["$defs"][item_type]["properties"]
+        ids = [o["observation_id"] for o in authored_inventory["inventory"]["observations"]]
+        if ids:
+            fields["scope_observation_ids"]["items"]["enum"] = ids
+        else:
+            fields["scope_observation_ids"]["maxItems"] = 0
+        fields["recipient_scope"]["description"] = recipient_scope.GUIDANCE
+
     def validate_author(value):
         for item in value["items"]:
             resolve_field(item, "author_evidence", author_sources)
@@ -566,6 +630,8 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
         )
         if scope_execution:
             issues.extend(recipient_scope.binding_issues(value, inventory))
+        if authored_execution:
+            issues.extend(authored.binding_issues(value, authored_inventory))
         return issues
 
     def repair_feedback():
@@ -573,7 +639,7 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
         if scope_execution:
             result.update(
                 {
-                    "接收范围核对执行版本": recipient_scope.VERSION,
+                    "接收范围核对执行版本": preparation[recipient_scope.KEY],
                     "接收范围修正边界": recipient_scope.GUIDANCE,
                 }
             )
@@ -591,10 +657,25 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
             **({ROLE_KEY: ROLE_VERSION, "来源角色与限制范围解释": ROLE_GUIDANCE} if roles else {}),
             **(
                 {
-                    "接收范围核对执行版本": recipient_scope.VERSION,
+                    authored.KEY: authored.VERSION,
+                    "先行作者来源范围观察（非作者条件）": authored_inventory,
+                    "作者来源解释边界": recipient_scope.GUIDANCE
+                    + "每项scope_observation_ids绑定先行O编号；所有观察均保持。只解析本段已经明确的主体与回指，真正未明保持ambiguous，不输出open_fields，不自动选择参与者、补写源事项或调用开放选择；scope_binding_status只有同一原话支持观察及本项范围才supported，先行AI观察不是原话真值，来源冲突或无法确认时填unknown并说明，保留本项原义，不为了绑定修改原事件、角色或阶段。",
+                }
+                if authored_execution
+                else {}
+            ),
+            **(
+                {
+                    "接收范围核对执行版本": preparation[recipient_scope.KEY],
                     "先行来源范围观察（AI观察，不是作者条件）": inventory,
                     "接收范围来源绑定": recipient_scope.GUIDANCE
-                    + "每项scope_observation_ids只引用先行观察O编号，全部观察须被原义对应事项保持；没有相关观察可空。only/unrestricted须有同一物品、双方和阶段的来源观察，不可借别项许可或禁止；先行观察仍非原话真值，发现来源歧义应保留而非伪造通过。",
+                    + "每项scope_observation_ids只引用先行观察O编号，全部观察须被原义对应事项保持；没有相关观察可空。only/unrestricted须有同一物品、双方和阶段的来源观察，不可借别项许可或禁止；先行观察仍非原话真值，发现来源歧义应保留而非伪造通过。"
+                    + (
+                        "scope_binding_status仅当原话支持本项与观察的绑定才supported；先行AI观察非真值，若与原话冲突或归属确实未明，可unknown并在scope_binding_reason保留双方差异；不为满足先行观察改变原事项或把unknown当格式错误修成一致。unknown会在开放选择、保持核对及正文前停止。"
+                        if preparation[recipient_scope.KEY] == recipient_scope.CURRENT_VERSION
+                        else ""
+                    ),
                 }
                 if scope_execution
                 else {}
@@ -621,20 +702,40 @@ async def interpret_plot(worker, author_text, *, source_kind=None, preparation=N
             else {}
         ),
     )
+    if authored_execution:
+        return {"contract": authored.core_value(contract), "bindings": authored.binding_data(contract)}
     if roles:
         return {
             **normalize_open_plan(recipient_scope.core_value(contract) if scope_execution else contract),
             "source_role_repair": repair_state.receipt(),
-            **({"recipient_scope_bindings": recipient_scope.bindings(contract)} if scope_execution else {}),
+            **(
+                {
+                    "recipient_scope_bindings": recipient_scope.bindings(
+                        contract, preparation[recipient_scope.KEY]
+                    )
+                }
+                if scope_execution
+                else {}
+            ),
         }
     return normalize_open_plan(contract) if open_details else contract
+
+
+def authored_metadata(worker, text, kind, number):
+    if kind not in {"author_plot", "author_instruction"}:
+        return {}
+    from . import authored_source_scope as authored
+
+    if not authored.validate_task(worker.task, getattr(worker, "domain", None)):
+        return {}
+    return authored.metadata(worker, text, kind, number)
 
 
 async def audit_plot(worker, author_text, text, number, *, source_kind=None, prepared_contract=None):
     version = execution_version(worker) if source_kind is not None else LEGACY_VERSION
     source_label = "本章工作章纲（AI规划）" if source_kind == "workflow_plan" else "作者原话"
     if prepared_contract is None:
-        contract = await interpret_plot(worker, author_text, source_kind=source_kind)
+        contract = await interpret_plot(worker, author_text, source_kind=source_kind, source_position=number)
     else:
         from .workflow_plan_preparation import frozen_contract
 
@@ -650,6 +751,19 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
             contract = frozen_contract(worker, author_text, number, prepared_contract)
         else:
             raise DomainError("plan_preparation_version", "冻结工作章纲解释不能替代作者情节解释。", 409)
+    source_execution = authored_metadata(worker, author_text, source_kind, number)
+    if source_execution.get("authored_source_scope", {}).get("state") == "unverified":
+        return {
+            "items": [],
+            "checks": [],
+            "findings": [],
+            "status": "unverified",
+            "summary": "作者来源范围仍待确认，未把AI解释当作正文硬条件；原话和提案保留。",
+            "interpretation_note": contract["note"],
+            "policy": "没有重新定义作者要求、比较或自动修改正文。",
+            "version": version,
+            **source_execution,
+        }
     items = [{"id": f"P{index:02}", **item} for index, item in enumerate(contract["items"], 1)]
     if not items:
         return {
@@ -661,6 +775,7 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
             "interpretation_note": contract["note"],
             "policy": "AI解释未形成作者新条件，正文未改变。",
             **({"version": version} if source_kind is not None else {}),
+            **authored_metadata(worker, author_text, source_kind, number),
         }
     units = source_units(text, f"PLOT{number:03}P")
     sources = {unit["source_id"]: unit for unit in units}
@@ -815,4 +930,5 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
         "policy": f"解释来自{source_label}，仍须作者核对；不写入故事事实，不自动采用候选。",
         **({"version": version} if source_kind is not None else {}),
         **({"comparison_guidance_version": COMPARISON_GUIDANCE_VERSION} if version == VERSION else {}),
+        **authored_metadata(worker, author_text, source_kind, number),
     }

@@ -654,6 +654,10 @@ class Domain:
             from .source_interpretation_correction import versioned_payload
 
             payload = versioned_payload(self, payload)
+        from .authored_source_scope import KEY as AUTHORED_KEY, SNAPSHOT as AUTHORED_SNAPSHOT
+
+        if AUTHORED_KEY in payload or AUTHORED_SNAPSHOT in payload:
+            raise DomainError("authored_scope_version", "作者来源执行见证不能由请求注入。", 409)
         previous = self.find_request(kind, payload)
         if previous:
             return previous
@@ -793,6 +797,9 @@ class Domain:
             from .reference import reference_basis
 
             initial["reference_snapshot"] = reference_basis(self, payload)
+        from .authored_source_scope import freeze as freeze_authored_source
+
+        freeze_authored_source(self, task_id, kind, payload, branch_id, initial)
         if kind == "workflow":
             initial["expected_story_revision"] = profile["source_story_revision"]
         with self.db.connect(True) as db:
@@ -875,6 +882,9 @@ class Domain:
                 ),
             )
             self.db.event(db, task_id, "queued", {"kind": kind})
+            from .authored_source_scope import event as authored_source_event
+
+            authored_source_event(self.db, db, task_id, payload, initial)
             if kind == "workflow" and "workflow_plan_source_roles_creation" in initial:
                 from .workflow_plan_source_roles import creation_event
 
@@ -943,6 +953,9 @@ class Domain:
             ):
                 raise DomainError("idempotency", "该续跑标识已用于其他检查点或决定。", 409)
             return previous
+        from .authored_source_scope import continuation as check_authored_continuation
+
+        check_authored_continuation(self, current)
         self.check_genre_snapshot(current["branch_id"], current["result"].get("genre_profile_snapshot"))
         if "workflow_plan_preparation_version" in current["result"]:
             from .workflow_plan_preparation import VERSION as PLAN_PREPARATION_VERSION

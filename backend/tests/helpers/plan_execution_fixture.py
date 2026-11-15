@@ -54,6 +54,11 @@ def plan_execution_output(instruction):
         if "接收范围核对执行版本" in instruction:
             for item in items:
                 item["scope_observation_ids"] = []
+                if instruction["接收范围核对执行版本"] == "workflow-plan-recipient-scope/2":
+                    item.update(
+                        scope_binding_status="supported",
+                        scope_binding_reason="确定性工程路由；真实语义另评。",
+                    )
         return {"items": items, "note": "确定性工程替身，不代表真实语义保持或创作质量通过。"}
     if action == CHOICE_ACTION:
         return {

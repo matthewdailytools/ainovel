@@ -6939,5 +6939,82 @@
     "result": "passed",
     "record": "2026-11-16-source-scope-and-flow-instance-checks.md",
     "fix_of": ""
+  },
+  {
+    "id": "authored-source-targeted-20261116",
+    "date": "2026-11-16",
+    "commit": "6af3ea7+authored-scope",
+    "module": "作者情节来源",
+    "scenario": "普通补写／半自动／参考的325项受影响来源与FLOW测试",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored-source-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "reference-first-check-failed-20261116",
+    "date": "2026-11-16",
+    "commit": "6af3ea7+authored-scope",
+    "module": "参考仿写",
+    "scenario": "独立API复现未核对试写的首次显式检查被降plot1并移除FLOW",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-authored-source-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "reference-first-check-fixed-20261116",
+    "date": "2026-11-16",
+    "commit": "6af3ea7+authored-scope",
+    "module": "参考仿写",
+    "scenario": "首次与候选编辑后首次核对保持原话及FLOW2，独立56项复测",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored-source-scope.md",
+    "fix_of": "reference-first-check-failed-20261116"
+  },
+  {
+    "id": "authored-source-full-first-failed-20261116",
+    "date": "2026-11-16",
+    "commit": "6af3ea7+authored-scope",
+    "module": "全项目稳定性",
+    "scenario": "361输入保持，首轮后端收集1error／浏览器113通过5失败，原日志保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-authored-source-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored-source-full-final-20261116",
+    "date": "2026-11-16",
+    "commit": "6af3ea7+authored-scope",
+    "module": "全项目稳定性",
+    "scenario": "361输入及7dist保持，2324后端／514前端／118无头／48Node通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored-source-scope.md",
+    "fix_of": "authored-source-full-first-failed-20261116"
+  },
+  {
+    "id": "scope-flow2-ci6af3-passed-20261116",
+    "date": "2026-11-16",
+    "commit": "6af3ea7",
+    "module": "全项目CI",
+    "scenario": "精确6af3ea7远端2300后端／509前端／116无头实际success，不冒称当前新源码CI",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored-source-scope.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored-source-real-quality-not-run-20261116",
+    "date": "2026-11-16",
+    "commit": "6af3ea7+authored-scope",
+    "module": "真实模型质量",
+    "scenario": "新作者Scope与新自动Scope2尚无真实质量结论，日常未发布；文学及收益未验证",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-16-authored-source-scope.md",
+    "fix_of": ""
   }
 ]

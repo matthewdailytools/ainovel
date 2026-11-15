@@ -185,14 +185,22 @@ class ScopeModel:
             assert "待识别事项" not in dumps(instruction)
             assert "recipient_scope" not in dumps(frame)
             assert "候选正文" not in dumps(frame) and "原始全批规划" not in dumps(frame)
-            return inventory(
+            result = inventory(
                 self.source,
                 kind="recipient_exclusivity" if self.only else "named_destination",
                 unknown=self.unknown,
             )["inventory"]
+            result["input_sha256"] = instruction["input_sha256"]
+            return result
         if action == "写前解释AI工作章纲":
             self.interpretations += 1
-            return output(self.source, only=self.only or (self.bad_first and self.interpretations == 1))
+            result = output(self.source, only=self.only or (self.bad_first and self.interpretations == 1))
+            if instruction.get("接收范围核对执行版本") == scope.CURRENT_VERSION:
+                for item in result["items"]:
+                    item.update(
+                        scope_binding_status="supported", scope_binding_reason="独立工程样例同源绑定。"
+                    )
+            return result
         assert action == CHECK_ACTION
         return plan_execution_output(instruction)
 
@@ -239,7 +247,7 @@ def test_prior_source_inventory_rejects_false_only_then_repairs_without_rewritin
     result = asyncio.run(prepare(worker, plot, chapter))
     assert result and model.interpretations == 2
     row = worker.task["result"]["plot_preparations"]["1"]
-    assert row[scope.KEY] == scope.VERSION and row["status"] == "ready"
+    assert row[scope.KEY] == scope.CURRENT_VERSION and row["status"] == "ready"
     assert row["original_plot"] == SOURCE and row["choices"] == []
     assert row["prepared_contract"]["items"][0]["recipient_scope"] == "unspecified"
     assert row["prepared_contract"]["items"][0]["recipient"] == "校核站"
@@ -336,7 +344,7 @@ def test_native_wire_schema_source_only_and_three_phases_are_persistent(settings
             "SELECT payload FROM task_events WHERE task_id=? AND kind='step_dispatched'", (worker.task["id"],)
         )
     ]
-    assert all(e["request"].get(scope.KEY) == scope.VERSION for e in events[:2])
+    assert all(e["request"].get(scope.KEY) == scope.CURRENT_VERSION for e in events[:2])
     with worker.budget.db() as tx:
         calls = [dict(r) for r in tx.execute("SELECT * FROM calls")]
     assert len(calls) == 3 and all(c["status"] == "settled" for c in calls)
@@ -436,6 +444,7 @@ def test_native_format_repair_keeps_inventory_source_only(settings, domain, stor
             assert instruction["原始任务"]["动作"] == scope.ACTION
             assert set(frame["上下文"]) == {"scope"}
             value = inventory(SOURCE)["inventory"]
+            value["input_sha256"] = instruction["原始任务"]["input_sha256"]
         else:
             value = model.answer(frame)
         return completed(dumps(value))

@@ -13,6 +13,8 @@ from .models import Input
 
 KEY = "workflow_plan_recipient_scope_version"
 VERSION = "workflow-plan-recipient-scope/1"
+CURRENT_VERSION = "workflow-plan-recipient-scope/2"
+SUPPORTED = {VERSION, CURRENT_VERSION}
 ACTION = "独立观察AI章纲接收范围来源"
 GUIDANCE = (
     "命名一个收件人、只写一次寄送或一份抄件，不表示排除其他收件人。"
@@ -111,7 +113,7 @@ def freeze(worker, row):
     """Only a genuinely new row receives this execution version."""
     if prior_rows(worker, row):
         raise DomainError("plan_scope_version", "该章已有冻结准备历史，不能以新行覆盖或升级。", 409)
-    row[KEY] = VERSION
+    row[KEY] = CURRENT_VERSION
 
 
 def enabled(worker, row):
@@ -122,8 +124,8 @@ def enabled(worker, row):
     if marker is None and witnessed is None:
         return False
     if (
-        marker != VERSION
-        or witnessed != VERSION
+        marker not in SUPPORTED
+        or witnessed != marker
         or first.get("chapter_id") != row.get("chapter_id")
         or first.get("original_plot_sha256") != row.get("original_plot_sha256")
         or row.get("workflow_plan_source_roles_version") != "workflow-plan-source-roles/1"
@@ -201,11 +203,14 @@ def inventory_supported(value):
 
 def inventory_valid(receipt, source):
     try:
+        version = receipt["version"]
+        if version not in SUPPORTED:
+            return False
         value = ScopeInventory.model_validate(receipt["inventory"]).model_dump()
         choices = {r["source_id"]: r for r in units(source)}
-        token = sha({"version": VERSION, "source": source})
+        token = sha({"version": version, "source": source})
         return (
-            receipt["version"] == VERSION
+            receipt["version"] == version
             and receipt["input_sha256"] == token
             and receipt["source_sha256"] == sha(source)
             and receipt["sources"] == list(choices.values())
@@ -228,8 +233,21 @@ def binding_issues(value, receipt):
             issues.append(f"P{index:02}范围绑定只能引用本次既有O编号，不重复或补造。")
             continue
         used.update(identifiers)
+        if receipt["version"] == CURRENT_VERSION:
+            if not item["scope_binding_reason"].strip():
+                issues.append(f"P{index:02}须说明来源是否支持绑定；先行观察不是原话真值。")
+            if item["scope_binding_status"] == "unknown":
+                continue
         rows = [indexed[i] for i in identifiers]
         for row in rows:
+            if (
+                receipt["version"] == CURRENT_VERSION
+                and row["kind"] == "named_destination"
+                and any(item[k] != row[k] for k in keys)
+            ):
+                issues.append(
+                    f"P{index:02}的supported绑定须对应同一命名传递双方、物品和阶段；先行观察不是原话真值，不能确认一致时保留原项并将绑定标unknown，不强迫更改原事件。"
+                )
             if row["kind"] in {"recipient_exclusivity", "explicitly_unrestricted"}:
                 wanted = "only" if row["kind"] == "recipient_exclusivity" else "unrestricted"
                 if item["recipient_scope"] != wanted or any(item[k] != row[k] for k in keys):
@@ -259,18 +277,30 @@ def binding_issues(value, receipt):
 def core_value(value):
     return {
         "items": [
-            {k: deepcopy(v) for k, v in item.items() if k != "scope_observation_ids"}
+            {
+                k: deepcopy(v)
+                for k, v in item.items()
+                if k not in {"scope_observation_ids", "scope_binding_status", "scope_binding_reason"}
+            }
             for item in value["items"]
         ],
         "note": value["note"],
     }
 
 
-def bindings(value):
+def bindings(value, version=VERSION):
     return {
-        "version": VERSION,
+        "version": version,
         "items": [
-            {"item_id": f"P{index:02}", "observation_ids": deepcopy(item["scope_observation_ids"])}
+            {
+                "item_id": f"P{index:02}",
+                "observation_ids": deepcopy(item["scope_observation_ids"]),
+                **(
+                    {"status": item["scope_binding_status"], "reason": item["scope_binding_reason"]}
+                    if version == CURRENT_VERSION
+                    else {}
+                ),
+            }
             for index, item in enumerate(value["items"], 1)
         ],
     }
@@ -278,13 +308,24 @@ def bindings(value):
 
 def bindings_valid(contract, binding, receipt):
     try:
-        if binding["version"] != VERSION or [r["item_id"] for r in binding["items"]] != [
-            f"P{i:02}" for i in range(1, len(contract["items"]) + 1)
-        ]:
+        if (
+            binding["version"] != receipt["version"]
+            or binding["version"] not in SUPPORTED
+            or [r["item_id"] for r in binding["items"]]
+            != [f"P{i:02}" for i in range(1, len(contract["items"]) + 1)]
+        ):
             return False
         value = {
             "items": [
-                {**item, "scope_observation_ids": row["observation_ids"]}
+                {
+                    **item,
+                    "scope_observation_ids": row["observation_ids"],
+                    **(
+                        {"scope_binding_status": row["status"], "scope_binding_reason": row["reason"]}
+                        if binding["version"] == CURRENT_VERSION
+                        else {}
+                    ),
+                }
                 for item, row in zip(contract["items"], binding["items"], strict=True)
             ],
             "note": contract["note"],
@@ -294,10 +335,16 @@ def bindings_valid(contract, binding, receipt):
         return False
 
 
-async def observe(worker, source):
+def bindings_supported(binding):
+    return binding["version"] == VERSION or all(row["status"] == "supported" for row in binding["items"])
+
+
+async def observe(worker, source, *, version=VERSION):
+    if version not in SUPPORTED:
+        raise DomainError("plan_scope_version", "未知来源范围执行版本，未派发。", 409)
     sources = units(source)
     choices = {row["source_id"]: row for row in sources}
-    token = sha({"version": VERSION, "source": source})
+    token = sha({"version": version, "source": source})
     schema = ScopeInventory.model_json_schema()
     schema["properties"]["input_sha256"]["enum"] = [token]
     schema["properties"]["unit_checks"].update(minItems=len(sources), maxItems=len(sources))
@@ -314,7 +361,7 @@ async def observe(worker, source):
             "动作": ACTION,
             "写前准备契约版本": "workflow-plan-preparation/1",
             "workflow_plan_source_roles_version": "workflow-plan-source-roles/1",
-            "接收范围核对执行版本": VERSION,
+            "接收范围核对执行版本": version,
             "input_sha256": token,
             "本章工作章纲原文": source,
             "可引用原文": sources,
@@ -336,7 +383,7 @@ async def observe(worker, source):
         diagnostic_label="写前接收范围来源观察",
     )
     return {
-        "version": VERSION,
+        "version": version,
         "input_sha256": token,
         "source_sha256": sha(source),
         "sources": sources,

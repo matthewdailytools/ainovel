@@ -104,7 +104,9 @@ test('真实API与Worker从维护完成的旧检查点创建并开始子任务�
   const response = await posted
   expect(response.status(), await response.text()).toBe(202)
   const child: Task = await response.json()
-  expect(child.status).toBe('queued')
+  // The independent Worker may claim or finish this task before the POST is read.
+  // Its identity and frozen policy are checked below; terminal behavior is polled.
+  expect(['queued', 'running', 'needs_review']).toContain(child.status)
   expect(child.result.flow_source_entailment_version).toBe('source-flow-entailment/2')
   expect(child.result.repair_round).toBe(1)
   expect(child.result.plan).toEqual(before.current.task.result.plan)

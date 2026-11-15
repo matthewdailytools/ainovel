@@ -1,5 +1,8 @@
 """Deterministic routing/acceptance tests, not model detection-quality evidence."""
 
+from helpers.authored_source_fixture import authored_inventory, bind_authored
+
+
 import asyncio
 from copy import deepcopy
 import hashlib
@@ -33,6 +36,12 @@ class PlotModel(SegmentModel):
         instruction = value["任务"]
         self.frames.append(deepcopy(value))
         action = instruction.get("动作", instruction.get("action"))
+        if fixture := authored_inventory(value["任务"]):
+            return {
+                "text": dumps(fixture),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-authored-source",
+            }
         if action == "仅依据作者原话整理本场景情节":
             output = {
                 "items": [
@@ -69,6 +78,7 @@ class PlotModel(SegmentModel):
         else:
             return await super().generate(account, task_id, system, prompt, max_output, **kwargs)
         self.calls += 1
+        bind_authored(value["任务"], output)
         return {
             "text": dumps(output) if isinstance(output, dict) else output,
             "usage": {"input": 1, "output": 1},
@@ -168,6 +178,13 @@ def test_workflow_unverified_does_not_force_revision_and_plan_origin_remains_exp
     monkeypatch.setattr(Worker, "revise_chapter", unexpected)
     asyncio.run(Worker(settings, model).run_once())
     task = domain.task(queued["id"])
+    if mode == "assisted" and certainty == "ambiguous":
+        # Fresh author-source ambiguity is discovered before writing, retaining
+        # the source receipt instead of spending on a candidate to reject later.
+        assert task["status"] == "blocked_runtime" and "作者原话" in task["error"]
+        assert not domain.db.all("SELECT * FROM artifacts")
+        assert not any(f["任务"].get("动作") == "按章纲写完整正文" for f in model.frames)
+        return
     assert task["status"] == "needs_review", task["error"]
     assert "未自动修订" in task["error"] and "有限修订" not in task["error"]
     saved = domain.artifact(task["result"]["waiting_artifact"])

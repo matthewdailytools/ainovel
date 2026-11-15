@@ -143,6 +143,7 @@ def check_receipt(worker, row, plot, chapter):
                 or slot.get("owner_task_id") not in owners
                 or slot.get("response_sha256") != sha(inventory)
                 or not recipient_scope.inventory_valid(inventory, text)
+                or inventory.get("version") != row[recipient_scope.KEY]
             ):
                 raise DomainError("plan_preparation_changed", "先行来源范围观察与本轮原文不一致。", 409)
             interpretation = next((r for r in row.get("interpretations", []) if r["round"] == index), None)
@@ -168,6 +169,15 @@ def check_receipt(worker, row, plot, chapter):
                     raise DomainError(
                         "plan_preparation_changed", "本轮来源范围观察或解释绑定无法核实，未生成正文。", 409
                     )
+    if (
+        scope_execution
+        and row.get("status") == "ready"
+        and any(
+            not recipient_scope.bindings_supported(r["recipient_scope_bindings"])
+            for r in row["interpretations"]
+        )
+    ):
+        raise DomainError("plan_preparation_changed", "未知来源绑定不能标记就绪。", 409)
     if roles:
         from .workflow_plan_source_roles import VERSION as ROLE_VERSION
 
@@ -222,7 +232,7 @@ def lineage(worker):
     raise DomainError("workflow_progress", "写前准备的续跑来源无法确认。", 409)
 
 
-async def phase(worker, row, key, state, invoke):
+async def phase(worker, row, key, state, invoke, *, owner_ids=None):
     """A resumed dispatch can read exact paid cache entries, never issue a new call."""
     active(worker)
     from .workflow_plan_open_details import KEY as OPEN_KEY
@@ -235,7 +245,7 @@ async def phase(worker, row, key, state, invoke):
     slot = slots.get(key)
     history = []
     if slot is not None:
-        if slot["owner_task_id"] not in lineage(worker):
+        if slot["owner_task_id"] not in (lineage(worker) if owner_ids is None else owner_ids):
             raise DomainError("workflow_progress", "写前准备步骤不属于本次续跑来源。", 409)
         if "response" in slot:
             if slot.get("response_sha256") != sha(slot["response"]):
@@ -426,7 +436,9 @@ async def prepare(worker, plot, chapter):
                     row,
                     f"recipient_scope:{round_number}",
                     "interpreting",
-                    lambda: recipient_scope.observe(worker, row["effective_plot"]),
+                    lambda: recipient_scope.observe(
+                        worker, row["effective_plot"], version=row[recipient_scope.KEY]
+                    ),
                 )
                 if not recipient_scope.inventory_valid(scope_inventory, row["effective_plot"]):
                     raise DomainError("plan_preparation_changed", "本轮接收范围来源观察无法核实。", 409)
@@ -448,7 +460,7 @@ async def prepare(worker, plot, chapter):
                         **({ROLE_KEY: ROLE_VERSION} if ROLE_KEY in row else {}),
                         **(
                             {
-                                recipient_scope.KEY: recipient_scope.VERSION,
+                                recipient_scope.KEY: row[recipient_scope.KEY],
                                 "recipient_scope_inventory": scope_inventory,
                             }
                             if scope_execution
@@ -484,6 +496,14 @@ async def prepare(worker, plot, chapter):
                     }
                 )
                 worker.checkpoint(result)
+            if scope_execution and not recipient_scope.bindings_supported(
+                interpretation["recipient_scope_bindings"]
+            ):
+                return stop(
+                    worker,
+                    row,
+                    "原话与先行范围观察的绑定仍未明，双方提案保留；未强迫解释服从第一模型，未选择开放细节或生成正文。",
+                )
             initial = row["interpretations"][0]["contract"]
             if not initial["items"] or len(contract["items"]) != len(initial["items"]):
                 return stop(worker, row, "写前解释未完整覆盖原始事项，未生成正文；请核对保留记录。")

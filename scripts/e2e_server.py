@@ -17,6 +17,7 @@ from ainovel.settings import Provider, Settings
 from ainovel.worker import Worker
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend/tests"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_reference_flow import Model as ReferenceModel  # noqa: E402
 from test_story_extraction import ExtractionModel, UpdateModel  # noqa: E402
 from test_workflow_scope import SegmentModel as BookModel  # noqa: E402
@@ -25,6 +26,7 @@ from helpers.plan_execution_fixture import plan_execution_output  # noqa: E402
 from helpers.ideation_fixture import complete_idea_output  # noqa: E402
 from helpers.source_identity_fixture import source_identity_output  # noqa: E402
 from helpers.flow_entailment_fixture import flow_entailment_output  # noqa: E402
+from e2e_authored_scope_fixture import source_observation, bind_interpretation  # noqa: E402
 from helpers.source_correction_fixture import (  # noqa: E402
     source_correction_output,
     source_correction_body_output,
@@ -99,6 +101,13 @@ class Model(ReferenceModel):
         source_instruction = instruction
         while "原始任务" in source_instruction:
             source_instruction = source_instruction["原始任务"]
+        authored_observation = source_observation(source_instruction)
+        if authored_observation is not None:
+            return {
+                "text": json.dumps(authored_observation, ensure_ascii=False),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-authored-source-observation",
+            }
         if source_instruction.get(
             "动作"
         ) == "按章纲写完整正文" and "memory-selection-e2e" in source_instruction.get("本章", {}).get(
@@ -376,10 +385,10 @@ class Model(ReferenceModel):
                 )
             return {
                 "text": json.dumps(
-                    {
-                        "items": [item],
-                        "note": "仅为确定性界面验证",
-                    }
+                    bind_interpretation(
+                        instruction,
+                        {"items": [item], "note": "仅为确定性界面验证"},
+                    )
                 ),
                 "usage": {"input": 1, "output": 1},
                 "call_id": "offline",

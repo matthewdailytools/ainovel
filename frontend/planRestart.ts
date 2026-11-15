@@ -6,6 +6,7 @@ export const OPEN_DETAILS_VERSION = 'workflow-plan-open-details/1'
 export const SOURCE_ROLES_VERSION = 'workflow-plan-source-roles/1'
 export const SOURCE_ROLES_CREATION_VERSION = 'workflow-plan-source-roles-creation/1'
 export const RECIPIENT_SCOPE_VERSION = 'workflow-plan-recipient-scope/1'
+export const RECIPIENT_SCOPE_CURRENT_VERSION = 'workflow-plan-recipient-scope/2'
 export type RestartInput = components['schemas']['PlanRestartInput']
 export type RestartBasis = Pick<
   RestartInput,
@@ -157,7 +158,7 @@ function initialInterpretationPhases(row: Record<string, unknown>, phases: Recor
   const version = row.workflow_plan_recipient_scope_version
   if (version === undefined) return Object.keys(phases).join(',') === 'interpret:0'
   if (
-    version !== RECIPIENT_SCOPE_VERSION ||
+    ![RECIPIENT_SCOPE_VERSION, RECIPIENT_SCOPE_CURRENT_VERSION].includes(String(version)) ||
     row.workflow_plan_source_roles_version !== SOURCE_ROLES_VERSION ||
     Object.keys(phases).sort().join(',') !== 'interpret:0,recipient_scope:0'
   )

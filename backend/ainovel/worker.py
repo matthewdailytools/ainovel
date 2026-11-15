@@ -274,6 +274,9 @@ class Worker:
         from .workflow_plan_source_roles import validate_task as validate_roles
 
         validate_roles(self.task, self.domain)
+        from .authored_source_scope import validate_task as validate_authored_source
+
+        authored_source = validate_authored_source(self.task, self.domain)
         from .flow_entailment import enabled as flow_entailment_enabled
 
         flow_entailment_enabled(self)
@@ -357,6 +360,7 @@ class Worker:
             "独立核对来源解释纠偏与全部事项保持",
             "独立观察全书条件在本章是否触发",
             "独立观察AI章纲接收范围来源",
+            "独立观察作者情节接收范围来源",
         }:
             # No implicit enrichment: source interpretation receives only its
             # source scope. New plan choice/check stages explicitly supply their
@@ -479,7 +483,19 @@ class Worker:
         if previous:
             saved = json.loads(previous[0]["result"])
             return await validated(saved)
-        if self.task["kind"] in {"source_interpretation_correction", "source_corrected_candidate_recheck"}:
+        if authored_source:
+            with self.budget.db() as usage:
+                unresolved = usage.execute(
+                    "SELECT id FROM calls WHERE task_id=? AND charged IS NULL LIMIT 1", (self.task["id"],)
+                ).fetchone()
+            if unresolved is not None:
+                raise DomainError(
+                    "unknown_result", "本任务仍有未结算调用，保留原预留与来源，未重发未知请求。", 409
+                )
+        if authored_source or self.task["kind"] in {
+            "source_interpretation_correction",
+            "source_corrected_candidate_recheck",
+        }:
             dispatched = self.db.all(
                 "SELECT id FROM task_events WHERE task_id=? AND kind='step_dispatched' "
                 "AND json_extract(payload,'$.fingerprint')=? ORDER BY id DESC LIMIT 1",
@@ -670,6 +686,15 @@ class Worker:
                         and "事实证据契约版本" in source_instruction
                         else {}
                     ),
+                    **(
+                        {
+                            "authored_source_scope_version": self.task["result"][
+                                "authored_source_scope_version"
+                            ]
+                        }
+                        if authored_source
+                        else {}
+                    ),
                     "account": self.settings.providers[payload["account"]].public(),
                     "reasoning_effort": provider.reasoning,
                     "service_tier": "default" if provider.kind == "openai" else None,
@@ -744,8 +769,11 @@ class Worker:
             from .providers import RequestNotSent
 
             if (
-                self.task["kind"]
-                in {"source_interpretation_correction", "source_corrected_candidate_recheck"}
+                (
+                    authored_source
+                    or self.task["kind"]
+                    in {"source_interpretation_correction", "source_corrected_candidate_recheck"}
+                )
                 and isinstance(error, RequestNotSent)
                 and error.task_id == self.task["id"]
                 and error.account == payload["account"]
@@ -987,6 +1015,14 @@ class Worker:
                 raise DomainError("chapter_required", "请选择目标章节。")
             instruction["输出"] = "仅返回本章正文。忠实给定情节与结果，可补动作对白心理环境，不改关键结果。"
             plot_source = module_plot_source(request) if request.get("plot_contract_check") is True else None
+            from .authored_source_scope import validate_task as authored_enabled
+
+            if authored_enabled(self.task, self.domain):
+                from .plot_audit import interpret_plot
+
+                await interpret_plot(
+                    self, plot_source, source_kind="author_instruction", source_position=chapter["position"]
+                )
             output = await self.call(
                 instruction, context=context, max_output=request["max_output_tokens"], stream=True
             )
@@ -1110,13 +1146,18 @@ class Worker:
                     "不能猜人、删除传递事件、换对象或把原阶段／否定／只／仅／未知改掉来通过校验。"
                 )
             if (
-                instruction.get("接收范围核对执行版本") == "workflow-plan-recipient-scope/1"
+                instruction.get("接收范围核对执行版本")
+                in {"workflow-plan-recipient-scope/1", "workflow-plan-recipient-scope/2"}
                 and instruction.get("动作") == "独立观察AI章纲接收范围来源"
             ):
                 current["引用修正要求"] = (
                     "本阶段没有正文或P卡。只依据本次本章工作章纲连续原话修正来源观察和引用编号；"
                     "命名目的地、一份材料、另项许可或排除某一人不等于排除其他全部接收者。"
                     "没有可支持的范围归属时保留unknown，不补造排他、不扩大原角色、物品、条件和阶段。"
+                )
+            if instruction.get("authored_source_scope_version") == "authored-source-scope/1":
+                current["引用修正要求"] = (
+                    "本阶段没有正文或候选。只回到作者本次原话核对连续引用、同一传递及绑定，保留原角色、原件／副本、阶段、条件与否定；目的地、另项许可或排除某人不能改成排他。真未明确保持unknown／ambiguous，不能替作者选人或补出新约束。"
                 )
             if repair_feedback is not None:
                 current.update(repair_feedback())
@@ -1676,6 +1717,9 @@ class Worker:
 
     async def workflow(self):
         payload, result = self.task["payload"], self.task["result"]
+        from .authored_source_scope import validate_task as authored_enabled
+
+        authored_enabled(self.task, self.domain)
         from .book_applicability import enabled as applicability_enabled
         from .conditional_review import enabled as conditional_enabled
         from .workflow_plan_preparation import enabled as preparation_enabled, prepare
@@ -1777,6 +1821,17 @@ class Worker:
                     if prepared is None:
                         return
                     plot, prepared_contract = prepared
+                if payload["mode"] == "assisted" and authored_enabled(self.task, self.domain):
+                    from .plot_audit import interpret_plot
+
+                    original = next((p for p in payload["plots"] if p["number"] == number), None)
+                    if original is None:
+                        raise DomainError(
+                            "authored_source", "本章作者原情节缺失，未先生成正文再推断要求。", 409
+                        )
+                    await interpret_plot(
+                        self, original["plot"], source_kind="author_plot", source_position=number
+                    )
                 context = self.context(branch_id, chapter["id"])
                 fixed = payload["fixed"] + [item for item in plot["fixed"] if item not in payload["fixed"]]
                 findings = [

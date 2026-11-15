@@ -1,3 +1,4 @@
+from helpers.authored_source_fixture import authored_inventory
 import asyncio
 from copy import deepcopy
 import json
@@ -44,6 +45,12 @@ class Model:
         value = json.loads(prompt.split("\n只返回")[0])
         self.requests.append(deepcopy(value))
         task = value["任务"]
+        if fixture := authored_inventory(value["任务"]):
+            return {
+                "text": dumps(fixture),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-authored-source",
+            }
         action = task.get("动作")
         if flow_review := flow_entailment_output(task):
             return {

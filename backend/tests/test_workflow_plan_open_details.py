@@ -67,6 +67,11 @@ class OpenModel(PreparationModel):
                 row["recipient"] = "门吏"
             if "接收范围核对执行版本" in instruction:
                 row["scope_observation_ids"] = []
+                if instruction["接收范围核对执行版本"] == "workflow-plan-recipient-scope/2":
+                    row.update(
+                        scope_binding_status="supported",
+                        scope_binding_reason="工程开放槽与原话范围关联；不作真实模型判定。",
+                    )
             output = {"items": [row], "note": "只据AI粗章纲，开放槽不属于事实或作者锁定。"}
         elif action == CHOICE_ACTION:
             output = {

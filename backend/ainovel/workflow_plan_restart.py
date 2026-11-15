@@ -258,7 +258,7 @@ def known_invalid_phase(domain, usage, current, row, *, open_phase=False):
     new_dispatches = [d for d in dispatched if d["fingerprint"] not in old]
     from types import SimpleNamespace
     from . import workflow_plan_recipient_scope as recipient_scope
-    from .plot_audit import ScopeBoundOpenPlanInterpretation
+    from .plot_audit import ScopeBoundOpenPlanInterpretation, ScopeBoundOpenPlanInterpretationV2
 
     scope_execution = recipient_scope.enabled(SimpleNamespace(task=current, domain=domain, db=domain.db), row)
     inventory = (
@@ -271,7 +271,9 @@ def known_invalid_phase(domain, usage, current, row, *, open_phase=False):
     ):
         raise DomainError("unknown_result", "先行范围观察不完整或未知，不重发旧解释。", 409)
     schema = (
-        ScopeBoundOpenPlanInterpretation
+        ScopeBoundOpenPlanInterpretationV2
+        if scope_execution and row[recipient_scope.KEY] == recipient_scope.CURRENT_VERSION
+        else ScopeBoundOpenPlanInterpretation
         if scope_execution
         else OpenPlanInterpretation
         if open_phase
@@ -287,7 +289,7 @@ def known_invalid_phase(domain, usage, current, row, *, open_phase=False):
             not isinstance(d.get("request"), dict)
             or d["request"].get(ROLE_KEY) != current["result"].get(ROLE_KEY)
             or d["request"].get(KEY) != VERSION
-            or (scope_execution and d["request"].get(recipient_scope.KEY) != recipient_scope.VERSION)
+            or (scope_execution and d["request"].get(recipient_scope.KEY) != row[recipient_scope.KEY])
             for d in new_dispatches
         )
     ):

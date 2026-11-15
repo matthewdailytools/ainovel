@@ -101,6 +101,16 @@ def source_identity_output(instruction):
                     "recipient_scope": "unspecified",
                     "scope_condition": "",
                     **({"scope_observation_ids": []} if "接收范围核对执行版本" in instruction else {}),
+                    **(
+                        {
+                            "scope_observation_ids": [],
+                            "scope_binding_status": "supported",
+                            "scope_binding_reason": "固定借尺工程样例没有排他范围观察，角色限定仍独立核对。",
+                        }
+                        if instruction.get("authored_source_scope_version") == "authored-source-scope/1"
+                        or instruction.get("接收范围核对执行版本") == "workflow-plan-recipient-scope/2"
+                        else {}
+                    ),
                 }
             ],
             "note": "工程夹具刻意保留泛称，检验独立身份限定链路。",
