@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>小说编辑器 · ainovel 交互原型</title>
+    <link rel="stylesheet" href="prototypes/editor/editor.css" />
+    <script src="prototypes/editor/editor.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#manuscript">跳到正文</a>
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">a.</span
+        ><span>ainovel<span class="brand-sub">小说创作工作台</span></span>
+      </div>
+      <span class="prototype-label">交互原型 · 演示数据</span>
+      <div class="header-actions">
+        <span id="save-status" role="status">正在读取浏览器演示稿…</span>
+        <button id="save">保存</button>
+        <button id="history-open">版本历史</button>
+        <button id="export" class="primary">导出本章 <span aria-hidden="true">↗</span></button>
+      </div>
+    </header>
+    <div id="persistent-error" class="error-banner" role="alert" hidden></div>
+    <div class="workspace" id="workspace">
+      <aside class="navigator" aria-label="章节目录">
+        <div class="book-heading">
+          <span class="eyebrow">当前作品 / 作者工作稿</span>
+          <h1>雾渡</h1>
+          <p>在旧账里，寻找失踪的人。</p>
+        </div>
+        <div class="section-row">
+          <h2>章节目录</h2>
+          <button id="new-chapter" aria-label="新建章节" title="新建章节">＋</button>
+        </div>
+        <p class="volume-label">第一卷 · 沉舟</p>
+        <ol id="chapter-list" class="chapter-list"></ol>
+        <button id="back-from-nav" class="return-button">返回正文 →</button>
+        <div class="navigator-foot">
+          <div class="book-rule"></div>
+          <p>写到哪里，故事就从哪里继续。</p>
+          <span id="book-count"></span
+          ><a href="21-小说编辑器调研与设计.md" target="_blank" rel="noopener">查看设计文档 ↗</a>
+        </div>
+      </aside>
+      <main class="writing-area" id="writing-area">
+        <div class="toolbar" aria-label="编辑工具">
+          <div class="tool-group">
+            <button id="nav-toggle" aria-expanded="true">目录</button
+            ><span class="tool-divider" aria-hidden="true"></span><button id="find-open">查找替换</button
+            ><button id="settings-open">排版</button>
+          </div>
+          <div class="tool-group">
+            <button id="focus-toggle" aria-pressed="false">专注写作</button
+            ><button id="inspector-toggle" aria-expanded="true">辅助面板</button>
+          </div>
+        </div>
+        <div class="paper-scroll" id="paper-scroll">
+          <div class="paper">
+            <div class="chapter-kicker">
+              <span id="chapter-kicker">第一卷 · 沉舟 / 03</span><span class="draft-label">作者工作稿</span>
+            </div>
+            <label class="sr-only" for="chapter-title">章节标题</label>
+            <input id="chapter-title" class="chapter-title" maxlength="200" />
+            <p class="chapter-meta" id="chapter-meta"></p>
+            <label class="sr-only" for="manuscript">章节正文</label>
+            <textarea
+              id="manuscript"
+              spellcheck="false"
+              placeholder="从一句话开始。无需先写大纲。"
+            ></textarea>
+            <div class="end-mark" aria-hidden="true">· · ·</div>
+          </div>
+        </div>
+        <footer class="editor-footer">
+          <span id="selection-count">未选择正文</span><span id="revision-status"></span
+          ><span>仅存当前浏览器 · 非服务稿</span>
+        </footer>
+      </main>
+      <aside class="inspector" id="inspector" aria-label="写作辅助与资料">
+        <div class="inspector-heading">
+          <span class="eyebrow">留在故事里</span
+          ><button id="inspector-close" aria-label="收起辅助面板">×</button>
+        </div>
+        <nav class="inspector-tabs" aria-label="辅助分区">
+          <button data-panel="assist" aria-pressed="true">写作辅助</button
+          ><button data-panel="context" aria-pressed="false">资料</button
+          ><button data-panel="notes" aria-pressed="false">便笺</button>
+        </nav>
+        <section id="panel-assist" class="inspector-content">
+          <div class="panel-heading">
+            <h2>让这一段，更进一步</h2>
+            <p>保留你的情节，只推敲表达。</p>
+          </div>
+          <div class="target-card">
+            <span class="eyebrow">本次操作范围</span><strong id="target-label">当前光标</strong>
+            <p id="target-preview">选择一段正文，或在光标处续写。</p>
+            <button id="sample-selection" class="text-button">载入示例选区 ↗</button>
+          </div>
+          <label for="action">想怎么调整</label>
+          <select id="action">
+            <option value="rewrite">改写选区</option>
+            <option value="expand">扩写选区</option>
+            <option value="continue">从光标处续写</option>
+          </select>
+          <label for="instruction">你的要求</label>
+          <textarea id="instruction" rows="3">收紧叙述，用动作表现迟疑；不改变事件与结果。</textarea>
+          <details class="context-disclosure">
+            <summary>本次演示的发送范围</summary>
+            <ul id="send-scope"></ul>
+            <p>仅展示范围。原型不连接外部模型，不产生费用。</p>
+          </details>
+          <p class="demo-note">本地固定候选演示，不解析自由输入的要求。</p>
+          <button id="generate" class="primary generate-button">
+            生成演示候选 <span aria-hidden="true">✧</span>
+          </button>
+          <button id="cancel-generation" hidden>取消生成</button>
+          <p id="generation-status" role="status"></p>
+          <section id="candidate" class="candidate" hidden aria-label="候选对照">
+            <div class="section-row">
+              <h3>候选对照</h3>
+              <span class="tag">演示候选</span>
+            </div>
+            <p id="candidate-basis" class="small"></p>
+            <details class="context-disclosure">
+              <summary>生成时的范围与要求</summary>
+              <p id="candidate-request"></p>
+            </details>
+            <div class="comparison-block before">
+              <span class="comparison-label">原文 · 保持可恢复</span>
+              <p id="candidate-before"></p>
+            </div>
+            <div class="comparison-block after">
+              <span class="comparison-label">建议 · 尚未写入正文</span>
+              <p id="candidate-after"></p>
+            </div>
+            <p id="candidate-warning" class="warning" hidden></p>
+            <div class="candidate-actions">
+              <button id="accept" class="primary">采用并替换选区</button><button id="reject">放弃候选</button>
+            </div>
+          </section>
+          <p class="inspector-hint">你拥有原稿，也决定每一次采用。</p>
+        </section>
+        <section id="panel-context" class="inspector-content" hidden>
+          <div class="panel-heading">
+            <h2>手边的故事资料</h2>
+            <p>查看资料与发送资料，分别选择。</p>
+          </div>
+          <article class="reference-card">
+            <span class="tag">人物设定 · 演示</span>
+            <h3>沈砚</h3>
+            <p>旧账房学徒。习惯先看账目的涂改处，再听人解释。</p>
+            <p class="small">来源：演示人物卡 · 不是任意时点的状态证明。</p>
+            <label class="check"
+              ><input id="include-character" type="checkbox" checked />演示请求选入此卡</label
+            >
+          </article>
+          <article class="reference-card">
+            <span class="tag">本章计划 · 演示</span>
+            <h3>第三章的落点</h3>
+            <p>沈砚去渡口核对旧账。交易失败，不发生战斗；以一条新线索收束。</p>
+            <p class="small">来源：演示章纲 · 计划尚不代表已发生事实。</p>
+            <label class="check"
+              ><input id="include-outline" type="checkbox" checked />演示请求选入章纲</label
+            >
+          </article>
+          <p class="small">正式产品使用已有资料书库和故事查询；本页条目只用于交互演示。</p>
+        </section>
+        <section id="panel-notes" class="inspector-content" hidden>
+          <div class="panel-heading">
+            <h2>给下次落笔的自己</h2>
+            <p>按章保存在原型中，不自动作为小说事实。</p>
+          </div>
+          <label for="chapter-note">本章便笺</label
+          ><textarea id="chapter-note" rows="10" placeholder="下一场景、当前卡点、要查的资料…"></textarea>
+          <p class="small">与正文一起保存。失败时可随本章下载保留。</p>
+        </section>
+        <button id="back-from-inspector" class="return-button">返回正文 →</button>
+      </aside>
+    </div>
+    <div class="toast" id="toast" role="status" hidden></div>
+    <dialog id="find-dialog" aria-labelledby="find-heading">
+      <div class="dialog-heading">
+        <h2 id="find-heading">本章查找替换</h2>
+        <button data-close="find-dialog" aria-label="关闭查找替换">×</button>
+      </div>
+      <p class="small">仅当前章，字面匹配且区分大小写。</p>
+      <label for="find-text">查找内容</label><input id="find-text" type="search" />
+      <label for="replace-text">替换为</label><input id="replace-text" />
+      <p id="find-status" role="status">输入要查找的内容。</p>
+      <div class="dialog-actions">
+        <button id="find-prev">上一处</button><button id="find-next">下一处</button
+        ><button id="replace-one">替换这一处</button><button id="replace-all">全部替换…</button>
+      </div>
+      <div id="replace-confirmation" class="confirm-box" hidden>
+        <p id="replace-confirmation-text"></p>
+        <button id="confirm-replace" class="primary">确认替换当前章</button
+        ><button id="cancel-replace">取消</button>
+      </div>
+      <p class="small">关闭窗口后可在正文查看命中选区；替换前稿保留在历史中。</p>
+    </dialog>
+    <dialog id="history-dialog" class="history-dialog" aria-labelledby="history-heading">
+      <div class="dialog-heading">
+        <h2 id="history-heading">本章版本历史</h2>
+        <button data-close="history-dialog" aria-label="关闭版本历史">×</button>
+      </div>
+      <p class="small">恢复生成新修订；当前稿保留。仅含本浏览器原型历史。</p>
+      <label for="history-version">选择要比较的版本</label
+      ><select id="history-version"></select>
+      <div class="history-compare">
+        <section>
+          <h3>当前工作稿</h3>
+          <pre id="history-current"></pre>
+        </section>
+        <section>
+          <h3>所选历史稿</h3>
+          <pre id="history-before"></pre>
+        </section>
+      </div>
+      <button id="restore" class="primary">恢复所选版本为新修订</button>
+    </dialog>
+    <dialog id="settings-dialog" aria-labelledby="settings-heading">
+      <div class="dialog-heading">
+        <h2 id="settings-heading">阅读与排版</h2>
+        <button data-close="settings-dialog" aria-label="关闭阅读与排版">×</button>
+      </div>
+      <p class="small">仅改变阅读呈现，不修改正文。</p>
+      <label for="font-size">正文字号</label
+      ><select id="font-size">
+        <option value="18">18 px · 默认</option>
+        <option value="22">22 px · 较大</option>
+        <option value="28">28 px · 大字</option>
+        <option value="36">36 px · 正文200%</option>
+      </select>
+      <label for="line-height">正文行距</label
+      ><select id="line-height">
+        <option value="1.95">1.95 · 默认</option>
+        <option value="1.65">1.65 · 紧凑</option>
+        <option value="2.3">2.3 · 宽松</option>
+      </select>
+      <label for="theme">阅读配色</label
+      ><select id="theme">
+        <option value="light">浅色纸面</option>
+        <option value="dark">深色夜读</option>
+      </select>
+      <details class="demo-controls">
+        <summary>原型状态演示</summary>
+        <label class="check"><input id="fail-save" type="checkbox" />模拟保存失败（内容留在窗口）</label
+        ><label class="check"
+          ><input id="fail-generation" type="checkbox" />下一次生成失败（重试恢复正常）</label
+        >
+        <p class="small">仅作用于演示稿。不访问正式数据或外部模型。</p>
+      </details>
+      <p class="small shortcuts">
+        快捷键：Ctrl/Cmd+S 保存；Ctrl/Cmd+Shift+F 查找；Ctrl/Cmd+Shift+Enter 专注。输入法组合期间不执行。
+      </p>
+    </dialog>
+    <dialog id="new-dialog" aria-labelledby="new-heading">
+      <form id="new-form">
+        <div class="dialog-heading">
+          <h2 id="new-heading">新建章节</h2>
+          <button type="button" data-close="new-dialog" aria-label="关闭新建章节">×</button>
+        </div>
+        <label for="new-title">章节标题</label><input id="new-title" maxlength="200" required />
+        <p id="new-error" role="alert"></p>
+        <button class="primary" type="submit">创建并开始写作</button>
+      </form>
+    </dialog>
+  </body>
+</html>
