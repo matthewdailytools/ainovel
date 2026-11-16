@@ -315,7 +315,7 @@ def binding_data(value, version=VERSION):
     }
 
 
-def binding_issues(value, inventory):
+def binding_issues(value, inventory, *, legacy_diagnostic_labels=False):
     observations = {row["observation_id"]: row for row in inventory["inventory"]["observations"]}
     used, issues = set(), []
     for index, item in enumerate(value["items"], 1):
@@ -331,7 +331,13 @@ def binding_issues(value, inventory):
                 "version": core.CURRENT_VERSION,
                 "inventory": {"observations": [observations[key] for key in ids]},
             }
-            issues.extend(core.binding_issues({"items": [item], "note": value["note"]}, subset))
+            local_issues = core.binding_issues({"items": [item], "note": value["note"]}, subset)
+            issues.extend(
+                f"P{index:02}{issue[3:]}"
+                if not legacy_diagnostic_labels and issue.startswith("P01")
+                else issue
+                for issue in local_issues
+            )
     if used != set(observations):
         issues.append("所有原文范围观察均须关联并保留，未明可unknown，不能删除真实限制。")
     return issues

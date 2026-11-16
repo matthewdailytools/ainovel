@@ -143,7 +143,14 @@ class FlowObservations(StrictModel):
 
 
 async def independent_flows(
-    worker, items, text, checks, *, source_label="作者原话", version=LEGACY_VERSION, source_text=None
+    worker,
+    items,
+    text,
+    checks,
+    *,
+    source_label="作者原话",
+    version=LEGACY_VERSION,
+    source_text=None,
 ):
     from .flow_entailment import enabled as entailment_enabled
 
@@ -167,7 +174,10 @@ async def independent_flows(
         )
     }
     if verify_sources:
-        from .flow_entailment import VERSION as ENTAILMENT_VERSION, execution_version as flow_version
+        from .flow_entailment import (
+            VERSION as ENTAILMENT_VERSION,
+            execution_version as flow_version,
+        )
 
         if flow_version(worker) == ENTAILMENT_VERSION:
             # Source roles need not assert a handover to be available as names.
@@ -240,7 +250,11 @@ async def independent_flows(
         "要求": "只提取正文实际给出、索取、交换、借还或传递的方向，不判断是否符合任何作者要求。supplier是给出方，recipient是取得方；交易失败也须区分原本提议的方向。offered/requested是当前提出的方向，completed是已交付，未来计划为planned，拒绝项为refused。只能据原文明确信息映射实体编号；不能映射则unknown，其他物品为other。引用FLOW编号。",
     }
     if verify_sources:
-        from .flow_entailment import OBJECT_GUIDANCE, execution_version as flow_version, observation_version
+        from .flow_entailment import (
+            OBJECT_GUIDANCE,
+            execution_version as flow_version,
+            observation_version,
+        )
 
         observation_instruction["角色流向观察版本"] = observation_version(worker)
         observation_instruction["流向来源蕴含版本"] = flow_version(worker)
@@ -485,7 +499,13 @@ def open_plan_issues(value, source):
 
 
 async def interpret_plot(
-    worker, author_text, *, source_kind=None, preparation=None, source_position=None, authored_inventory=None
+    worker,
+    author_text,
+    *,
+    source_kind=None,
+    preparation=None,
+    source_position=None,
+    authored_inventory=None,
 ):
     from . import authored_source_scope as authored
     from .authored_source_classification import GUIDANCE as CLASSIFICATION_GUIDANCE
@@ -617,7 +637,7 @@ async def interpret_plot(
             fields["scope_observation_ids"]["maxItems"] = 0
         fields["recipient_scope"]["description"] = recipient_scope.GUIDANCE
 
-    def validate_author(value):
+    def validate_author(value, *, legacy_diagnostic_labels=False):
         for item in value["items"]:
             resolve_field(item, "author_evidence", author_sources)
         issues = []
@@ -634,7 +654,11 @@ async def interpret_plot(
         if scope_execution:
             issues.extend(recipient_scope.binding_issues(value, inventory))
         if authored_execution:
-            issues.extend(authored.binding_issues(value, authored_inventory))
+            issues.extend(
+                authored.binding_issues(
+                    value, authored_inventory, legacy_diagnostic_labels=legacy_diagnostic_labels
+                )
+            )
         return issues
 
     def repair_feedback():
@@ -716,6 +740,15 @@ async def interpret_plot(
         {"scope": f"仅{source_label}，尚未读取候选"},
         validate_author,
         contract=author_contract,
+        **(
+            {
+                "diagnostic_legacy_validator": lambda value: validate_author(
+                    value, legacy_diagnostic_labels=True
+                )
+            }
+            if authored_execution and authored_inventory["version"] == authored.CURRENT_VERSION
+            else {}
+        ),
         **({"diagnostic_label": "AI工作章纲写前解释"} if open_details else {}),
         **(
             {"repair_feedback": repair_feedback if scope_execution else repair_state.feedback}

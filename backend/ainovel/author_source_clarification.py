@@ -155,7 +155,9 @@ def authorized_account_descendant(domain, chain, origin):
                 or receipt.get("original_account") != parent["payload"]["account"]
             ):
                 raise DomainError(
-                    "author_clarification_account", "换账户来源缺少既有显式续跑决定，未静默换配置。", 409
+                    "author_clarification_account",
+                    "换账户来源缺少既有显式续跑决定，未静默换配置。",
+                    409,
                 )
             event = {"previous_task": parent["id"], "next_task": child["id"], **receipt}
         nonce = child["payload"].get("client_request_id")
@@ -172,7 +174,9 @@ def authorized_account_descendant(domain, chain, origin):
             or json.loads(rows[0]["payload"]) != event
         ):
             raise DomainError(
-                "author_clarification_account", "账户续跑的原提交与创建事件无法核对，未自动发送。", 409
+                "author_clarification_account",
+                "账户续跑的原提交与创建事件无法核对，未自动发送。",
+                409,
             )
         changed = True
     return changed
@@ -198,7 +202,9 @@ def ensure_runtime(task, domain, settings):
     chosen = settings.providers.get(task["payload"]["account"])
     if chosen is None or (not changed and chosen.public() != receipt.get("account")):
         raise DomainError(
-            "configuration_changed", "原账户模型配置已变化，请核对冻结来源与费用，未自动换配置继续。", 409
+            "configuration_changed",
+            "原账户模型配置已变化，请核对冻结来源与费用，未自动换配置继续。",
+            409,
         )
     # A queued child must not replay body work dispatched later by another
     # producer while it waited. Its own generation and legitimate descendants
@@ -233,7 +239,9 @@ def ensure_runtime(task, domain, settings):
             and target.get("id") in targets
         ):
             raise DomainError(
-                "author_clarification_late", "子任务等待期间已有其他正文派发，保留现场，未跨任务重发。", 409
+                "author_clarification_late",
+                "子任务等待期间已有其他正文派发，保留现场，未跨任务重发。",
+                409,
             )
 
 
@@ -315,13 +323,14 @@ def completed_unverified_record(domain, current, entry):
         ) from error
 
 
-def checkpoint(domain, current, *, record_check=None):
+def checkpoint(domain, current, *, record_check=None, allow_running=False):
     state, payload = current["result"], current["payload"]
     if (
         current["kind"] != "workflow"
         or payload.get("mode") != "assisted"
         or payload.get("plot_contract_check") is not True
-        or current["status"] not in {"blocked_runtime", "needs_review", "paused", "cancelled"}
+        or current["status"]
+        not in ({"running"} if allow_running else {"blocked_runtime", "needs_review", "paused", "cancelled"})
         or any(
             state.get(k)
             for k in (
@@ -384,7 +393,9 @@ def checkpoint(domain, current, *, record_check=None):
         for c in future
     ):
         raise DomainError(
-            "author_clarification_late", "当前或后续章已有正文、修订或候选，不借澄清改变原要求。", 409
+            "author_clarification_late",
+            "当前或后续章已有正文、修订或候选，不借澄清改变原要求。",
+            409,
         )
     tasks = lineage(domain, current)
     owners = {t["id"] for t in tasks}
@@ -425,7 +436,9 @@ def checkpoint(domain, current, *, record_check=None):
             and target_version.get("id") in ids
         ):
             raise DomainError(
-                "author_clarification_late", "当前或后章已派发正文，未知结果也不得通过新子任务重发。", 409
+                "author_clarification_late",
+                "当前或后章已派发正文，未知结果也不得通过新子任务重发。",
+                409,
             )
     if domain.db.all(
         "SELECT id FROM tasks WHERE branch_id=? AND id!=? AND status IN ('queued','running') AND cancel=0 LIMIT 1",
@@ -443,7 +456,8 @@ def known_source_proof(domain, usage, record):
             dict(r) for r in usage.execute("SELECT * FROM calls WHERE task_id=? ORDER BY id", (owner,))
         ]
         own_steps = domain.db.all(
-            "SELECT task_id,fingerprint,result FROM task_steps WHERE task_id=? ORDER BY fingerprint", (owner,)
+            "SELECT task_id,fingerprint,result FROM task_steps WHERE task_id=? ORDER BY fingerprint",
+            (owner,),
         )
         complete = {
             json.loads(r["result"]).get("call_id")

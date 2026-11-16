@@ -164,10 +164,14 @@ def check_receipt(worker, row, plot, chapter):
                 ).get("recipient_scope_bindings"):
                     raise DomainError("plan_preparation_changed", "范围解释绑定与原步骤回执不一致。", 409)
                 if inventory is None or not recipient_scope.bindings_valid(
-                    interpretation["contract"], interpretation.get("recipient_scope_bindings"), inventory
+                    interpretation["contract"],
+                    interpretation.get("recipient_scope_bindings"),
+                    inventory,
                 ):
                     raise DomainError(
-                        "plan_preparation_changed", "本轮来源范围观察或解释绑定无法核实，未生成正文。", 409
+                        "plan_preparation_changed",
+                        "本轮来源范围观察或解释绑定无法核实，未生成正文。",
+                        409,
                     )
     if (
         scope_execution
@@ -280,6 +284,7 @@ async def phase(worker, row, key, state, invoke, *, owner_ids=None):
         }
         row["status"] = state
         worker.checkpoint(worker.task["result"])
+    worker._diagnostic_phase = {"row": row, "key": key, "slot": slot}
     try:
         response = await invoke()
     except DomainError as error:
@@ -294,6 +299,7 @@ async def phase(worker, row, key, state, invoke, *, owner_ids=None):
         raise
     finally:
         worker.__dict__.pop("_workflow_plan_replay", None)
+        worker.__dict__.pop("_diagnostic_phase", None)
     slot.update(status="completed", response=deepcopy(response), response_sha256=sha(response))
     worker.checkpoint(worker.task["result"])
     return response
@@ -359,7 +365,9 @@ def frozen_contract(worker, author_text, number, supplied):
         or row["preservation_checks"][-1]["source_sha256"] != row["effective_plot_sha256"]
         or not preserved(row["preservation_checks"][-1]["result"])
         or preservation_issues(
-            row["preservation_checks"][-1]["result"], row["interpretations"][0]["contract"], contract
+            row["preservation_checks"][-1]["result"],
+            row["interpretations"][0]["contract"],
+            contract,
         )
     ):
         raise DomainError("plan_preparation_changed", "写前冻结解释、全项保持核对或有效章纲无法确认。", 409)
@@ -378,7 +386,8 @@ async def prepare(worker, plot, chapter):
     row = rows.get(str(plot["number"]))
     if row is None:
         if chapter["content"].strip() or worker.db.all(
-            "SELECT id FROM artifacts WHERE chapter_id=? AND kind='chapter_draft' LIMIT 1", (chapter["id"],)
+            "SELECT id FROM artifacts WHERE chapter_id=? AND kind='chapter_draft' LIMIT 1",
+            (chapter["id"],),
         ):
             raise DomainError(
                 "plan_preparation_late", "本章已有正文或候选，不能事后选择章纲细节制造一致。", 409

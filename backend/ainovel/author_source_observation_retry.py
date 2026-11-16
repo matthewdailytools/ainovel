@@ -128,7 +128,10 @@ def request_identity(current, provider, settings, frame, instruction):
             "wire_schema_version": WIRE_SCHEMA_VERSION,
             "wire_schema_sha256": hashlib.sha256(
                 json.dumps(
-                    strict_schema(contract), ensure_ascii=False, separators=(",", ":"), allow_nan=False
+                    strict_schema(contract),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    allow_nan=False,
                 ).encode()
             ).hexdigest(),
         }
@@ -152,6 +155,11 @@ def request_identity(current, provider, settings, frame, instruction):
     )
     request = {
         **wire,
+        **(
+            {"plot_contract_version": instruction["情节核对契约版本"]}
+            if "情节核对契约版本" in instruction
+            else {}
+        ),
         "system_sha256": sha(SYSTEM),
         "prompt_sha256": sha(prompt),
         "semantic_prompt_sha256": sha(semantic),
@@ -192,11 +200,23 @@ def request_identity(current, provider, settings, frame, instruction):
     return sha(basis), request, schema.__name__
 
 
-def known_returned_proof(domain, usage, current, entry, record, settings):
+def known_returned_proof(
+    domain,
+    usage,
+    current,
+    entry,
+    record,
+    settings,
+    *,
+    phase_key="observe",
+    frame=None,
+    stop_event_id=None,
+    terminal_error=None,
+):
     from .worker import PROMPT_VERSION, parse_json
 
     chosen = clarification.provider(SimpleNamespace(settings=settings), current)
-    slot = record["phases"]["observe"]
+    slot = record["phases"][phase_key]
     all_steps = domain.db.all(
         "SELECT task_id,fingerprint,result FROM task_steps WHERE task_id=? ORDER BY fingerprint",
         (current["id"],),
@@ -214,6 +234,8 @@ def known_returned_proof(domain, usage, current, entry, record, settings):
     events = domain.db.all(
         "SELECT id,kind,payload FROM task_events WHERE task_id=? ORDER BY id", (current["id"],)
     )
+    if stop_event_id is not None:
+        events = [event for event in events if event["id"] <= stop_event_id]
     running = [
         e
         for e in events
@@ -232,7 +254,7 @@ def known_returned_proof(domain, usage, current, entry, record, settings):
         .get(authored.RECEIPTS, {})
         .get(entry["key"], {})
         .get("phases", {})
-        .get("observe")
+        .get(phase_key)
         == slot
     ]
     if not witnessed:
@@ -251,9 +273,10 @@ def known_returned_proof(domain, usage, current, entry, record, settings):
         or any(unresolved_call(c) for c in calls)
     ):
         reject(
-            "须核实同一次观察三份完整返回、两轮引用修正及已结算调用；未知或缺失回执不重发。", "unknown_result"
+            "须核实同一次观察三份完整返回、两轮引用修正及已结算调用；未知或缺失回执不重发。",
+            "unknown_result",
         )
-    frame = legacy_frame(domain, current, entry)
+    frame = frame or legacy_frame(domain, current, entry)
     instruction = deepcopy(frame["instruction"])
     by_step, by_call = {s["fingerprint"]: s for s in steps}, {c["id"]: c for c in calls}
     proof_steps, seen_calls, errors = [], set(), []
@@ -265,7 +288,7 @@ def known_returned_proof(domain, usage, current, entry, record, settings):
             sent
             != {
                 "fingerprint": fingerprint,
-                "action": authored.ACTION,
+                "action": frame["instruction"].get("动作", authored.ACTION),
                 "schema": schema_name,
                 "template_version": PROMPT_VERSION,
                 "request": request,
@@ -327,18 +350,27 @@ def known_returned_proof(domain, usage, current, entry, record, settings):
                 "issues": issues,
             }
         )
-        feedback = frame["repair_feedback"]()
-        instruction = {**frame["instruction"], "前次产物": value, "定位错误": issues, **feedback}
+        if "repair_request" in frame:
+            instruction = frame["repair_request"](value, issues)
+        else:
+            feedback = frame["repair_feedback"]()
+            instruction = {
+                **frame["instruction"],
+                "前次产物": value,
+                "定位错误": issues,
+                **feedback,
+            }
     stopped = json.loads(relevant[-1]["payload"])
     message = "两轮引用修正后仍无法回到原文，未采纳或自动推进。"
-    message += f" {frame['diagnostic_label']}（{len(errors[-1])}项）：" + "；".join(
-        i[:350] for i in errors[-1][:6]
-    )
-    if len(errors[-1]) > 6:
-        message += f"；另{len(errors[-1]) - 6}项详见任务引用修正记录"
+    if frame.get("diagnostic_label"):
+        message += f" {frame['diagnostic_label']}（{len(errors[-1])}项）：" + "；".join(
+            i[:350] for i in errors[-1][:6]
+        )
+        if len(errors[-1]) > 6:
+            message += f"；另{len(errors[-1]) - 6}项详见任务引用修正记录"
     if (
         stopped != {"code": "evidence", "message": message, "provider_details": None}
-        or current["error"] != message
+        or (current["error"] if terminal_error is None else terminal_error) != message
     ):
         reject("原终态不是同次已知引用失败，不能据错误字符串单独重发。", "unknown_result")
     return {
@@ -347,7 +379,11 @@ def known_returned_proof(domain, usage, current, entry, record, settings):
         "attempt": slot["attempt"],
         "steps": proof_steps,
         "calls": [
-            call_audit(by_call[s["call_id"]], complete_step=True, scope="source_observation")
+            call_audit(
+                by_call[s["call_id"]],
+                complete_step=True,
+                scope="source_observation" if phase_key == "observe" else "source_interpretation",
+            )
             for s in proof_steps
         ],
         "call_ids": sorted(seen_calls),
@@ -479,7 +515,10 @@ def retry(domain, budget, current, request):
             reject("来源检查点已改变，请保留请求并重新读取依据。", "task_changed")
         value = preview(domain, budget, current, usage=usage)
         if request["preview_basis_sha256"] != value["request_basis"]["preview_basis_sha256"]:
-            reject("来源、完整规划、原账户或费用依据改变，请显式重读。", "author_observation_retry_basis")
+            reject(
+                "来源、完整规划、原账户或费用依据改变，请显式重读。",
+                "author_observation_retry_basis",
+            )
         identifier, now = uid(), time()
         payload = {
             **deepcopy(current["payload"]),
@@ -573,7 +612,10 @@ def validate_task(task, domain, chain=None):
         parent = next(t for t in chain if t["id"] == receipt["source_task_id"])
         clean_parent = {k: v for k, v in parent["result"].items() if k != "continued_to"}
         entry = receipt["source_entry"]
-        old_source, new_source = parent["result"][authored.SNAPSHOT], origin["result"][authored.SNAPSHOT]
+        old_source, new_source = (
+            parent["result"][authored.SNAPSHOT],
+            origin["result"][authored.SNAPSHOT],
+        )
         strip = {"task_id", "payload_sha256", execution.KEY}
         expected = {
             "version": VERSION,
@@ -634,7 +676,10 @@ def validate_task(task, domain, chain=None):
         ):
             raise ValueError("source or receipt changed")
     except KeyError, TypeError, ValueError, StopIteration:
-        reject("来源、完整计划、新执行模板或独立恢复见证不符，未派发。", "author_observation_retry_version")
+        reject(
+            "来源、完整计划、新执行模板或独立恢复见证不符，未派发。",
+            "author_observation_retry_version",
+        )
     return receipt
 
 
@@ -652,7 +697,12 @@ def ensure_runtime(task, domain, settings):
     with Budget(settings).db() as usage:
         settled_provider(usage, chosen)
         proof = known_returned_proof(
-            domain, usage, parent, receipt["source_entry"], receipt["previous_source_receipt"], settings
+            domain,
+            usage,
+            parent,
+            receipt["source_entry"],
+            receipt["previous_source_receipt"],
+            settings,
         )
     if proof != receipt["known_returned_proof"]:
         reject("原三份已付返回或结算证明已变化，未派发新调用。", "unknown_result")

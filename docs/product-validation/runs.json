@@ -8283,5 +8283,27 @@
   "result": "not_run",
   "record": "2026-11-16-interpretation-diagnostic-stop-and-recovery.md",
   "fix_of": "e7-interpret-three-returned-stop-20261116"
+},
+{
+  "id": "diagnostic-phase-resume-root-integration-static-20261116",
+  "module": "诊断与有限恢复",
+  "scenario": "12路径base/post精确合入；432输入API/类型/格式/745前端/48Node/构建通过，私有22与114及真实E7纯重建独立留证，不冒称全项目通过",
+  "result": "passed",
+  "date": "2026-11-16",
+  "commit": "working-tree",
+  "phase": "stability",
+  "record": "2026-11-16-interpretation-diagnostic-stop-and-recovery.md",
+  "fix_of": "e7-interpret-three-returned-stop-20261116"
+},
+{
+  "id": "diagnostic-phase-resume-root-full-regression-pending-20261116",
+  "module": "全项目恢复回归",
+  "scenario": "现有resume一次至多2新纠错wire、旧帧仍invalid；Root完整后端/全无头和精确CI/发布待独立核验，未实际resume或新增费用",
+  "result": "not_run",
+  "date": "2026-11-16",
+  "commit": "working-tree",
+  "phase": "stability",
+  "record": "2026-11-16-interpretation-diagnostic-stop-and-recovery.md",
+  "fix_of": "e7-interpret-three-returned-stop-20261116"
 }
 ]

@@ -148,7 +148,8 @@ def create_app(settings=None, schema_only=False):
         try:
             if int(request.headers.get("content-length", "0")) > 24 * 1024 * 1024:
                 return JSONResponse(
-                    {"code": "file_limit", "message": "请求超过 24 MiB，未读取或保存。"}, status_code=413
+                    {"code": "file_limit", "message": "请求超过 24 MiB，未读取或保存。"},
+                    status_code=413,
                 )
         except ValueError:
             return JSONResponse({"code": "length", "message": "请求长度无效。"}, status_code=400)
@@ -158,7 +159,8 @@ def create_app(settings=None, schema_only=False):
                 and secrets.compare_digest(request.headers.get("x-ainovel-csrf", ""), csrf)
             ):
                 return JSONResponse(
-                    {"code": "csrf", "message": "写入凭据失效，请刷新工作台后重试。"}, status_code=403
+                    {"code": "csrf", "message": "写入凭据失效，请刷新工作台后重试。"},
+                    status_code=403,
                 )
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -269,10 +271,12 @@ def create_app(settings=None, schema_only=False):
             )
             tx.execute("UPDATE facts SET stale=1 WHERE branch_id=?", (chapter["branch_id"],))
             tx.execute(
-                "UPDATE chapters SET stale=1 WHERE branch_id=? AND content!=''", (chapter["branch_id"],)
+                "UPDATE chapters SET stale=1 WHERE branch_id=? AND content!=''",
+                (chapter["branch_id"],),
             )
             tx.execute(
-                "UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (chapter["branch_id"],)
+                "UPDATE branches SET story_revision=story_revision+1 WHERE id=?",
+                (chapter["branch_id"],),
             )
         return {
             "id": chapter_id,
@@ -306,7 +310,8 @@ def create_app(settings=None, schema_only=False):
                 )
             tx.execute("UPDATE facts SET stale=1 WHERE branch_id=?", (chapter["branch_id"],))
             tx.execute(
-                "UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (chapter["branch_id"],)
+                "UPDATE branches SET story_revision=story_revision+1 WHERE id=?",
+                (chapter["branch_id"],),
             )
         return chapters(chapter["branch_id"])
 
@@ -321,7 +326,13 @@ def create_app(settings=None, schema_only=False):
         return (
             rows[0]
             if rows
-            else {"branch_id": branch_id, "chapter_id": None, "cursor": 0, "note": "", "revision": 0}
+            else {
+                "branch_id": branch_id,
+                "chapter_id": None,
+                "cursor": 0,
+                "note": "",
+                "revision": 0,
+            }
         )
 
     @app.put("/api/branches/{branch_id}/reading-state")
@@ -500,7 +511,8 @@ def create_app(settings=None, schema_only=False):
             }
         )
         domain.check_author_contract_basis(
-            contract, data.author_contract_basis.model_dump() if data.author_contract_basis else None
+            contract,
+            data.author_contract_basis.model_dump() if data.author_contract_basis else None,
         )
         branch_id = uid()
         with db.connect(True) as tx:
@@ -573,7 +585,12 @@ def create_app(settings=None, schema_only=False):
             authored_payload(data, source_candidate)
             if data.kind == "intent"
             else data.model_dump(
-                exclude={"kind", "base_story_revision", "intent_contract", "intent_source_candidate_id"}
+                exclude={
+                    "kind",
+                    "base_story_revision",
+                    "intent_contract",
+                    "intent_source_candidate_id",
+                }
             )
         )
         artifact = domain.stage(
@@ -810,11 +827,17 @@ def create_app(settings=None, schema_only=False):
                 )
                 if changed.rowcount != 1:
                     raise DomainError("candidate_changed", "候选状态已改变，请重新审阅。", 409)
+            from .diagnostic_phase_recovery import resume_marker
+
+            resume_event = data.model_dump()
+            marker = resume_marker(domain, budget, settings, current, data)
+            if marker is not None:
+                resume_event["diagnostic_feedback_recovery"] = marker
             tx.execute(
                 "UPDATE tasks SET status='queued',cancel=0,pause=0,attempt=NULL,error='',result=?,updated=? WHERE id=?",
                 (dumps(result), time(), task_id),
             )
-            db.event(tx, task_id, "resume_requested", data.model_dump())
+            db.event(tx, task_id, "resume_requested", resume_event)
         return domain.task(task_id)
 
     @app.post("/api/tasks/{task_id}/continue", status_code=202)
@@ -863,7 +886,9 @@ def create_app(settings=None, schema_only=False):
 
     register_author_recheck_routes(app, domain, budget, provider_ready)
 
-    from .author_source_observation_retry import register_routes as register_observation_retry_routes
+    from .author_source_observation_retry import (
+        register_routes as register_observation_retry_routes,
+    )
 
     register_observation_retry_routes(app, domain, budget, provider_ready)
 
@@ -871,8 +896,12 @@ def create_app(settings=None, schema_only=False):
 
     register_flow_policy_routes(app, domain, budget, provider_ready)
 
-    from .source_interpretation_correction import register_routes as register_source_correction_routes
-    from .source_corrected_candidate_recheck import register_routes as register_corrected_recheck_routes
+    from .source_interpretation_correction import (
+        register_routes as register_source_correction_routes,
+    )
+    from .source_corrected_candidate_recheck import (
+        register_routes as register_corrected_recheck_routes,
+    )
 
     register_source_correction_routes(app, domain, budget, provider_ready)
     register_corrected_recheck_routes(app, domain, budget, provider_ready)
@@ -1009,7 +1038,8 @@ def create_app(settings=None, schema_only=False):
             ):
                 raise DomainError("candidate_conflict", "候选已有新修订，请比较后再拒绝。", 409)
             tx.execute(
-                "UPDATE artifacts SET status='rejected' WHERE id=? AND status='candidate'", (artifact_id,)
+                "UPDATE artifacts SET status='rejected' WHERE id=? AND status='candidate'",
+                (artifact_id,),
             )
         return domain.artifact(artifact_id)
 
@@ -1060,7 +1090,8 @@ def create_app(settings=None, schema_only=False):
                 row["content"],
             )
             tx.execute(
-                "UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (chapter["branch_id"],)
+                "UPDATE branches SET story_revision=story_revision+1 WHERE id=?",
+                (chapter["branch_id"],),
             )
         return {"saved": True}
 
