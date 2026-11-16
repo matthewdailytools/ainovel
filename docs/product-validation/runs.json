@@ -7841,5 +7841,126 @@
     "result": "passed",
     "record": "2026-11-16-cross-chapter-impact-quality.md",
     "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-ad822-exact-remote-ci-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "全项目工程回归",
+    "scenario": "精确CI43814823217/job133124379660成功：2542后端1960.09s、672前端29文件3s、152无头9m、48Node203.2939ms；源ad822d5",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-v5-first-export-path-limit-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "不可变发布",
+    "scenario": "首次264字符长路径导出失败，仅429部分文件，旧目录保留、未采用binding；无日常或模型写入",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-v5-short-release-export-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "不可变发布",
+    "scenario": "新独立短release最长233字符，636Git＋13dist＝649逐项绑定实际ad822d5；412输入与7已测dist对应",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": "authored2-auto3-v5-first-export-path-limit-20261116"
+  },
+  {
+    "id": "authored2-auto3-v5-official-backup-double-restore-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "备份恢复",
+    "scenario": "b670正式备份30,899,135bytes，两次真实41→41＋2usage恢复，272章记录含空章/241tasks/25原件/9回执，原process139/37保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-v5-raw-start-guard-rejected-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "运行身份保护",
+    "scenario": "raw start未走原restart_gate而被旧精确登记守卫拒绝，未写启动intent；未删登记/改DB/杀其他应用",
+    "phase": "stability",
+    "result": "blocked",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-v5-gated-runtime-verify-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "日常运行发布",
+    "scenario": "同一封存V5 restart_gate start/verify实际exit0，原生API/Worker、8766、SQezcN3V及新source导入对应；不新增例外",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": "authored2-auto3-v5-raw-start-guard-rejected-20261116"
+  },
+  {
+    "id": "authored2-auto3-v5-originals-fees-sidecar-preserved-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "原稿与费用",
+    "scenario": "旧全业务行/完整calls与metadata/Main/原件保持，DS39.888146/unknown0、OAI旧未知不清；master47独立sidecar每phase保护，0新增模型",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-v5-get-capability-proofs-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "来源与续接入口",
+    "scenario": "仅GET核旧auto默认/1与flag=true/2、e5原话不变且/2可用；新auto3核提交AST/API合同，0任务派发，不冒真实语义结果",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-v5-post-publication-ui-pending-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "日常后台只读UI",
+    "scenario": "独立只读UI探针已由Root另行启动，本发布记录截止尚无终态，未标通过",
+    "phase": "stability",
+    "result": "unverified",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-v5-history-browser-first-env-failed-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "验证历史页",
+    "scenario": "文档无头首轮子进程未绑定当前backend，加载旧editable安装而在import阶段失败；未启动隔离8877，未访问8766/模型",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-v5-history-docs-regression-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "验证历史页",
+    "scenario": "仅子进程明确当前backend后：9历史后端＋1隔离历史页无头通过，320实际文字2倍/键盘/筛选/滚动，旧713记录不改",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-publication.md",
+    "fix_of": "authored2-auto3-v5-history-browser-first-env-failed-20261116"
   }
 ]
