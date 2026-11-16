@@ -7962,5 +7962,60 @@
     "result": "passed",
     "record": "2026-11-16-authored2-auto3-runtime-publication.md",
     "fix_of": "authored2-auto3-v5-history-browser-first-env-failed-20261116"
+  },
+  {
+    "id": "authored2-auto3-ui-r2-post-preview-label-failed-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "日常后台只读UI",
+    "scenario": "r2半自动GET/逐字核对/桌面已完成，后续字体测量仍用初读label而20秒超时；Source2未运行，数据保持且关闭",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-authored2-auto3-runtime-ui.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-ui-r3-exact-post-preview-label-fixed-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "日常UI实测工具（仓库外）",
+    "scenario": "仅两个读后重新读取精确label用于测量，初读click/GET不变；26离线边界通过、r2请求规则/目标逐字相同，无产品改动",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-ui.md",
+    "fix_of": "authored2-auto3-ui-r2-post-preview-label-failed-20261116"
+  },
+  {
+    "id": "authored2-auto3-ui-r3-actual-previews-and-text-scale-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "日常后台只读UI",
+    "scenario": "两入口实际GET原文/计划保持，费用确认默认未选，Source2键盘显式flag；四张桌面/320实际2倍截图Root查看，scrollWidth320",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-ui.md",
+    "fix_of": "authored2-auto3-ui-r2-post-preview-label-failed-20261116"
+  },
+  {
+    "id": "authored2-auto3-ui-r3-requests-originals-and-close-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "日常只读边界",
+    "scenario": "86controlGET、70browserGET＋1owned阅读PUT尝试abort/发送0；normal timers，目标API字节同、三个context/browser关闭、模型/子任务0",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-ui.md",
+    "fix_of": ""
+  },
+  {
+    "id": "authored2-auto3-ui-r3-history-docs-regression-20261116",
+    "date": "2026-11-16",
+    "commit": "ad822d5",
+    "module": "验证历史页",
+    "scenario": "原724历史字节前缀/业务质量状态不变，9历史后端＋1隔离file页无头、链接/重复生成/diff通过；不碰8766",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-authored2-auto3-runtime-ui.md",
+    "fix_of": ""
   }
 ]
