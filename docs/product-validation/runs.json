@@ -8305,5 +8305,49 @@
   "phase": "stability",
   "record": "2026-11-16-interpretation-diagnostic-stop-and-recovery.md",
   "fix_of": "e7-interpret-three-returned-stop-20261116"
+},
+{
+  "id": "diagnostic-phase-resume-root-full-and-ci-20261117",
+  "commit": "6f8b4be",
+  "module": "全项目恢复回归",
+  "scenario": "432输入／7构建同输入2649后端、745前端、168无头、48Node及post实际通过；精确6f8 CI success，仍未发布",
+  "result": "passed",
+  "fix_of": "diagnostic-phase-resume-root-full-regression-pending-20261116",
+  "date": "2026-11-17",
+  "phase": "stability",
+  "record": "2026-11-17-paid-cache-recovery-compatibility.md"
+},
+{
+  "id": "legacy-paid-valid-cache-compatibility-first-failure-20261117",
+  "commit": "6f8b4be",
+  "module": "任务恢复",
+  "scenario": "旧解释修正已付有效缓存但phase未落盘的隔离首次恢复cache miss；0新增解释wire，旧3缓存及3已结费用保持",
+  "result": "failed",
+  "fix_of": "",
+  "date": "2026-11-17",
+  "phase": "stability",
+  "record": "2026-11-17-paid-cache-recovery-compatibility.md"
+},
+{
+  "id": "legacy-paid-valid-cache-compatibility-root-retest-20261117",
+  "commit": "6f8b4be+working-tree",
+  "module": "任务恢复",
+  "scenario": "两路径精确整合；433输入静态／745前端／48Node与21专项通过，当前缓存优先，旧解释fallback仅无grant，未知和双miss仍0wire",
+  "result": "passed",
+  "fix_of": "legacy-paid-valid-cache-compatibility-first-failure-20261117",
+  "date": "2026-11-17",
+  "phase": "stability",
+  "record": "2026-11-17-paid-cache-recovery-compatibility.md"
+},
+{
+  "id": "legacy-paid-valid-cache-new-full-and-release-pending-20261117",
+  "commit": "6f8b4be+working-tree",
+  "module": "全项目恢复回归",
+  "scenario": "新433输入完整后端／全无头已启动未终态；新精确CI、正常备份发布及同e7实际resume仍待验，不借旧2649／168或6f8 CI",
+  "result": "not_run",
+  "fix_of": "legacy-paid-valid-cache-compatibility-first-failure-20261117",
+  "date": "2026-11-17",
+  "phase": "stability",
+  "record": "2026-11-17-paid-cache-recovery-compatibility.md"
 }
 ]

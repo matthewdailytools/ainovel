@@ -342,6 +342,8 @@ class Worker:
         stream=False,
         structure_repairs=2,
         contract=None,
+        *,
+        cache_alternative=None,
     ):
         payload = self.task["payload"]
         from .workflow_plan_source_roles import validate_task as validate_roles
@@ -629,6 +631,21 @@ class Worker:
                     "该来源核对步骤已派发但缺少完整回执，保留旧缓存与费用，未盲目重发。",
                     409,
                 )
+        phase = self.__dict__.get("_diagnostic_phase") or {}
+        if (
+            cache_alternative is not None
+            and cache_alternative != instruction
+            and replay_owner is not None
+            and phase.get("key") == "interpret"
+            and not phase.get("slot", {}).get("diagnostic_feedback_recovery")
+        ):
+            # Current diagnostics stay authoritative. Historical labels only
+            # locate an already-paid result after the current cache misses.
+            # The recursive call has no alternative; its original replay guard
+            # still forbids a provider call if that historical cache is absent.
+            return await self.call(
+                cache_alternative, schema, context, max_output, stream, structure_repairs, contract
+            )
         if replay_owner is not None:
             from .diagnostic_phase_recovery import permit_dispatch
 
@@ -1266,6 +1283,7 @@ class Worker:
         diagnostic_legacy_validator=None,
     ):
         current = instruction
+        cache_alternative = None
         units = instruction.get("可引用原文", instruction.get("可替换原文", []))
         contract = contract or (source_schema(schema.model_json_schema(), units) if units else None)
         for repair in range(3):
@@ -1273,7 +1291,14 @@ class Worker:
                 from .diagnostic_phase_recovery import set_frame
 
                 set_frame(self, current, schema, context, max_output, contract)
-            result = await self.call(current, schema, context, max_output, contract=contract)
+            result = await self.call(
+                current,
+                schema,
+                context,
+                max_output,
+                contract=contract,
+                **({"cache_alternative": cache_alternative} if cache_alternative is not None else {}),
+            )
             issues = validator(result)
             if not issues:
                 return result
@@ -1298,6 +1323,19 @@ class Worker:
                 self.attempt,
             )
             current = citation_repair_request(instruction, result, issues, repair_feedback)
+            cache_alternative = None
+            phase = self.__dict__.get("_diagnostic_phase") or {}
+            if (
+                diagnostic_legacy_validator is not None
+                and getattr(self, "_workflow_plan_replay", None) is not None
+                and phase.get("key") == "interpret"
+                and not phase.get("slot", {}).get("diagnostic_feedback_recovery")
+            ):
+                legacy_issues = diagnostic_legacy_validator(deepcopy(result))
+                if legacy_issues:
+                    cache_alternative = citation_repair_request(
+                        instruction, result, legacy_issues, repair_feedback
+                    )
         message = "两轮引用修正后仍无法回到原文，未采纳或自动推进。"
         if diagnostic_label:
             details = "；".join(issue[:350] for issue in issues[:6])
