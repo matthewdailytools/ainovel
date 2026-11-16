@@ -8228,6 +8228,60 @@
     "phase": "stability",
     "record": "2026-11-16-observation-recovery-runtime-and-ui.md",
     "fix_of": ""
-  }
-
+  },
+{
+  "id": "e7-r5-loader-and-actual-preparation-20261116",
+  "date": "2026-11-16",
+  "commit": "e3ab19e",
+  "module": "私有执行设施",
+  "scenario": "仅修动态模块登记，14必要窄回归与真实GET/RO准备通过；沿原未POSTnonce/原因，原R4失败和所有资金/规划保留",
+  "phase": "stability",
+  "result": "passed",
+  "record": "2026-11-16-interpretation-diagnostic-stop-and-recovery.md",
+  "fix_of": "e3-private-r4-prepare-loader-registration-failed-20261116"
+},
+{
+  "id": "e7-observation-completed-interpret-pending-20261116",
+  "date": "2026-11-16",
+  "commit": "e3ab19e",
+  "module": "来源观察",
+  "scenario": "真实exec2观察对9单元/6观察完成直接引用核对，解释与独立保持未完成，不把观察完成当来源ready",
+  "phase": "quality",
+  "result": "unverified",
+  "record": "2026-11-16-interpretation-diagnostic-stop-and-recovery.md",
+  "fix_of": ""
+},
+{
+  "id": "e7-interpret-three-returned-stop-20261116",
+  "date": "2026-11-16",
+  "commit": "e3ab19e",
+  "module": "半自动解释质量",
+  "scenario": "首帧及两修正均排他范围受控值错误，真实位置P10/P10/P11却反馈P01；4笔CNY.286862全结，正文0，全自动未启",
+  "phase": "quality",
+  "result": "failed",
+  "record": "2026-11-16-interpretation-diagnostic-stop-and-recovery.md",
+  "fix_of": ""
+},
+{
+  "id": "e7-originals-fees-and-master49-20261116",
+  "date": "2026-11-16",
+  "commit": "e3ab19e",
+  "module": "原稿与费用",
+  "scenario": "最终稳定旧行保持errors为空，章节/修订/产物表同准备像；DS40.327960/未知0，Master只追加48→49，原48/其它字段同",
+  "phase": "stability",
+  "result": "passed",
+  "record": "2026-11-16-interpretation-diagnostic-stop-and-recovery.md",
+  "fix_of": ""
+},
+{
+  "id": "e7-diagnostic-mapping-and-resume-integration-pending-20261116",
+  "date": "2026-11-16",
+  "commit": "e3ab19e",
+  "module": "诊断与恢复修复",
+  "scenario": "只修单项P01到真实index的定位，invalid仍拒；旧缓存不得追认，已有resume新feedback缺缓存仍安全拒，有限恢复尚在隔离实现",
+  "phase": "stability",
+  "result": "not_run",
+  "record": "2026-11-16-interpretation-diagnostic-stop-and-recovery.md",
+  "fix_of": "e7-interpret-three-returned-stop-20261116"
+}
 ]
