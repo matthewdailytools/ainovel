@@ -452,14 +452,14 @@ def test_unambiguous_role_without_personal_name_is_ready_without_author_clarific
         value = answer(frame)
         if frame["任务"]["动作"] == authored.ACTION:
             value["observations"][0]["supplier"] = "伙计"
-        else:
+        elif frame["任务"]["动作"] == "仅依据作者原话整理本场景情节":
             value["items"][0].update(actor="伙计", supplier="伙计", certainty="explicit")
         return completed(json.dumps(value, ensure_ascii=False))
 
     worker.client = ModelClient(settings, worker.budget, httpx.MockTransport(handler))
     result = asyncio.run(interpret_plot(worker, clear, source_kind="author_plot", source_position=1))
     assert result["items"][0]["actor"] == "伙计" and result["items"][0]["certainty"] == "explicit"
-    assert worker.task["result"][authored.RECEIPTS]["chapter:1"]["state"] == "ready" and len(calls) == 2
+    assert worker.task["result"][authored.RECEIPTS]["chapter:1"]["state"] == "ready" and len(calls) == 3
 
 
 def test_complete_semantic_unknown_inventory_can_be_clarified_without_a_candidate(

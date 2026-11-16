@@ -272,7 +272,8 @@ def known_invalid_phase(domain, usage, current, row, *, open_phase=False):
         raise DomainError("unknown_result", "先行范围观察不完整或未知，不重发旧解释。", 409)
     schema = (
         ScopeBoundOpenPlanInterpretationV2
-        if scope_execution and row[recipient_scope.KEY] == recipient_scope.CURRENT_VERSION
+        if scope_execution
+        and row[recipient_scope.KEY] in {recipient_scope.CURRENT_VERSION, recipient_scope.NEW_VERSION}
         else ScopeBoundOpenPlanInterpretation
         if scope_execution
         else OpenPlanInterpretation

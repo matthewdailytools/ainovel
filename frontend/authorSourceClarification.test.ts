@@ -10,6 +10,23 @@ import {
 } from './authorSourceClarification'
 
 describe('作者来源补充边界', () => {
+  it('新版来源的真实未知保持停点可显式补充，沿用对应政策而不重写旧版', () => {
+    const { source, preview, request, child, record } = clarificationFixture()
+    object(source.result)!.authored_source_scope_version = 'authored-source-scope/2'
+    preview.policies.authored_source_scope_version = 'authored-source-scope/2'
+    Object.assign(record.phases, {
+      preserve: { status: 'completed', owner_task_id: source.id, response: { result: 'unknown' } },
+    })
+    expect(readClarificationPreview(preview, source)).toEqual(preview)
+    expect(readClarificationChild(child(), { source, preview, request })).toBeDefined()
+    object(record.phases)!.preserve = { status: 'started', owner_task_id: source.id }
+    expect(readClarificationPreview(preview, source)).toBeUndefined()
+  })
+  it('旧版不会因新增保持阶段自动升级为可补充停点', () => {
+    const { source, preview, record } = clarificationFixture()
+    Object.assign(record.phases, { preserve: { status: 'completed', owner_task_id: source.id } })
+    expect(readClarificationPreview(preview, source)).toBeUndefined()
+  })
   it('已完整返回的首次语义unknown也可读取依据，不要求生成解释或补姓名', () => {
     const { source, preview, record } = clarificationFixture()
     const raw = object(record)!,

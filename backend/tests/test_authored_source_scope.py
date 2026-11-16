@@ -18,6 +18,12 @@ from test_workflow_plan_recipient_scope import inventory, SOURCE
 from test_workflow_plan_source_roles import proposal
 
 
+@pytest.fixture(autouse=True)
+def legacy_policy_frames(monkeypatch):
+    """These existing tests preserve /1 requests and exact historical step frames."""
+    monkeypatch.setattr(authored, "NEW_TASK_VERSION", authored.VERSION)
+
+
 def module_task(
     settings, domain, story, *, action="writing.expand_plot", enabled=True, nonce="author-source-test"
 ):

@@ -9,6 +9,9 @@ from . import workflow_plan_recipient_scope as core
 
 KEY = "authored_source_scope_version"
 VERSION = "authored-source-scope/1"
+CURRENT_VERSION = "authored-source-scope/2"
+NEW_TASK_VERSION = CURRENT_VERSION
+SUPPORTED = {VERSION, CURRENT_VERSION}
 SNAPSHOT = "authored_source_scope_snapshot"
 RECEIPTS = "authored_source_scope_receipts"
 EVENT = "authored_source_scope_frozen"
@@ -156,8 +159,11 @@ def freeze(domain, task_id, kind, payload, branch_id, initial):
     )
     if inherited is False:
         return
+    version = inherited.get("source_policy_version", VERSION) if inherited else NEW_TASK_VERSION
+    if version not in SUPPORTED:
+        version = VERSION
     witness = {
-        "version": VERSION,
+        "version": version,
         "task_id": task_id,
         "novel_id": payload["novel_id"],
         "branch_id": branch_id,
@@ -166,7 +172,7 @@ def freeze(domain, task_id, kind, payload, branch_id, initial):
         "sources": sources(payload, initial),
         "inherited": inherited,
     }
-    initial.update({KEY: VERSION, SNAPSHOT: witness})
+    initial.update({KEY: version, SNAPSHOT: witness})
 
 
 def event(db, tx, task_id, payload, initial):
@@ -204,12 +210,12 @@ def validate_task(task, domain):
     marker, witness = task["result"].get(KEY), task["result"].get(SNAPSHOT)
     if marker is None and witness is None and not any(events):
         return False
-    if marker != VERSION or not isinstance(witness, dict) or witness.get("version") != VERSION:
+    if marker not in SUPPORTED or not isinstance(witness, dict) or witness.get("version") != marker:
         raise DomainError("authored_scope_version", "作者来源执行版本或创建见证缺失，未派发或降级。", 409)
     origin = next((t for t in chain if t["id"] == witness.get("task_id")), None)
     if (
         origin is None
-        or origin["result"].get(KEY) != VERSION
+        or origin["result"].get(KEY) != marker
         or origin["result"].get(SNAPSHOT) != witness
         or witness.get("payload_sha256") != sha(origin["payload"])
         or witness.get("novel_id") != task["novel_id"]
@@ -219,12 +225,15 @@ def validate_task(task, domain):
     ):
         raise DomainError("authored_scope_version", "作者原话、目标或冻结来源链已改变，未反向套用候选。", 409)
     rows = domain.db.all("SELECT payload FROM task_events WHERE task_id=? AND kind=?", (origin["id"], EVENT))
-    expected = {KEY: VERSION, "snapshot_sha256": sha(witness), "payload_sha256": sha(origin["payload"])}
+    expected = {KEY: marker, "snapshot_sha256": sha(witness), "payload_sha256": sha(origin["payload"])}
     if len(rows) != 1 or json.loads(rows[0]["payload"]) != expected:
         raise DomainError("authored_scope_version", "作者来源独立创建事件无法核对，未派发。", 409)
     from .author_source_clarification import validate_task as validate_clarification
 
     validate_clarification(task, domain, chain)
+    from .author_source_recheck import validate_task as validate_recheck
+
+    validate_recheck(task, domain, chain)
     return True
 
 
@@ -246,20 +255,21 @@ def select(task, text, kind, number=None):
     return found[0]
 
 
-def token(entry):
-    return sha({"version": VERSION, "key": entry["key"], "kind": entry["kind"], "source": entry["text"]})
+def token(entry, version=VERSION):
+    return sha({"version": version, "key": entry["key"], "kind": entry["kind"], "source": entry["text"]})
 
 
 def inventory_valid(receipt, entry):
     try:
+        version = receipt["version"]
         value = core.ScopeInventory.model_validate(receipt["inventory"]).model_dump()
         choices = {u["source_id"]: u for u in core.units(entry["text"])}
         return (
-            receipt["version"] == VERSION
-            and receipt["input_sha256"] == token(entry)
+            version in SUPPORTED
+            and receipt["input_sha256"] == token(entry, version)
             and receipt["source_sha256"] == entry["sha256"]
             and receipt["sources"] == list(choices.values())
-            and not core.inventory_issues(value, token(entry), choices)
+            and not core.inventory_issues(value, token(entry, version), choices)
             and receipt["status"] == ("supported" if core.inventory_supported(value) else "needs_review")
         )
     except ValueError, KeyError, TypeError:
@@ -280,9 +290,9 @@ def core_value(value):
     }
 
 
-def binding_data(value):
+def binding_data(value, version=VERSION):
     return {
-        "version": VERSION,
+        "version": version,
         "items": [
             {
                 "item_id": f"P{i:02}",
@@ -319,7 +329,7 @@ def binding_issues(value, inventory):
 
 def binding_valid(contract, binding, inventory):
     try:
-        if binding["version"] != VERSION or [r["item_id"] for r in binding["items"]] != [
+        if binding["version"] not in SUPPORTED or [r["item_id"] for r in binding["items"]] != [
             f"P{i:02}" for i in range(1, len(contract["items"]) + 1)
         ]:
             return False
@@ -343,6 +353,12 @@ def binding_valid(contract, binding, inventory):
 def receipt_valid(record, text, owner_ids=None):
     from .plot_audit import ScopedAuthorPlot, author_contract_issues
 
+    if not isinstance(record, dict):
+        return False
+    if record.get("version") == CURRENT_VERSION:
+        from .authored_source_classification import receipt_valid as classification_valid
+
+        return classification_valid(record, text, owner_ids)
     try:
         entry = record["source"]
         if entry["text"] != text or entry["sha256"] != sha(text) or record["source_sha256"] != sha(text):
@@ -444,6 +460,17 @@ def continuation(domain, current):
 
 
 async def prepare(worker, text, kind, number=None):
+    if validate_task(worker.task, worker.domain) and worker.task["result"][KEY] == CURRENT_VERSION:
+        entry = select(worker.task, text, kind, number)
+        record = worker.task["result"].get(RECEIPTS, {}).get(entry["key"])
+        if record is None or record.get("version") == CURRENT_VERSION:
+            from .authored_source_classification import prepare as classification_prepare
+
+            return await classification_prepare(worker, entry)
+    return await prepare_legacy(worker, text, kind, number)
+
+
+async def prepare_legacy(worker, text, kind, number=None):
     from .plot_audit import interpret_plot, ScopedAuthorPlot
     from .workflow_plan_preparation import phase
 
@@ -533,12 +560,14 @@ def metadata(worker, text, kind, number):
     inherited = record.get("inherited")
     return {
         "authored_source_scope": {
-            "version": VERSION,
+            "version": record.get("version", VERSION),
             "source_key": entry["key"],
             "source_sha256": entry["sha256"],
             "receipt_sha256": sha(record),
             "state": record.get("state", "unverified"),
-            "scope_policy_version": inherited["source_policy_version"] if inherited else VERSION,
+            "scope_policy_version": inherited["source_policy_version"]
+            if inherited
+            else record.get("version", VERSION),
             "author_literary_approval": "unverified",
         }
     }

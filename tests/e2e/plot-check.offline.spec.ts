@@ -415,7 +415,7 @@ test('半自动来源核对：原话歧义在正文前停止，保留回执且�
   expect(task.result.next_chapter).toBe(1)
   expect(task.result.pending_structure).toBeUndefined()
   expect(task.result.plot_contract_version).toBe('author-plot-audit/2')
-  expect(task.result.authored_source_scope_version).toBe('authored-source-scope/1')
+  expect(task.result.authored_source_scope_version).toBe('authored-source-scope/2')
   const receipt = task.result.authored_source_scope_receipts?.['chapter:1']
   expect(receipt?.state).toBe('unverified')
   expect(receipt?.source).toMatchObject({
@@ -432,7 +432,9 @@ test('半自动来源核对：原话歧义在正文前停止，保留回执且�
     page.getByText(/本任务冻结的情节逐项核对：已开启（额外模型费用）。核对来源是作者提供的本章情节。/),
   ).toBeVisible()
   await expect(
-    page.getByText('作者原话仍有歧义，未由AI选人、补条件或生成正文。', { exact: true }),
+    page.getByText('来源分类、解释或独立原意保持尚未核实；原话及报告保留，未生成正文。', {
+      exact: true,
+    }),
   ).toBeVisible()
   const chapters = await read<{ id: string }[]>(page, `/api/branches/${started.branch_id}/chapters`)
   expect(chapters).toHaveLength(1)
@@ -479,6 +481,12 @@ test('v2仅向守卫：正向与unknown接收者并存保留原pass并降未知�
     .toBe('needs_review')
   const task = await read<Task>(page, `/api/tasks/${started.id}`)
   expect(task.result.next_chapter).toBe(1)
+  expect(task.result.authored_source_scope_version).toBe('authored-source-scope/2')
+  const sourceReceipt = task.result.authored_source_scope_receipts?.['chapter:1']
+  expect(sourceReceipt?.state).toBe('ready')
+  expect(sourceReceipt?.source.text).toBe(exclusivePlot)
+  for (const phase of ['observe', 'interpret', 'preserve'])
+    expect(sourceReceipt?.phases[phase].status).toBe('completed')
   const candidate = await read<Artifact>(page, `/api/artifacts/${task.result.waiting_artifact}`)
   const audit = candidate.payload.plot_audit!
   expect(audit.version).toBe('author-plot-audit/2')
@@ -559,29 +567,33 @@ test('v2仅向守卫：正向与unknown接收者并存保留原pass并降未知�
   expect(dispatches.map((row) => [row.payload.action, row.payload.schema])).toEqual([
     ['独立观察作者情节接收范围来源', 'ScopeInventory'],
     ['仅依据作者原话整理本场景情节', 'ScopeBoundAuthorPlot'],
+    ['独立核对作者来源分类与完整原意保持', 'Preservation'],
     ['按章纲写完整正文', null],
     ['审查正文', 'ConditionalReview'],
     ['逐项对照作者情节解释与本次正文', 'PlotAudit'],
     ['只从本次正文独立提取物品与信息流向', 'FlowObservations'],
     ['独立核对正文流向观察的来源蕴含', 'AssociatedFlowChecks'],
   ])
-  expect(dispatches[5].payload.request).toMatchObject({
+  expect(dispatches[2].payload.request).toMatchObject({
+    authored_source_scope_version: 'authored-source-scope/2',
+  })
+  expect(dispatches[6].payload.request).toMatchObject({
     flow_role_observation_version: 'source-role-observation/3',
     flow_source_entailment_version: task.result.flow_source_entailment_version,
   })
-  expect(dispatches[6].payload.request.flow_source_entailment_version).toBe(sourceReview.version)
+  expect(dispatches[7].payload.request.flow_source_entailment_version).toBe(sourceReview.version)
   expect(new Set(transcript.steps.map((step) => step.fingerprint))).toEqual(
     new Set(dispatches.map((row) => row.payload.fingerprint)),
   )
-  expect(transcript.steps).toHaveLength(7) // Source observation and interpretation precede prose; no repair, memory or next chapter.
-  const sourceStep = transcript.steps.find((step) => step.fingerprint === dispatches[6].payload.fingerprint)!
+  expect(transcript.steps).toHaveLength(8) // Source observation, interpretation and independent preservation precede prose; no repair, memory or next chapter.
+  const sourceStep = transcript.steps.find((step) => step.fingerprint === dispatches[7].payload.fingerprint)!
   const checked = JSON.parse(sourceStep.result.text) as {
     input_sha256: string
     checks: { flow_id: string; result: string; evidence: string; verified_fields: string[] }[]
   }
   expect(checked.input_sha256).toBe(sourceReview.input_sha256)
   expect(checked.checks).toHaveLength(sourceReview.checks.length)
-  const quotedUnits = dispatches[6].payload.request.quoted_units as {
+  const quotedUnits = dispatches[7].payload.request.quoted_units as {
     source_id: string
     start: number
     end: number

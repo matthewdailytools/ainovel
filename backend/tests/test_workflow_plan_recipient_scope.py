@@ -19,6 +19,12 @@ from test_workflow_plan_preparation import claimed, CHECK_ACTION
 from test_workflow_plan_source_roles import SOURCE, proposal
 
 
+@pytest.fixture(autouse=True)
+def legacy_second_policy_frames(monkeypatch):
+    """This original file keeps exercising the frozen /2 source policy."""
+    monkeypatch.setattr(scope, "NEW_TASK_VERSION", scope.CURRENT_VERSION)
+
+
 def inventory(source, *, kind="named_destination", stage="completed", condition="", unknown=False):
     sources = scope.units(source)
     observations = [

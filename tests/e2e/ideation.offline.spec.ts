@@ -43,6 +43,7 @@ test('一句想法生成、编辑、刷新恢复、采用并去写作；保留�
   expect(
     await page.request.get(`/api/tasks?branch_id=${novel.branch_id}`).then((r) => r.json()),
   ).toHaveLength(0)
+  await expect(page.getByRole('button', { name: '帮我展开', exact: true })).toBeEnabled()
   await page.keyboard.press('Tab')
   await expect(page.getByRole('button', { name: '帮我展开', exact: true })).toBeFocused()
   const request = page.waitForRequest((r) => r.url().endsWith('/api/modules') && r.method() === 'POST')
@@ -139,6 +140,7 @@ test('未配置模型也能直接采用；空输入不会提交', async ({ page 
 test('另一窗口改约后先保留输入，重新读取再采用时保留新锁定', async ({ page }) => {
   const { novel, headers } = await openIdea(page, '后台验证 · 构思并发保护', true)
   await page.getByRole('textbox', { name: '你的想法', exact: true }).fill(idea)
+  await expect(page.getByRole('button', { name: '直接采用这段想法', exact: true })).toBeEnabled()
   const current = await (await page.request.get(`/api/branches/${novel.branch_id}/author-contract`)).json()
   const update = await page.request.post(`/api/branches/${novel.branch_id}/definitions`, {
     headers,

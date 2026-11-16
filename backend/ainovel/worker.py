@@ -281,6 +281,10 @@ class Worker:
             from .author_source_clarification import ensure_runtime as ensure_clarification_runtime
 
             ensure_clarification_runtime(self.task, self.domain, self.settings)
+        if self.task["result"].get("author_source_recheck_version") is not None:
+            from .author_source_recheck import ensure_runtime as ensure_recheck_runtime
+
+            ensure_recheck_runtime(self.task, self.domain, self.settings)
         from .flow_entailment import enabled as flow_entailment_enabled
 
         flow_entailment_enabled(self)
@@ -378,6 +382,10 @@ class Worker:
             "独立核对作者补充澄清与原来源保持",
             "独立观察旧有效AI章纲的接收范围",
             "独立核对旧AI章纲范围纠偏与全部事项保持",
+            "独立核对旧AI章纲物品称谓与同次实例关联",
+            "独立核对物品关联及范围窄修的全部原义保持",
+            "独立核对作者来源分类与完整原意保持",
+            "独立核对AI章纲分类与完整规划原意保持",
         }:
             # No implicit enrichment: source interpretation receives only its
             # source scope. New plan choice/check stages explicitly supply their
@@ -1177,7 +1185,10 @@ class Worker:
                     "命名目的地、一份材料、另项许可或排除某一人不等于排除其他全部接收者。"
                     "没有可支持的范围归属时保留unknown，不补造排他、不扩大原角色、物品、条件和阶段。"
                 )
-            if instruction.get("authored_source_scope_version") == "authored-source-scope/1":
+            if instruction.get("authored_source_scope_version") in {
+                "authored-source-scope/1",
+                "authored-source-scope/2",
+            }:
                 current["引用修正要求"] = (
                     "本阶段没有正文或候选。只回到作者本次原话核对连续引用、同一传递及绑定，保留原角色、原件／副本、阶段、条件与否定；目的地、另项许可或排除某人不能改成排他。真未明确保持unknown／ambiguous，不能替作者选人或补出新约束。"
                 )

@@ -259,6 +259,10 @@ def completed_unverified_record(domain, current, entry):
     from .plot_audit import ScopedAuthorPlot, author_contract_issues
 
     record = current["result"].get(authored.RECEIPTS, {}).get(entry["key"])
+    if record and record.get("version") == authored.CURRENT_VERSION:
+        from .authored_source_classification import completed_unverified_record
+
+        return completed_unverified_record(domain, current, entry, record)
     owners = {t["id"] for t in lineage(domain, current)}
     try:
         if (

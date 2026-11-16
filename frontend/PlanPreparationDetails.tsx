@@ -130,6 +130,34 @@ export function PlanPreparationDetails({
                     </details>
                   )
                 })}
+                {row.workflow_plan_recipient_scope_version === 'workflow-plan-recipient-scope/3' && (
+                  <section aria-label="AI章纲来源分类记录">
+                    <details>
+                      <summary>新版AI章纲来源分类与完整原意保持（只读）</summary>
+                      <p>
+                        来源是本次冻结AI工作章纲，不是作者原话或已发生事实。未涉及接收范围的句子仍保留完整情节；分类与原意保持均须独立核对。这里的模型结论不代表正文、整书或文学通过。
+                      </p>
+                      {rows(row.scope_classification_preservations).length === 0 && (
+                        <p>尚无独立分类保持结果，不能据此确认通过。</p>
+                      )}
+                      <pre className="stream">
+                        {JSON.stringify(
+                          {
+                            version: row.workflow_plan_recipient_scope_version,
+                            source_observations: Object.fromEntries(
+                              Object.entries(record(row.phases) || {}).filter(([name]) =>
+                                name.startsWith('recipient_scope:'),
+                              ),
+                            ),
+                            scope_classification_preservations: row.scope_classification_preservations,
+                          },
+                          null,
+                          2,
+                        )}
+                      </pre>
+                    </details>
+                  </section>
+                )}
                 <details>
                   <summary>逐轮解释、保持核对与来源</summary>
                   <p className="small muted">以下是AI准备记录，不是已发生事实或作者认可。</p>

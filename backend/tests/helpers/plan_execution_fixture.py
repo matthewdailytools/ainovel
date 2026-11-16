@@ -7,6 +7,10 @@ def plan_execution_output(instruction):
     while isinstance(instruction.get("原始任务"), dict):
         instruction = instruction["原始任务"]
     action = instruction.get("动作")
+    if action == "独立核对AI章纲分类与完整规划原意保持":
+        from helpers.auto_scope_classification_fixture import preservation_output
+
+        return preservation_output(instruction)
     if action == "独立观察AI章纲接收范围来源":
         return {
             "input_sha256": instruction["input_sha256"],
@@ -54,7 +58,10 @@ def plan_execution_output(instruction):
         if "接收范围核对执行版本" in instruction:
             for item in items:
                 item["scope_observation_ids"] = []
-                if instruction["接收范围核对执行版本"] == "workflow-plan-recipient-scope/2":
+                if instruction["接收范围核对执行版本"] in {
+                    "workflow-plan-recipient-scope/2",
+                    "workflow-plan-recipient-scope/3",
+                }:
                     item.update(
                         scope_binding_status="supported",
                         scope_binding_reason="确定性工程路由；真实语义另评。",

@@ -653,6 +653,8 @@ class Domain:
                 "author_source_clarification_version",
                 "author_source_clarification",
                 "author_source_clarification_checks",
+                "author_source_recheck_version",
+                "author_source_recheck",
             )
         ):
             raise DomainError(

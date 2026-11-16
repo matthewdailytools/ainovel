@@ -1,8 +1,11 @@
 """New reference reports receive bindings without changing paid model prompts."""
 
 import hashlib
+import json
 
 from ainovel.plot_audit import VERSION
+from ainovel.authored_source_classification import ACTION as CLASSIFICATION_ACTION
+from ainovel import authored_source_scope as authored
 from test_plot_audit import AUTHOR, Integrated
 from test_reference_flow import reference as reference, run, update
 
@@ -39,13 +42,14 @@ def test_new_reference_draft_and_edited_candidate_check_have_actual_bindings(
     edited = domain.artifact(draft["id"])
     old_report = edited["payload"]["previous_reference_comparison"]["plot_audit"]
     assert old_report == report
+    checker = Integrated()
     checked, _ = run(
         client,
         settings,
         domain,
         row["id"],
         "check",
-        model=Integrated(),
+        model=checker,
         plot_contract_check=True,
         candidate_id=edited["id"],
     )
@@ -54,6 +58,18 @@ def test_new_reference_draft_and_edited_candidate_check_have_actual_bindings(
     assert bound["candidate_sha256"] == hashlib.sha256(text.encode()).hexdigest()
     assert checked["payload"]["target"]["candidate"] == {"id": edited["id"], "revision": 1}
     assert domain.artifact(draft["id"])["payload"]["previous_reference_comparison"]["plot_audit"] == report
+    inherited = domain.task(checked["task_id"])["result"][authored.RECEIPTS]["module"]
+    assert inherited["version"] == authored.CURRENT_VERSION and inherited["state"] == "ready"
+    assert set(inherited["phases"]) == {"preserve"}
+    dispatched = [
+        json.loads(e["payload"])["action"]
+        for e in domain.db.all(
+            "SELECT payload FROM task_events WHERE task_id=? AND kind='step_dispatched'",
+            (checked["task_id"],),
+        )
+    ]
+    assert dispatched.count(CLASSIFICATION_ACTION) == 1 and authored.ACTION not in dispatched
+    assert inherited["preservation_input"]["fixed"] == [{"source_id": "FIX001", "text": "交易失败"}]
 
 
 def test_saved_reference_check_binds_saved_body_revision_separately_from_report_revision(

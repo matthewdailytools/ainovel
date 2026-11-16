@@ -488,6 +488,7 @@ async def interpret_plot(
     worker, author_text, *, source_kind=None, preparation=None, source_position=None, authored_inventory=None
 ):
     from . import authored_source_scope as authored
+    from .authored_source_classification import GUIDANCE as CLASSIFICATION_GUIDANCE
 
     authored_enabled = (
         preparation is None
@@ -552,7 +553,8 @@ async def interpret_plot(
             raise DomainError("plan_scope_version", "写前范围来源观察缺失、未知或版本不符，未派发解释。", 409)
         schema = (
             ScopeBoundOpenPlanInterpretationV2
-            if preparation[recipient_scope.KEY] == recipient_scope.CURRENT_VERSION
+            if preparation[recipient_scope.KEY]
+            in {recipient_scope.CURRENT_VERSION, recipient_scope.NEW_VERSION}
             else ScopeBoundOpenPlanInterpretation
         )
     authored_execution = authored_inventory is not None
@@ -572,7 +574,8 @@ async def interpret_plot(
         "ScopeBoundAuthorItem"
         if authored_execution
         else "ScopeBoundOpenPlanItemV2"
-        if scope_execution and preparation[recipient_scope.KEY] == recipient_scope.CURRENT_VERSION
+        if scope_execution
+        and preparation[recipient_scope.KEY] in {recipient_scope.CURRENT_VERSION, recipient_scope.NEW_VERSION}
         else "ScopeBoundOpenPlanItem"
         if scope_execution
         else "OpenPlanItem"
@@ -640,10 +643,17 @@ async def interpret_plot(
             result.update(
                 {
                     "接收范围核对执行版本": preparation[recipient_scope.KEY],
+                    **(
+                        {"完整AI章纲分类边界": PLAN_CLASSIFICATION_GUIDANCE}
+                        if preparation[recipient_scope.KEY] == recipient_scope.NEW_VERSION
+                        else {}
+                    ),
                     "接收范围修正边界": recipient_scope.GUIDANCE,
                 }
             )
         return result
+
+    from .workflow_plan_scope_classification import GUIDANCE as PLAN_CLASSIFICATION_GUIDANCE
 
     source_label = "本章工作章纲（AI规划）" if source_kind == "workflow_plan" else "作者原话"
     # No candidate, reference excerpt, application plan or old review reaches this call.
@@ -657,8 +667,13 @@ async def interpret_plot(
             **({ROLE_KEY: ROLE_VERSION, "来源角色与限制范围解释": ROLE_GUIDANCE} if roles else {}),
             **(
                 {
-                    authored.KEY: authored.VERSION,
+                    authored.KEY: authored_inventory["version"],
                     "先行作者来源范围观察（非作者条件）": authored_inventory,
+                    **(
+                        {"完整来源分类边界": CLASSIFICATION_GUIDANCE}
+                        if authored_inventory["version"] == authored.CURRENT_VERSION
+                        else {}
+                    ),
                     "作者来源解释边界": recipient_scope.GUIDANCE
                     + "每项scope_observation_ids绑定先行O编号；所有观察均保持。只解析本段已经明确的主体与回指，真正未明保持ambiguous，不输出open_fields，不自动选择参与者、补写源事项或调用开放选择；scope_binding_status只有同一原话支持观察及本项范围才supported，先行AI观察不是原话真值，来源冲突或无法确认时填unknown并说明，保留本项原义，不为了绑定修改原事件、角色或阶段。",
                 }
@@ -668,12 +683,18 @@ async def interpret_plot(
             **(
                 {
                     "接收范围核对执行版本": preparation[recipient_scope.KEY],
+                    **(
+                        {"完整AI章纲分类边界": PLAN_CLASSIFICATION_GUIDANCE}
+                        if preparation[recipient_scope.KEY] == recipient_scope.NEW_VERSION
+                        else {}
+                    ),
                     "先行来源范围观察（AI观察，不是作者条件）": inventory,
                     "接收范围来源绑定": recipient_scope.GUIDANCE
                     + "每项scope_observation_ids只引用先行观察O编号，全部观察须被原义对应事项保持；没有相关观察可空。only/unrestricted须有同一物品、双方和阶段的来源观察，不可借别项许可或禁止；先行观察仍非原话真值，发现来源歧义应保留而非伪造通过。"
                     + (
                         "scope_binding_status仅当原话支持本项与观察的绑定才supported；先行AI观察非真值，若与原话冲突或归属确实未明，可unknown并在scope_binding_reason保留双方差异；不为满足先行观察改变原事项或把unknown当格式错误修成一致。unknown会在开放选择、保持核对及正文前停止。"
-                        if preparation[recipient_scope.KEY] == recipient_scope.CURRENT_VERSION
+                        if preparation[recipient_scope.KEY]
+                        in {recipient_scope.CURRENT_VERSION, recipient_scope.NEW_VERSION}
                         else ""
                     ),
                 }
@@ -703,7 +724,10 @@ async def interpret_plot(
         ),
     )
     if authored_execution:
-        return {"contract": authored.core_value(contract), "bindings": authored.binding_data(contract)}
+        return {
+            "contract": authored.core_value(contract),
+            "bindings": authored.binding_data(contract, authored_inventory["version"]),
+        }
     if roles:
         return {
             **normalize_open_plan(recipient_scope.core_value(contract) if scope_execution else contract),

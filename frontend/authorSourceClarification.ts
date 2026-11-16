@@ -5,6 +5,7 @@ import { canonical, object } from './planRestart'
 
 export const AUTHOR_CLARIFICATION_VERSION = 'author-source-clarification/1'
 export const AUTHORED_SCOPE_VERSION = 'authored-source-scope/1'
+export const AUTHORED_SCOPE_CURRENT_VERSION = 'authored-source-scope/2'
 export type ClarificationInput = Required<components['schemas']['ClarificationInput']>
 export type AuthorSourceEntry = {
   key: string
@@ -68,7 +69,8 @@ export function clarificationUnavailableReason(task: Task) {
     task.payload.plot_contract_check !== true
   )
     return '仅半自动情节核对批次可使用本入口。'
-  if (result?.authored_source_scope_version !== AUTHORED_SCOPE_VERSION)
+  const sourcePolicy = result?.authored_source_scope_version
+  if (!result || (sourcePolicy !== AUTHORED_SCOPE_VERSION && sourcePolicy !== AUTHORED_SCOPE_CURRENT_VERSION))
     return '本批次未冻结可核实的作者来源政策，不能自动升级旧任务。'
   if (result.continued_to) return '已有续接任务，请打开已有子任务查看。'
   if (
@@ -83,7 +85,14 @@ export function clarificationUnavailableReason(task: Task) {
     record?.state !== 'unverified' ||
     !phases ||
     !object(phases.observe) ||
-    Object.keys(phases).some((key) => !['observe', 'interpret'].includes(key)) ||
+    Object.keys(phases).some(
+      (key) =>
+        !(
+          sourcePolicy === AUTHORED_SCOPE_CURRENT_VERSION
+            ? ['observe', 'interpret', 'preserve']
+            : ['observe', 'interpret']
+        ).includes(key),
+    ) ||
     Object.values(phases).some((value) => object(value)?.status !== 'completed')
   )
     return '仅已完整返回的来源待核停点可补充，未知派发或格式失败不能借此重发。'

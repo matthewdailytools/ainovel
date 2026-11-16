@@ -14,7 +14,9 @@ from .models import Input
 KEY = "workflow_plan_recipient_scope_version"
 VERSION = "workflow-plan-recipient-scope/1"
 CURRENT_VERSION = "workflow-plan-recipient-scope/2"
-SUPPORTED = {VERSION, CURRENT_VERSION}
+NEW_VERSION = "workflow-plan-recipient-scope/3"
+NEW_TASK_VERSION = NEW_VERSION
+SUPPORTED = {VERSION, CURRENT_VERSION, NEW_VERSION}
 ACTION = "独立观察AI章纲接收范围来源"
 GUIDANCE = (
     "命名一个收件人、只写一次寄送或一份抄件，不表示排除其他收件人。"
@@ -113,7 +115,7 @@ def freeze(worker, row):
     """Only a genuinely new row receives this execution version."""
     if prior_rows(worker, row):
         raise DomainError("plan_scope_version", "该章已有冻结准备历史，不能以新行覆盖或升级。", 409)
-    row[KEY] = CURRENT_VERSION
+    row[KEY] = NEW_TASK_VERSION
 
 
 def enabled(worker, row):
@@ -233,7 +235,7 @@ def binding_issues(value, receipt):
             issues.append(f"P{index:02}范围绑定只能引用本次既有O编号，不重复或补造。")
             continue
         used.update(identifiers)
-        if receipt["version"] == CURRENT_VERSION:
+        if receipt["version"] in {CURRENT_VERSION, NEW_VERSION}:
             if not item["scope_binding_reason"].strip():
                 issues.append(f"P{index:02}须说明来源是否支持绑定；先行观察不是原话真值。")
             if item["scope_binding_status"] == "unknown":
@@ -241,7 +243,7 @@ def binding_issues(value, receipt):
         rows = [indexed[i] for i in identifiers]
         for row in rows:
             if (
-                receipt["version"] == CURRENT_VERSION
+                receipt["version"] in {CURRENT_VERSION, NEW_VERSION}
                 and row["kind"] == "named_destination"
                 and any(item[k] != row[k] for k in keys)
             ):
@@ -297,7 +299,7 @@ def bindings(value, version=VERSION):
                 "observation_ids": deepcopy(item["scope_observation_ids"]),
                 **(
                     {"status": item["scope_binding_status"], "reason": item["scope_binding_reason"]}
-                    if version == CURRENT_VERSION
+                    if version in {CURRENT_VERSION, NEW_VERSION}
                     else {}
                 ),
             }
@@ -322,7 +324,7 @@ def bindings_valid(contract, binding, receipt):
                     "scope_observation_ids": row["observation_ids"],
                     **(
                         {"scope_binding_status": row["status"], "scope_binding_reason": row["reason"]}
-                        if binding["version"] == CURRENT_VERSION
+                        if binding["version"] in {CURRENT_VERSION, NEW_VERSION}
                         else {}
                     ),
                 }
@@ -340,6 +342,14 @@ def bindings_supported(binding):
 
 
 async def observe(worker, source, *, version=VERSION):
+    if version == NEW_VERSION:
+        from .workflow_plan_scope_classification import observe as observe_classification
+
+        return await observe_classification(worker, source)
+    return await observe_legacy(worker, source, version=version)
+
+
+async def observe_legacy(worker, source, *, version=VERSION):
     if version not in SUPPORTED:
         raise DomainError("plan_scope_version", "未知来源范围执行版本，未派发。", 409)
     sources = units(source)

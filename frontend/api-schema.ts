@@ -995,6 +995,58 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/tasks/{task_id}/author-source-recheck-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Source Recheck Preview */
+    get: operations['source_recheck_preview_api_tasks__task_id__author_source_recheck_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/author-source-rechecks/{client_request_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Source Recheck Receipt */
+    get: operations['source_recheck_receipt_api_tasks__task_id__author_source_rechecks__client_request_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/author-source-rechecks': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Source Recheck Receipt */
+    get: operations['source_recheck_receipt_api_tasks__task_id__author_source_rechecks_get']
+    put?: never
+    /** Source Recheck */
+    post: operations['source_recheck_api_tasks__task_id__author_source_rechecks_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/tasks/{task_id}/continue-flow-policy-preview': {
     parameters: {
       query?: never
@@ -2760,6 +2812,20 @@ export interface components {
       preview_basis_sha256: string
       /** Receipt Id */
       receipt_id: string
+    }
+    /** RecheckInput */
+    RecheckInput: {
+      /**
+       * Version
+       * @constant
+       */
+      version: 'author-source-recheck/1'
+      /** Client Request Id */
+      client_request_id: string
+      /** Preview Basis Sha256 */
+      preview_basis_sha256: string
+      /** Reason */
+      reason: string
     }
     /** ReconfirmationInput */
     ReconfirmationInput: {
@@ -5563,6 +5629,137 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['ClarificationInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  source_recheck_preview_api_tasks__task_id__author_source_recheck_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  source_recheck_receipt_api_tasks__task_id__author_source_rechecks__client_request_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+        client_request_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  source_recheck_receipt_api_tasks__task_id__author_source_rechecks_get: {
+    parameters: {
+      query: {
+        client_request_id: string
+      }
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  source_recheck_api_tasks__task_id__author_source_rechecks_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RecheckInput']
       }
     }
     responses: {

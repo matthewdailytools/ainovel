@@ -63,3 +63,63 @@ test('作者可核对原章纲、开放附注和最终执行安排，文本以�
   expect(html).toContain('不根据已写正文倒改计划')
   expect(html).toContain('不等于小说质量通过')
 })
+
+test('新版AI章纲分类和独立保持可只读审阅，unknown仍保留且不产生升级动作', () => {
+  const html = render({
+    version: 'workflow-plan-preparation/1',
+    value: {
+      '1': {
+        status: 'needs_review',
+        workflow_plan_recipient_scope_version: 'workflow-plan-recipient-scope/3',
+        original_plot: '交易失败，原物未交。',
+        phases: {
+          'recipient_scope:0': {
+            status: 'completed',
+            response: {
+              inventory: {
+                unit_checks: [{ status: 'not_scope_related', reason: '<script>不可执行</script>' }],
+              },
+            },
+          },
+        },
+        scope_classification_preservations: [
+          {
+            version: 'workflow-plan-recipient-scope/3',
+            round: 0,
+            input_sha256: 'a'.repeat(64),
+            result: {
+              original_checks: [{ source_id: 'ORIG0001', classification_result: 'unknown', result: 'pass' }],
+              item_checks: [{ item_id: 'P01', result: 'unknown' }],
+              summary: '无范围也须保留失败与未交付。',
+            },
+          },
+        ],
+      },
+    },
+  })
+  expect(html).toContain('新版AI章纲来源分类与完整原意保持（只读）')
+  expect(html).toContain('classification_result')
+  expect(html).toContain('unknown')
+  expect(html).toContain('not_scope_related')
+  expect(html).toContain('执行安排待核对')
+  expect(html).toContain('&lt;script&gt;')
+  expect(html).not.toContain('<script>')
+  expect(html).not.toContain('<button')
+})
+test.each(['workflow-plan-recipient-scope/1', 'workflow-plan-recipient-scope/2'])(
+  '旧%s不借新字段升级展示政策',
+  (version) => {
+    expect(
+      render({
+        version: 'workflow-plan-preparation/1',
+        value: {
+          '1': {
+            status: 'needs_review',
+            workflow_plan_recipient_scope_version: version,
+            scope_classification_preservations: [],
+          },
+        },
+      }),
+    ).not.toContain('新版AI章纲来源分类与完整原意保持')
+  },
+)

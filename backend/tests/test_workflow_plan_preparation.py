@@ -12,6 +12,7 @@ from ainovel.db import DomainError, dumps
 from ainovel.plot_audit import audit_plot
 from ainovel.worker import Worker
 from ainovel.providers import ModelClient
+from ainovel.workflow_plan_scope_classification import ACTION as CLASSIFICATION_ACTION
 from ainovel.workflow_plan_preparation import (
     CHECK_ACTION,
     CHOICE_ACTION,
@@ -92,6 +93,50 @@ def claimed(settings, domain, story, *, model=None, legacy=False, chapters=None)
     return worker, plot, domain.chapter(story["chapter_id"]), task
 
 
+PREPARATION_V3_STEPS = [
+    ("独立观察AI章纲接收范围来源", "ScopeInventory"),
+    ("写前解释AI工作章纲", "ScopeBoundOpenPlanInterpretationV2"),
+    (CHECK_ACTION, "PlanPreservation"),
+    (CLASSIFICATION_ACTION, "Preservation"),
+]
+
+
+def dispatches(worker):
+    return [
+        json.loads(row["payload"])
+        for row in worker.db.all(
+            "SELECT payload FROM task_events WHERE task_id=? AND kind='step_dispatched' ORDER BY id",
+            (worker.task["id"],),
+        )
+    ]
+
+
+def completed_steps(worker):
+    return worker.db.all(
+        "SELECT * FROM task_steps WHERE task_id=? ORDER BY fingerprint", (worker.task["id"],)
+    )
+
+
+def assert_ready_v3_steps(worker):
+    row = worker.task["result"]["plot_preparations"]["1"]
+    assert row["workflow_plan_recipient_scope_version"] == "workflow-plan-recipient-scope/3"
+    assert row["status"] == "ready" and row["round"] == 0 and row["choices"] == []
+    assert set(row["phases"]) == {"recipient_scope:0", "interpret:0", "check:0", "scope_preserve:0"}
+    assert all(phase["status"] == "completed" for phase in row["phases"].values())
+    # A proven-not-sent local failure may have a separate dispatch event, but
+    # exactly these four final requests must own complete, distinct cached steps.
+    sent = dispatches(worker)[-4:]
+    assert [(event["action"], event["schema"]) for event in sent] == PREPARATION_V3_STEPS
+    assert all(event["request"]["workflow_plan_preparation_version"] == VERSION for event in sent[:3])
+    assert sent[3]["request"]["workflow_plan_recipient_scope_version"] == "workflow-plan-recipient-scope/3"
+    assert "workflow_plan_preparation_version" not in sent[3]["request"]
+    assert len({event["fingerprint"] for event in sent}) == 4
+    steps = completed_steps(worker)
+    assert len(steps) == 4
+    assert {step["fingerprint"] for step in steps} == {event["fingerprint"] for event in sent}
+    return sent
+
+
 @pytest.mark.parametrize(
     "mode,enabled,expected",
     [("automatic", True, True), ("assisted", True, False), ("automatic", False, False)],
@@ -136,7 +181,14 @@ def test_new_automatic_prepares_before_prose_keeps_original_and_reuses_frozen_in
     assert not any(f["任务"].get("动作") == "仅依据作者原话整理本场景情节" for f in model.frames)
     for frame in model.preparation_frames:
         assert "本次候选" not in dumps(frame) and "沈砚向陆栖画出" not in dumps(frame)
-        if frame["任务"]["动作"] in {"写前解释AI工作章纲", "独立观察AI章纲接收范围来源"}:
+        if frame["任务"]["动作"] == CLASSIFICATION_ACTION:
+            assert set(frame["上下文"]) == {"scope"}
+            assert frame["任务"]["接收范围核对执行版本"] == "workflow-plan-recipient-scope/3"
+            assert frame["任务"]["原始AI本章"] == row["original_plot"]
+            assert frame["任务"]["有效AI本章"] == row["effective_plot"]
+            assert frame["任务"]["完整原规划与采用约定"]["原始全批规划"] == saved["result"]["plan"]
+            assert "chapter" not in frame["上下文"] and "recent" not in frame["上下文"]
+        elif frame["任务"]["动作"] in {"写前解释AI工作章纲", "独立观察AI章纲接收范围来源"}:
             assert "recent" not in frame["上下文"] and "chapter" not in frame["上下文"]
             assert "genre_profile" not in frame["上下文"]
         else:
@@ -331,11 +383,22 @@ def test_finished_step_crash_before_receipt_reuses_paid_cache_without_reissuing(
     assert model.calls == 2  # source inventory plus paid interpretation
     restored = domain.task(task["id"])
     assert "response" not in restored["result"]["plot_preparations"]["1"]["phases"]["interpret:0"]
+    paid_cache = {step["fingerprint"]: step for step in completed_steps(worker)}
+    assert len(paid_cache) == 2 and len(dispatches(worker)) == 2
     worker.task = restored
     monkeypatch.setattr(worker, "checkpoint", original)
     effective, contract = asyncio.run(prepare(worker, plot, chapter))
-    assert model.calls == 3  # inventory and interpretation come from paid cache; only preservation is new
+    assert model.calls == 4  # Reuse the two paid steps; add the ordinary and /3 independent checks once.
+    assert_ready_v3_steps(worker)
+    assert len(dispatches(worker)) == 4
+    after = {step["fingerprint"]: step for step in completed_steps(worker)}
+    assert all(after[fingerprint] == step for fingerprint, step in paid_cache.items())
     assert frozen_contract(worker, effective["plot"], 1, contract) == contract
+    assert asyncio.run(prepare(worker, plot, chapter)) == (effective, contract)
+    assert model.calls == 4 and completed_steps(worker) == list(
+        sorted(after.values(), key=lambda step: step["fingerprint"])
+    )
+    assert len(dispatches(worker)) == 4
 
 
 def test_dispatch_checkpoint_without_complete_cache_stops_without_new_calls(
@@ -430,6 +493,7 @@ def test_real_adapter_proven_not_sent_failures_can_explicitly_resume_without_res
     result = domain.task(task["id"])["result"]
     assert result["plot_preparations"]["1"]["phases"]["recipient_scope:0"]["status"] == "not_sent"
     assert worker.budget.report()[0]["settled"] == 0
+    blocked_dispatches = dispatches(worker)
     settings.providers["openai_1"] = provider
     monkeypatch.setattr(worker.budget, "reserve", original_reserve)
     # These are the existing explicit user recovery paths, not a worker retry.
@@ -453,7 +517,28 @@ def test_real_adapter_proven_not_sent_failures_can_explicitly_resume_without_res
     row = next_worker.task["result"]["plot_preparations"]["1"]
     assert row["round"] == 0 and len(row["choices"]) == 0
     assert row["phases"]["recipient_scope:0"]["not_sent_history"][0]["code"] == kind
-    assert len(bodies) == 3 and frozen_contract(next_worker, effective["plot"], 1, contract) == contract
+    assert len(bodies) == 4
+    assert [json.loads(json.loads(body)["input"][1]["content"])["任务"]["动作"] for body in bodies] == [
+        action for action, _ in PREPARATION_V3_STEPS
+    ]
+    assert_ready_v3_steps(next_worker)
+    with next_worker.budget.db() as usage:
+        calls = [dict(call) for call in usage.execute("SELECT * FROM calls ORDER BY id")]
+    assert len(calls) == 4 and all(call["status"] == "settled" and call["charged"] > 0 for call in calls)
+    assert all(
+        call["task_id"] == resumed["id"] and call["account"] == resumed["payload"]["account"]
+        for call in calls
+    )
+    cached_steps, sent = completed_steps(next_worker), dispatches(next_worker)
+    prior = [] if switch_account else blocked_dispatches
+    assert sent[: len(prior)] == prior and len(sent) == len(prior) + 4
+    assert frozen_contract(next_worker, effective["plot"], 1, contract) == contract
+    assert asyncio.run(prepare(next_worker, plot, chapter)) == (effective, contract)
+    assert (
+        len(bodies) == 4 and completed_steps(next_worker) == cached_steps and dispatches(next_worker) == sent
+    )
+    with next_worker.budget.db() as usage:
+        assert [dict(call) for call in usage.execute("SELECT * FROM calls ORDER BY id")] == calls
 
 
 @pytest.mark.parametrize("boundary", ["pause", "cancel", "lease", "attempt", "source"])
@@ -556,13 +641,9 @@ def test_new_schema_inventory_remains_supported_and_request_metadata_names_polic
         assert strict_schema(schema.model_json_schema())["type"] == "object"
     worker, plot, chapter, task = claimed(settings, domain, story)
     asyncio.run(prepare(worker, plot, chapter))
-    requests = [
-        json.loads(r["payload"])["request"]
-        for r in domain.db.all(
-            "SELECT payload FROM task_events WHERE task_id=? AND kind='step_dispatched'", (task["id"],)
-        )
-    ]
-    assert requests and all(r["workflow_plan_preparation_version"] == VERSION for r in requests)
+    assert worker.client.calls == 4
+    assert_ready_v3_steps(worker)
+    assert len(dispatches(worker)) == 4
 
 
 def test_real_unknown_timeout_keeps_money_hold_and_cannot_be_relabelled_not_sent(settings, domain, story):
@@ -655,10 +736,18 @@ def test_pending_phase_account_switch_is_rejected_without_locking_original_and_c
     assert not domain.db.all("SELECT task_id FROM task_requests WHERE key='must-not-create'")
     unchanged = domain.task(task["id"])
     assert unchanged["status"] == "blocked_runtime" and "continued_to" not in unchanged["result"]
+    paid_cache = {step["fingerprint"]: step for step in completed_steps(worker)}
+    assert worker.client.calls == 2 and len(paid_cache) == 2 and len(dispatches(worker)) == 2
     with domain.db.connect(True) as tx:
         tx.execute("UPDATE tasks SET status='running' WHERE id=?", (task["id"],))
     worker.task = domain.task(task["id"])
     monkeypatch.setattr(worker, "checkpoint", original)
     effective, contract = asyncio.run(prepare(worker, plot, chapter))
-    assert worker.client.calls == 3  # inventory + cached interpretation + independent preservation
+    assert worker.client.calls == 4  # Cached observation/interpretation plus both independent checks.
+    assert_ready_v3_steps(worker)
+    assert len(dispatches(worker)) == 4
+    after = {step["fingerprint"]: step for step in completed_steps(worker)}
+    assert all(after[fingerprint] == step for fingerprint, step in paid_cache.items())
     assert frozen_contract(worker, effective["plot"], 1, contract) == contract
+    assert asyncio.run(prepare(worker, plot, chapter)) == (effective, contract)
+    assert worker.client.calls == 4 and len(dispatches(worker)) == 4 and len(completed_steps(worker)) == 4

@@ -5,6 +5,7 @@ from copy import deepcopy
 import json
 
 import pytest
+import httpx
 
 from ainovel.db import DomainError, dumps, uid
 from ainovel.story_graph import SaveRecord, save_record
@@ -12,8 +13,72 @@ from ainovel.workflow_plan_context import KEY as CONTEXT_KEY
 from ainovel.workflow_plan_open_details import KEY as OPEN_KEY
 from ainovel.workflow_plan_preparation import CHECK_ACTION, CHOICE_ACTION, prepare
 from ainovel.workflow_plan_recipient_scope import ACTION as SCOPE_ACTION
+from ainovel.workflow_plan_scope_classification import ACTION as CLASSIFICATION_ACTION
+from ainovel.authored_source_classification import ACTION as AUTHOR_CLASSIFICATION_ACTION
+from ainovel.prepared_source_object_aliases import ASSOCIATE, VERIFY
+from ainovel.models import ModuleInput
+from ainovel.providers import ModelClient
+from ainovel.worker import Worker
 from test_workflow_plan_open_details import OpenModel, SOURCE
 from test_workflow_plan_preparation import PreparationModel, claimed
+from test_author_contract import adopt_intent, FIELDS
+from test_genre_integration import adopt_reader
+from test_openai_schema import completed
+
+
+@pytest.mark.parametrize("action", [ASSOCIATE, VERIFY, AUTHOR_CLASSIFICATION_ACTION, CLASSIFICATION_ACTION])
+def test_new_source_actions_native_wire_keeps_explicit_frozen_inputs_without_implicit_enrichment(
+    settings, domain, story, action
+):
+    genre_marker = "UNRELATED_GENRE_FUTURE_MARKER"
+    author_marker = "UNRELATED_AUTHOR_FUTURE_MARKER"
+    adopt_reader(domain, story, text=genre_marker, author_exceptions=[genre_marker])
+    adopt_intent(domain, story, text=author_marker, fields={**FIELDS, "ending": author_marker})
+    payload = ModuleInput(
+        novel_id=story["id"],
+        branch_id=story["branch_id"],
+        chapter_id=story["chapter_id"],
+        base_revision=0,
+        action="writing.advise",
+        instruction="原生上下文发送范围探针。",
+        account="openai_1",
+    ).model_dump(exclude_none=True)
+    task = domain.queue("module", payload, story["branch_id"])
+    worker = Worker(settings)
+    worker.task = worker.claim()
+    worker.attempt = worker.task["attempt"]
+    assert worker.task["id"] == task["id"]
+    explicit = {
+        "冻结来源原文": "EXPLICIT_SOURCE_ONLY",
+        "原文观察和P": {"observation_id": "O01", "item_id": "P01", "source": "EXPLICIT_SOURCE_ONLY"},
+    }
+    if action != ASSOCIATE:
+        explicit.update(
+            全部固定项=[{"source_id": "FIX001", "text": "EXPLICIT_FIXED_ONLY"}],
+            采用约定={"text": "EXPLICIT_CONTRACT_ONLY"},
+            原始全批规划={"chapters": [{"number": 1, "plot": "EXPLICIT_PLAN_ONLY"}]},
+        )
+    frames = []
+
+    def handler(request):
+        frame = json.loads(json.loads(request.content)["input"][1]["content"])
+        frames.append(frame)
+        return completed("source-wire-ok")
+
+    worker.client = ModelClient(settings, worker.budget, httpx.MockTransport(handler))
+    assert (
+        asyncio.run(worker.call({"动作": action, **explicit}, context={"scope": "仅本次显式冻结来源。"}))
+        == "source-wire-ok"
+    )
+    assert len(frames) == 1
+    assert frames[0]["上下文"] == {"scope": "仅本次显式冻结来源。"}
+    assert frames[0]["任务"] == {"动作": action, **explicit}
+    text = dumps(frames[0])
+    assert genre_marker not in text and author_marker not in text
+    assert domain.chapter(story["chapter_id"])["content"] == ""
+    with worker.budget.db() as tx:
+        calls = list(tx.execute("SELECT status,charged FROM calls WHERE task_id=?", (task["id"],)))
+    assert len(calls) == 1 and calls[0]["status"] == "settled" and calls[0]["charged"] is not None
 
 
 @pytest.fixture
@@ -185,6 +250,16 @@ def test_choice_and_compatibility_check_receive_frozen_adopted_context_but_inter
                 assert frame["任务"]["本章工作章纲原文"].startswith(SOURCE)
                 assert "recipient_scope_inventory" not in frame["任务"]
                 assert "原始事项" not in frame["任务"]
+        elif action == CLASSIFICATION_ACTION:
+            assert set(context) == {"scope"}
+            assert frame["任务"]["接收范围核对执行版本"] == "workflow-plan-recipient-scope/3"
+            assert frame["任务"]["原始AI本章"] == row["original_plot"]
+            assert frame["任务"]["有效AI本章"] == row["effective_plot"]
+            assert frame["任务"]["完整原规划与采用约定"]["原始全批规划"] == worker.task["result"]["plan"]
+            text = dumps(frame)
+            assert "FUTURE_SECRET" not in text and "FUTURE_FACT_SECRET" not in text and "OTHER_" not in text
+            assert "UNACCEPTED_CANDIDATE_SECRET" not in text
+            assert "本次候选" not in frame["任务"] and "正文" not in frame["任务"]
         else:
             assert action in (CHECK_ACTION, CHOICE_ACTION)
             assert context["creative_context_sha256"] == frozen["sha256"]

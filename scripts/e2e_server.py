@@ -26,7 +26,7 @@ from helpers.plan_execution_fixture import plan_execution_output  # noqa: E402
 from helpers.ideation_fixture import complete_idea_output  # noqa: E402
 from helpers.source_identity_fixture import source_identity_output  # noqa: E402
 from helpers.flow_entailment_fixture import flow_entailment_output  # noqa: E402
-from e2e_authored_scope_fixture import source_observation, bind_interpretation  # noqa: E402
+from e2e_authored_scope_fixture import source_observation, source_classification, bind_interpretation  # noqa: E402
 from helpers.source_correction_fixture import (  # noqa: E402
     source_correction_output,
     source_correction_body_output,
@@ -56,6 +56,7 @@ class Model(ReferenceModel):
     def __init__(self):
         super().__init__()
         self.flow_review_calls = 0
+        self.authored_classification_calls = 0
         self.source_correction_calls = 0
         self.book_tasks = set()
         self.book_model = BookModel()
@@ -66,6 +67,13 @@ class Model(ReferenceModel):
         self.memory_selection_modes = {}
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+        if hasattr(self, "author_source_recheck_app"):
+            from e2e_author_source_recheck_fixture import author_source_recheck_result
+
+            if result := await author_source_recheck_result(
+                self.author_source_recheck_app, account, task_id, system, prompt, max_output, **kwargs
+            ):
+                return result
         if hasattr(self, "prepared_object_alias_app"):
             from e2e_prepared_object_alias_fixture import prepared_object_alias_result
 
@@ -115,6 +123,14 @@ class Model(ReferenceModel):
         source_instruction = instruction
         while "原始任务" in source_instruction:
             source_instruction = source_instruction["原始任务"]
+        authored_classification = source_classification(source_instruction)
+        if authored_classification is not None:
+            self.authored_classification_calls += 1
+            return {
+                "text": json.dumps(authored_classification, ensure_ascii=False),
+                "usage": {"input": 1, "output": 1},
+                "call_id": f"offline-authored-classification-{self.authored_classification_calls}",
+            }
         authored_observation = source_observation(source_instruction)
         if authored_observation is not None:
             return {
@@ -623,6 +639,7 @@ def main():
     from e2e_source_correction_fixture import register_source_correction_fixture
     from e2e_prepared_scope_fixture import register_prepared_scope_fixture
     from e2e_prepared_object_alias_fixture import register_prepared_object_alias_fixture
+    from e2e_author_source_recheck_fixture import register_author_source_recheck_fixture
     from e2e_flow_policy_fixture import register_flow_policy_fixture
     from e2e_scene_unknown_reason_fixture import register_unknown_reason_fixture
 
@@ -652,6 +669,7 @@ def main():
         register_source_correction_fixture(app, settings, location)
         register_prepared_scope_fixture(app, settings, location)
         register_prepared_object_alias_fixture(app, settings, location)
+        register_author_source_recheck_fixture(app, settings, location)
         register_flow_policy_fixture(app, settings, location)
         register_unknown_reason_fixture(app, settings)
         original = app.router.lifespan_context
@@ -662,6 +680,7 @@ def main():
                 model = Model()
                 model.prepared_scope_app = app
                 model.prepared_object_alias_app = app
+                model.author_source_recheck_app = app
                 model.flow_native_settings = settings
                 model.flow_native_sends = app.state.flow_native_transport_sends
                 worker = Worker(settings, model)

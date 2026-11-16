@@ -100,6 +100,8 @@ test('显式不同称谓：默认旧版、换选项重读、独立关联与正�
   const aliases = panel.getByRole('region', { name: '材料称谓关联证据', exact: true })
   await expect(aliases).toContainText('同一次传递的同一份材料')
   await expect(aliases).toContainText('原文关联已核对')
+  await expect(aliases).toContainText('来源解释阶段：已完成')
+  await expect(aliases).not.toContainText('阶段：completed')
   const colors = await aliases.locator('h4').evaluate((element) => {
     let background: Element | null = element
     while (background && getComputedStyle(background).backgroundColor === 'rgba(0, 0, 0, 0)')

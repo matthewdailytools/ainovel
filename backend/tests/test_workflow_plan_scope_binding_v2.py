@@ -2,10 +2,17 @@
 
 import asyncio
 from copy import deepcopy
+import pytest
 
 from ainovel.workflow_plan_preparation import prepare
 from ainovel import workflow_plan_recipient_scope as scope
 from test_workflow_plan_recipient_scope import ScopeModel, worker_for
+
+
+@pytest.fixture(autouse=True)
+def historical_second_policy(monkeypatch):
+    """This file retains the original /2 disagreement and no-forcing contract."""
+    monkeypatch.setattr(scope, "NEW_TASK_VERSION", scope.CURRENT_VERSION)
 
 
 class Disagrees(ScopeModel):

@@ -217,6 +217,10 @@ def check_receipt(worker, row, plot, chapter):
             raise DomainError("plan_preparation_changed", "章纲附注版本无法核实。", 409)
     if row.get("effective_plot") != text or row.get("effective_plot_sha256") != sha(text):
         raise DomainError("plan_preparation_changed", "有效章纲与保留附注不一致，未反向适配正文。", 409)
+    if row.get(recipient_scope.KEY) == recipient_scope.NEW_VERSION and row.get("status") == "ready":
+        from .workflow_plan_scope_classification import validate as validate_classification
+
+        validate_classification(worker, row, plot, row["prepared_contract"])
 
 
 def lineage(worker):
@@ -567,6 +571,15 @@ async def prepare(worker, plot, chapter):
                 return stop(worker, row, "写前保持核对存在不符或未知，未生成正文；原规划与每轮记录保留。")
             active(worker)
             if all(item["certainty"] == "explicit" for item in contract["items"]):
+                if scope_execution and row[recipient_scope.KEY] == recipient_scope.NEW_VERSION:
+                    from .workflow_plan_scope_classification import check as check_classification
+
+                    if not await check_classification(worker, row, plot, contract):
+                        return stop(
+                            worker,
+                            row,
+                            "新版来源分类或完整规划原意保持仍有不符/未知，未生成正文；原句、P和费用保留。",
+                        )
                 row.update(
                     status="ready",
                     prepared_contract=deepcopy(contract),

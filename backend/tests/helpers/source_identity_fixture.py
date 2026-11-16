@@ -107,8 +107,10 @@ def source_identity_output(instruction):
                             "scope_binding_status": "supported",
                             "scope_binding_reason": "固定借尺工程样例没有排他范围观察，角色限定仍独立核对。",
                         }
-                        if instruction.get("authored_source_scope_version") == "authored-source-scope/1"
-                        or instruction.get("接收范围核对执行版本") == "workflow-plan-recipient-scope/2"
+                        if instruction.get("authored_source_scope_version")
+                        in {"authored-source-scope/1", "authored-source-scope/2"}
+                        or instruction.get("接收范围核对执行版本")
+                        in {"workflow-plan-recipient-scope/2", "workflow-plan-recipient-scope/3"}
                         else {}
                     ),
                 }

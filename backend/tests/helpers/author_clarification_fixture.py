@@ -3,6 +3,7 @@
 import asyncio
 from copy import deepcopy
 import json
+from unittest.mock import patch
 
 import httpx
 from ainovel.db import DomainError, dumps
@@ -22,6 +23,11 @@ BODY = "伙计双手托平账页，等来客接稳，才慢慢松开指头。纸
 def answer(frame, *, preserve="pass", phase_unknown=False):
     instruction = frame["任务"]
     action = instruction.get("动作")
+    from ainovel.authored_source_classification import ACTION as CLASSIFICATION_ACTION
+    from helpers.authored_source_fixture import classification_preservation
+
+    if action == CLASSIFICATION_ACTION:
+        return classification_preservation(instruction)
     if action == authored.ACTION:
         text = instruction["作者本次情节原话"]
         clarified = "补充澄清" in text
@@ -216,12 +222,14 @@ def source_unverified(
         plot_contract_check=True,
         client_request_id="initial-ambiguous-author-source",
     ).model_dump(exclude_none=True)
-    if client is not None:
-        response = client.post("/api/workflows", json=payload)
-        assert response.status_code == 202, response.text
-        task = response.json()
-    else:
-        task = domain.queue("workflow", payload, story["branch_id"])
+    # Preserve this fixture's frozen /1 parent and old paid-frame semantics.
+    with patch.object(authored, "NEW_TASK_VERSION", authored.VERSION):
+        if client is not None:
+            response = client.post("/api/workflows", json=payload)
+            assert response.status_code == 202, response.text
+            task = response.json()
+        else:
+            task = domain.queue("workflow", payload, story["branch_id"])
     branch = task["branch_id"]
     for n in range(1, chapters + 1):
         rows = domain.db.all(

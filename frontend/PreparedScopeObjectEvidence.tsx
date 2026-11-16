@@ -3,6 +3,7 @@ import type { ScopeReceipt } from './preparedScopeObjectCorrection'
 export function PreparedScopeObjectEvidence({ receipt }: { receipt: ScopeReceipt }) {
   if (!('object_alias_resolution' in receipt)) return null
   const aliases = receipt.object_alias_resolution
+  const stage = { completed: '已完成', attempted: '尝试', planned: '计划', none: '无传递' }
   const relation = {
     same_transfer_same_instance: '同一次传递中的同一份材料',
     different_transfer_or_instance: '另一传递或另一份材料',
@@ -43,7 +44,8 @@ export function PreparedScopeObjectEvidence({ receipt }: { receipt: ScopeReceipt
             </strong>
             <p>
               原事项材料称谓：{before?.transfer_object || '未指定'}；{before?.supplier || '未指定'} →{' '}
-              {before?.recipient || '未指定'}；阶段：{before?.transfer_scope || '未知'}。
+              {before?.recipient || '未指定'}；来源解释阶段：{before ? stage[before.transfer_scope] : '未知'}
+              （AI章纲安排，非已发生事实）。
             </p>
             <p>{item.reason}</p>
             {item.checks.map((check) => {

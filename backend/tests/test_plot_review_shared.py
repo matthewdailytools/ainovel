@@ -181,7 +181,7 @@ def test_workflow_unverified_does_not_force_revision_and_plan_origin_remains_exp
     if mode == "assisted" and certainty == "ambiguous":
         # Fresh author-source ambiguity is discovered before writing, retaining
         # the source receipt instead of spending on a candidate to reject later.
-        assert task["status"] == "blocked_runtime" and "作者原话" in task["error"]
+        assert task["status"] == "blocked_runtime" and "未核实" in task["error"]
         assert not domain.db.all("SELECT * FROM artifacts")
         assert not any(f["任务"].get("动作") == "按章纲写完整正文" for f in model.frames)
         return
