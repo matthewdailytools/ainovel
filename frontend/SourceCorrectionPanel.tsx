@@ -4,7 +4,7 @@ import {
   PreparedScopeCorrectionArtifact,
   PreparedScopeTaskNotice,
 } from './PreparedScopeCorrectionPanel'
-import { SCOPE_KIND, SCOPE_BODY_VERSION } from './preparedScopeCorrection'
+import { SCOPE_KIND, isScopeBodyVersion } from './preparedScopeObjectCorrection'
 import { api, ApiError, type Artifact, type Chapter, type Task } from './api'
 import { useLeaveGuard } from './leaveGuard'
 import { parseRecheckBudget } from './candidateRecheck'
@@ -133,7 +133,7 @@ export function SourceCorrectionTaskNotice({ task }: { task: Task }) {
   if (
     task.kind === SCOPE_KIND ||
     (object(task.result) &&
-      (task.result as Record<string, unknown>).source_corrected_recheck_version === SCOPE_BODY_VERSION)
+      isScopeBodyVersion((task.result as Record<string, unknown>).source_corrected_recheck_version))
   )
     return <PreparedScopeTaskNotice task={task} />
   const label = correctionKindLabel(task.kind)
@@ -961,7 +961,7 @@ function LegacySourceCorrectionArtifact({
 }
 
 export function SourceCorrectionArtifact(props: Parameters<typeof LegacySourceCorrectionArtifact>[0]) {
-  return props.artifact.kind === SCOPE_KIND || props.artifact.payload.version === SCOPE_BODY_VERSION ? (
+  return props.artifact.kind === SCOPE_KIND || isScopeBodyVersion(props.artifact.payload.version) ? (
     <PreparedScopeCorrectionArtifact {...props} />
   ) : (
     <LegacySourceCorrectionArtifact {...props} />

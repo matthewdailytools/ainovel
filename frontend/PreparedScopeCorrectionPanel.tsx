@@ -4,6 +4,7 @@ import { useLeaveGuard } from './leaveGuard'
 import { parseRecheckBudget } from './candidateRecheck'
 import { PlotAuditDetails } from './PlotAuditDetails'
 import { ConditionalReviewNotice } from './ConditionalReviewNotice'
+import { PreparedScopeObjectEvidence } from './PreparedScopeObjectEvidence'
 import {
   canonical,
   correctionKindLabel,
@@ -23,13 +24,17 @@ import {
   readScopePreview,
   readScopeReceipt,
   scopeEligibility,
+  scopePreviewPath,
+  objectAliasesEnabled,
+  SCOPE_OBJECT_VERSION,
+  SCOPE_OBJECT_BODY_VERSION,
   SCOPE_KIND,
   type ScopeCapsule,
   type ScopeOperationState,
   type ScopeBodyPreview,
   type ScopePreview,
   type ScopeReceipt,
-} from './preparedScopeCorrection'
+} from './preparedScopeObjectCorrection'
 const errorText = (value: unknown) =>
   value instanceof Error ? value.message : '读取失败，输入与原提交记录保留。'
 const scopeLabel = { only: '仅限指定接收方', unrestricted: '明确不限制', unspecified: '未声明独占' }
@@ -56,9 +61,11 @@ export function PreparedScopeReceiptView({
         <summary>冻结AI章纲与原解释</summary>
         <pre className="stream">{receipt.snapshot.plot.plot}</pre>
       </details>
+      <PreparedScopeObjectEvidence receipt={receipt} />
       {receipt.snapshot.prepared_contract.items.map((before, i) => {
         const proposal = receipt.proposal.items[i],
           check = receipt.preservation?.item_checks[i]
+        const aliasCheck = check && 'object_alias_check' in check ? check.object_alias_check : undefined
         return (
           <article className="fact" key={before.id}>
             <strong>
@@ -78,6 +85,19 @@ export function PreparedScopeReceiptView({
                 : '来源尚未核实，没有派发独立保持核对，不能继续正文复检。'}
             </p>
             {check && <blockquote>{check.evidence}</blockquote>}
+            {aliasCheck !== undefined && (
+              <p>
+                末次独立称谓复核：
+                {aliasCheck === 'pass'
+                  ? '模型标同指保持'
+                  : aliasCheck === 'fail'
+                    ? '模型标不符'
+                    : aliasCheck === 'unknown'
+                      ? '仍待核对'
+                      : '本项无需额外关联'}
+                。
+              </p>
+            )}
           </article>
         )
       })}
@@ -103,7 +123,9 @@ export function PreparedScopeTaskNotice({ task }: { task: Task }) {
       </strong>
       <p>
         {source
-          ? '先核冻结AI章纲，再独立核对原义保持；不读取候选正文。来源就绪不代表正文通过。'
+          ? objectAliasesEnabled(task.payload)
+            ? '先独立观察冻结AI章纲，必要时核对材料不同称谓，再独立核对全部原义保持；不读取候选正文。来源就绪不代表正文通过。'
+            : '先核冻结AI章纲，再独立核对原义保持；不读取候选正文。来源就绪不代表正文通过。'
           : '仅按就绪来源回执复检原候选，不生成、采纳或恢复正文。'}
       </p>
       {task.error && <p role="status">{task.error}</p>}
@@ -150,8 +172,9 @@ export function PreparedScopeCorrectionPanel({
     chapter?.id,
     chapter?.revision,
   ])
-  const current = useRef({ scope, signature, unsaved, disabled, modelReady })
-  current.current = { scope, signature, unsaved, disabled, modelReady }
+  const [verifyObjectAliases, setVerifyObjectAliases] = useState(false)
+  const current = useRef({ scope, signature, unsaved, disabled, modelReady, verifyObjectAliases })
+  current.current = { scope, signature, unsaved, disabled, modelReady, verifyObjectAliases }
   const mounted = useRef(true),
     sequence = useRef(0),
     composing = useRef(false)
@@ -184,7 +207,7 @@ export function PreparedScopeCorrectionPanel({
     [source, setSource] = useState<unknown>()
   const [storageReady, setStorageReady] = useState(false),
     [submitted, setSubmitted] = useState('')
-  const draftSignature = canonical([selected, reason, budget])
+  const draftSignature = canonical([selected, reason, budget, verifyObjectAliases])
   const draftKey = `ainovel.prepared-scope-correction.draft.1:${scope}`
   const budgetValue = parseRecheckBudget(budget)
   const locked =
@@ -197,14 +220,18 @@ export function PreparedScopeCorrectionPanel({
   const stale =
     prepared !== undefined &&
     (previewSignature.current !== signature ||
+      objectAliasesEnabled(prepared.value) !== verifyObjectAliases ||
       (prepared.phase === 'recheck' && prepared.value.receipt_id !== selectedReceipt))
   const currentReceipt = receipt?.artifact.id === selectedReceipt ? receipt : undefined
   const receiptCurrent =
-    currentReceipt !== undefined && currentReceipt.current && currentReceipt.bindingSignature === signature
+    currentReceipt !== undefined &&
+    currentReceipt.current &&
+    currentReceipt.bindingSignature === signature &&
+    objectAliasesEnabled(currentReceipt.data.snapshot) === verifyObjectAliases
   useLeaveGuard(
     operation.status === 'sending' ||
       operation.status === 'uncertain' ||
-      (draftSignature !== submitted && (!!reason || selected.length > 0 || !!budget)),
+      (draftSignature !== submitted && (!!reason || selected.length > 0 || !!budget || verifyObjectAliases)),
     'AI章纲范围纠偏范围、原因或待查提交',
   )
   useEffect(() => {
@@ -227,16 +254,22 @@ export function PreparedScopeCorrectionPanel({
           draft.budget.length <= 100 &&
           Array.isArray(draft.selected) &&
           draft.selected.length <= 12 &&
+          (draft.verify_object_aliases === undefined || typeof draft.verify_object_aliases === 'boolean') &&
           draft.selected.every((id) => typeof id === 'string' && /^P(?:0[1-9]|1[0-2])$/u.test(id))
         ) {
           setReason(draft.reason)
           setBudget(draft.budget)
           setSelected(draft.selected)
+          setVerifyObjectAliases(draft.verify_object_aliases === true)
           if (typeof draft.submitted === 'string') setSubmitted(draft.submitted)
         }
       }
       if (control.state.pending) {
         const capsule = control.state.pending
+        setVerifyObjectAliases(
+          capsule.preview.version === SCOPE_OBJECT_VERSION ||
+            capsule.preview.version === SCOPE_OBJECT_BODY_VERSION,
+        )
         if (capsule.phase === 'source' && 'item_ids' in capsule.request) {
           setReason(capsule.request.reason)
           setSelected(capsule.request.item_ids)
@@ -259,12 +292,21 @@ export function PreparedScopeCorrectionPanel({
   useEffect(() => {
     if (!storageReady) return
     try {
-      localStorage.setItem(draftKey, JSON.stringify({ reason, selected, budget, submitted }))
+      localStorage.setItem(
+        draftKey,
+        JSON.stringify({
+          reason,
+          selected,
+          budget,
+          submitted,
+          ...(verifyObjectAliases ? { verify_object_aliases: true } : {}),
+        }),
+      )
     } catch {
       setStorageReady(false)
       setError('范围草稿无法保存，提交前必须先恢复浏览器存储。')
     }
-  }, [storageReady, draftKey, reason, selected, budget, submitted])
+  }, [storageReady, draftKey, reason, selected, budget, submitted, verifyObjectAliases])
   useEffect(() => {
     let alive = true
     void api<unknown>(`/tasks/${encodeURIComponent(artifact.task_id || '')}`)
@@ -372,10 +414,9 @@ export function PreparedScopeCorrectionPanel({
         if (receiptMatches && owner) {
           try {
             const latest = readScopePreview(
-              await api<unknown>(
-                `/artifacts/${encodeURIComponent(artifact.id)}/prepared-source-scope-preview`,
-              ),
+              await api<unknown>(scopePreviewPath(artifact.id, objectAliasesEnabled(data.snapshot))),
               owner,
+              objectAliasesEnabled(data.snapshot),
             )
             if (latest)
               bindingStatus = latest.basis_sha256 === data.snapshot.basis_sha256 ? 'current' : 'historical'
@@ -413,24 +454,24 @@ export function PreparedScopeCorrectionPanel({
       readScopeReceipt(row.payload)?.snapshot.artifact_id === artifact.id,
   )
   const blocked = disabled || unsaved || !storageReady || locked || !!eligibility
-  const matches = (token: number, expected: string) =>
+  const matches = (token: number, expected: string, expectedAliases?: boolean) =>
     mounted.current &&
     sequence.current === token &&
     current.current.scope === scope &&
-    current.current.signature === expected
+    current.current.signature === expected &&
+    (expectedAliases === undefined || current.current.verifyObjectAliases === expectedAliases)
   async function load(phase: Phase) {
     if (blocked || !owner) return
     const token = ++sequence.current,
-      expected = signature
+      expected = signature,
+      expectedAliases = phase === 'source' ? verifyObjectAliases : undefined
     setLoading(true)
     setError('')
     try {
       let next: Prepared
       if (phase === 'source') {
-        const raw = await api<unknown>(
-          `/artifacts/${encodeURIComponent(artifact.id)}/prepared-source-scope-preview`,
-        )
-        const preview = readScopePreview(raw, owner)
+        const raw = await api<unknown>(scopePreviewPath(artifact.id, verifyObjectAliases))
+        const preview = readScopePreview(raw, owner, verifyObjectAliases)
         if (!preview || (await digest(preview.source_text)) !== preview.source_text_sha256)
           throw new Error('来源预览的原文、目标或摘要无法核对，未提交。')
         next = { phase, value: preview }
@@ -443,7 +484,7 @@ export function PreparedScopeCorrectionPanel({
         if (!preview) throw new Error('正文复检依据与就绪回执无法对应，未提交。')
         next = { phase, value: preview }
       }
-      if (!matches(token, expected)) return
+      if (!matches(token, expected, expectedAliases)) return
       if (
         phase === 'recheck' &&
         prepared?.phase === 'source' &&
@@ -476,7 +517,7 @@ export function PreparedScopeCorrectionPanel({
         previewSignature.current = expected
       }
     } catch (failure) {
-      if (matches(token, expected)) {
+      if (matches(token, expected, expectedAliases)) {
         setError(errorText(failure))
         previewSignature.current = ''
       }
@@ -487,6 +528,7 @@ export function PreparedScopeCorrectionPanel({
   function acceptIncoming() {
     if (
       !incoming ||
+      objectAliasesEnabled(incoming.value) !== verifyObjectAliases ||
       incomingSignature.current !== signature ||
       unsaved ||
       !!eligibility ||
@@ -518,6 +560,7 @@ export function PreparedScopeCorrectionPanel({
       !mounted.current ||
       current.current.scope !== scope ||
       current.current.signature !== expectedSignature ||
+      objectAliasesEnabled(prepared.value) !== current.current.verifyObjectAliases ||
       current.current.unsaved ||
       current.current.disabled
     )
@@ -542,7 +585,13 @@ export function PreparedScopeCorrectionPanel({
         client_signature: clientSignature,
         owner,
         preview: prepared.value,
-        request: { ...base, source_identity_context: false, item_ids: selected, reason: reason.trim() },
+        request: {
+          ...base,
+          source_identity_context: false,
+          item_ids: selected,
+          reason: reason.trim(),
+          ...(objectAliasesEnabled(prepared.value) ? { verify_object_aliases: true } : {}),
+        },
       }
     } else
       capsule = {
@@ -562,7 +611,26 @@ export function PreparedScopeCorrectionPanel({
           用于旧AI章纲解释把普通接收方误当唯一接收方，或把别处的许可范围错套到本次交接。来源是冻结的有效AI章纲，不是作者原话或已发生事实；仅允许核对接收范围及其条件，角色、动作、阶段、结果、原章纲和正文均不修改。
         </p>
         <p>
-          来源纠偏包含两个独立模型步骤；就绪后另行读取依据并提交正文复检。每步及失败均可能产生费用，继续受累计预算和原任务剩余额度保护。
+          来源纠偏基础流程包含两个独立模型步骤；开启称谓核对后可能增加一步。就绪后另行读取依据并提交正文复检。每步及失败均可能产生费用，继续受累计预算和原任务剩余额度保护。
+        </p>
+        <label className="check">
+          <input
+            type="checkbox"
+            style={{ flexShrink: 0 }}
+            checked={verifyObjectAliases}
+            disabled={locked || disabled || unsaved}
+            onChange={(event) => {
+              sequence.current++
+              setVerifyObjectAliases(event.target.checked)
+              setIncoming(undefined)
+              incomingSignature.current = ''
+            }}
+          />
+          <span style={{ minWidth: 0 }}>核对材料的不同称谓</span>
+        </label>
+        <p className="small muted">
+          默认关闭。开启后先独立观察原文，必要时增加同一次传递的材料称谓关联检查，最后仍核对全部事项与固定条件，可能产生额外费用。
+          更换选项后须重新读取依据；旧回执和旧提交保持原版本，关联不新增本书事实或代表正文通过。
         </p>
         {eligibility && <p role="status">{eligibility}</p>}
         {error && <p role="alert">{error}</p>}
@@ -680,6 +748,11 @@ export function PreparedScopeCorrectionPanel({
         )}
         {currentReceipt && (
           <>
+            {objectAliasesEnabled(currentReceipt.data.snapshot) !== verifyObjectAliases && (
+              <p role="status">
+                此回执的材料称谓选项与当前选择不同；回执保留只读，请显式选择相同选项后再读取正文依据。
+              </p>
+            )}
             {currentReceipt.bindingStatus === 'unavailable' && (
               <p role="status">当前完整来源依据尚未核实；回执保留只读，未启用正文复检。</p>
             )}

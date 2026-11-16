@@ -2311,6 +2311,12 @@
             "in": "path",
             "required": true,
             "schema": { "type": "string", "title": "Artifact Id" }
+          },
+          {
+            "name": "verify_object_aliases",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean", "default": false, "title": "Verify Object Aliases" }
           }
         ],
         "responses": {
@@ -5106,7 +5112,8 @@
             "minItems": 1,
             "title": "Item Ids"
           },
-          "reason": { "type": "string", "maxLength": 2000, "title": "Reason", "default": "" }
+          "reason": { "type": "string", "maxLength": 2000, "title": "Reason", "default": "" },
+          "verify_object_aliases": { "type": "boolean", "title": "Verify Object Aliases", "default": false }
         },
         "additionalProperties": false,
         "type": "object",

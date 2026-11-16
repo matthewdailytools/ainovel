@@ -11,7 +11,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_scope": "本项的实际写作总投入/作者体验仍未测量；不能用保存回归替代使用收益。",
     "latest_runtime_evidence": "2026-11-16-037-runtime-recovery-and-scope-smoke.md"
   },
@@ -27,7 +27,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_evidence": [
       "2026-11-14-real-epub.md"
     ],
@@ -46,7 +46,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_evidence": [
       "2026-11-13-reference-repeats.md",
       "2026-11-13-author-review-feedback.md"
@@ -66,7 +66,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_evidence": [
       "2026-11-14-books-coldstart.md"
     ],
@@ -85,7 +85,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
@@ -107,7 +107,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
@@ -129,7 +129,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_scope": "36章导入保留；六轮旧失败后，相同两章第七轮2次CNY0.241526形成34记录/12场景待审候选，116逐字来源/145段覆盖及引用范围通过；16事件order未知、after空及群体身份待整理，0采用。真实十章/跨卷/作者整体质量仍待验。",
     "quality_evidence": [
       "2026-11-15-longform-import-and-reverse.md",
@@ -152,7 +152,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_evidence": [
       "2026-11-15-assisted-candidate-recheck.md",
       "2026-11-15-source-identity-context.md",
@@ -176,7 +176,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_evidence": [
       "2026-11-15-second-chapter-review-candidates.md",
       "2026-11-15-source-identity-context.md",
@@ -185,9 +185,10 @@
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
       "2026-11-15-conditional-book-continuations.md",
       "2026-11-15-chapter3-joint-corrections.md",
-      "2026-11-16-assisted5-maintained-and-assisted6-review.md"
+      "2026-11-16-assisted5-maintained-and-assisted6-review.md",
+      "2026-11-16-reduced12-first-source-stop.md"
     ],
-    "quality_scope": "新政策子任务保留原36规划/约定/题材及累计预算，实际采用并维护3章。章3派生事实范围与事件主体问题已按5项正式最小更正及语义查询复检，同步故事修订27，paused next4；0新增模型调用。工程人工介入不代表十章/整书/文学或总投入已通过。 最新真实FLOW2子批次已采用并维护第五章；第六章候选未采用，日期错误及权限unknown独立记录，私有A/B未写入；15调用CNY1.390900全结。此前段落是历史截止，仍未通过十章/整书/文学及收益。",
+    "quality_scope": "新政策子任务保留原36规划/约定/题材及累计预算，实际采用并维护3章。章3派生事实范围与事件主体问题已按5项正式最小更正及语义查询复检，同步故事修订27，paused next4；0新增模型调用。工程人工介入不代表十章/整书/文学或总投入已通过。 最新真实FLOW2子批次已采用并维护第五章；第六章候选未采用，日期错误及权限unknown独立记录，私有A/B未写入；15调用CNY1.390900全结。此前段落是历史截止，仍未通过十章/整书/文学及收益。 最新两个独立12章空来源已建，半自动首章来源观察误分类停止、无正文；3call CNY.266256全结，全自动尚未启动。旧36不截断，新十章/跨卷/整书/文学/收益未通过。",
     "latest_runtime_evidence": "2026-11-16-037-runtime-recovery-and-scope-smoke.md"
   },
   {
@@ -202,7 +203,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-assisted-candidate-recheck.md",
@@ -211,9 +212,10 @@
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
       "2026-11-15-conditional-book-continuations.md",
       "2026-11-15-chapter3-joint-corrections.md",
-      "2026-11-16-automatic5-source-object-alias-stop.md"
+      "2026-11-16-automatic5-source-object-alias-stop.md",
+      "2026-11-16-reduced12-first-source-stop.md"
     ],
-    "quality_scope": "独立实际采用并维护3章。章3派生时点/交付后资源状态问题已按5项正式最小更正并复检，同步故事修订38，paused next4；0新增模型。第4章旧写前解释失败及三份调用保留，仍未生成正文；原36计划和预算不变，十章/跨卷/整书/文学及收益待验。 最新另立0c11任务第5章r0仍未采用，来源范围与实例流向误报分开记录；本轮增加旧AI章纲受限来源纠偏及显式FLOW2正文复检，尚未本轮日常发布/真实模型验证。此前章4前段是历史截止，不据此追认整书。 最新真实旧自动5来源回执unverified，观察正确但物品称谓字面未关联；2call CNY.049512已结，未正文复检或采用，不把局部source观察当任务完成。",
+    "quality_scope": "独立实际采用并维护3章。章3派生时点/交付后资源状态问题已按5项正式最小更正并复检，同步故事修订38，paused next4；0新增模型。第4章旧写前解释失败及三份调用保留，仍未生成正文；原36计划和预算不变，十章/跨卷/整书/文学及收益待验。 最新另立0c11任务第5章r0仍未采用，来源范围与实例流向误报分开记录；本轮增加旧AI章纲受限来源纠偏及显式FLOW2正文复检，尚未本轮日常发布/真实模型验证。此前章4前段是历史截止，不据此追认整书。 最新真实旧自动5来源回执unverified，观察正确但物品称谓字面未关联；2call CNY.049512已结，未正文复检或采用，不把局部source观察当任务完成。 最新两个独立12章空来源已建，半自动首章来源观察误分类停止、无正文；3call CNY.266256全结，全自动尚未启动。旧36不截断，新十章/跨卷/整书/文学/收益未通过。",
     "latest_runtime_evidence": "2026-11-16-037-runtime-recovery-and-scope-smoke.md"
   },
   {
@@ -228,7 +230,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_scope": "实际费用/故障/恢复属于工程稳定性；使用总投入尚未完整测量，不据此作文学或收益通过。",
     "quality_evidence": [
       "2026-11-16-assisted5-maintained-and-assisted6-review.md"
@@ -247,7 +249,7 @@
     "status_as_of": "2026-11-16",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-prepared-source-scope-correction.md",
+    "latest_regression_evidence": "2026-11-16-prepared-source-object-aliases.md",
     "quality_scope": "工程中文/键盘/缩放已有范围；真实作者输入法、辅助技术和体验评估不能由替身事件推定。",
     "latest_runtime_evidence": "2026-11-16-037-runtime-recovery-and-scope-smoke.md"
   }

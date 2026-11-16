@@ -66,6 +66,13 @@ class Model(ReferenceModel):
         self.memory_selection_modes = {}
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+        if hasattr(self, "prepared_object_alias_app"):
+            from e2e_prepared_object_alias_fixture import prepared_object_alias_result
+
+            if result := await prepared_object_alias_result(
+                self.prepared_object_alias_app, account, task_id, system, prompt, max_output, **kwargs
+            ):
+                return result
         if hasattr(self, "prepared_scope_app"):
             from e2e_prepared_scope_fixture import prepared_scope_result
 
@@ -615,6 +622,7 @@ def main():
     from e2e_scene_reconfirmation_fixture import register_scene_reconfirmation_fixture
     from e2e_source_correction_fixture import register_source_correction_fixture
     from e2e_prepared_scope_fixture import register_prepared_scope_fixture
+    from e2e_prepared_object_alias_fixture import register_prepared_object_alias_fixture
     from e2e_flow_policy_fixture import register_flow_policy_fixture
     from e2e_scene_unknown_reason_fixture import register_unknown_reason_fixture
 
@@ -643,6 +651,7 @@ def main():
         register_scene_reconfirmation_fixture(app, settings, location)
         register_source_correction_fixture(app, settings, location)
         register_prepared_scope_fixture(app, settings, location)
+        register_prepared_object_alias_fixture(app, settings, location)
         register_flow_policy_fixture(app, settings, location)
         register_unknown_reason_fixture(app, settings)
         original = app.router.lifespan_context
@@ -652,6 +661,7 @@ def main():
             async with original(app):
                 model = Model()
                 model.prepared_scope_app = app
+                model.prepared_object_alias_app = app
                 model.flow_native_settings = settings
                 model.flow_native_sends = app.state.flow_native_transport_sends
                 worker = Worker(settings, model)

@@ -7478,5 +7478,82 @@
     "result": "unverified",
     "record": "2026-11-16-reduced12-acceptance-input-decision.md",
     "fix_of": ""
+  },
+  {
+    "id": "source-object-v2-root-backend-20261116",
+    "date": "2026-11-16",
+    "commit": "working-tree-source-object-alias-v2",
+    "module": "全项目后端",
+    "scenario": "2466项通过/1462.07秒，来源及旧版本兼容；1项既有弃用警告",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-prepared-source-object-aliases.md",
+    "fix_of": ""
+  },
+  {
+    "id": "source-object-v2-root-frontend-20261116",
+    "date": "2026-11-16",
+    "commit": "working-tree-source-object-alias-v2",
+    "module": "全项目前端",
+    "scenario": "618项/28文件及48Node，API重生成、类型、格式、构建通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-prepared-source-object-aliases.md",
+    "fix_of": ""
+  },
+  {
+    "id": "source-object-v2-root-headless-20261116",
+    "date": "2026-11-16",
+    "commit": "working-tree-source-object-alias-v2",
+    "module": "全项目无头",
+    "scenario": "139通过/0重试/0跳过/0flaky，原政策及新称谓关联、显式正文链",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-prepared-source-object-aliases.md",
+    "fix_of": ""
+  },
+  {
+    "id": "source-object-v2-root-freeze-20261116",
+    "date": "2026-11-16",
+    "commit": "working-tree-source-object-alias-v2",
+    "module": "验证绑定",
+    "scenario": "构建先完成，396源码输入与7构建文件跨前后端/浏览器逐项保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-prepared-source-object-aliases.md",
+    "fix_of": ""
+  },
+  {
+    "id": "source-object-v2-real-quality-not-run-20261116",
+    "date": "2026-11-16",
+    "commit": "working-tree-source-object-alias-v2",
+    "module": "全自动来源质量",
+    "scenario": "新政策本地通过，日常仍037；真实关联/正文复检未执行，旧回执保持unverified",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-16-prepared-source-object-aliases.md",
+    "fix_of": "automatic5-v1-object-alias-stop-20261116"
+  },
+  {
+    "id": "reduced12-first-source-observation-stop-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "半自动来源质量",
+    "scenario": "两空来源作品已建；首章实际3call CNY.266256全结，5项非范围内容误分类而停止，无正文/自动书未启动",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-16-reduced12-first-source-stop.md",
+    "fix_of": "reduced12-input-scope-adopted-20261116"
+  },
+  {
+    "id": "ci4c8-exact-complete-20261116",
+    "date": "2026-11-16",
+    "commit": "4c8ca05",
+    "module": "持续集成",
+    "scenario": "精确4c8/43793418819 success：2422后端、588前端、131无头、48Node；不代替新功能CI",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": ""
   }
 ]

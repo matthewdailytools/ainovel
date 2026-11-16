@@ -120,7 +120,7 @@ def freeze(domain, request, *, verify_basis=True, flow_entailment_version=FLOW_V
 def validate(worker):
     from . import prepared_source_scope_correction as scope_correction
 
-    if worker.task["result"].get("source_corrected_recheck_version") == scope_correction.RECHECK_VERSION:
+    if worker.task["result"].get("source_corrected_recheck_version") in scope_correction.RECHECK_VERSIONS:
         return scope_correction.validate_recheck(worker)
     from .conditional_review import KEY as CONDITIONAL_KEY
     from .book_applicability import KEY as APPLICABILITY_KEY
@@ -281,6 +281,7 @@ def register_routes(app, domain, budget, provider_ready):
         snapshot = freeze(domain, request, verify_basis=False)
         return {
             "version": snapshot["version"],
+            **({"verify_object_aliases": True} if snapshot.get("verify_object_aliases") is True else {}),
             "target": artifact_id,
             "candidate_revision": candidate["candidate_revision"],
             "receipt_id": receipt_id,

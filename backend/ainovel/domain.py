@@ -727,7 +727,7 @@ class Domain:
 
             snapshot = scope_correction.freeze(self, payload)
             initial.update(
-                prepared_source_scope_version=scope_correction.VERSION,
+                prepared_source_scope_version=snapshot["version"],
                 prepared_source_scope_snapshot=snapshot,
                 genre_profile_snapshot=snapshot["genre_profile_snapshot"],
                 author_contract_snapshot=snapshot["author_contract_snapshot"],
@@ -920,7 +920,7 @@ class Domain:
                     task_id,
                     scope_correction.EVENT,
                     {
-                        scope_correction.KEY: scope_correction.VERSION,
+                        scope_correction.KEY: initial[scope_correction.SNAPSHOT]["version"],
                         "payload_sha256": scope_correction.sha(payload),
                         "snapshot_sha256": scope_correction.sha(initial[scope_correction.SNAPSHOT]),
                     },

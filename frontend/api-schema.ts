@@ -3060,6 +3060,11 @@ export interface components {
        * @default
        */
       reason: string
+      /**
+       * Verify Object Aliases
+       * @default false
+       */
+      verify_object_aliases: boolean
     }
     /** Segment */
     Segment: {
@@ -5912,7 +5917,9 @@ export interface operations {
   }
   scope_preview_api_artifacts__artifact_id__prepared_source_scope_preview_get: {
     parameters: {
-      query?: never
+      query?: {
+        verify_object_aliases?: boolean
+      }
       header?: never
       path: {
         artifact_id: string

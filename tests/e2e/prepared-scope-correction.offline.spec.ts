@@ -263,5 +263,6 @@ test('late source preview after switching work cannot arm a request for another 
   const current = page.getByRole('region', { name: 'AI章纲范围来源纠偏', exact: true })
   await expect(current.getByRole('button', { name: '读取章纲范围依据', exact: true })).toBeEnabled()
   await expect(current.getByRole('button', { name: sourceSubmit, exact: true })).toHaveCount(0)
-  await expect(current.getByRole('checkbox')).toHaveCount(0)
+  await expect(current.getByRole('checkbox', { name: /^P\d\d/ })).toHaveCount(0)
+  await expect(current.getByRole('checkbox', { name: '核对材料的不同称谓', exact: true })).not.toBeChecked()
 })

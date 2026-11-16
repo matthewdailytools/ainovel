@@ -17,18 +17,21 @@ from . import workflow_plan_recipient_scope as scope
 from .evidence import source_units
 
 VERSION = "prepared-source-scope-correction/1"
+ALIAS_VERSION = "prepared-source-scope-correction/2"
 KIND = "prepared_source_scope_correction"
 KEY = "prepared_source_scope_version"
 SNAPSHOT = "prepared_source_scope_snapshot"
 EVENT = "prepared_source_scope_frozen"
 RECHECK_VERSION = "scope-corrected-candidate-recheck/1"
+ALIAS_RECHECK_VERSION = "scope-corrected-candidate-recheck/2"
+RECHECK_VERSIONS = {RECHECK_VERSION, ALIAS_RECHECK_VERSION}
 OBSERVE = "独立观察旧有效AI章纲的接收范围"
 VERIFY = "独立核对旧AI章纲范围纠偏与全部事项保持"
 FIELDS = {"recipient_scope", "scope_condition"}
 
 
 class ScopeCorrectionInput(actor.CorrectionInput):
-    pass
+    verify_object_aliases: bool = False
 
 
 class ScopeItemCheck(actor.ItemCheck):
@@ -40,12 +43,21 @@ class Preservation(actor.Preservation):
 
 
 def versioned_payload(payload):
-    if KEY in payload and payload[KEY] != VERSION:
+    aliases = payload.get("verify_object_aliases", False)
+    if type(aliases) is not bool:
+        raise DomainError("prepared_scope_version", "物品称谓核对须显式布尔选项。", 409)
+    version = ALIAS_VERSION if aliases else VERSION
+    if KEY in payload and payload[KEY] != version:
         raise DomainError("prepared_scope_version", "范围纠偏执行版本未知，未派发。", 409)
-    return {**payload, KEY: VERSION}
+    original = {k: v for k, v in payload.items() if k != "verify_object_aliases" or aliases}
+    return {**original, KEY: version}
 
 
 def freeze(domain, request, *, verify_basis=True):
+    if request.get("verify_object_aliases") is True:
+        from .prepared_source_object_aliases import freeze as freeze_aliases
+
+        return freeze_aliases(domain, request, verify_basis=verify_basis)
     snapshot = old_freeze(domain, request)
     parent = domain.task(snapshot["source_workflow_id"])
     if parent["payload"].get("mode") != "automatic":
@@ -73,6 +85,10 @@ def freeze(domain, request, *, verify_basis=True):
 
 
 def validate_task(domain, task):
+    if task["payload"].get(KEY) == ALIAS_VERSION:
+        from .prepared_source_object_aliases import validate_task as validate_aliases
+
+        return validate_aliases(domain, task)
     snapshot = task["result"].get(SNAPSHOT)
     events = domain.db.all("SELECT payload FROM task_events WHERE task_id=? AND kind=?", (task["id"], EVENT))
     expected = {KEY: VERSION, "payload_sha256": sha(task["payload"]), "snapshot_sha256": sha(snapshot)}
@@ -265,6 +281,10 @@ def ready(proposal, preservation):
 
 async def run(worker):
     snapshot = validate(worker)
+    if snapshot["version"] == ALIAS_VERSION:
+        from .prepared_source_object_aliases import run as run_aliases
+
+        return await run_aliases(worker, snapshot)
     inventory = worker.task["result"].get("prepared_scope_inventory")
     if inventory is None:
         inventory = await observe(worker, snapshot)
@@ -337,6 +357,12 @@ async def run(worker):
 
 
 def freeze_recheck(domain, request, *, verify_basis=True, flow_entailment_version=None):
+    if domain.artifact(request["receipt_id"])["payload"].get("version") == ALIAS_VERSION:
+        from .prepared_source_object_aliases import freeze_recheck as freeze_alias_recheck
+
+        return freeze_alias_recheck(
+            domain, request, verify_basis=verify_basis, flow_entailment_version=flow_entailment_version
+        )
     from .conditional_review import VERSION as COND
     from .book_applicability import VERSION as APP
     from .flow_entailment import VERSION as FLOW
@@ -407,6 +433,10 @@ def freeze_recheck(domain, request, *, verify_basis=True, flow_entailment_versio
 
 
 def validate_recheck(worker):
+    if worker.task["result"].get("source_corrected_recheck_version") == ALIAS_RECHECK_VERSION:
+        from .prepared_source_object_aliases import validate_recheck as validate_alias_recheck
+
+        return validate_alias_recheck(worker)
     from .flow_entailment import KEY as FLOW_KEY
 
     expected = worker.task["result"].get("source_corrected_recheck_snapshot")
@@ -438,7 +468,7 @@ def verified_contract(worker, text, number, supplied):
     return deepcopy(snapshot["prepared_contract"])
 
 
-def preview(domain, artifact_id):
+def preview(domain, artifact_id, *, verify_object_aliases=False):
     candidate = domain.artifact(artifact_id)
     payload = {
         "source_candidate_id": artifact_id,
@@ -448,10 +478,12 @@ def preview(domain, artifact_id):
         "chapter_id": candidate["chapter_id"],
         "base_revision": candidate["base_revision"],
         "item_ids": ["P01"],
+        **({"verify_object_aliases": True} if verify_object_aliases else {}),
     }
     snapshot = freeze(domain, payload, verify_basis=False)
     return {
-        "version": VERSION,
+        "version": snapshot["version"],
+        **({"verify_object_aliases": True} if verify_object_aliases else {}),
         "target": artifact_id,
         "candidate_revision": candidate["candidate_revision"],
         "source_kind": "workflow_plan",
@@ -463,14 +495,18 @@ def preview(domain, artifact_id):
         "story_revision": snapshot["story_revision"],
         "source_workflow_id": snapshot["source_workflow_id"],
         "allowed_fields": sorted(FIELDS),
-        "notice": "仅核冻结有效AI章纲的来源范围；不是作者输入或正文通过。两个独立来源步骤，额外费用沿原家族，不修改或采纳候选。",
+        "notice": (
+            "显式核对物品不同称谓：精确关联不足时增加独立来源关联及费用，再独立保持核对；不改原物品或正文，不自动采纳。"
+            if verify_object_aliases
+            else "仅核冻结有效AI章纲的来源范围；不是作者输入或正文通过。两个独立来源步骤，额外费用沿原家族，不修改或采纳候选。"
+        ),
     }
 
 
 def register_routes(app, domain, budget, provider_ready):
     @app.get("/api/artifacts/{artifact_id}/prepared-source-scope-preview")
-    def scope_preview(artifact_id: str):
-        return preview(domain, artifact_id)
+    def scope_preview(artifact_id: str, verify_object_aliases: bool = False):
+        return preview(domain, artifact_id, verify_object_aliases=verify_object_aliases)
 
     @app.post("/api/artifacts/{artifact_id}/prepared-source-scope-corrections", status_code=202)
     def create_scope(artifact_id: str, data: ScopeCorrectionInput):
