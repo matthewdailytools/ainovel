@@ -386,6 +386,7 @@ class Domain:
                 "candidate_recheck",
                 "source_interpretation_correction",
                 "source_corrected_candidate_recheck",
+                "prepared_source_scope_correction",
             }:
                 raise DomainError(
                     "candidate_recheck_readonly", "候选复检报告只读，请回到其目标候选决定是否采纳。", 409
@@ -661,6 +662,10 @@ class Domain:
             from .workflow_plan_source_roles import replay_payload
 
             payload = replay_payload(self, payload)
+        if kind == "prepared_source_scope_correction":
+            from .prepared_source_scope_correction import versioned_payload as scope_payload
+
+            payload = scope_payload(payload)
         if kind == "source_interpretation_correction":
             from .source_interpretation_correction import versioned_payload
 
@@ -717,6 +722,17 @@ class Domain:
                 plot_contract_version="author-plot-audit/2",
                 **{FLOW_KEY: snapshot[FLOW_KEY]},
             )
+        if kind == "prepared_source_scope_correction":
+            from . import prepared_source_scope_correction as scope_correction
+
+            snapshot = scope_correction.freeze(self, payload)
+            initial.update(
+                prepared_source_scope_version=scope_correction.VERSION,
+                prepared_source_scope_snapshot=snapshot,
+                genre_profile_snapshot=snapshot["genre_profile_snapshot"],
+                author_contract_snapshot=snapshot["author_contract_snapshot"],
+                plot_contract_version="author-plot-audit/2",
+            )
         if kind in {"source_interpretation_correction", "source_corrected_candidate_recheck"}:
             from . import source_interpretation_correction as source_correction
             from . import source_corrected_candidate_recheck as corrected_recheck
@@ -727,7 +743,7 @@ class Domain:
                 "source_correction" if kind == source_correction.KIND else "source_corrected_recheck"
             )
             initial.update(
-                **{correction_key + "_version": module.VERSION, correction_key + "_snapshot": snapshot},
+                **{correction_key + "_version": snapshot["version"], correction_key + "_snapshot": snapshot},
                 genre_profile_snapshot=snapshot["genre_profile_snapshot"],
                 author_contract_snapshot=snapshot["author_contract_snapshot"],
                 plot_contract_version="author-plot-audit/2",
@@ -871,6 +887,11 @@ class Domain:
                     != selection
                 ):
                     raise DomainError("candidate_changed", "复检来源在排队时改变，未创建任务。", 409)
+            if (
+                kind == "prepared_source_scope_correction"
+                and scope_correction.freeze(self, payload) != initial["prepared_source_scope_snapshot"]
+            ):
+                raise DomainError("prepared_scope_changed", "范围来源在提交时改变，未创建任务。", 409)
             if kind in {"source_interpretation_correction", "source_corrected_candidate_recheck"}:
                 module = source_correction if kind == source_correction.KIND else corrected_recheck
                 correction_key = (
@@ -893,6 +914,17 @@ class Domain:
                 ),
             )
             self.db.event(db, task_id, "queued", {"kind": kind})
+            if kind == "prepared_source_scope_correction":
+                self.db.event(
+                    db,
+                    task_id,
+                    scope_correction.EVENT,
+                    {
+                        scope_correction.KEY: scope_correction.VERSION,
+                        "payload_sha256": scope_correction.sha(payload),
+                        "snapshot_sha256": scope_correction.sha(initial[scope_correction.SNAPSHOT]),
+                    },
+                )
             from .authored_source_scope import event as authored_source_event
 
             authored_source_event(self.db, db, task_id, payload, initial)

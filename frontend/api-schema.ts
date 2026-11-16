@@ -1121,7 +1121,8 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    get?: never
+    /** Recheck Request Query */
+    get: operations['recheck_request_query_api_artifacts__artifact_id__recheck_source_correction_get']
     put?: never
     /** Create Recheck */
     post: operations['create_recheck_api_artifacts__artifact_id__recheck_source_correction_post']
@@ -1142,6 +1143,41 @@ export interface paths {
     get: operations['recheck_request_api_artifacts__artifact_id__recheck_source_correction__client_request_id__get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/artifacts/{artifact_id}/prepared-source-scope-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Scope Preview */
+    get: operations['scope_preview_api_artifacts__artifact_id__prepared_source_scope_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/artifacts/{artifact_id}/prepared-source-scope-corrections': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Scope Request */
+    get: operations['scope_request_api_artifacts__artifact_id__prepared_source_scope_corrections_get']
+    put?: never
+    /** Create Scope */
+    post: operations['create_scope_api_artifacts__artifact_id__prepared_source_scope_corrections_post']
     delete?: never
     options?: never
     head?: never
@@ -2998,6 +3034,32 @@ export interface components {
        * @default
        */
       note: string
+    }
+    /** ScopeCorrectionInput */
+    ScopeCorrectionInput: {
+      /**
+       * Source Identity Context
+       * @default false
+       * @constant
+       */
+      source_identity_context: false
+      /** Candidate Revision */
+      candidate_revision: number
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
+      /** Preview Basis Sha256 */
+      preview_basis_sha256: string
+      /** Item Ids */
+      item_ids: string[]
+      /**
+       * Reason
+       * @default
+       */
+      reason: string
     }
     /** Segment */
     Segment: {
@@ -5748,6 +5810,39 @@ export interface operations {
       }
     }
   }
+  recheck_request_query_api_artifacts__artifact_id__recheck_source_correction_get: {
+    parameters: {
+      query: {
+        client_request_id: string
+      }
+      header?: never
+      path: {
+        artifact_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   create_recheck_api_artifacts__artifact_id__recheck_source_correction_post: {
     parameters: {
       query?: never
@@ -5797,6 +5892,105 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  scope_preview_api_artifacts__artifact_id__prepared_source_scope_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        artifact_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  scope_request_api_artifacts__artifact_id__prepared_source_scope_corrections_get: {
+    parameters: {
+      query: {
+        client_request_id: string
+      }
+      header?: never
+      path: {
+        artifact_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_scope_api_artifacts__artifact_id__prepared_source_scope_corrections_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        artifact_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ScopeCorrectionInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
         headers: {
           [name: string]: unknown
         }

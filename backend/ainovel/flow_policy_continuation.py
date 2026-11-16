@@ -148,13 +148,21 @@ def checkpoint(domain, current):
 def auxiliary_family(domain, tasks):
     ids = {row["id"] for row in tasks}
     rows = domain.db.all(
-        "SELECT * FROM tasks WHERE branch_id=? AND kind IN (?,?) ORDER BY id",
-        (tasks[0]["branch_id"], "source_interpretation_correction", "source_corrected_candidate_recheck"),
+        "SELECT * FROM tasks WHERE branch_id=? AND kind IN (?,?,?) ORDER BY id",
+        (
+            tasks[0]["branch_id"],
+            "source_interpretation_correction",
+            "source_corrected_candidate_recheck",
+            "prepared_source_scope_correction",
+        ),
     )
     result = []
     for row in rows:
         payload, state = json.loads(row["payload"]), json.loads(row["result"])
-        bound = state.get("source_correction_snapshot", state.get("source_corrected_recheck_snapshot", {}))
+        bound = state.get(
+            "source_correction_snapshot",
+            state.get("source_corrected_recheck_snapshot", state.get("prepared_source_scope_snapshot", {})),
+        )
         if isinstance(bound, dict) and bound.get("source_workflow_id") in ids:
             if row["status"] in ("queued", "running"):
                 raise DomainError("active_task", "相关来源纠偏或正文复检尚在执行，未开启新批次。", 409)

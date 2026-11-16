@@ -2237,6 +2237,36 @@
             }
           }
         }
+      },
+      "get": {
+        "summary": "Recheck Request Query",
+        "operationId": "recheck_request_query_api_artifacts__artifact_id__recheck_source_correction_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          },
+          {
+            "name": "client_request_id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "title": "Client Request Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
       }
     },
     "/api/artifacts/{artifact_id}/recheck-source-correction/{client_request_id}": {
@@ -2253,6 +2283,94 @@
           {
             "name": "client_request_id",
             "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Client Request Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}/prepared-source-scope-preview": {
+      "get": {
+        "summary": "Scope Preview",
+        "operationId": "scope_preview_api_artifacts__artifact_id__prepared_source_scope_preview_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}/prepared-source-scope-corrections": {
+      "post": {
+        "summary": "Create Scope",
+        "operationId": "create_scope_api_artifacts__artifact_id__prepared_source_scope_corrections_post",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ScopeCorrectionInput" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Scope Request",
+        "operationId": "scope_request_api_artifacts__artifact_id__prepared_source_scope_corrections_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          },
+          {
+            "name": "client_request_id",
+            "in": "query",
             "required": true,
             "schema": { "type": "string", "title": "Client Request Id" }
           }
@@ -4955,6 +5073,51 @@
         "type": "object",
         "required": ["title", "source_revision", "start", "end"],
         "title": "SceneTime"
+      },
+      "ScopeCorrectionInput": {
+        "properties": {
+          "source_identity_context": {
+            "type": "boolean",
+            "const": false,
+            "title": "Source Identity Context",
+            "default": false
+          },
+          "candidate_revision": { "type": "integer", "minimum": 0, "title": "Candidate Revision" },
+          "account": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          },
+          "preview_basis_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Preview Basis Sha256"
+          },
+          "item_ids": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Item Ids"
+          },
+          "reason": { "type": "string", "maxLength": 2000, "title": "Reason", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "candidate_revision",
+          "account",
+          "client_request_id",
+          "preview_basis_sha256",
+          "item_ids"
+        ],
+        "title": "ScopeCorrectionInput"
       },
       "Segment": {
         "properties": {

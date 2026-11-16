@@ -1,4 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  PreparedScopeCorrectionPanel,
+  PreparedScopeCorrectionArtifact,
+  PreparedScopeTaskNotice,
+} from './PreparedScopeCorrectionPanel'
+import { SCOPE_KIND, SCOPE_BODY_VERSION } from './preparedScopeCorrection'
 import { api, ApiError, type Artifact, type Chapter, type Task } from './api'
 import { useLeaveGuard } from './leaveGuard'
 import { parseRecheckBudget } from './candidateRecheck'
@@ -124,6 +130,12 @@ export function SourceReceiptView({
   )
 }
 export function SourceCorrectionTaskNotice({ task }: { task: Task }) {
+  if (
+    task.kind === SCOPE_KIND ||
+    (object(task.result) &&
+      (task.result as Record<string, unknown>).source_corrected_recheck_version === SCOPE_BODY_VERSION)
+  )
+    return <PreparedScopeTaskNotice task={task} />
   const label = correctionKindLabel(task.kind)
   if (!label) return null
   if (
@@ -444,6 +456,24 @@ export function SourceCorrectionPanel({
     }
   }, [selectedReceipt, branchId, artifact.id, signature])
   if (!owner) return null
+  if (object(source) && object(source.payload) && source.payload.mode === 'automatic')
+    return (
+      <PreparedScopeCorrectionPanel
+        {...{
+          artifact,
+          chapter,
+          novelId,
+          branchId,
+          account,
+          modelReady,
+          disabled,
+          unsaved,
+          artifacts,
+          onTask,
+          onRefresh,
+        }}
+      />
+    )
   const eligibility = sourceCorrectionEligibility(artifact, source, chapter, branchId, unsaved)
   const available = artifacts.filter(
     (row) =>
@@ -779,7 +809,7 @@ export function SourceCorrectionPanel({
   )
 }
 
-export function SourceCorrectionArtifact({
+function LegacySourceCorrectionArtifact({
   artifact,
   branchId,
   onTarget,
@@ -927,5 +957,13 @@ export function SourceCorrectionArtifact({
         <pre className="report">{JSON.stringify(artifact.payload, null, 2)}</pre>
       </details>
     </section>
+  )
+}
+
+export function SourceCorrectionArtifact(props: Parameters<typeof LegacySourceCorrectionArtifact>[0]) {
+  return props.artifact.kind === SCOPE_KIND || props.artifact.payload.version === SCOPE_BODY_VERSION ? (
+    <PreparedScopeCorrectionArtifact {...props} />
+  ) : (
+    <LegacySourceCorrectionArtifact {...props} />
   )
 }

@@ -4,6 +4,9 @@ import { notTriggeredLabel } from './ConditionalReviewNotice'
 
 export const SOURCE_CORRECTION_VERSION = 'source-interpretation-correction/1'
 export const CORRECTED_RECHECK_VERSION = 'source-corrected-candidate-recheck/1'
+export const PREPARED_SCOPE_CORRECTION_VERSION = 'prepared-source-scope-correction/1'
+export const PREPARED_SCOPE_CORRECTION_KIND = 'prepared_source_scope_correction'
+export const SCOPE_CORRECTED_RECHECK_VERSION = 'scope-corrected-candidate-recheck/1'
 export const SOURCE_CORRECTION_KIND = 'source_interpretation_correction'
 export const CORRECTED_RECHECK_KIND = 'source_corrected_candidate_recheck'
 export type Phase = 'source' | 'recheck'
@@ -14,11 +17,15 @@ export const correctionPath = (phase: Phase) =>
 export const correctionKindLabel = (kind: string) =>
   kind === SOURCE_CORRECTION_KIND
     ? '来源解释纠偏回执'
-    : kind === CORRECTED_RECHECK_KIND
-      ? '来源纠偏后的正文复检报告'
-      : undefined
+    : kind === PREPARED_SCOPE_CORRECTION_KIND
+      ? 'AI章纲范围来源纠偏回执'
+      : kind === CORRECTED_RECHECK_KIND
+        ? '来源纠偏后的正文复检报告'
+        : undefined
 export const isCorrectionReceiptKind = (kind: string) =>
-  kind === SOURCE_CORRECTION_KIND || kind === CORRECTED_RECHECK_KIND
+  kind === SOURCE_CORRECTION_KIND ||
+  kind === PREPARED_SCOPE_CORRECTION_KIND ||
+  kind === CORRECTED_RECHECK_KIND
 export const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
 const string = (value: unknown, max = 10000): value is string =>
@@ -787,8 +794,9 @@ export function createCorrectionOperation(
   }
 }
 
-export type CorrectedReport = {
-  version: typeof CORRECTED_RECHECK_VERSION
+type ReportVersion = typeof CORRECTED_RECHECK_VERSION | typeof SCOPE_CORRECTED_RECHECK_VERSION
+export type CorrectedReport<Version extends ReportVersion = typeof CORRECTED_RECHECK_VERSION> = {
+  version: Version
   target: {
     kind: 'candidate'
     artifact_id: string
@@ -806,9 +814,16 @@ export type CorrectedReport = {
   note: string
 }
 export function readCorrectedReport(value: unknown): CorrectedReport | undefined {
+  return readVersionedCorrectedReport(value, CORRECTED_RECHECK_VERSION)
+}
+export function readVersionedCorrectedReport<Version extends ReportVersion>(
+  value: unknown,
+  version: Version,
+): CorrectedReport<Version> | undefined {
   if (
     !object(value) ||
-    value.version !== CORRECTED_RECHECK_VERSION ||
+    ![CORRECTED_RECHECK_VERSION, SCOPE_CORRECTED_RECHECK_VERSION].includes(version) ||
+    value.version !== version ||
     !object(value.target) ||
     value.target.kind !== 'candidate' ||
     !nonempty(value.target.artifact_id, 100) ||
@@ -880,11 +895,12 @@ export function readCorrectedReport(value: unknown): CorrectedReport | undefined
       ))
   )
     return
-  return value as CorrectedReport
+  return value as CorrectedReport<Version>
 }
+export { coreItems as readCoreItems, sourceEvidence as validSourceEvidence }
 
 export async function sourceReceiptTargetCurrent(
-  receipt: SourceReceipt,
+  receipt: Pick<SourceReceipt, 'snapshot'>,
   artifact: Artifact,
   branchId: string,
   checksum: (text: string) => Promise<string> = digest,
@@ -901,7 +917,7 @@ export async function sourceReceiptTargetCurrent(
   )
 }
 export async function capsuleMatchesCurrent(
-  capsule: Capsule,
+  capsule: Pick<Capsule, 'client_signature'>,
   signature: string,
   checksum: (text: string) => Promise<string> = digest,
 ) {

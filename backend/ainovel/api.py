@@ -869,6 +869,10 @@ def create_app(settings=None, schema_only=False):
     register_source_correction_routes(app, domain, budget, provider_ready)
     register_corrected_recheck_routes(app, domain, budget, provider_ready)
 
+    from .prepared_source_scope_correction import register_routes as register_prepared_scope_routes
+
+    register_prepared_scope_routes(app, domain, budget, provider_ready)
+
     @app.get("/api/artifacts")
     def artifacts(branch_id: str, chapter_id: str | None = None):
         rows = db.all(
@@ -983,6 +987,7 @@ def create_app(settings=None, schema_only=False):
             "candidate_recheck",
             "source_interpretation_correction",
             "source_corrected_candidate_recheck",
+            "prepared_source_scope_correction",
         }:
             raise DomainError("candidate_recheck_readonly", "候选复检报告只读，原报告及关联保持。", 409)
         with db.connect(True) as tx:

@@ -293,7 +293,17 @@ class Worker:
 
             validate(self)
         run_limit = payload.get("budget_limit")
-        if self.task["kind"] in {"source_interpretation_correction", "source_corrected_candidate_recheck"}:
+        if self.task["kind"] == "prepared_source_scope_correction":
+            from .prepared_source_scope_correction import validate as validate_scope_correction
+            from .source_interpretation_correction import bounded_run_limit
+
+            validate_scope_correction(self)
+            run_limit = bounded_run_limit(self)
+        elif self.task["kind"] in {
+            "source_interpretation_correction",
+            "source_corrected_candidate_recheck",
+            "prepared_source_scope_correction",
+        }:
             from . import source_interpretation_correction as source_correction
             from . import source_corrected_candidate_recheck as corrected_recheck
 
@@ -366,6 +376,8 @@ class Worker:
             "独立观察AI章纲接收范围来源",
             "独立观察作者情节接收范围来源",
             "独立核对作者补充澄清与原来源保持",
+            "独立观察旧有效AI章纲的接收范围",
+            "独立核对旧AI章纲范围纠偏与全部事项保持",
         }:
             # No implicit enrichment: source interpretation receives only its
             # source scope. New plan choice/check stages explicitly supply their
@@ -500,6 +512,7 @@ class Worker:
         if authored_source or self.task["kind"] in {
             "source_interpretation_correction",
             "source_corrected_candidate_recheck",
+            "prepared_source_scope_correction",
         }:
             dispatched = self.db.all(
                 "SELECT id FROM task_events WHERE task_id=? AND kind='step_dispatched' "
@@ -777,7 +790,11 @@ class Worker:
                 (
                     authored_source
                     or self.task["kind"]
-                    in {"source_interpretation_correction", "source_corrected_candidate_recheck"}
+                    in {
+                        "source_interpretation_correction",
+                        "source_corrected_candidate_recheck",
+                        "prepared_source_scope_correction",
+                    }
                 )
                 and isinstance(error, RequestNotSent)
                 and error.task_id == self.task["id"]
@@ -1173,6 +1190,11 @@ class Worker:
                     "evidence_ids只能引用本次ORIGINAL/ADDITION/FIX连续来源编号，不补造或借旧报告。"
                     "保留所有原话与补充事项及否定、结果、传递阶段和范围；真正改向保留direction_change，"
                     "不能确认保留unknown，不为修复编号把未明改成通过，也不替作者选择角色。"
+                )
+            if instruction.get("prepared_source_scope_version") == "prepared-source-scope-correction/1":
+                current["引用修正要求"] = (
+                    "本步骤没有正文或候选。只核冻结有效AI章纲原文与本步骤编号，保留原角色、物品、原件/副本、否定和阶段；"
+                    "普通命名目的地、另一许可或排除某人不能变成真正排他。未知保留，不为引用修复清除真实限制。"
                 )
             if repair_feedback is not None:
                 current.update(repair_feedback())
@@ -2109,6 +2131,10 @@ class Worker:
                 await self.module()
             elif task["kind"] == "candidate_recheck":
                 from .candidate_recheck import run
+
+                await run(self)
+            elif task["kind"] == "prepared_source_scope_correction":
+                from .prepared_source_scope_correction import run
 
                 await run(self)
             elif task["kind"] == "source_interpretation_correction":

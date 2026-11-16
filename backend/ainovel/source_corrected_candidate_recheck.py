@@ -30,6 +30,12 @@ def freeze(domain, request, *, verify_basis=True, flow_entailment_version=FLOW_V
     from .conditional_review import VERSION as CONDITIONAL_VERSION
     from .book_applicability import VERSION as APPLICABILITY_VERSION
 
+    from . import prepared_source_scope_correction as scope_correction
+
+    if domain.artifact(request["receipt_id"])["kind"] == scope_correction.KIND:
+        return scope_correction.freeze_recheck(
+            domain, request, verify_basis=verify_basis, flow_entailment_version=flow_entailment_version
+        )
     original = old_freeze(
         domain,
         request,
@@ -112,6 +118,10 @@ def freeze(domain, request, *, verify_basis=True, flow_entailment_version=FLOW_V
 
 
 def validate(worker):
+    from . import prepared_source_scope_correction as scope_correction
+
+    if worker.task["result"].get("source_corrected_recheck_version") == scope_correction.RECHECK_VERSION:
+        return scope_correction.validate_recheck(worker)
     from .conditional_review import KEY as CONDITIONAL_KEY
     from .book_applicability import KEY as APPLICABILITY_KEY
 
@@ -172,7 +182,7 @@ async def run(worker):
         snapshot["plot"]["plot"],
         text,
         snapshot["plot"]["number"],
-        "author_plot",
+        snapshot.get("source_kind", "author_plot"),
         prepared_contract=snapshot["prepared_contract"],
     )
     validate(worker)
@@ -238,7 +248,7 @@ async def run(worker):
         worker.task["payload"],
         KIND,
         {
-            "version": VERSION,
+            "version": snapshot["version"],
             "target": target,
             "receipt_id": snapshot["receipt_id"],
             "review": review,
@@ -270,7 +280,7 @@ def register_routes(app, domain, budget, provider_ready):
         }
         snapshot = freeze(domain, request, verify_basis=False)
         return {
-            "version": VERSION,
+            "version": snapshot["version"],
             "target": artifact_id,
             "candidate_revision": candidate["candidate_revision"],
             "receipt_id": receipt_id,
@@ -290,6 +300,10 @@ def register_routes(app, domain, budget, provider_ready):
             return previous
         provider_ready(data.account)
         return domain.queue(KIND, payload)
+
+    @app.get("/api/artifacts/{artifact_id}/recheck-source-correction")
+    def recheck_request_query(artifact_id: str, client_request_id: str):
+        return correction.query_request(domain, artifact_id, client_request_id, KIND)
 
     @app.get("/api/artifacts/{artifact_id}/recheck-source-correction/{client_request_id}")
     def recheck_request(artifact_id: str, client_request_id: str):

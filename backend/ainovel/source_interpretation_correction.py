@@ -22,7 +22,7 @@ VERSION = "source-interpretation-correction/1"
 KIND = "source_interpretation_correction"
 PROPOSE = "仅从原情节纠偏事项主体与指令性质"
 VERIFY = "独立核对来源解释纠偏与全部事项保持"
-READONLY_KINDS = {KIND, "source_corrected_candidate_recheck"}
+READONLY_KINDS = {KIND, "source_corrected_candidate_recheck", "prepared_source_scope_correction"}
 SHAPE_KEY = "source_correction_shape_version"
 SHAPE_V1 = "source-correction-output-shape/1"
 SHAPE_VERSION = "source-correction-output-shape/2"
@@ -421,6 +421,8 @@ def bounded_run_limit(worker):
         key = (
             "source_correction_snapshot"
             if worker.task["kind"] == KIND
+            else "prepared_source_scope_snapshot"
+            if worker.task["kind"] == "prepared_source_scope_correction"
             else "source_corrected_recheck_snapshot"
         )
         parent = worker.domain.task(worker.task["result"][key]["source_workflow_id"])
@@ -428,7 +430,10 @@ def bounded_run_limit(worker):
     chosen = worker.settings.providers[worker.task["payload"]["account"]]
     if original.kind != chosen.kind:
         raise DomainError("source_correction_account", "来源纠偏仅可沿用同服务商共享账本。", 409)
-    rows = worker.db.all("SELECT id,result FROM tasks WHERE kind IN (?,?)", tuple(READONLY_KINDS))
+    rows = worker.db.all(
+        "SELECT id,result FROM tasks WHERE kind IN (" + ",".join("?" for _ in READONLY_KINDS) + ")",
+        tuple(READONLY_KINDS),
+    )
     if workflow and not rows:
         return worker.task["payload"].get("budget_limit")
     from .conditional_continuation import lineage
@@ -437,7 +442,10 @@ def bounded_run_limit(worker):
     tasks = [parent["id"]]
     for row in rows:
         state = json.loads(row["result"])
-        bound = state.get("source_correction_snapshot", state.get("source_corrected_recheck_snapshot", {}))
+        bound = state.get(
+            "source_correction_snapshot",
+            state.get("source_corrected_recheck_snapshot", state.get("prepared_source_scope_snapshot", {})),
+        )
         if bound.get("source_workflow_id") in source_ids and row["id"] != worker.task["id"]:
             tasks.append(row["id"])
     if workflow and len(tasks) == 1:

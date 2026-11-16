@@ -7225,5 +7225,115 @@
     "result": "not_run",
     "record": "2026-11-16-83c-runtime-maint01-and-checkpoint.md",
     "fix_of": ""
+  },
+  {
+    "id": "prepared-scope-v2-final-backend-20261116",
+    "date": "2026-11-16",
+    "commit": "working-tree-prepared-scope-v2",
+    "module": "全项目后端",
+    "scenario": "2422通过/774.31秒，385输入与跨阶段一致",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-prepared-source-scope-correction.md",
+    "fix_of": ""
+  },
+  {
+    "id": "prepared-scope-v2-final-frontend-20261116",
+    "date": "2026-11-16",
+    "commit": "working-tree-prepared-scope-v2",
+    "module": "全项目前端",
+    "scenario": "588单测27文件、48Node、API/类型/格式/构建通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-prepared-source-scope-correction.md",
+    "fix_of": ""
+  },
+  {
+    "id": "prepared-scope-v2-final-headless-20261116",
+    "date": "2026-11-16",
+    "commit": "working-tree-prepared-scope-v2",
+    "module": "全项目无头",
+    "scenario": "131通过/7.2分钟，独立后台、零重试，来源与显式FLOW2正文链",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-prepared-source-scope-correction.md",
+    "fix_of": ""
+  },
+  {
+    "id": "prepared-scope-v2-independent-binding-20261116",
+    "date": "2026-11-16",
+    "commit": "working-tree-prepared-scope-v2",
+    "module": "验证绑定",
+    "scenario": "三阶段14命令日志完整，六份385输入与当前源码、7dist逐项一致",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-prepared-source-scope-correction.md",
+    "fix_of": ""
+  },
+  {
+    "id": "prepared-scope-v2-live-quality-not-run-20261116",
+    "date": "2026-11-16",
+    "commit": "working-tree-prepared-scope-v2",
+    "module": "全自动来源纠偏",
+    "scenario": "新源码已验证，尚未本轮日常发布或真实来源/正文复检",
+    "phase": "quality",
+    "result": "not_run",
+    "record": "2026-11-16-prepared-source-scope-correction.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted5-flow2-maintained-real-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "半自动整书",
+    "scenario": "正式第5章r1及14记录4场景维护完成，15调用CNY1.390900全结",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-16-assisted5-maintained-and-assisted6-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted5-independent-limited-findings-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "正文与事实",
+    "scenario": "本章未确认严重情节违约；日期措辞与平面转述限定两项未修，非作者文学认可",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-16-assisted5-maintained-and-assisted6-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted6-date-scope-stop-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "长篇连续性",
+    "scenario": "确认日期自认错误；设备操作范围仍unknown，正式章空/候选r0未采用",
+    "phase": "quality",
+    "result": "failed",
+    "record": "2026-11-16-assisted5-maintained-and-assisted6-review.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted6-minimal-ab-unadopted-20261116",
+    "date": "2026-11-16",
+    "commit": "83c6f7d",
+    "module": "定向修订",
+    "scenario": "A2处/B19处完整私有提案，明确取舍，未写入候选或采纳",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-16-assisted5-maintained-and-assisted6-review.md",
+    "fix_of": "assisted6-date-scope-stop-20261116"
+  },
+  {
+    "id": "assisted6-ab-html-headless-20261116",
+    "date": "2026-11-16",
+    "commit": "private-review-html",
+    "module": "审阅页面",
+    "scenario": "原文/A/B定位、桌面/320实际2倍及键盘通过，0HTTP/模型，浏览器关闭",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-assisted5-maintained-and-assisted6-review.md",
+    "fix_of": ""
   }
 ]

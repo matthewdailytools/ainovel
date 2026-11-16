@@ -747,6 +747,10 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
             from .source_corrected_candidate_recheck import verified_author_contract
 
             contract = verified_author_contract(worker, author_text, number, prepared_contract)
+        elif source_kind == "workflow_plan" and worker.task["kind"] == "source_corrected_candidate_recheck":
+            from .prepared_source_scope_correction import verified_contract
+
+            contract = verified_contract(worker, author_text, number, prepared_contract)
         elif source_kind == "workflow_plan":
             contract = frozen_contract(worker, author_text, number, prepared_contract)
         else:
@@ -800,7 +804,14 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
         return issues
 
     source_correction = (
-        worker.task["result"]["source_corrected_recheck_snapshot"]["source_correction_metadata"]
+        worker.task["result"]["source_corrected_recheck_snapshot"].get("source_correction_metadata")
+        if (getattr(worker, "task", None) or {}).get("kind") == "source_corrected_candidate_recheck"
+        else None
+    )
+    scope_correction = (
+        worker.task["result"]
+        .get("source_corrected_recheck_snapshot", {})
+        .get("source_scope_correction_metadata")
         if (getattr(worker, "task", None) or {}).get("kind") == "source_corrected_candidate_recheck"
         else None
     )
@@ -809,6 +820,11 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
             "动作": "逐项对照作者情节解释与本次正文",
             source_label: author_text,
             "独立整理的解释提案": items,
+            **(
+                {"显式旧AI章纲范围纠偏回执": deepcopy(scope_correction)}
+                if scope_correction is not None
+                else {}
+            ),
             "本次候选": text,
             "可引用原文": units,
             **source_metadata(source_kind, version),
@@ -924,6 +940,7 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
         "direction_guard": direction_guard,
         **compared,
         "interpretation_note": contract["note"],
+        **({"source_scope_correction": deepcopy(scope_correction)} if scope_correction is not None else {}),
         **({"source_correction": deepcopy(source_correction)} if source_correction is not None else {}),
         "status": status,
         "findings": findings,
