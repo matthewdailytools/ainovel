@@ -8161,4 +8161,73 @@
   "result": "passed",
   "record": "2026-11-16-task-input-reference-recovery.md"
 }
+,
+
+  {
+    "id": "e3-observation-recovery-exact-ci-and-inputs-20261116",
+    "module": "精确版本与工程绑定",
+    "scenario": "e3ab19e正式REST CI43858544263/job133269006983成功；本地同427输入2618后端/745前端/168无头/48Node和7tested保持，不借父提交结果",
+    "result": "passed",
+    "date": "2026-11-16",
+    "commit": "e3ab19e",
+    "phase": "stability",
+    "record": "2026-11-16-observation-recovery-runtime-and-ui.md",
+    "fix_of": ""
+  },
+  {
+    "id": "e3-observation-recovery-backup-and-two-restores-20261116",
+    "module": "真实备份恢复",
+    "scenario": "新e80正式备份与两次41+2真实恢复/全API通过，无迁移；25原件、272章含空、242任务和536b旧15events/3steps/3settled保留",
+    "result": "passed",
+    "date": "2026-11-16",
+    "commit": "e3ab19e",
+    "phase": "stability",
+    "record": "2026-11-16-observation-recovery-runtime-and-ui.md",
+    "fix_of": ""
+  },
+  {
+    "id": "e3-observation-recovery-runtime-published-20261116",
+    "module": "日常运行与旧数据保护",
+    "scenario": "655Git+14dist=669项从不可变副本发布；restart_gate正式start/verify、API/Worker身份及UI/OpenAPI通过，Main/8765/费用及独立master48保持",
+    "result": "passed",
+    "date": "2026-11-16",
+    "commit": "e3ab19e",
+    "phase": "stability",
+    "record": "2026-11-16-observation-recovery-runtime-and-ui.md",
+    "fix_of": ""
+  },
+  {
+    "id": "e3-observation-retry-readonly-ui-20261116",
+    "module": "观察恢复日常入口",
+    "scenario": "同源12章/exec旧1新2/余11.580792 GET可读，默认确认关和缺理由禁用；合成未POST nonce仅GET/null，0非GET/模型/child，三context全关，实际320文字2倍",
+    "result": "passed",
+    "date": "2026-11-16",
+    "commit": "e3ab19e",
+    "phase": "stability",
+    "record": "2026-11-16-observation-recovery-runtime-and-ui.md",
+    "fix_of": ""
+  },
+  {
+    "id": "e3-a07-task-input-reference-local-ui-20261116",
+    "module": "任务输入与原引用日常恢复",
+    "scenario": "现成EPUB任务预览取消保持，再GET确认仅本地恢复表单及唯一原引用；原空r0/API字节保持，1正常readingPUT尝试abort发送0，两context全关，无原选区正向UTF16结论",
+    "result": "passed",
+    "date": "2026-11-16",
+    "commit": "e3ab19e",
+    "phase": "stability",
+    "record": "2026-11-16-observation-recovery-runtime-and-ui.md",
+    "fix_of": ""
+  },
+  {
+    "id": "e3-private-r4-prepare-loader-registration-failed-20261116",
+    "module": "私有付费runner准备设施",
+    "scenario": "R4 prepare在native前sys.modules动态loader登记KeyError停止，新baseline/run目录/POST/任务/模型均无；派生r5修复尚待验，非产品或原稿失败",
+    "result": "failed",
+    "date": "2026-11-16",
+    "commit": "e3ab19e",
+    "phase": "stability",
+    "record": "2026-11-16-observation-recovery-runtime-and-ui.md",
+    "fix_of": ""
+  }
+
 ]
