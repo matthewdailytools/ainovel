@@ -8138,5 +8138,27 @@
   "result": "not_run",
   "record": "2026-11-16-task-input-reference-recovery.md",
   "fix_of": "task-input-recovery-root-r1-intent-old-click-failed-20261116"
+},
+{
+  "id": "task-input-recovery-root-r2-all-project-passed-20261116",
+  "module": "全项目恢复回归",
+  "scenario": "修正后的同输入2618后端／745前端／168无头／48Node及API/9文件严格类型/格式/构建全部通过；无头0跳过0flaky，保留167/1首次失败",
+  "fix_of": "task-input-recovery-root-r1-intent-old-click-failed-20261116",
+  "date": "2026-11-16",
+  "commit": "e3ab19e",
+  "phase": "stability",
+  "result": "passed",
+  "record": "2026-11-16-task-input-reference-recovery.md"
+},
+{
+  "id": "task-input-recovery-root-r2-final-seal-20261116",
+  "module": "输入与构建封存",
+  "scenario": "post实际终态0，三phase427输入及7dist逐SHA一致并对应e3ab19e Git对象；CI及日常发布仍独立等待，未发模型或采纳旧候选",
+  "fix_of": "",
+  "date": "2026-11-16",
+  "commit": "e3ab19e",
+  "phase": "stability",
+  "result": "passed",
+  "record": "2026-11-16-task-input-reference-recovery.md"
 }
 ]
