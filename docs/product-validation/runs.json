@@ -7335,5 +7335,148 @@
     "result": "passed",
     "record": "2026-11-16-assisted5-maintained-and-assisted6-review.md",
     "fix_of": ""
+  },
+  {
+    "id": "03705b3-exact-ci-success-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "全项目CI",
+    "scenario": "精确037 CI2422/588/131/48成功，与385输入及7dist同源",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": ""
+  },
+  {
+    "id": "runtime037-v3-pause-guard-failed-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "发布检查器",
+    "scenario": "semi needs_review真实pause0，v3误要求1安全拒绝，无写入",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": ""
+  },
+  {
+    "id": "runtime037-v4-pause-guard-fixed-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "发布检查器",
+    "scenario": "v4精确pause0、123回归与Root3定向，旧v3保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": "runtime037-v3-pause-guard-failed-20261116"
+  },
+  {
+    "id": "runtime037-first-export-incomplete-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "运行包导出",
+    "scenario": "句柄失效后发现591/604源文件且无binding，原目录保留",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": ""
+  },
+  {
+    "id": "runtime037-unobserved-old-service-exit-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "日常服务",
+    "scenario": "8766无监听、旧API/Worker已退出，Root未stop且原因未观测",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": ""
+  },
+  {
+    "id": "runtime037-r2-git-export-bound-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "运行包导出",
+    "scenario": "新r2由604Git+12dist构成616，完整同源与保护文件核对",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": "runtime037-first-export-incomplete-20261116"
+  },
+  {
+    "id": "runtime037-offline-double-restore-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "备份恢复",
+    "scenario": "官方927946备份及目标两次实恢41+2、25原件、137/35进程行严格保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": ""
+  },
+  {
+    "id": "runtime037-prepare-tail-registry-blocked-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "原生身份守卫",
+    "scenario": "备份与双恢复已完成后原registry拒绝，未启动、原失败保持",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": ""
+  },
+  {
+    "id": "runtime037-tail-finalized-original-guards-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "原生身份守卫",
+    "scenario": "fresh全41+2/两ZIP/旧对象/端口/原registry通过，仅补尾部，不增豁免",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": "runtime037-prepare-tail-registry-blocked-20261116"
+  },
+  {
+    "id": "runtime037-actual-start-verify-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "日常恢复",
+    "scenario": "outage start/verify真实完成，API47468/Worker55680与03/IPU原生来源一致",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": "runtime037-unobserved-old-service-exit-20261116"
+  },
+  {
+    "id": "runtime037-paused-clock-readonly-window-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "日常只读入口",
+    "scenario": "显式暂停页面计时；36.03秒103GET、0非GET/model，全表/费用保持且browser关闭",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-16-037-runtime-recovery-and-scope-smoke.md",
+    "fix_of": ""
+  },
+  {
+    "id": "automatic5-v1-object-alias-stop-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "全自动来源质量",
+    "scenario": "2callsCNY.049512全结；观察supported但物品称谓字面不匹配，来源未ready、不发正文",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-16-automatic5-source-object-alias-stop.md",
+    "fix_of": "prepared-scope-v2-live-quality-not-run-20261116"
+  },
+  {
+    "id": "reduced12-input-scope-adopted-20261116",
+    "date": "2026-11-16",
+    "commit": "03705b3",
+    "module": "整书验收范围",
+    "scenario": "按预算授权采用两本独立12章输入，24元书内上限+10元预留，旧36不改，尚未生成",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-16-reduced12-acceptance-input-decision.md",
+    "fix_of": ""
   }
 ]
