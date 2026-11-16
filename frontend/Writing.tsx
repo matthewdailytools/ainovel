@@ -20,6 +20,7 @@ import { ChapterContext } from './ChapterContext'
 import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
+import { TaskInputRecoveryPanel } from './TaskInputRecoveryPanel'
 import { SceneTimePanel } from './SceneTimePanel'
 import { ConditionalReviewNotice } from './ConditionalReviewNotice'
 import {
@@ -114,6 +115,11 @@ export function Writing({
   const [dirty, setDirty] = useState(0)
   const [selection, setSelection] = useState<Selection>({ start: 0, end: 0, text: '' })
   const [cursor, setCursor] = useState(0)
+  const [restoredSelection, setRestoredSelection] = useState<{
+    start: number
+    end: number
+    request: number
+  }>()
   const [note, setNote] = useState('')
   const reading = useRef({ revision: 0 })
   const [recovery, setRecovery] = useState<Draft>()
@@ -878,6 +884,7 @@ export function Writing({
               id={editorKey}
               initial={text}
               cursor={cursor}
+              restoredSelection={restoredSelection}
               readOnly={busy || opening}
               onChange={change}
               onSelection={setSelection}
@@ -967,11 +974,33 @@ export function Writing({
         )}
         <form onSubmit={generate}>
           {tasks[0]?.payload.instruction && actions.some(([id]) => id === tasks[0].payload.action) && (
-            <button
-              type="button"
-              onClick={() => {
+            <TaskInputRecoveryPanel
+              task={tasks[0]}
+              target={{
+                novelId: novel.id,
+                branchId: branch.id,
+                chapterId: chapter?.id ?? null,
+                revision: chapter?.revision ?? null,
+                savedContent: chapter?.content ?? '',
+                draftContent: text,
+              }}
+              formBasis={assistantFormSignature + JSON.stringify(selection)}
+              disabled={busy || opening || !!activeTask || !!feedbackHandoff}
+              onRestore={(preview, referenceIds) => {
                 try {
-                  const previous = tasks[0].payload
+                  const target = preview.target
+                  if (
+                    target.novelId !== novel.id ||
+                    target.branchId !== branch.id ||
+                    target.chapterId !== (current.current?.id ?? null) ||
+                    target.revision !== (current.current?.revision ?? null) ||
+                    target.savedContent !== (current.current?.content ?? '') ||
+                    target.draftContent !== draftText.current
+                  )
+                    throw new Error('恢复期间正文目标或稿件已变化，请重新读取并核对。')
+                  const previous = preview.task.payload
+                  if (!actions.some(([id]) => id === previous.action))
+                    throw new Error('原任务动作不适用于当前写作页，未恢复。')
                   const restored =
                     previous.action === 'writing.expand_plot'
                       ? readDirectionExpansionInstruction(previous.instruction || '')
@@ -985,7 +1014,7 @@ export function Writing({
                       revision: current.current.revision,
                     })
                   }
-                  if (directionBasis && !confirmLeave()) return
+                  if (directionBasis && !confirmLeave()) return false
                   setDirectionBasis(restored?.basis)
                   setInstruction(restored?.instruction ?? previous.instruction ?? '')
                   setAction(previous.action || 'writing.advise')
@@ -999,13 +1028,26 @@ export function Writing({
                     )
                   setFixed(previous.fixed?.join('\n') || '')
                   setProfile(previous.writing_profile || presets[0])
+                  setReferences((rows) => [
+                    ...rows.filter((row) => !preview.references.some((original) => original.id === row.id)),
+                    ...preview.references.flatMap((row) => (row.excerpt ? [row.excerpt] : [])),
+                  ])
+                  setSelectedRefs(referenceIds)
+                  const range = preview.selection || { start: 0, end: 0, text: '' }
+                  setSelection(range)
+                  setCursor(range.start)
+                  setRestoredSelection((last) => ({
+                    start: range.start,
+                    end: range.end,
+                    request: (last?.request ?? 0) + 1,
+                  }))
+                  return true
                 } catch (error) {
                   notify(error)
+                  return false
                 }
               }}
-            >
-              恢复最近任务的输入
-            </button>
+            />
           )}
           <label>
             这次要做什么

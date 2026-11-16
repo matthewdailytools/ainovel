@@ -10,6 +10,7 @@ export function Editor({
   id,
   initial,
   cursor = 0,
+  restoredSelection,
   readOnly = false,
   onChange,
   onSelection,
@@ -17,6 +18,7 @@ export function Editor({
   id: string
   initial: string
   cursor?: number
+  restoredSelection?: { start: number; end: number; request: number }
   readOnly?: boolean
   onChange: (text: string) => void
   onSelection: (selection: Selection) => void
@@ -80,6 +82,14 @@ export function Editor({
       ]),
     })
   }, [readOnly, id])
+  useEffect(() => {
+    const view = instance.current
+    if (!view || !restoredSelection || readOnly) return
+    const { start, end } = restoredSelection
+    if (start < 0 || end < start || end > view.state.doc.length) return
+    view.dispatch({ selection: { anchor: start, head: end }, scrollIntoView: true })
+    // Only an explicit restore request changes the existing editor selection.
+  }, [restoredSelection?.request])
   return <div className="editor" ref={mount} />
 }
 

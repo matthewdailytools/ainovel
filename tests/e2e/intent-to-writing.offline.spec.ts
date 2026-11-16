@@ -154,8 +154,12 @@ async function runAuthorTask(page: Page, testInfo: TestInfo, withDesigns: boolea
       expect(afterAdoption.definitions.some((row: { id: string }) => row.id === artifact.id)).toBe(true)
     }
     const scopeField = page.getByRole('combobox', { name: '设定作用范围', exact: true })
+    const recovery = page.getByRole('region', { name: '恢复最近任务的输入与资料', exact: true })
     await scopeField.selectOption('chapter')
     await page.getByRole('button', { name: '恢复最近任务的输入', exact: true }).click()
+    await expect(scopeField).toHaveValue('chapter')
+    await recovery.getByRole('checkbox', { name: /我已核对当前内容/ }).check()
+    await recovery.getByRole('button', { name: '确认恢复输入与资料', exact: true }).click()
     await expect(scopeField).toHaveValue('book')
     const local = await generate(
       'world.generate',
@@ -177,6 +181,9 @@ async function runAuthorTask(page: Page, testInfo: TestInfo, withDesigns: boolea
     ).toHaveLength(3)
     await scopeField.selectOption('book')
     await page.getByRole('button', { name: '恢复最近任务的输入', exact: true }).click()
+    await expect(scopeField).toHaveValue('book')
+    await recovery.getByRole('checkbox', { name: /我已核对当前内容/ }).check()
+    await recovery.getByRole('button', { name: '确认恢复输入与资料', exact: true }).click()
     await expect(scopeField).toHaveValue('chapter')
     await page.setViewportSize({ width: 320, height: 800 })
     await page.evaluate(() => {

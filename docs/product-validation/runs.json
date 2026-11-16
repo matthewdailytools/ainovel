@@ -8094,5 +8094,49 @@
   "date": "2026-11-16",
   "commit": "working-tree",
   "record": "2026-11-16-observation-citation-stop-and-recovery.md"
+},
+{
+  "id": "task-input-recovery-root-r1-static-and-backend-20261116",
+  "date": "2026-11-16",
+  "commit": "e1c376e+A07",
+  "module": "写作恢复工程",
+  "scenario": "427输入下745前端、2618后端、48Node及API/类型/格式/构建通过；不把分项结果冒称全无头通过",
+  "phase": "stability",
+  "result": "passed",
+  "record": "2026-11-16-task-input-reference-recovery.md",
+  "fix_of": ""
+},
+{
+  "id": "task-input-recovery-root-r1-intent-old-click-failed-20261116",
+  "date": "2026-11-16",
+  "commit": "e1c376e+A07",
+  "module": "U02完整任务回归",
+  "scenario": "全项目无头167通过/1失败：旧用例只打开新预览即断言范围恢复，未执行新增确认；trace和首次失败保留",
+  "phase": "stability",
+  "result": "failed",
+  "record": "2026-11-16-task-input-reference-recovery.md",
+  "fix_of": ""
+},
+{
+  "id": "task-input-recovery-root-r2-intent-confirmed-20261116",
+  "date": "2026-11-16",
+  "commit": "e1c376e+A07",
+  "module": "U02恢复确认",
+  "scenario": "仅两处旧操作补显式确认并新增预览不改变范围断言；3项U02完整/跳过规划/无章节专项通过，427输入保持，无跳过重试",
+  "phase": "stability",
+  "result": "passed",
+  "record": "2026-11-16-task-input-reference-recovery.md",
+  "fix_of": "task-input-recovery-root-r1-intent-old-click-failed-20261116"
+},
+{
+  "id": "task-input-recovery-root-r2-full-project-pending-20261116",
+  "date": "2026-11-16",
+  "commit": "e1c376e+A07",
+  "module": "写作恢复全项目复测",
+  "scenario": "最小恢复实现及U02操作修正已合入；新同输入全后端/全无头、精确提交CI和日常入口后续分别核验",
+  "phase": "stability",
+  "result": "not_run",
+  "record": "2026-11-16-task-input-reference-recovery.md",
+  "fix_of": "task-input-recovery-root-r1-intent-old-click-failed-20261116"
 }
 ]

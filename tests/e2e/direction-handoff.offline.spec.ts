@@ -215,6 +215,9 @@ test('U01：空白手写、卡点方向、作者选择、补写、拒绝、采�
     .getByRole('textbox', { name: '情节或具体要求', exact: true })
     .fill('本章独立要求，不能套用上一章方向。')
   await page.getByRole('button', { name: '恢复最近任务的输入', exact: true }).click()
+  const recovery = page.getByRole('region', { name: '恢复最近任务的输入与资料', exact: true })
+  await recovery.getByRole('checkbox', { name: /我已核对当前内容/ }).check()
+  await recovery.getByRole('button', { name: '确认恢复输入与资料', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('选定方向的目标已改变')
   await expect(page.getByRole('textbox', { name: '情节或具体要求', exact: true })).toHaveValue(
     '本章独立要求，不能套用上一章方向。',
@@ -240,6 +243,8 @@ test('U01：空白手写、卡点方向、作者选择、补写、拒绝、采�
   ])
   await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue('空白起笔章')
   await page.getByRole('button', { name: '恢复最近任务的输入', exact: true }).click()
+  await recovery.getByRole('checkbox', { name: /我已核对当前内容/ }).check()
+  await recovery.getByRole('button', { name: '确认恢复输入与资料', exact: true }).click()
   await expect(page.getByRole('textbox', { name: '情节或具体要求', exact: true })).toHaveValue(chosen)
   await expect(page.getByRole('region', { name: '作者选定方向来源', exact: true })).toContainText(advice.id)
   await page.getByRole('button', { name: '清除方向来源，保留当前要求', exact: true }).click()
