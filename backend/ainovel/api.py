@@ -863,6 +863,10 @@ def create_app(settings=None, schema_only=False):
 
     register_author_recheck_routes(app, domain, budget, provider_ready)
 
+    from .author_source_observation_retry import register_routes as register_observation_retry_routes
+
+    register_observation_retry_routes(app, domain, budget, provider_ready)
+
     from .flow_policy_continuation import register_routes as register_flow_policy_routes
 
     register_flow_policy_routes(app, domain, budget, provider_ready)

@@ -67,6 +67,13 @@ class Model(ReferenceModel):
         self.memory_selection_modes = {}
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+        if hasattr(self, "observation_retry_app"):
+            from e2e_author_source_observation_fixture import author_source_observation_result
+
+            if result := await author_source_observation_result(
+                self.observation_retry_app, account, task_id, system, prompt, max_output, **kwargs
+            ):
+                return result
         if hasattr(self, "author_source_recheck_app"):
             from e2e_author_source_recheck_fixture import author_source_recheck_result
 
@@ -640,6 +647,7 @@ def main():
     from e2e_prepared_scope_fixture import register_prepared_scope_fixture
     from e2e_prepared_object_alias_fixture import register_prepared_object_alias_fixture
     from e2e_author_source_recheck_fixture import register_author_source_recheck_fixture
+    from e2e_author_source_observation_fixture import register_author_source_observation_fixture
     from e2e_flow_policy_fixture import register_flow_policy_fixture
     from e2e_scene_unknown_reason_fixture import register_unknown_reason_fixture
 
@@ -670,6 +678,7 @@ def main():
         register_prepared_scope_fixture(app, settings, location)
         register_prepared_object_alias_fixture(app, settings, location)
         register_author_source_recheck_fixture(app, settings, location)
+        register_author_source_observation_fixture(app, settings, location)
         register_flow_policy_fixture(app, settings, location)
         register_unknown_reason_fixture(app, settings)
         original = app.router.lifespan_context
@@ -681,6 +690,7 @@ def main():
                 model.prepared_scope_app = app
                 model.prepared_object_alias_app = app
                 model.author_source_recheck_app = app
+                model.observation_retry_app = app
                 model.flow_native_settings = settings
                 model.flow_native_sends = app.state.flow_native_transport_sends
                 worker = Worker(settings, model)

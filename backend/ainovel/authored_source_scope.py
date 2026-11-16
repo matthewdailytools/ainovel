@@ -146,6 +146,9 @@ def inherited_source(domain, payload, initial):
 
 
 def freeze(domain, task_id, kind, payload, branch_id, initial):
+    from . import authored_source_execution as execution
+
+    execution.reject_payload(payload)
     if KEY in payload or SNAPSHOT in payload:
         raise DomainError("authored_scope_version", "作者来源执行见证只由服务器冻结。", 409)
     eligible = payload.get("plot_contract_check") is True and (
@@ -173,6 +176,7 @@ def freeze(domain, task_id, kind, payload, branch_id, initial):
         "inherited": inherited,
     }
     initial.update({KEY: version, SNAPSHOT: witness})
+    execution.freeze_execution(domain, task_id, kind, payload, initial)
 
 
 def event(db, tx, task_id, payload, initial):
@@ -183,6 +187,9 @@ def event(db, tx, task_id, payload, initial):
             EVENT,
             {KEY: initial[KEY], "snapshot_sha256": sha(initial[SNAPSHOT]), "payload_sha256": sha(payload)},
         )
+    from .authored_source_execution import event as execution_event
+
+    execution_event(db, tx, task_id, payload, initial)
 
 
 def ancestry(task, domain):
@@ -234,6 +241,9 @@ def validate_task(task, domain):
     from .author_source_recheck import validate_task as validate_recheck
 
     validate_recheck(task, domain, chain)
+    from .authored_source_execution import validate_execution
+
+    validate_execution(task, domain, chain)
     return True
 
 

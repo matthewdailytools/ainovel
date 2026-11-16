@@ -47,7 +47,11 @@ class Preservation(Input):
     summary: str = Field(max_length=2000)
 
 
-async def observe(worker, entry):
+def observation_request(entry, execution_version=None):
+    """Pure versioned request builder; legacy output is kept byte-for-byte."""
+    from . import authored_source_execution as execution
+
+    execution_version = execution_version or execution.LEGACY_VERSION
     core = authored.core
     units = core.units(entry["text"])
     choices = {u["source_id"]: u for u in units}
@@ -62,41 +66,74 @@ async def observe(worker, entry):
     fields["observation_id"]["enum"] = ids
     fields["evidence"]["enum"] = list(choices)
     fields["restriction_evidence"]["enum"] = ["", *choices]
-    value = await worker.grounded(
-        {
-            "动作": authored.ACTION,
-            authored.KEY: VERSION,
-            "input_sha256": token,
-            "作者本次情节原话": entry["text"],
-            "可引用原文": units,
-            "分类口径": {
-                "recipient_exclusivity": "明确排除其他所有接收者，定位同一传递、原件/副本、阶段与原条件。",
-                "named_destination": "只命名本次传递目的地，不是排他；传递尝试失败不令明确的双方与目标未知。",
-                "specific_recipient_exclusion": "只排除某人接收或知情，不扩成排除所有人。",
-                "action_permission": "许可使用/携带/另抄限制动作或物品，不等于已交付，不冒充请求已获准。",
-                "explicitly_unrestricted": "原话明确不限制接收方；未写限制不能用此类。",
-                "unknown": "确有范围问题但仅据原句不能确认其回指、同一实例、限制归属或条件，不补剧情。",
-            },
-            "范围分类边界": GUIDANCE,
-            "要求": "先独立读全部原话，没有P、旧观察、期望方向、正文、候选、全书约定或自由原因。O01起连续编号，全部SCOPE单元按原序恰好核对一次；covered绑定本句动作或限制O，not_scope_related仍在后续完整解释保留原句，真正不明unknown。evidence及restriction_evidence只填本次编号，条件为限制句连续原话，没有条件空。保留真实否定、角色、物品、不同次传递和阶段。未知有效，不能因覆盖要求造观察或强行通过。",
+    instruction = {
+        "动作": authored.ACTION,
+        authored.KEY: VERSION,
+        "input_sha256": token,
+        "作者本次情节原话": entry["text"],
+        "可引用原文": units,
+        "分类口径": {
+            "recipient_exclusivity": "明确排除其他所有接收者，定位同一传递、原件/副本、阶段与原条件。",
+            "named_destination": "只命名本次传递目的地，不是排他；传递尝试失败不令明确的双方与目标未知。",
+            "specific_recipient_exclusion": "只排除某人接收或知情，不扩成排除所有人。",
+            "action_permission": "许可使用/携带/另抄限制动作或物品，不等于已交付，不冒充请求已获准。",
+            "explicitly_unrestricted": "原话明确不限制接收方；未写限制不能用此类。",
+            "unknown": "确有范围问题但仅据原句不能确认其回指、同一实例、限制归属或条件，不补剧情。",
         },
-        core.ScopeInventory,
-        {"scope": "仅作者本次原话及稳定编号，无旧P/旧观察/原因/正文/候选/未来章"},
-        lambda v: core.inventory_issues(v, token, choices),
-        contract=schema,
-        max_output=8192,
-        diagnostic_label="作者来源范围分类",
-        repair_feedback=lambda: {
-            "引用修正要求": "本阶段没有正文、P或旧观察。只依据给定作者原话和SCOPE编号修正引用与分类；非范围事实和明确的剧情未知不造范围unknown，真正范围歧义保留unknown，不删限制、不补角色或剧情。"
-        },
-    )
+        "范围分类边界": GUIDANCE,
+        "要求": "先独立读全部原话，没有P、旧观察、期望方向、正文、候选、全书约定或自由原因。O01起连续编号，全部SCOPE单元按原序恰好核对一次；covered绑定本句动作或限制O，not_scope_related仍在后续完整解释保留原句，真正不明unknown。evidence及restriction_evidence只填本次编号，条件为限制句连续原话，没有条件空。保留真实否定、角色、物品、不同次传递和阶段。未知有效，不能因覆盖要求造观察或强行通过。",
+    }
+    repair = {
+        "引用修正要求": "本阶段没有正文、P或旧观察。只依据给定作者原话和SCOPE编号修正引用与分类；非范围事实和明确的剧情未知不造范围unknown，真正范围歧义保留unknown，不删限制、不补角色或剧情。"
+    }
+
+    def validator(value):
+        return (
+            execution.inventory_issues_detailed(value, token, choices)
+            if execution_version == execution.VERSION
+            else core.inventory_issues(value, token, choices)
+        )
+
+    if execution_version == execution.VERSION:
+        instruction.update({execution.KEY: execution.VERSION, "直接引用覆盖与请求边界": execution.GUIDANCE})
+        repair["引用修正要求"] += execution.GUIDANCE
+    elif execution_version != execution.LEGACY_VERSION:
+        raise DomainError("authored_execution_version", "未知来源观察执行模板，未派发。", 409)
+    return {
+        "instruction": instruction,
+        "schema": core.ScopeInventory,
+        "context": {"scope": "仅作者本次原话及稳定编号，无旧P/旧观察/原因/正文/候选/未来章"},
+        "validator": validator,
+        "contract": schema,
+        "max_output": 8192,
+        "diagnostic_label": "作者来源范围分类",
+        "repair_feedback": lambda: deepcopy(repair),
+    }
+
+
+async def observe(worker, entry):
+    from . import authored_source_execution as execution
+
+    version = worker.task["result"].get(execution.KEY, execution.LEGACY_VERSION)
+    if version == execution.VERSION:
+        execution.ensure_runtime(worker.task, worker.domain, worker.settings)
+    request = observation_request(entry, version)
+    repair = request.pop("repair_feedback")
+
+    def repair_feedback():
+        if version == execution.VERSION:
+            execution.ensure_runtime(worker.task, worker.domain, worker.settings)
+        return repair()
+
+    value = await worker.grounded(**request, repair_feedback=repair_feedback)
     return {
         "version": VERSION,
-        "input_sha256": token,
+        "input_sha256": authored.token(entry, VERSION),
         "source_sha256": entry["sha256"],
-        "sources": units,
+        "sources": authored.core.units(entry["text"]),
         "inventory": value,
-        "status": "supported" if core.inventory_supported(value) else "needs_review",
+        "status": "supported" if authored.core.inventory_supported(value) else "needs_review",
+        **execution.record_metadata(worker.task),
     }
 
 
@@ -192,6 +229,10 @@ def receipt_valid(record, text, owner_ids=None):
     from .plot_audit import ScopedAuthorPlot, author_contract_issues
 
     try:
+        from .authored_source_execution import record_valid, same_record_metadata
+
+        if not record_valid(record):
+            return False
         entry = record["source"]
         contract = ScopedAuthorPlot.model_validate(record["contract"]).model_dump()
         if (
@@ -233,6 +274,10 @@ def receipt_valid(record, text, owner_ids=None):
         ):
             return False
         inventory, interpretation = phases["observe"]["response"], phases["interpret"]["response"]
+        if not same_record_metadata(record, inventory) or not record_valid(
+            inventory, record.get("authored_source_observation_execution_snapshot")
+        ):
+            return False
         value = Preservation.model_validate(phases["preserve"]["response"]).model_dump()
         basis = record["preservation_input"]
         return (
@@ -262,6 +307,10 @@ def completed_unverified_record(domain, current, entry, record):
 
     owners = {t["id"] for t in authored.ancestry(current, domain)}
     try:
+        from .authored_source_execution import record_valid, same_record_metadata
+
+        if not record_valid(record):
+            raise ValueError("invalid observation execution record")
         if (
             record["state"] != "unverified"
             or record["source"] != entry
@@ -282,7 +331,11 @@ def completed_unverified_record(domain, current, entry, record):
         ):
             raise ValueError("unknown phase")
         inventory = phases["observe"]["response"]
-        if inventory["version"] != VERSION or not authored.inventory_valid(inventory, entry):
+        if (
+            not same_record_metadata(record, inventory)
+            or inventory["version"] != VERSION
+            or not authored.inventory_valid(inventory, entry)
+        ):
             raise ValueError("invalid inventory")
         if "interpret" not in phases:
             if inventory["status"] != "needs_review":
@@ -330,6 +383,9 @@ def completed_unverified_record(domain, current, entry, record):
 
 async def independent_preserve(worker, record, inventory, owners):
     from .workflow_plan_preparation import phase
+    from .authored_source_execution import ensure_runtime
+
+    ensure_runtime(worker.task, worker.domain, worker.settings)
 
     entry = record["source"]
     basis = preservation_input(worker, record)
@@ -375,12 +431,14 @@ async def independent_preserve(worker, record, inventory, owners):
 async def prepare(worker, entry):
     from .plot_audit import interpret_plot, ScopedAuthorPlot
     from .workflow_plan_preparation import phase
+    from . import authored_source_execution as execution
 
     if (
         not authored.validate_task(worker.task, worker.domain)
         or worker.task["result"][authored.KEY] != VERSION
     ):
         raise DomainError("authored_scope_version", "本任务未冻结新版作者来源政策。", 409)
+    execution.ensure_runtime(worker.task, worker.domain, worker.settings)
     records = worker.task["result"].setdefault(authored.RECEIPTS, {})
     record = records.get(entry["key"])
     inherited = worker.task["result"][authored.SNAPSHOT]["inherited"]
@@ -392,6 +450,7 @@ async def prepare(worker, entry):
             "phases": {},
             "inherited": deepcopy(inherited),
             "state": "pending",
+            **execution.record_metadata(worker.task),
         }
         worker.checkpoint(worker.task["result"])
     if (
@@ -427,6 +486,7 @@ async def prepare(worker, entry):
     if not authored.core.units(entry["text"]):
         record.update(state="unverified", contract={"items": [], "note": "来源没有可核对原话，未补造。"})
     else:
+        execution.ensure_runtime(worker.task, worker.domain, worker.settings)
         inventory = await phase(
             worker, record, "observe", "observing", lambda: observe(worker, entry), owner_ids=owners
         )
@@ -441,6 +501,7 @@ async def prepare(worker, entry):
                 },
             )
         else:
+            execution.ensure_runtime(worker.task, worker.domain, worker.settings)
             interpreted = await phase(
                 worker,
                 record,

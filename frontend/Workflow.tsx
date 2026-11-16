@@ -32,6 +32,10 @@ import {
 import { FlowContinuationPanel, FlowContinuationReceipt } from './FlowContinuationPanel'
 import { AuthorSourceRecheckPanel, AuthorSourceRecheckReceipt } from './AuthorSourceRecheckPanel'
 import {
+  AuthorSourceObservationRetryPanel,
+  AuthorSourceObservationRetryReceipt,
+} from './AuthorSourceObservationRetryPanel'
+import {
   DEFAULT_STRUCTURE_OUTPUT_TOKENS,
   workflowStructureOutput,
   type StructureOutputChoice,
@@ -86,7 +90,14 @@ export function WorkflowPage({
   const [flowLocked, setFlowLocked] = useState(false)
   const [clarificationLocked, setClarificationLocked] = useState(false)
   const [sourceRecheckLocked, setSourceRecheckLocked] = useState(false)
-  const busy = operationBusy || restartLocked || flowLocked || clarificationLocked || sourceRecheckLocked
+  const [observationRetryLocked, setObservationRetryLocked] = useState(false)
+  const busy =
+    operationBusy ||
+    restartLocked ||
+    flowLocked ||
+    clarificationLocked ||
+    sourceRecheckLocked ||
+    observationRetryLocked
   const pendingRequest = useRef<{ signature: string; key: string } | null>(null)
   const pendingContinuation = useRef<{ signature: string; key: string } | null>(null)
   const pendingConditionalContinuation = useRef<{
@@ -653,7 +664,13 @@ export function WorkflowPage({
                     currency={
                       accounts.find((entry) => entry.id === task.payload.account)?.currency || '原账户币种'
                     }
-                    disabled={operationBusy || flowLocked || clarificationLocked || sourceRecheckLocked}
+                    disabled={
+                      operationBusy ||
+                      flowLocked ||
+                      clarificationLocked ||
+                      sourceRecheckLocked ||
+                      observationRetryLocked
+                    }
                     onLockChange={setRestartLocked}
                     onCreated={async (row) => {
                       setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])
@@ -668,7 +685,13 @@ export function WorkflowPage({
                     key={JSON.stringify(['author-source-recheck', novel.id, branchId, task.id])}
                     task={task}
                     activeBranchId={branchId}
-                    disabled={operationBusy || restartLocked || flowLocked || clarificationLocked}
+                    disabled={
+                      operationBusy ||
+                      restartLocked ||
+                      flowLocked ||
+                      clarificationLocked ||
+                      observationRetryLocked
+                    }
                     onLockChange={setSourceRecheckLocked}
                     onCreated={async (row) => {
                       setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])
@@ -677,11 +700,37 @@ export function WorkflowPage({
                       await onStarted(row.branch_id)
                     }}
                   />
+                  <AuthorSourceObservationRetryReceipt task={task} />
+                  <AuthorSourceObservationRetryPanel
+                    key={JSON.stringify(['author-source-observation-retry', novel.id, branchId, task.id])}
+                    task={task}
+                    activeBranchId={branchId}
+                    disabled={
+                      operationBusy ||
+                      restartLocked ||
+                      flowLocked ||
+                      clarificationLocked ||
+                      sourceRecheckLocked
+                    }
+                    onLockChange={setObservationRetryLocked}
+                    onCreated={async (row) => {
+                      setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])
+                      setSelectedTask(row.id)
+                      setStatus('来源观察恢复子批次已建立；原话、三次旧返回和累计费用保留。')
+                      await onStarted(row.branch_id)
+                    }}
+                  />
                   <AuthorSourceClarificationPanel
                     key={JSON.stringify(['author-source-clarification', novel.id, branchId, task.id])}
                     task={task}
                     activeBranchId={branchId}
-                    disabled={operationBusy || restartLocked || flowLocked || sourceRecheckLocked}
+                    disabled={
+                      operationBusy ||
+                      restartLocked ||
+                      flowLocked ||
+                      sourceRecheckLocked ||
+                      observationRetryLocked
+                    }
                     onLockChange={setClarificationLocked}
                     onCreated={async (row) => {
                       setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])
@@ -695,7 +744,13 @@ export function WorkflowPage({
                     key={JSON.stringify(['flow-continuation', novel.id, branchId, task.id])}
                     task={task}
                     activeBranchId={branchId}
-                    disabled={operationBusy || restartLocked || clarificationLocked || sourceRecheckLocked}
+                    disabled={
+                      operationBusy ||
+                      restartLocked ||
+                      clarificationLocked ||
+                      sourceRecheckLocked ||
+                      observationRetryLocked
+                    }
                     onLockChange={setFlowLocked}
                     onCreated={async (row) => {
                       setTasks((prior) => [row, ...prior.filter((entry) => entry.id !== row.id)])

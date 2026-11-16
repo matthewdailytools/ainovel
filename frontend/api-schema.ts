@@ -1047,6 +1047,58 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/tasks/{task_id}/author-source-observation-retry-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Preview */
+    get: operations['read_preview_api_tasks__task_id__author_source_observation_retry_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/author-source-observation-retries/{client_request_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Receipt */
+    get: operations['read_receipt_api_tasks__task_id__author_source_observation_retries__client_request_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/author-source-observation-retries': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Receipt */
+    get: operations['read_receipt_api_tasks__task_id__author_source_observation_retries_get']
+    put?: never
+    /** Create Retry */
+    post: operations['create_retry_api_tasks__task_id__author_source_observation_retries_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/tasks/{task_id}/continue-flow-policy-preview': {
     parameters: {
       query?: never
@@ -2703,6 +2755,20 @@ export interface components {
        * @default
        */
       brief: string
+    }
+    /** ObservationRetryInput */
+    ObservationRetryInput: {
+      /**
+       * Version
+       * @constant
+       */
+      version: 'author-source-observation-retry/1'
+      /** Client Request Id */
+      client_request_id: string
+      /** Preview Basis Sha256 */
+      preview_basis_sha256: string
+      /** Reason */
+      reason: string
     }
     /** PlanRestartInput */
     PlanRestartInput: {
@@ -5760,6 +5826,137 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['RecheckInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_preview_api_tasks__task_id__author_source_observation_retry_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_receipt_api_tasks__task_id__author_source_observation_retries__client_request_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+        client_request_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_receipt_api_tasks__task_id__author_source_observation_retries_get: {
+    parameters: {
+      query: {
+        client_request_id: string
+      }
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_retry_api_tasks__task_id__author_source_observation_retries_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ObservationRetryInput']
       }
     }
     responses: {

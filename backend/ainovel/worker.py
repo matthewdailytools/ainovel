@@ -285,6 +285,10 @@ class Worker:
             from .author_source_recheck import ensure_runtime as ensure_recheck_runtime
 
             ensure_recheck_runtime(self.task, self.domain, self.settings)
+        if self.task["result"].get("author_source_observation_retry_version") is not None:
+            from .author_source_observation_retry import ensure_runtime as ensure_observation_retry_runtime
+
+            ensure_observation_retry_runtime(self.task, self.domain, self.settings)
         from .flow_entailment import enabled as flow_entailment_enabled
 
         flow_entailment_enabled(self)

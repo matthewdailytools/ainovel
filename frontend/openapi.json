@@ -2115,6 +2115,126 @@
         }
       }
     },
+    "/api/tasks/{task_id}/author-source-observation-retry-preview": {
+      "get": {
+        "summary": "Read Preview",
+        "operationId": "read_preview_api_tasks__task_id__author_source_observation_retry_preview_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/author-source-observation-retries/{client_request_id}": {
+      "get": {
+        "summary": "Read Receipt",
+        "operationId": "read_receipt_api_tasks__task_id__author_source_observation_retries__client_request_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          },
+          {
+            "name": "client_request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Client Request Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/author-source-observation-retries": {
+      "get": {
+        "summary": "Read Receipt",
+        "operationId": "read_receipt_api_tasks__task_id__author_source_observation_retries_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          },
+          {
+            "name": "client_request_id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "title": "Client Request Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Retry",
+        "operationId": "create_retry_api_tasks__task_id__author_source_observation_retries_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ObservationRetryInput" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/tasks/{task_id}/continue-flow-policy-preview": {
       "get": {
         "summary": "Flow Policy Preview",
@@ -4753,6 +4873,27 @@
         "type": "object",
         "required": ["title"],
         "title": "NovelInput"
+      },
+      "ObservationRetryInput": {
+        "properties": {
+          "version": { "type": "string", "const": "author-source-observation-retry/1", "title": "Version" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "preview_basis_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Preview Basis Sha256"
+          },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["version", "client_request_id", "preview_basis_sha256", "reason"],
+        "title": "ObservationRetryInput"
       },
       "PlanRestartInput": {
         "properties": {

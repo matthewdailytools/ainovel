@@ -8017,5 +8017,82 @@
     "result": "passed",
     "record": "2026-11-16-authored2-auto3-runtime-ui.md",
     "fix_of": ""
-  }
+  },
+{
+  "id": "assisted12-authored2-536b-citation-stop-20261116",
+  "date": "2026-11-16",
+  "commit": "ad822d5",
+  "module": "半自动整书",
+  "scenario": "同原话新子批次保留12章完整计划；首轮加两轮结构化返回均因引用不合停止，next1/0正文，3settled共CNY.152952，自动书未启",
+  "phase": "quality",
+  "result": "failed",
+  "record": "2026-11-16-observation-citation-stop-and-recovery.md",
+  "fix_of": ""
+},
+{
+  "id": "assisted12-authored2-536b-preservation-20261116",
+  "date": "2026-11-16",
+  "commit": "ad822d5",
+  "module": "半自动原稿与费用",
+  "scenario": "最终稳定快照旧行及费用保持、errors为空，原三缓存/15事件/3结算完整；pending started不冒称费用未知，不重发原nonce",
+  "phase": "stability",
+  "result": "passed",
+  "record": "2026-11-16-observation-citation-stop-and-recovery.md",
+  "fix_of": ""
+},
+{
+  "id": "assisted12-authored2-536b-source-review-20261116",
+  "date": "2026-11-16",
+  "commit": "ad822d5",
+  "module": "来源语义核对",
+  "scenario": "后两帧unit4→O2错锚拒绝成立；知识边界与请求许可仍待完整原意核对，不把改编号或独立审读当来源ready",
+  "phase": "quality",
+  "result": "unverified",
+  "record": "2026-11-16-observation-citation-stop-and-recovery.md",
+  "fix_of": ""
+},
+{
+  "id": "authored-observation-execution2-root-integration-20261116",
+  "date": "2026-11-16",
+  "commit": "working-tree",
+  "module": "来源执行与恢复",
+  "scenario": "20路径独立封包base/post核对后合入；来源语义2不变，旧请求缓存保留，新执行模板2和有限已知失败child待Root全项目检查及真实复验",
+  "phase": "stability",
+  "result": "not_run",
+  "record": "2026-11-16-observation-citation-stop-and-recovery.md",
+  "fix_of": ""
+},
+{
+  "id": "observation-execution2-root-all-project-regression-20261116",
+  "module": "全项目确定性回归",
+  "scenario": "Root同输入2618后端、730前端、163无头及48Node全部通过，API/严格类型/格式/构建通过；无头0跳过0flaky，模型调用0",
+  "phase": "stability",
+  "result": "passed",
+  "fix_of": "authored-observation-execution2-root-integration-20261116",
+  "date": "2026-11-16",
+  "commit": "working-tree",
+  "record": "2026-11-16-observation-citation-stop-and-recovery.md"
+},
+{
+  "id": "observation-execution2-root-input-and-dist-seal-20261116",
+  "module": "验证输入与产物",
+  "scenario": "三阶段前后423输入逐SHA一致，7dist保持；post实际终态0，旧付费三帧不改、不重发，日常仍ad822",
+  "phase": "stability",
+  "result": "passed",
+  "fix_of": "",
+  "date": "2026-11-16",
+  "commit": "working-tree",
+  "record": "2026-11-16-observation-citation-stop-and-recovery.md"
+},
+{
+  "id": "observation-execution2-actual-quality-pending-20261116",
+  "module": "执行模板真实复验",
+  "scenario": "本地工程通过不替代精确CI、日常新入口及真实536恢复；两12章、Source2、文学及总投入继续待验",
+  "phase": "quality",
+  "result": "unverified",
+  "fix_of": "",
+  "date": "2026-11-16",
+  "commit": "working-tree",
+  "record": "2026-11-16-observation-citation-stop-and-recovery.md"
+}
 ]

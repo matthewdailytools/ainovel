@@ -315,7 +315,7 @@ def completed_unverified_record(domain, current, entry):
         ) from error
 
 
-def checkpoint(domain, current):
+def checkpoint(domain, current, *, record_check=None):
     state, payload = current["result"], current["payload"]
     if (
         current["kind"] != "workflow"
@@ -357,7 +357,7 @@ def checkpoint(domain, current):
         )
     original = next(e for e in state[authored.SNAPSHOT]["sources"] if e["number"] == number)
     entry = source_entry(current, original)
-    record = completed_unverified_record(domain, current, entry)
+    record = (record_check or completed_unverified_record)(domain, current, entry)
     chapters = domain.db.all(
         "SELECT id,position,revision,title,content,stale,archived FROM chapters WHERE branch_id=? ORDER BY position,id",
         (branch["id"],),
