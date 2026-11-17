@@ -8558,5 +8558,16 @@
     "result": "blocked",
     "record": "2026-11-17-scope-freeze-and-followups.md",
     "fix_of": ""
+  },
+  {
+    "id": "frozen-book-exit-43eec17-full-ci-restores-deployed-20261118",
+    "date": "2026-11-18",
+    "commit": "43eec17",
+    "module": "冻结范围内整书出口阻断修复与实际部署",
+    "scenario": "半自动格式失败显式澄清与自动前章改稿后的上下文刷新合批：767前端/2747后端/169全项目无头/48Node及10类静态通过，439源码/7构建同输入，无头0skip/0unexpected/0flaky；精确CI44137013146/job134229196629成功，备份301cecf及两次41+2隔离恢复、8766的43eec17/CMsbfCSm实际部署完成。旧行/费用/资料原件/Main用户文件保持，发布业务写/模型0；发布截止两书3/12+1/12、后续模型未发、原unknown保持，不提升整书/文学/收益结论",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-18-bounded-book-exit-fixes.md",
+    "fix_of": "assisted12-ch4-source-observation-held-20261117"
   }
 ]
