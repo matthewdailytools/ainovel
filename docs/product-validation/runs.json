@@ -8349,5 +8349,82 @@
   "date": "2026-11-17",
   "phase": "stability",
   "record": "2026-11-17-paid-cache-recovery-compatibility.md"
-}
+},
+  {
+    "id": "237-full-regression-and-exact-ci-20261117",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "module": "全项目恢复回归",
+    "scenario": "433源码／7tested同输入2653后端、745前端、168无头、48Node及post通过；精确237bdf7 CI43911364245/job133453822644成功，不借前轮2649",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "fix_of": "legacy-paid-valid-cache-new-full-and-release-pending-20261117"
+  },
+  {
+    "id": "237-v7-runtime-and-double-restore-20261117",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "module": "日常发布与恢复",
+    "scenario": "664Git＋14dist共678项；正式备份及双真实40表＋序列表／2usage／25原件恢复通过，restart gate正式verify，旧稿／费用及独立Master49保持",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "fix_of": ""
+  },
+  {
+    "id": "237-a07-task-input-local-ui-20261117",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "module": "任务输入与资料恢复",
+    "scenario": "实际新版本预览取消及本地唯一原引用／表单恢复；320真实2倍字与键盘通过，1正常readingPUT尝试abort发送0、2context全关，无正向选区或旧资料快照结论",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "fix_of": ""
+  },
+  {
+    "id": "e7-private-cli-main-order-first-counterexample-20261117",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "module": "私有执行设施",
+    "scenario": "旧封存driver的prepare/capture经真实main与argparse分别NameError；匿名0传输复现，实际prepare／POST之前发现，不归为产品／模型／原稿失败",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "fix_of": ""
+  },
+  {
+    "id": "e7-private-cli-r2-and-actual-prepare-20261117",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "module": "私有执行设施",
+    "scenario": "main guard移末尾、15函数raw/AST相同；4窄检查通过，实际prepare核同E7／旧4返回／rev0／原12规划，33.293930所需低于39.672040余额，auto原nonce未发",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "fix_of": "e7-private-cli-main-order-first-counterexample-20261117"
+  },
+  {
+    "id": "e7-same-task-resume-source-ready-20261117",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "module": "同任务诊断恢复",
+    "scenario": "仅一次正式resume保同E7；interpret纠错消耗1/2授权，来源三阶段ready；10新返回／CNY0.735706全结，最新stable／旧行及费用保持，非正文通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "fix_of": "e7-interpret-three-returned-stop-20261116"
+  },
+  {
+    "id": "e7-resumed-first-chapter-quality-held-20261117",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "module": "半自动首章质量",
+    "scenario": "2626字r0未采用、needs_review，P03内容证据缺口/P06流向对象漏配待核；基准因果与对象用途需局部处理，来源ready不替正文／文学／整书通过，自动未启",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "fix_of": ""
+  }
 ]

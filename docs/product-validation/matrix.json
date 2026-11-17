@@ -8,22 +8,30 @@
     "stability": "unverified",
     "quality": "not_run",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。 任务引用与选区恢复新增连接已有分项证据；首轮167／1、最小确认操作修正及3项U02专项分别留存，新整合全量与日常入口待验。 随后e3ab19e同输入2618后端／745前端／168无头／48Node全部通过，427输入及7dist保持；CI与日常入口仍另验，模块业务／收益不追认。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_scope": "本项的实际写作总投入/作者体验仍未测量；不能用保存回归替代使用收益。",
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "additional_stability_evidence": [
       "2026-11-16-task-input-reference-recovery.md",
-      "2026-11-16-observation-recovery-runtime-and-ui.md"
+      "2026-11-16-observation-recovery-runtime-and-ui.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
     ],
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   },
   {
@@ -35,24 +43,32 @@
     "stability": "unverified",
     "quality": "unverified",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_evidence": [
       "2026-11-14-real-epub.md"
     ],
     "quality_scope": "已执行真实获取与一对有/无摘录输出；作者相关性及总投入待审。",
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
     ],
     "additional_stability_evidence": [
-      "2026-11-16-observation-recovery-runtime-and-ui.md"
+      "2026-11-16-observation-recovery-runtime-and-ui.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   },
   {
@@ -64,22 +80,29 @@
     "stability": "unverified",
     "quality": "unverified",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_evidence": [
       "2026-11-13-reference-repeats.md",
       "2026-11-13-author-review-feedback.md"
     ],
     "quality_scope": "首轮与代表重复已执行；仅样例01有作者偏好，其余文学/收益未验收。",
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   },
   {
@@ -91,22 +114,29 @@
     "stability": "unverified",
     "quality": "unverified",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_evidence": [
       "2026-11-14-books-coldstart.md",
       "2026-11-16-ideation-objective-revisions.md"
     ],
     "quality_scope": "已执行限定频道/题材的真实两模式起步，不代表36题材组合质量覆盖。 U02已完成两轮真实定向返修及未采用操作员r1；历史记录与未来联系仍未完整证明，内容和文学及总投入不提升。",
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   },
   {
@@ -118,10 +148,10 @@
     "stability": "unverified",
     "quality": "unverified",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
@@ -130,13 +160,20 @@
       "2026-11-16-cross-chapter-impact-quality.md"
     ],
     "quality_scope": "相对事件查询和场景重核已有工程/日常证据；此前两套章2共36项更正保留。本轮章3纠正知识、关系与资源有效时点，并在正式查询及1c4实际恢复中复检通过，原文和旧记录保留。人工最小更正不代表模型能稳定自动提取，十章/跨卷/整书及文学收益仍待验。 U10三章实测检出两依赖并形成两处最小候选；第三章检查unknown保留，候选未采用，不能外推长篇或作者质量。",
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   },
   {
@@ -148,10 +185,10 @@
     "stability": "unverified",
     "quality": "unverified",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
@@ -160,13 +197,20 @@
       "2026-11-16-cross-chapter-impact-quality.md"
     ],
     "quality_scope": "事件、依赖和承诺保存已有工程证据；此前章2更正与8场景回执保留。本轮半自动章3只更正事件标题主体并刷新依赖见证、显式重核同ID场景，原范围/顺序/视角保持，实际恢复通过；跨卷及新整书承诺闭合仍待验。 U10三章实测检出两依赖并形成两处最小候选；第三章检查unknown保留，候选未采用，不能外推长篇或作者质量。",
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   },
   {
@@ -178,10 +222,10 @@
     "stability": "unverified",
     "quality": "unverified",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_scope": "36章导入保留；六轮旧失败后，相同两章第七轮2次CNY0.241526形成34记录/12场景待审候选，116逐字来源/145段覆盖及引用范围通过；16事件order未知、after空及群体身份待整理，0采用。真实十章/跨卷/作者整体质量仍待验。",
     "quality_evidence": [
       "2026-11-15-longform-import-and-reverse.md",
@@ -190,13 +234,20 @@
       "2026-11-15-extraction-reference-checks.md",
       "2026-11-15-scene-range-evidence.md"
     ],
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   },
   {
@@ -208,10 +259,10 @@
     "stability": "unverified",
     "quality": "unverified",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_evidence": [
       "2026-11-15-assisted-candidate-recheck.md",
       "2026-11-15-source-identity-context.md",
@@ -223,13 +274,20 @@
       "2026-11-16-cross-chapter-impact-quality.md"
     ],
     "quality_scope": "真实候选正文与记忆可分选，复检同版列表变化和空列表以hash/显式重读保护；0/6真实回执可恢复，派生事实语义和作者文学/收益仍需核定。 最新真实旧自动5来源回执unverified，观察正确但物品称谓字面未关联；2call CNY.049512已结，未正文复检或采用，不把局部source观察当任务完成。 U02已完成两轮真实定向返修及未采用操作员r1；历史记录与未来联系仍未完整证明，内容和文学及总投入不提升。 U10三章实测检出两依赖并形成两处最小候选；第三章检查unknown保留，候选未采用，不能外推长篇或作者质量。",
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   },
   {
@@ -241,10 +299,10 @@
     "stability": "unverified",
     "quality": "unverified",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_evidence": [
       "2026-11-15-second-chapter-review-candidates.md",
       "2026-11-15-source-identity-context.md",
@@ -259,16 +317,27 @@
       "2026-11-16-interpretation-diagnostic-stop-and-recovery.md"
     ],
     "quality_scope": "新政策子任务保留原36规划/约定/题材及累计预算，实际采用并维护3章。章3派生事实范围与事件主体问题已按5项正式最小更正及语义查询复检，同步故事修订27，paused next4；0新增模型调用。工程人工介入不代表十章/整书/文学或总投入已通过。 最新真实FLOW2子批次已采用并维护第五章；第六章候选未采用，日期错误及权限unknown独立记录，私有A/B未写入；15调用CNY1.390900全结。此前段落是历史截止，仍未通过十章/整书/文学及收益。 最新两个独立12章空来源已建，半自动首章来源观察误分类停止、无正文；3call CNY.266256全结，全自动尚未启动。旧36不截断，新十章/跨卷/整书/文学/收益未通过。 最新同原话scope2子批次536b在第一章三引用修正后停止，CNY.152952全结、unknown0、正文0；错锚拒绝成立且另有知识/许可风险。新模板和有限恢复尚待Root整项目及真实复验，不能追认来源、十章、跨卷、整书或作者收益。 随后Root同输入2618后端／730前端／163无头／48Node通过，423输入及7dist保持；这是确定性工程证据，真实模板恢复、来源及整书质量仍待验。 e3真实e7执行2观察完成，解释3帧因范围受控值错误停止、实际P10/P10/P11误报P01；4settled CNY.286862，无正文。诊断和有限resume仍待整合，不提升来源/两书/文学/收益。 后续诊断及严格一次resume已合入，432静态／745前端／48Node通过；真实恢复、新完整回归与发布仍待独立证据，质量不提升。 2026-11-17：6f8完整2649／745／168／48及精确CI通过；新旧有效缓存兼容最小补丁433静态及21专项通过，新完整回归与发布待验；没有新增真实模型或提高整书结论。",
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
     ],
     "additional_stability_evidence": [
-      "2026-11-16-observation-recovery-runtime-and-ui.md"
+      "2026-11-16-observation-recovery-runtime-and-ui.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
+    ],
+    "additional_quality_evidence": [
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
     ]
   },
   {
@@ -280,10 +349,10 @@
     "stability": "unverified",
     "quality": "unverified",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-assisted-candidate-recheck.md",
@@ -296,13 +365,20 @@
       "2026-11-16-reduced12-first-source-stop.md"
     ],
     "quality_scope": "独立实际采用并维护3章。章3派生时点/交付后资源状态问题已按5项正式最小更正并复检，同步故事修订38，paused next4；0新增模型。第4章旧写前解释失败及三份调用保留，仍未生成正文；原36计划和预算不变，十章/跨卷/整书/文学及收益待验。 最新另立0c11任务第5章r0仍未采用，来源范围与实例流向误报分开记录；本轮增加旧AI章纲受限来源纠偏及显式FLOW2正文复检，尚未本轮日常发布/真实模型验证。此前章4前段是历史截止，不据此追认整书。 最新真实旧自动5来源回执unverified，观察正确但物品称谓字面未关联；2call CNY.049512已结，未正文复检或采用，不把局部source观察当任务完成。 最新两个独立12章空来源已建，半自动首章来源观察误分类停止、无正文；3call CNY.266256全结，全自动尚未启动。旧36不截断，新十章/跨卷/整书/文学/收益未通过。",
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   },
   {
@@ -314,25 +390,33 @@
     "stability": "unverified",
     "quality": "not_run",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_scope": "实际费用/故障/恢复属于工程稳定性；使用总投入尚未完整测量，不据此作文学或收益通过。 U10三章实测检出两依赖并形成两处最小候选；第三章检查unknown保留，候选未采用，不能外推长篇或作者质量。",
     "quality_evidence": [
       "2026-11-16-assisted5-maintained-and-assisted6-review.md",
       "2026-11-16-cross-chapter-impact-quality.md"
     ],
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
     ],
     "additional_stability_evidence": [
-      "2026-11-16-observation-recovery-runtime-and-ui.md"
+      "2026-11-16-observation-recovery-runtime-and-ui.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   },
   {
@@ -344,21 +428,29 @@
     "stability": "unverified",
     "quality": "not_run",
     "stability_evidence": "2026-11-13-project-stability-baseline.md",
-    "status_as_of": "2026-11-16",
+    "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-16-source-classification-and-same-source-continuation.md",
+    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "quality_scope": "工程中文/键盘/缩放已有范围；真实作者输入法、辅助技术和体验评估不能由替身事件推定。",
-    "latest_runtime_evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
-    "latest_runtime_scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。",
+    "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
     "runtime_evidence_history": [
       {
         "evidence": "2026-11-16-authored2-auto3-runtime-publication.md",
         "scope": "ad822实际运行版本与全量旧数据恢复；不是该模块全部日常行为或质量通过。"
+      },
+      {
+        "evidence": "2026-11-16-observation-recovery-runtime-and-ui.md",
+        "scope": "e3ab19e／CbKTBuhK实际V6发布、双真实恢复及两个只读恢复入口；1次正常阅读PUT仅abort、0发送。原536b/稿件/费用/master48保持，私有R4 prepare失败尚待验；不代表该模块全部日常行为、文学、整书或收益通过。"
       }
     ],
     "additional_stability_evidence": [
-      "2026-11-16-observation-recovery-runtime-and-ui.md"
+      "2026-11-16-observation-recovery-runtime-and-ui.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
+    ],
+    "regression_evidence_history": [
+      "2026-11-16-source-classification-and-same-source-continuation.md"
     ]
   }
 ]
