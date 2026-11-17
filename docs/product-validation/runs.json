@@ -8569,5 +8569,16 @@
     "result": "passed",
     "record": "2026-11-18-bounded-book-exit-fixes.md",
     "fix_of": "assisted12-ch4-source-observation-held-20261117"
+  },
+  {
+    "id": "frozen-book-exit-source4-clarified-held-auto2-refreshed-20261118",
+    "date": "2026-11-18",
+    "commit": "43eec17",
+    "module": "两模式实际写前来源出口核对",
+    "scenario": "半自动第4章显式authorized_operator补充后新三份完整返回仍格式失败，已结CNY0.369644，未进解释/保持/正文且不换nonce重发；全自动第2章原接口将context4→45，零新费用，unknown和全部阶段保持。稿件逐哈希保持，两书仍3/12+1/12，未扩机制或再部署；DS累计47.232214/未知0，文学与收益未验证",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-18-frozen-book-exit-source-stops.md",
+    "fix_of": ""
   }
 ]
