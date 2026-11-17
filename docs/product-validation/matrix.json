@@ -11,7 +11,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。 任务引用与选区恢复新增连接已有分项证据；首轮167／1、最小确认操作修正及3项U02专项分别留存，新整合全量与日常入口待验。 随后e3ab19e同输入2618后端／745前端／168无头／48Node全部通过，427输入及7dist保持；CI与日常入口仍另验，模块业务／收益不追认。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_scope": "本项的实际写作总投入/作者体验仍未测量；不能用保存回归替代使用收益。",
     "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
@@ -31,7 +31,9 @@
       }
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ]
   },
   {
@@ -46,7 +48,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_evidence": [
       "2026-11-14-real-epub.md"
     ],
@@ -68,7 +70,9 @@
       "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ]
   },
   {
@@ -83,7 +87,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_evidence": [
       "2026-11-13-reference-repeats.md",
       "2026-11-13-author-review-feedback.md"
@@ -102,7 +106,9 @@
       }
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ]
   },
   {
@@ -117,7 +123,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_evidence": [
       "2026-11-14-books-coldstart.md",
       "2026-11-16-ideation-objective-revisions.md"
@@ -136,7 +142,9 @@
       }
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ]
   },
   {
@@ -151,7 +159,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
@@ -173,7 +181,9 @@
       }
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ]
   },
   {
@@ -188,7 +198,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-scene-reconfirmation-and-semantic-corrections.md",
@@ -210,7 +220,9 @@
       }
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ]
   },
   {
@@ -225,7 +237,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_scope": "36章导入保留；六轮旧失败后，相同两章第七轮2次CNY0.241526形成34记录/12场景待审候选，116逐字来源/145段覆盖及引用范围通过；16事件order未知、after空及群体身份待整理，0采用。真实十章/跨卷/作者整体质量仍待验。",
     "quality_evidence": [
       "2026-11-15-longform-import-and-reverse.md",
@@ -247,7 +259,9 @@
       }
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ]
   },
   {
@@ -262,7 +276,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_evidence": [
       "2026-11-15-assisted-candidate-recheck.md",
       "2026-11-15-source-identity-context.md",
@@ -287,7 +301,9 @@
       }
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ],
     "additional_quality_evidence": [
       "2026-11-17-first-chapter-r1-and-recheck-quality.md"
@@ -308,7 +324,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_evidence": [
       "2026-11-15-second-chapter-review-candidates.md",
       "2026-11-15-source-identity-context.md",
@@ -340,7 +356,9 @@
       "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ],
     "additional_quality_evidence": [
       "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
@@ -359,7 +377,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_evidence": [
       "2026-11-14-automatic-ten-segment-complete.md",
       "2026-11-15-assisted-candidate-recheck.md",
@@ -385,7 +403,9 @@
       }
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ]
   },
   {
@@ -400,7 +420,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_scope": "实际费用/故障/恢复属于工程稳定性；使用总投入尚未完整测量，不据此作文学或收益通过。 U10三章实测检出两依赖并形成两处最小候选；第三章检查unknown保留，候选未采用，不能外推长篇或作者质量。",
     "quality_evidence": [
       "2026-11-16-assisted5-maintained-and-assisted6-review.md",
@@ -424,7 +444,9 @@
       "2026-11-17-first-chapter-r1-and-recheck-quality.md"
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ]
   },
   {
@@ -439,7 +461,7 @@
     "status_as_of": "2026-11-17",
     "status_scope": "模块整体结论；工程回归通过不等于每项日常场景及质量均通过。原stability_evidence保留最初基线。",
     "current_evidence_index": "N-U-F验收追踪.md",
-    "latest_regression_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+    "latest_regression_evidence": "2026-11-17-preservation-reference-recovery.md",
     "quality_scope": "工程中文/键盘/缩放已有范围；真实作者输入法、辅助技术和体验评估不能由替身事件推定。",
     "latest_runtime_evidence": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "latest_runtime_scope": "237bdf7／CbKTBuhK已实际V7发布、双真实恢复及新A07只读入口；同E7诊断恢复来源ready、首章未采用待审，10新已结CNY.735706。仅本轮具体工程／入口证据，不代表本模块全部日常任务、真实质量、文学、整书或收益通过。",
@@ -458,7 +480,9 @@
       "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
     ],
     "regression_evidence_history": [
-      "2026-11-16-source-classification-and-same-source-continuation.md"
+      "2026-11-16-source-classification-and-same-source-continuation.md",
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-preservation-reference-recovery.md"
     ]
   }
 ]

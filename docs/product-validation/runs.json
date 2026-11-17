@@ -8492,5 +8492,38 @@
     "fix_of": "object-guidance-8b-full-backend-fixture-failure-20261117",
     "date": "2026-11-17",
     "record": "2026-11-17-object-guidance-history-fixture-retest.md"
+  },
+  {
+    "id": "frozen-exit-first-two-chapters-maintained-20261117",
+    "date": "2026-11-17",
+    "commit": "dfc0262",
+    "module": "两套整书出口与范围冻结",
+    "scenario": "范围冻结后仅处理既定12章出口阻断；半自动第1章r1与第2章r2已保存、保留原稿并完成结构维护和独立事实核对，P06旧模型unknown不改；作者文学、两套整书及收益未验证，非阻断排后续",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-17-scope-freeze-and-followups.md",
+    "fix_of": ""
+  },
+  {
+    "id": "assisted12-ch3-preservation-invalid-evidence-held-20261117",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "module": "半自动第3章来源保持",
+    "scenario": "正文前停止：观察与解释完成，三份保持返回均在SCOPE0003/0004夹带非原句O01/O02，引用校验拒绝有据；本章5笔CNY.342716全结，DS截止43.593750/未知0，原返回未改、未重发或生成正文",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-17-preservation-reference-recovery.md",
+    "fix_of": ""
+  },
+  {
+    "id": "preservation-reference-recovery-root-full-regression-20261117",
+    "date": "2026-11-17",
+    "commit": "工作树（基线dfc0262）",
+    "module": "来源保持阻断修复与全项目工程回归",
+    "scenario": "既有两明确阶段的精确反馈及有限恢复合批：10静态、2697后端、168无头通过，436源码/7构建三阶段同输入并完成post，0skip/0unexpected/0flaky；旧引用仍无效，日常237、未发布及未付费恢复，新质量与两套整书仍未验",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-17-preservation-reference-recovery.md",
+    "fix_of": "assisted12-ch3-preservation-invalid-evidence-held-20261117"
   }
 ]

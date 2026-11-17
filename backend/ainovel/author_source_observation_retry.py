@@ -194,7 +194,7 @@ def request_identity(current, provider, settings, frame, instruction):
         },
         "quoted_units": [
             {k: row[k] for k in ("source_id", "chapter_id", "revision", "start", "end") if k in row}
-            for row in instruction["可引用原文"]
+            for row in instruction.get("可引用原文", instruction.get("可替换原文", []))
         ],
     }
     return sha(basis), request, schema.__name__

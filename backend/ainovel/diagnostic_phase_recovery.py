@@ -17,6 +17,8 @@ from .db import DomainError, dumps
 MARK = "diagnostic_feedback_recovery"
 FIX = "scope_binding_item_indices"
 PHASE = "interpret"
+PRESERVE_FIX = "preservation_reference_locations"
+PHASES = {PHASE, "preserve"}
 LIMIT = 2
 sha = authored.sha
 
@@ -30,6 +32,14 @@ def plain_slot(slot):
     return {k: deepcopy(v) for k, v in slot.items() if k != MARK}
 
 
+def active_phase(record):
+    return "preserve" if "preserve" in record.get("phases", {}) else PHASE
+
+
+def phase_fix(phase):
+    return PRESERVE_FIX if phase == "preserve" else FIX
+
+
 def record_check(domain, current, entry):
     record = current["result"].get(authored.RECEIPTS, {}).get(entry["key"])
     require(
@@ -37,9 +47,10 @@ def record_check(domain, current, entry):
         "仅原来源未完成的解释阶段可核对诊断恢复。",
     )
     phases = record.get("phases", {})
-    observe, slot = phases.get("observe", {}), phases.get(PHASE, {})
+    phase = active_phase(record)
+    observe, slot = phases.get("observe", {}), phases.get(phase, {})
     require(
-        set(phases) == {"observe", PHASE}
+        set(phases) == ({"observe", PHASE, "preserve"} if phase == "preserve" else {"observe", PHASE})
         and observe.get("status") == "completed"
         and observe.get("response_sha256") == sha(observe.get("response"))
         and authored.inventory_valid(observe.get("response"), entry)
@@ -49,6 +60,23 @@ def record_check(domain, current, entry):
         and "response" not in slot,
         "观察须完整且解释仅有原started现场，未绕过未知或已有结果。",
     )
+    if phase == "preserve":
+        from .plot_audit import author_contract_issues
+
+        interpreted = phases[PHASE]
+        response = interpreted.get("response", {})
+        contract = record.get("contract", {})
+        require(
+            interpreted.get("status") == "completed"
+            and interpreted.get("response_sha256") == sha(response)
+            and response.get("contract") == contract
+            and response.get("bindings") == record.get("bindings")
+            and not author_contract_issues(contract, entry["text"], scoped=True)
+            and authored.binding_valid(contract, record["bindings"], observe["response"])
+            and all(i["certainty"] == "explicit" for i in contract["items"])
+            and all(i["status"] == "supported" for i in record["bindings"]["items"]),
+            "保持前的原观察与完整解释须已有效，不能借引用恢复处理语义未知。",
+        )
     return record
 
 
@@ -105,7 +133,8 @@ def known_currency(usage, provider):
 def frozen(domain, current, value):
     branch, chapter, original, entry, record, tasks, chapters = value
     clean = deepcopy(record)
-    clean["phases"][PHASE] = plain_slot(clean["phases"][PHASE])
+    phase = active_phase(record)
+    clean["phases"][phase] = plain_slot(clean["phases"][phase])
     return {
         "payload": sha(current["payload"]),
         "plan": sha(current["result"].get("plan")),
@@ -134,13 +163,19 @@ def resume_marker(domain, budget, settings, current, data):
     try:
         value = checkpoint(domain, current, settings)
         entry, record = value[3:5]
-        slot = record["phases"][PHASE]
+        phase = active_phase(record)
+        slot = record["phases"][phase]
         if MARK in slot:
             return None
         events = domain.db.all(
             "SELECT id,kind,payload FROM task_events WHERE task_id=? ORDER BY id", (current["id"],)
         )
-        if any(e["kind"] == "resume_requested" and MARK in json.loads(e["payload"]) for e in events):
+        if any(
+            e["kind"] == "resume_requested"
+            and (grant := json.loads(e["payload"]).get(MARK, {})).get("source_key") == entry["key"]
+            and grant.get("phase") == phase
+            for e in events
+        ):
             return None
         running = [
             e
@@ -157,7 +192,7 @@ def resume_marker(domain, budget, settings, current, data):
             .get(authored.RECEIPTS, {})
             .get(entry["key"], {})
             .get("phases", {})
-            .get(PHASE)
+            .get(phase)
             == slot
         ]
         require(checks, "原解释派发前检查点缺失。")
@@ -187,7 +222,27 @@ def resume_marker(domain, budget, settings, current, data):
         chosen = clarification.provider(SimpleNamespace(settings=settings), current)
         with budget.db() as usage:
             known_currency(usage, chosen.kind)
-            basic = clarification.known_source_proof(domain, usage, record)
+            if phase == "preserve":
+                from .authored_source_classification import preservation_request, source_inventory
+                from .worker import citation_repair_request
+
+                frame = preservation_request(record, source_inventory(record))
+                feedback = frame.pop("repair_feedback")
+                frame["repair_request"] = lambda result, errors: citation_repair_request(
+                    frame["instruction"], result, errors, feedback
+                )
+                basic = known_returned_proof(
+                    domain,
+                    usage,
+                    current,
+                    entry,
+                    record,
+                    settings,
+                    phase_key=phase,
+                    frame=frame,
+                )
+            else:
+                basic = clarification.known_source_proof(domain, usage, record)
             rows = witness(domain, usage, current["id"])
         require(
             len(set(rows["steps"]) - set(slot["before_steps"]))
@@ -196,9 +251,9 @@ def resume_marker(domain, budget, settings, current, data):
             "原phase返回或结算计数不完整。",
         )
         return {
-            "fix": FIX,
+            "fix": phase_fix(phase),
             "source_key": entry["key"],
-            "phase": PHASE,
+            "phase": phase,
             "old_attempt": slot["attempt"],
             "old_slot_sha256": sha(slot),
             "stopped_event_id": relevant[-1]["id"],
@@ -243,14 +298,15 @@ def guard_pending_recovery(worker):
     # A valid interpretation still needs the ordinary independent next phase.
     # Its permit is not an exemption from unresolved selected-provider charges.
     for record in worker.task["result"].get(authored.RECEIPTS, {}).values():
-        grant = record.get("phases", {}).get(PHASE, {}).get(MARK)
-        if record.get("state") != "pending" or not isinstance(grant, dict):
-            continue
-        chosen = clarification.provider(SimpleNamespace(settings=worker.settings), worker.task)
-        require(chosen.public() == grant["marker"]["account"], "来源保持核对前原账户配置改变。")
-        with worker.budget.db() as usage:
-            known_currency(usage, chosen.kind)
-            ensure_witness(worker.domain, usage, worker.task["id"], grant["marker"]["original_rows"])
+        for phase in PHASES:
+            grant = record.get("phases", {}).get(phase, {}).get(MARK)
+            if record.get("state") != "pending" or not isinstance(grant, dict):
+                continue
+            chosen = clarification.provider(SimpleNamespace(settings=worker.settings), worker.task)
+            require(chosen.public() == grant["marker"]["account"], "来源保持核对前原账户配置改变。")
+            with worker.budget.db() as usage:
+                known_currency(usage, chosen.kind)
+                ensure_witness(worker.domain, usage, worker.task["id"], grant["marker"]["original_rows"])
 
 
 def claim(
@@ -265,8 +321,9 @@ def claim(
     repair_feedback,
 ):
     ctx = worker.__dict__.get("_diagnostic_phase")
-    if not ctx or ctx["key"] != PHASE or not eligible(worker.task):
+    if not ctx or ctx["key"] not in PHASES or not eligible(worker.task):
         return
+    phase = ctx["key"]
     slot = ctx["slot"]
     if MARK in slot:
         return
@@ -279,7 +336,7 @@ def claim(
         return
     resume = resumes[-1]
     marker = json.loads(resume["payload"]).get(MARK)
-    if not isinstance(marker, dict) or marker.get("fix") != FIX:
+    if not isinstance(marker, dict) or marker.get("fix") != phase_fix(phase) or marker.get("phase") != phase:
         return
     require(
         [e for e in events if e["id"] > resume["id"] and e["kind"] == "running"]
@@ -309,6 +366,11 @@ def claim(
             instruction, value, issues, repair_feedback
         ),
     }
+    if phase == "preserve":
+        from .authored_source_classification import ACTION
+
+        frame["diagnostic_label"] = "作者来源分类与完整原意保持"
+        require(instruction.get("动作") == ACTION, "保持恢复只能修正原独立保持请求。")
     current = worker.domain.task(worker.task["id"])
     value = checkpoint(worker.domain, current, worker.settings, running=True)
     require(
@@ -327,7 +389,7 @@ def claim(
             value[3],
             value[4],
             worker.settings,
-            phase_key=PHASE,
+            phase_key=phase,
             frame=frame,
             stop_event_id=marker["stopped_event_id"],
             terminal_error=marker["original_error"],
@@ -389,7 +451,7 @@ def claim(
         worker.db.check_attempt(tx, current["id"], worker.attempt)
         revalidate(worker, marker)
         latest = json.loads(tx.execute("SELECT result FROM tasks WHERE id=?", (current["id"],)).fetchone()[0])
-        target = latest[authored.RECEIPTS][marker["source_key"]]["phases"][PHASE]
+        target = latest[authored.RECEIPTS][marker["source_key"]]["phases"][phase]
         require(
             MARK not in target and sha(target) == marker["old_slot_sha256"],
             "原phase或许可已被并发更新。",
@@ -402,7 +464,7 @@ def claim(
 
 def permit_dispatch(worker, fingerprint, instruction):
     ctx = worker.__dict__.get("_diagnostic_phase")
-    if not ctx or ctx["key"] != PHASE or MARK not in ctx["slot"]:
+    if not ctx or ctx["key"] not in PHASES or MARK not in ctx["slot"]:
         return False
     grant = ctx["slot"][MARK]
     if grant["attempt"] != worker.attempt:
@@ -430,7 +492,7 @@ def permit_dispatch(worker, fingerprint, instruction):
         worker.db.check_attempt(tx, current["id"], worker.attempt)
         revalidate(worker, marker)
         latest = json.loads(tx.execute("SELECT result FROM tasks WHERE id=?", (current["id"],)).fetchone()[0])
-        slot = latest[authored.RECEIPTS][marker["source_key"]]["phases"][PHASE]
+        slot = latest[authored.RECEIPTS][marker["source_key"]]["phases"][ctx["key"]]
         active = slot.get(MARK)
         require(
             active == grant and plain_slot(slot) == grant["original_slot"],

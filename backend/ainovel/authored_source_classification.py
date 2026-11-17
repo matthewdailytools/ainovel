@@ -170,7 +170,26 @@ def preservation_input(worker, record):
     }
 
 
-def issues(value, entry, contract, basis):
+def _reference_details(row, path, choices, *, source_only=False):
+    evidence = row["evidence_ids"]
+    details = []
+    invalid = list(dict.fromkeys(i for i in evidence if i not in choices))
+    if invalid:
+        allowed = "SCOPE原句" if source_only else "SCOPE／FIX原句"
+        details.append(
+            f"{path}.evidence_ids含非法编号{','.join(invalid)}；只允许本次{allowed}编号，"
+            "O编号属于AI观察，不是原句证据"
+        )
+    if len(evidence) != len(set(evidence)):
+        details.append(f"{path}.evidence_ids有重复编号，须逐项去重")
+    if not row["reason"].strip():
+        details.append(f"{path}.reason为空，须说明原文依据")
+    if source_only and row["result"] == "pass" and not evidence:
+        details.append(f"{path}.evidence_ids为空，pass须有本次SCOPE原句依据")
+    return "；".join(details)
+
+
+def issues(value, entry, contract, basis, *, detailed=False):
     errors = []
     sources = authored.core.units(entry["text"])
     expected = {
@@ -190,7 +209,10 @@ def issues(value, entry, contract, basis):
                 or any(i not in choices for i in evidence)
                 or not row["reason"].strip()
             ):
-                errors.append("保持只引用本次完整连续来源编号并说明理由。")
+                message = "保持只引用本次完整连续来源编号并说明理由。"
+                if detailed:
+                    message += " " + _reference_details(row, f"{field}.{row['source_id']}", choices)
+                errors.append(message)
             if (row["result"] == "pass" or row.get("classification_result") == "pass") and row[
                 "source_id"
             ] not in evidence:
@@ -207,10 +229,23 @@ def issues(value, entry, contract, basis):
             or not row["reason"].strip()
             or (row["result"] == "pass" and not evidence)
         ):
-            errors.append("P通过须回到本次原话，不能从观察、固定项或候选补造情节依据。")
+            message = "P通过须回到本次原话，不能从观察、固定项或候选补造情节依据。"
+            if detailed:
+                message += " " + _reference_details(
+                    row,
+                    f"item_checks.{row['item_id']}",
+                    expected["source_checks"],
+                    source_only=True,
+                )
+            errors.append(message)
     if not value["author_contract_check"]["reason"].strip():
         errors.append("采用约定保持须明确说明，不能空白通过。")
     return errors
+
+
+def detailed_issues(value, entry, contract, basis):
+    """Locate reference errors without changing acceptance or legacy feedback."""
+    return issues(value, entry, contract, basis, detailed=True)
 
 
 def passed(value):
@@ -381,6 +416,38 @@ def completed_unverified_record(domain, current, entry, record):
         ) from error
 
 
+def preservation_request(record, inventory):
+    """Rebuild the original preservation request without worker state or I/O."""
+    entry = record["source"]
+    basis = record["preservation_input"]
+    schema = Preservation.model_json_schema()
+    schema["properties"]["input_sha256"]["enum"] = [authored.sha(basis)]
+    return {
+        "instruction": {
+            "动作": ACTION,
+            authored.KEY: VERSION,
+            "input_sha256": authored.sha(basis),
+            "作者本次原话": entry["text"],
+            "全部原话连续单元": inventory["sources"],
+            "先行分类（AI提案不是真值）": inventory["inventory"],
+            "完整P解释（AI提案非新条件）": record["contract"],
+            "本章及全书固定条件": basis["fixed"],
+            "采用创作约定": basis["author_contract"],
+            "分类边界": GUIDANCE,
+            "要求": "独立逐全部SCOPE原句核查分类是否漏掉真范围要求，以及P是否保留完整原意；不能凭先行观察或P自称通过。每句source_checks给classification_result和result，全部P按P01起在item_checks各一次，全部固定项各一次；pass必须给本项来源编号。not_scope_related不免剧情：保留失败/未交付、角色不知道或不能推出全知、请求与许可/取得区别、归还条件、真排他、特定禁止、原件副本、阶段时点和否定。source/fixed通过只引用自己的原句，P依据只能本次原话；新增无源内容或遗漏原句fail，不能确认unknown。全书未到的后续结果只核解释保留，不要求提前兑现。此处没有正文、候选、旧结论或自由原因，不补剧情，不是文学批准。",
+        },
+        "schema": Preservation,
+        "context": {"scope": "完整作者原话、固定项和采用约定的独立保持；无正文/候选/未来章"},
+        "validator": lambda value: issues(value, entry, record["contract"], basis),
+        "max_output": 4096,
+        "contract": schema,
+        "diagnostic_label": "作者来源分类与完整原意保持",
+        "repair_feedback": lambda: {
+            "引用修正要求": "本步骤没有正文或候选。只回到全部SCOPE原句、全部P及FIX，按完整编号顺序核分类和原意；not_scope_related不准漏原句，真正unknown/fail不为修引用改pass。"
+        },
+    }
+
+
 async def independent_preserve(worker, record, inventory, owners):
     from .workflow_plan_preparation import phase
     from .authored_source_execution import ensure_runtime
@@ -393,36 +460,15 @@ async def independent_preserve(worker, record, inventory, owners):
         raise DomainError("authored_scope_changed", "独立保持输入改变，未重派旧步骤。", 409)
     record["preservation_input"] = basis
     worker.checkpoint(worker.task["result"])
-    schema = Preservation.model_json_schema()
-    schema["properties"]["input_sha256"]["enum"] = [authored.sha(basis)]
+    request = preservation_request(record, inventory)
+    request["diagnostic_legacy_validator"] = request["validator"]
+    request["validator"] = lambda value: detailed_issues(value, entry, record["contract"], basis)
     result = await phase(
         worker,
         record,
         "preserve",
         "checking",
-        lambda: worker.grounded(
-            {
-                "动作": ACTION,
-                authored.KEY: VERSION,
-                "input_sha256": authored.sha(basis),
-                "作者本次原话": entry["text"],
-                "全部原话连续单元": inventory["sources"],
-                "先行分类（AI提案不是真值）": inventory["inventory"],
-                "完整P解释（AI提案非新条件）": record["contract"],
-                "本章及全书固定条件": basis["fixed"],
-                "采用创作约定": basis["author_contract"],
-                "分类边界": GUIDANCE,
-                "要求": "独立逐全部SCOPE原句核查分类是否漏掉真范围要求，以及P是否保留完整原意；不能凭先行观察或P自称通过。每句source_checks给classification_result和result，全部P按P01起在item_checks各一次，全部固定项各一次；pass必须给本项来源编号。not_scope_related不免剧情：保留失败/未交付、角色不知道或不能推出全知、请求与许可/取得区别、归还条件、真排他、特定禁止、原件副本、阶段时点和否定。source/fixed通过只引用自己的原句，P依据只能本次原话；新增无源内容或遗漏原句fail，不能确认unknown。全书未到的后续结果只核解释保留，不要求提前兑现。此处没有正文、候选、旧结论或自由原因，不补剧情，不是文学批准。",
-            },
-            Preservation,
-            {"scope": "完整作者原话、固定项和采用约定的独立保持；无正文/候选/未来章"},
-            lambda v: issues(v, entry, record["contract"], basis),
-            contract=schema,
-            diagnostic_label="作者来源分类与完整原意保持",
-            repair_feedback=lambda: {
-                "引用修正要求": "本步骤没有正文或候选。只回到全部SCOPE原句、全部P及FIX，按完整编号顺序核分类和原意；not_scope_related不准漏原句，真正unknown/fail不为修引用改pass。"
-            },
-        ),
+        lambda: worker.grounded(**request),
         owner_ids=owners,
     )
     record["state"] = "ready" if passed(result) else "unverified"

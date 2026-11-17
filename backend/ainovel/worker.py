@@ -636,7 +636,7 @@ class Worker:
             cache_alternative is not None
             and cache_alternative != instruction
             and replay_owner is not None
-            and phase.get("key") == "interpret"
+            and phase.get("key") in {"interpret", "preserve"}
             and not phase.get("slot", {}).get("diagnostic_feedback_recovery")
         ):
             # Current diagnostics stay authoritative. Historical labels only
@@ -1328,7 +1328,7 @@ class Worker:
             if (
                 diagnostic_legacy_validator is not None
                 and getattr(self, "_workflow_plan_replay", None) is not None
-                and phase.get("key") == "interpret"
+                and phase.get("key") in {"interpret", "preserve"}
                 and not phase.get("slot", {}).get("diagnostic_feedback_recovery")
             ):
                 legacy_issues = diagnostic_legacy_validator(deepcopy(result))
