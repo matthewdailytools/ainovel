@@ -8525,5 +8525,38 @@
     "result": "passed",
     "record": "2026-11-17-preservation-reference-recovery.md",
     "fix_of": "assisted12-ch3-preservation-invalid-evidence-held-20261117"
+  },
+  {
+    "id": "preservation-reference-recovery-5cc-ci-restores-deployed-20261117",
+    "date": "2026-11-17",
+    "commit": "5cc03a7",
+    "module": "来源保持阻断修复与实际部署",
+    "scenario": "合批10静态/2697后端/168无头及436源码/7构建同输入通过；精确CI44073068137/job134003937875成功，实际备份双隔离恢复及5cc部署完成，41+2/25原件/历史费用保持；发布业务写与模型0，不据此判整书或文学通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-17-preservation-reference-recovery.md",
+    "fix_of": "preservation-reference-recovery-root-full-regression-20261117"
+  },
+  {
+    "id": "frozen-exit-third-chapter-r1-maintained-continue4-20261117",
+    "date": "2026-11-17",
+    "commit": "5cc03a7",
+    "module": "半自动第3章与既定整书出口",
+    "scenario": "第3章3403字r1已采纳保存并维护21记录/6场景，paused next4；P03原模型pass、P03 guard unknown及原报告保留，操作员裁定提议发生但交换未成交，5建议/傍晚精度/旧关系覆盖省略排后续；第4章HTTP200 queued仅受理，文学/两书/收益仍未验证",
+    "phase": "quality",
+    "result": "unverified",
+    "record": "2026-11-17-scope-freeze-and-followups.md",
+    "fix_of": "assisted12-ch3-preservation-invalid-evidence-held-20261117"
+  },
+  {
+    "id": "assisted12-ch4-source-observation-held-20261117",
+    "date": "2026-11-17",
+    "commit": "5cc03a7",
+    "module": "两模式写前停点与全自动首章r2",
+    "scenario": "半自动4来源受阻保留；独立auto12自行规划12章、首章r1模型12P全pass但独立查出同刻/共同基准问题，10处r2共3314字已保存且事实核对通过、文学未验；主task needs_review/pause1/next2，recipient_scope未知无正文，旧创作快照无刷新入口；r2独立整理运行中截止/CNY1.5，未记维护完成",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-17-scope-freeze-and-followups.md",
+    "fix_of": ""
   }
 ]
