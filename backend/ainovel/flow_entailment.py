@@ -18,6 +18,16 @@ SUPPORTED_VERSIONS = (LEGACY_VERSION, VERSION)
 ACTION = "独立核对正文流向观察的来源蕴含"
 LEGACY_OBSERVATION_VERSION = "source-role-observation/2"
 OBSERVATION_VERSION = "source-role-observation/3"
+OBJECT_KEY = "flow_object_observation_guidance_version"
+OBJECT_VERSION = "body-object-observation-guidance/1"
+OBJECT_GUIDANCE_DETAIL = (
+    "名称表可以是物品的概称，正文可以用材质、具体种类、简称或连续回指称呼同一实物。只依据本次正文"
+    "的连续指代、用途及取得经过辨认，不仅因字面不同就填other，也不因同属尺、纸、记录就合并。"
+    "物品本体与读数、答案、许可、请求本身分开：看见固定潮尺的数字，只证明读到数字，不等于借得"
+    "一把量尺；另一把工具、另一份实物或同指不明，仍用other或保留未知。不得依据预期方向或"
+    "原观察note选择物品；“接过”只说明动作，不能单独证明接过哪一件或它与名称表同指。"
+    "独立复核须重新核具体对象、双方、阶段、确定性和连续引文；观察提案不是物品同指的证据。"
+)
 
 # Names alone do not decide whether a request denotes the speech act or the
 # requested answer/object. This guidance is independent of the expected plot.
@@ -64,6 +74,23 @@ def execution_version(worker):
 
 def observation_version(worker):
     return LEGACY_OBSERVATION_VERSION if execution_version(worker) == LEGACY_VERSION else OBSERVATION_VERSION
+
+
+def object_guidance(worker):
+    task = getattr(worker, "task", None) or {}
+    snapshot = task.get("result", {}).get("candidate_recheck_snapshot") or {}
+    marker = snapshot.get(OBJECT_KEY)
+    if marker is None:
+        return {}
+    if (
+        task.get("kind") != "candidate_recheck"
+        or marker != OBJECT_VERSION
+        or execution_version(worker) != VERSION
+    ):
+        raise DomainError(
+            "flow_entailment_version", "正文物品辨认的冻结执行模板无法确认，未升级旧检查。", 409
+        )
+    return {"物品辨认执行模板": marker, "物品同指与内容边界": OBJECT_GUIDANCE_DETAIL}
 
 
 def enabled(worker, version=None):
@@ -176,6 +203,7 @@ async def review_flows(worker, text, entities, objects, observations):
             },
             "要求": "只核实每条观察是否由本次正文支持，不判断是否符合任何情节要求。名称表没有预期方向；不得补造角色身份或依旧报告认定。逐项检查object_id实际所指、supplier_id、recipient_id、stage、certainty和原引文所述行为。原观察证据也只是待核实提案，不能循环佐证；可回到本次全文核对但须定位连续原文。supported须全部实质断言受支持；unknown和contradicted均为有效结果，不为通过而删项或重造方向。只返回原flow_id的判断，不生成替代观察、不读取全书未来、规划或作者期望。",
             **(GUIDANCE if version == VERSION else {}),
+            **object_guidance(worker),
         },
         schema,
         {"scope": "仅本次正文、无方向名称表与观察提案；未提供原情节、预期方向、逐项对照结论或旧报告"},

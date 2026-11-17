@@ -15,6 +15,7 @@
 
 ## 文件
 
+- [候选复检物品辨认指导](2026-11-17-candidate-object-observation-guidance.md)：首章漏配复现后的实现、窄回归与待发布验证范围。
 - [完整编号追踪](N-U-F验收追踪.md)：N01—N12、U01—U13、F01—F16的任务、证据及剩余缺口。
 - [需求场景矩阵](需求与场景矩阵.md)：痛点、需求、作者状态、场景和功能覆盖。
 - `matrix.json`：模块整体结论和证据索引，按实际范围更新；已执行但待作者/整书验收记unverified，未执行保留not_run，各自注明范围。不从邻近用例推定通过。
@@ -24,6 +25,10 @@
 生成历史：`.venv/Scripts/python.exe scripts/build-validation-history.py`。
 
 ## 当前状态
+
+[候选复检物品辨认指导](2026-11-17-candidate-object-observation-guidance.md)已完成Root的26项窄回归、10类静态检查（745前端／48Node）及168项无头，434源码／7tested输入保持、0 flaky。完整后端仍待终态，新精确CI／发布／真实质量均待验；日常仍237，原r1／P06未知／原稿费用不改，不将工程分项视为整体通过。
+
+[首章r1最小修稿与正式复检](2026-11-17-first-chapter-r1-and-recheck-quality.md)：操作员7处替换后的2796字r1已正式另存候选，r0 payload精确保留、原空稿rev0不动。独立复检任务执行succeeded，但review_passed=false，9项pass／P06仍unknown；F12实际借用标other、F01读数误映O02，不能以完成检查代替正文通过。6笔CNY0.581950全结，DS累计41.645616／余38.354384，家族2.023726／余9.976274；OpenAI历史保持，未采纳／维护／resume、自动未启。物品辨认指导改进仅计划／未验证，不提升文学、整书或收益。 以下旧段落保留各自截止。
 
 [诊断修复实际发布与首章待审](2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md)：237bdf7／CbKTBuhK已完成同输入433／7的2653后端／745前端／168无头／48Node、精确CI及V7真实发布／双恢复；新A07只读入口通过，1次阅读PUT尝试abort发送0。随后同E7仅一次正式resume，来源三阶段ready，新增10笔CNY0.735706全结；首章2626字r0仍needs_review／未采用，P03证据缺口、P06对象漏配与另两处局部内容问题分别保留。DS累计41.063666／未知0，OpenAI历史费用和未知不变；全自动未启动，原759条历史、模块业务／整书／文学及收益状态不提升。 旧段落按各自截止读取。
 

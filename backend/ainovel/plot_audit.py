@@ -263,6 +263,9 @@ async def independent_flows(
             "supplier与recipient按待识别内容本身的给出及接收方向识别，不能无条件把发问人当取得方。",
         )
         observation_instruction["要求"] += "内容所指口径优先于笼统索取者口径。" + OBJECT_GUIDANCE
+        from .flow_entailment import object_guidance
+
+        observation_instruction.update(object_guidance(worker))
     observed = await worker.grounded(
         observation_instruction,
         FlowObservations,

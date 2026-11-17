@@ -8426,5 +8426,49 @@
     "result": "unverified",
     "record": "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
     "fix_of": ""
+  },
+  {
+    "id": "e7-ch1-r1-patch-and-r0-history-20261117",
+    "module": "候选编辑与历史",
+    "scenario": "7处限定替换2626→2796字；正式PATCH同候选r1，r0完整payload及原空稿rev0保持，null采纳回执，无模型自动返修或正文覆盖",
+    "phase": "stability",
+    "result": "passed",
+    "fix_of": "",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "record": "2026-11-17-first-chapter-r1-and-recheck-quality.md"
+  },
+  {
+    "id": "e7-ch1-r1-recheck-executed-and-fees-20261117",
+    "module": "候选复检与费用",
+    "scenario": "唯一独立复检任务succeeded仅表示执行完成，报告绑定r1/正文SHA；6返回CNY.581950全结，旧行/费用保持，家族2.023726，未采纳维护resume",
+    "phase": "stability",
+    "result": "passed",
+    "fix_of": "",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "record": "2026-11-17-first-chapter-r1-and-recheck-quality.md"
+  },
+  {
+    "id": "e7-ch1-r1-quality-p06-held-20261117",
+    "module": "半自动首章质量",
+    "scenario": "r1九项pass/仅P06unknown，P03及测量/用途本轮未再阻断；借用F12 completed却other、读数F01误映O02，正文仍未通过，新指导尚无验证",
+    "phase": "quality",
+    "result": "unverified",
+    "fix_of": "e7-resumed-first-chapter-quality-held-20261117",
+    "date": "2026-11-17",
+    "commit": "237bdf7",
+    "record": "2026-11-17-first-chapter-r1-and-recheck-quality.md"
+  },
+  {
+    "id": "candidate-object-guidance-root-partial-checks-20261117",
+    "date": "2026-11-17",
+    "commit": "工作树（基线0ef7870）",
+    "module": "候选复检工程",
+    "scenario": "仅26窄回归＋10类静态（745前端／48Node）＋168全无头分项通过，434源码／7tested保持、0flaky；完整后端仍待，精确CI／发布／新模板真实质量未验，不称整体通过",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-17-candidate-object-observation-guidance.md",
+    "fix_of": "e7-ch1-r1-quality-p06-held-20261117"
   }
 ]

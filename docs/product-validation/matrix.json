@@ -288,6 +288,12 @@
     ],
     "regression_evidence_history": [
       "2026-11-16-source-classification-and-same-source-continuation.md"
+    ],
+    "additional_quality_evidence": [
+      "2026-11-17-first-chapter-r1-and-recheck-quality.md"
+    ],
+    "additional_stability_evidence": [
+      "2026-11-17-first-chapter-r1-and-recheck-quality.md"
     ]
   },
   {
@@ -337,7 +343,8 @@
       "2026-11-16-source-classification-and-same-source-continuation.md"
     ],
     "additional_quality_evidence": [
-      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-first-chapter-r1-and-recheck-quality.md"
     ]
   },
   {
@@ -413,7 +420,8 @@
     ],
     "additional_stability_evidence": [
       "2026-11-16-observation-recovery-runtime-and-ui.md",
-      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md"
+      "2026-11-17-diagnostic-recovery-runtime-and-first-chapter.md",
+      "2026-11-17-first-chapter-r1-and-recheck-quality.md"
     ],
     "regression_evidence_history": [
       "2026-11-16-source-classification-and-same-source-continuation.md"

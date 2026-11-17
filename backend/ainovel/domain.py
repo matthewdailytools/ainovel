@@ -708,6 +708,7 @@ class Domain:
             initial[REFERENCE_KEY] = REFERENCE_VERSION
         if kind == "candidate_recheck":
             from .candidate_recheck import VERSION, freeze
+            from .flow_entailment import OBJECT_VERSION
 
             snapshot = freeze(
                 self,
@@ -715,6 +716,7 @@ class Domain:
                 conditional_policy=initial[CONDITIONAL_KEY],
                 applicability_version=initial[APPLICABILITY_KEY],
                 flow_entailment_version=FLOW_VERSION,
+                flow_object_guidance_version=OBJECT_VERSION,
             )
             initial.update(
                 candidate_recheck_version=VERSION,
@@ -885,6 +887,9 @@ class Domain:
                         conditional_policy=selection.get(CONDITIONAL_KEY),
                         applicability_version=selection.get(APPLICABILITY_KEY),
                         flow_entailment_version=selection.get(FLOW_KEY),
+                        flow_object_guidance_version=selection.get(
+                            "flow_object_observation_guidance_version"
+                        ),
                     )
                     != selection
                 ):

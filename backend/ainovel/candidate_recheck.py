@@ -79,7 +79,13 @@ def assisted_contract(source, parent, plot):
 
 
 def freeze(
-    domain, request, *, conditional_policy=None, applicability_version=None, flow_entailment_version=None
+    domain,
+    request,
+    *,
+    conditional_policy=None,
+    applicability_version=None,
+    flow_entailment_version=None,
+    flow_object_guidance_version=None,
 ):
     from .plot_audit import VERSION as PLOT_VERSION
     from .plot_identity_context import VERSION as IDENTITY_VERSION
@@ -180,6 +186,12 @@ def freeze(
                 "flow_entailment_version", "复检的流向来源核对政策无法确认，未升级旧检查。", 409
             )
         policy[FLOW_KEY] = flow_entailment_version
+    if flow_object_guidance_version is not None:
+        from .flow_entailment import OBJECT_KEY, OBJECT_VERSION, VERSION as FLOW_VERSION
+
+        if flow_object_guidance_version != OBJECT_VERSION or flow_entailment_version != FLOW_VERSION:
+            raise DomainError("flow_entailment_version", "正文物品辨认执行模板无法确认，未升级旧检查。", 409)
+        policy[OBJECT_KEY] = flow_object_guidance_version
     return {
         "version": VERSION,
         **policy,
@@ -230,6 +242,7 @@ def validate(worker):
             conditional_policy=expected.get(KEY),
             applicability_version=expected.get(APPLICABILITY_KEY),
             flow_entailment_version=expected.get(FLOW_KEY),
+            flow_object_guidance_version=expected.get("flow_object_observation_guidance_version"),
         )
         != expected
     ):
