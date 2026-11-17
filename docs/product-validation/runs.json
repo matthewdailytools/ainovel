@@ -8470,5 +8470,27 @@
     "result": "passed",
     "record": "2026-11-17-candidate-object-observation-guidance.md",
     "fix_of": "e7-ch1-r1-quality-p06-held-20261117"
+  },
+  {
+    "id": "object-guidance-8b-full-backend-fixture-failure-20261117",
+    "commit": "8b73278",
+    "module": "完整后端回归",
+    "scenario": "434输入稳定但完整1failed/2661passed/1warning；历史fixture只删FLOW残留OBJECT，守卫拒绝；8b CI运行中未绿，无日常或模型操作",
+    "phase": "stability",
+    "result": "failed",
+    "fix_of": "",
+    "date": "2026-11-17",
+    "record": "2026-11-17-object-guidance-history-fixture-retest.md"
+  },
+  {
+    "id": "object-guidance-faithful-history-fixture-narrow-retest-20261117",
+    "commit": "工作树（基线8b73278）",
+    "module": "历史兼容测试修正",
+    "scenario": "仅测试同时去除历史不存在的FLOW/OBJECT且断言不增标记；另保残留OBJECT删双方FLOW的blocked/0call反例，33窄复测通过；新full/CI/发布/真实质量待",
+    "phase": "stability",
+    "result": "passed",
+    "fix_of": "object-guidance-8b-full-backend-fixture-failure-20261117",
+    "date": "2026-11-17",
+    "record": "2026-11-17-object-guidance-history-fixture-retest.md"
   }
 ]
