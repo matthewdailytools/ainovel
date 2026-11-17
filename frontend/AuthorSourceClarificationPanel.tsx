@@ -387,6 +387,11 @@ export function AuthorSourceClarificationPanel({
         {preview && targetMatches && (
           <>
             <h4>第 {preview.chapter} 章 · 来源仍待核对，尚无正文候选</h4>
+            {preview.source_review.observation_failure && (
+              <p role="status">
+                三份原始返回已完整保存，但格式核对失败。补充说明会与原话分开保存，不会修改旧返回或将其记为通过。
+              </p>
+            )}
             <h5>原作者情节</h5>
             <pre className="report">{preview.original_source.text}</pre>
             {preview.current_source.text !== preview.original_source.text && (

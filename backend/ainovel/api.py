@@ -1,7 +1,7 @@
 """Loopback-only application API. Writes require a same-origin session and CSRF token."""
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 import json
 from pathlib import Path
 import secrets
@@ -708,6 +708,7 @@ def create_app(settings=None, schema_only=False):
         domain.check_author_contract_snapshot(current["branch_id"], result.get("author_contract_snapshot"))
         reject_pending = None
         branch_snapshot = None
+        refresh_preparation_context = False
         if current["kind"] == "workflow":
             structure = result.get("waiting_structure")
             if structure:
@@ -771,6 +772,16 @@ def create_app(settings=None, schema_only=False):
                 )
                 if not data.acknowledge_changes and (not waiting or stale):
                     raise DomainError("story_changed", "前文已改变；确认后从最早失效章重新检查生成。", 409)
+                preparation = result.get("plot_preparations", {}).get(str(result.get("next_chapter")), {})
+                refresh_preparation_context = bool(
+                    data.acknowledge_changes
+                    and current["payload"].get("mode") == "automatic"
+                    and current["status"] in {"needs_review", "paused"}
+                    and not waiting
+                    and preparation.get("status") in {"interpreting", "needs_review"}
+                    and set(preparation.get("phases", {})) == {"recipient_scope:0"}
+                    and preparation.get("creative_context")
+                )
                 if stale:
                     result.pop("waiting_artifact", None)
                     waiting = None
@@ -799,7 +810,10 @@ def create_app(settings=None, schema_only=False):
                 result["expected_story_revision"] = branch["story_revision"]
         if data.pause_after_maintenance:
             result["pause_after_maintenance_requested"] = True
-        with db.connect(True) as tx:
+        with (
+            budget.db(True) if refresh_preparation_context else nullcontext() as usage,
+            db.connect(True) as tx,
+        ):
             latest = tx.execute("SELECT status,updated FROM tasks WHERE id=?", (task_id,)).fetchone()
             if latest["status"] != current["status"] or latest["updated"] != current["updated"]:
                 raise DomainError("task_changed", "任务状态已改变，请刷新后操作。", 409)
@@ -827,6 +841,11 @@ def create_app(settings=None, schema_only=False):
                 )
                 if changed.rowcount != 1:
                     raise DomainError("candidate_changed", "候选状态已改变，请重新审阅。", 409)
+            if refresh_preparation_context:
+                from .workflow_plan_context import refresh_after_revision
+
+                context_refresh = refresh_after_revision(domain, current, result, usage, data.reason)
+                db.event(tx, task_id, "preparation_context_refreshed", context_refresh)
             from .diagnostic_phase_recovery import resume_marker
 
             resume_event = data.model_dump()

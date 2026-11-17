@@ -1,7 +1,9 @@
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test'
 import { ADDITION, clarificationFixture } from '../../fixtures/author-source-clarification'
+import { clarificationFormatFailureFixture } from '../../fixtures/author-source-clarification-format-failure'
 import type { Task } from '../../frontend/api'
 import type { ClarificationInput } from '../../frontend/authorSourceClarification'
+import { object } from '../../frontend/planRestart'
 import { assertActualDoubleText } from './helpers/actualTextScale'
 
 const SUMMARY = '补充作者情节来源，保留原话与费用',
@@ -18,7 +20,7 @@ function gate() {
   return { promise, release }
 }
 type Reply = { status?: number; json?: unknown; abort?: boolean }
-async function setup(page: Page) {
+async function setup(page: Page, formatFailure = false) {
   const sessionResponse = await page.request.get('/api/session'),
     origin = new URL(sessionResponse.url()).origin
   const session = (await sessionResponse.json()) as { csrf: string }
@@ -28,7 +30,10 @@ async function setup(page: Page) {
   })
   expect(response.status()).toBe(201)
   const novel = (await response.json()) as { id: string; branch_id: string }
-  const first = clarificationFixture('clarify-parent', novel.branch_id),
+  const first = (formatFailure ? clarificationFormatFailureFixture : clarificationFixture)(
+      'clarify-parent',
+      novel.branch_id,
+    ),
     second = clarificationFixture('clarify-other', novel.branch_id)
   for (const fixture of [first, second]) {
     fixture.source.novel_id = novel.id
@@ -167,6 +172,60 @@ test('明确作者补充、IME与重复触发：只建一子任务，原情节�
     status: world.originals[0].status,
     result: { ...world.first.source.result, continued_to: undefined },
   }).toMatchObject(world.originals[0])
+  expect(world.external).toEqual([])
+  expect(world.errors).toEqual([])
+})
+
+test('三份完整格式失败经现有表单显式补充，重复触发及刷新只保留一个原nonce', async ({ page }) => {
+  const world = await setup(page, true)
+  world.hooks.onPost = async () => ({ abort: true })
+  let target = await open(page, world)
+  await read(target)
+  await expect(
+    target.getByText(
+      '三份原始返回已完整保存，但格式核对失败。补充说明会与原话分开保存，不会修改旧返回或将其记为通过。',
+      { exact: true },
+    ),
+  ).toBeVisible()
+  const input = target.getByRole('textbox', { name: INPUT, exact: true }),
+    submit = target.getByRole('button', { name: SUBMIT, exact: true })
+  await expect(submit).toBeDisabled()
+  await input.fill(' \n ')
+  await expect(submit).toBeDisabled()
+  expect(world.posts).toHaveLength(0)
+  await input.fill(ADDITION)
+  await submit.dblclick()
+  await expect(target.getByRole('button', { name: LOOKUP, exact: true })).toBeVisible()
+  expect(world.posts).toHaveLength(1)
+  const originalRequest = structuredClone(world.posts[0])
+  expect(originalRequest.actor).toBe('author')
+  expect(originalRequest.clarification).toBe(ADDITION)
+  expect(object(world.first.source.result)!.authored_source_scope_receipts).toEqual(
+    object(world.originals[0].result)!.authored_source_scope_receipts,
+  )
+  expect(world.first.record.phases.observe.status).toBe('started')
+  expect(world.first.record.phases.observe).not.toHaveProperty('response')
+  expect(world.first.record.phases.observe).not.toHaveProperty('response_sha256')
+
+  target = await open(page, world)
+  await expect(target.getByRole('textbox', { name: INPUT, exact: true })).toHaveValue(ADDITION)
+  await expect(target.getByRole('button', { name: SUBMIT, exact: true })).toBeDisabled()
+  world.commit(originalRequest)
+  await target.getByRole('button', { name: LOOKUP, exact: true }).click()
+  await expect(page.getByRole('region', { name: '作者来源补充回执', exact: true })).toBeVisible()
+  expect(world.posts).toEqual([originalRequest])
+  const queries = world.calls.filter(
+    (call) => call.startsWith('GET ') && call.includes('/author-source-clarifications?'),
+  )
+  expect(queries).toHaveLength(1)
+  expect(new URL('http://offline.invalid' + queries[0].slice(4)).searchParams.get('client_request_id')).toBe(
+    originalRequest.client_request_id,
+  )
+  expect(object(world.first.source.result)!.authored_source_scope_receipts).toEqual(
+    object(world.originals[0].result)!.authored_source_scope_receipts,
+  )
+  expect(world.first.record.phases.observe.status).toBe('started')
+  expect(world.first.record.phases.observe).not.toHaveProperty('response')
   expect(world.external).toEqual([])
   expect(world.errors).toEqual([])
 })

@@ -144,7 +144,7 @@ export function observationRetryUnavailableReason(task: Task) {
     return '只读取尚未保存观察结果的原现场；能否恢复由服务端核对三次已返回及结算证明。'
   return ''
 }
-function returnedProof(
+export function returnedProof(
   v: unknown,
   source: Task,
   provider: string,

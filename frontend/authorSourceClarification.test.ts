@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { clarificationFixture } from '../fixtures/author-source-clarification'
+import { clarificationFormatFailureFixture } from '../fixtures/author-source-clarification-format-failure'
 import { canonical, object } from './planRestart'
 import {
   clarificationUnavailableReason,
@@ -158,6 +159,106 @@ describe('作者来源补充边界', () => {
     if (change === 'combined') object(receipt.source_entry)!.text = '替换原话'
     if (change === 'policy') result.authored_source_scope_version = 'future'
     if (change === 'account-config') receipt.account = { ...preview.account, model: 'changed-model' }
+    expect(readClarificationChild(value, { source, preview, request })).toBeUndefined()
+  })
+})
+
+describe('三份已知完整格式失败的显式澄清边界', () => {
+  it('只读预览保留pending现场，author补充及原nonce可查证，不制造有效观察', () => {
+    const { source, preview, request, child, record } = clarificationFormatFailureFixture(),
+      pending = { source, preview, request },
+      owner = canonical([source.novel_id, source.branch_id, source.id]),
+      before = structuredClone(record)
+    expect(clarificationUnavailableReason(source)).toBe('')
+    expect(readClarificationPreview(preview, source)).toEqual(preview)
+    expect(preview.source_review).toMatchObject({
+      state: 'pending',
+      contract: null,
+      bindings: null,
+      inventory: null,
+      observation_failure: { kind: 'known_returned_invalid_observation' },
+    })
+    expect(preview.source_review.observation_failure?.raw_returns).toHaveLength(3)
+    expect(readPendingClarification(structuredClone(pending), owner)).toEqual(pending)
+    expect(readClarificationChild(child(), pending)).toEqual(child())
+    expect(
+      readClarificationLookup(
+        { source_task_id: source.id, client_request_id: request.client_request_id, task: child() },
+        pending,
+      ),
+    ).toEqual(child())
+    expect(record).toEqual(before)
+    expect(record.phases.observe.status).toBe('started')
+    expect(record.phases.observe).not.toHaveProperty('response')
+    expect(record.phases.observe).not.toHaveProperty('response_sha256')
+  })
+
+  it.each([
+    'missing-proof',
+    'duplicate-call',
+    'unsettled-call',
+    'incomplete-call',
+    'missing-dispatch',
+    'zero-dispatch',
+    'duplicate-dispatch',
+    'missing-stop',
+    'stop-before-last-dispatch',
+    'wrong-attempt',
+    'wrong-owner',
+    'wrong-errors',
+    'missing-raw',
+    'empty-raw',
+    'unbound-raw',
+    'fake-inventory',
+    'fake-unverified',
+  ])('不把缺失、重复、未决或伪造现场当作可提交预览：%s', (change) => {
+    const { source, preview } = clarificationFormatFailureFixture(),
+      value = structuredClone(preview),
+      failure = object(value.source_review.observation_failure)!,
+      proof = object(failure.proof)!,
+      steps = (proof.steps as unknown[]).map((step) => object(step)!),
+      calls = (proof.calls as unknown[]).map((call) => object(call)!),
+      raw = failure.raw_returns as Record<string, unknown>[]
+    if (change === 'missing-proof') delete failure.proof
+    if (change === 'duplicate-call') proof.call_ids = [steps[0].call_id, steps[0].call_id, steps[2].call_id]
+    if (change === 'unsettled-call') Object.assign(calls[0], { status: 'unknown', charged: null })
+    if (change === 'incomplete-call') calls[0].has_complete_step = false
+    if (change === 'missing-dispatch') delete steps[0].dispatch_event_id
+    if (change === 'zero-dispatch') steps[0].dispatch_event_id = 0
+    if (change === 'duplicate-dispatch') steps[1].dispatch_event_id = steps[0].dispatch_event_id
+    if (change === 'missing-stop') delete proof.stopped_event_id
+    if (change === 'stop-before-last-dispatch') proof.stopped_event_id = steps[2].dispatch_event_id
+    if (change === 'wrong-attempt') proof.attempt = 'other-attempt'
+    if (change === 'wrong-owner') proof.owner_task_id = 'other-task'
+    if (change === 'wrong-errors') proof.errors = [['另一次工程错误'], ['原错误'], ['原错误']]
+    if (change === 'missing-raw') failure.raw_returns = raw.slice(0, 2)
+    if (change === 'empty-raw') raw[0].text = ' '
+    if (change === 'unbound-raw') raw[0].fingerprint = 'another-step'
+    if (change === 'fake-inventory') value.source_review.inventory = { status: 'supported' }
+    if (change === 'fake-unverified') value.source_review.state = 'unverified'
+    expect(readClarificationPreview(value, source)).toBeUndefined()
+  })
+
+  it.each(['old-execution', 'fake-completed', 'prior-clarification'])(
+    '只允许当前未写正文的首次格式失败现场读取：%s',
+    (change) => {
+      const { source, preview, record } = clarificationFormatFailureFixture()
+      if (change === 'old-execution')
+        object(source.result)!.authored_source_observation_execution_version =
+          'authored-source-observation-execution/1'
+      if (change === 'fake-completed') record.phases.observe.status = 'completed'
+      if (change === 'prior-clarification')
+        object(source.result)!.author_source_clarification = { chapter: source.result.next_chapter }
+      expect(clarificationUnavailableReason(source)).not.toBe('')
+      expect(readClarificationPreview(preview, source)).toBeUndefined()
+    },
+  )
+
+  it('子任务须保留原格式失败证明，不能用新回执替换旧started现场', () => {
+    const { source, preview, request, child } = clarificationFormatFailureFixture(),
+      value = child(),
+      receipt = object(object(value.result)!.author_source_clarification)!
+    delete receipt.observation_failure
     expect(readClarificationChild(value, { source, preview, request })).toBeUndefined()
   })
 })

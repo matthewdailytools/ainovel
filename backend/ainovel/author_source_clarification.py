@@ -114,6 +114,14 @@ def validate_task(task, domain, chain=None):
         or receipt.get("source_payload_sha256") != sha(parent["payload"])
         or receipt.get("source_progress_sha256") != sha(clean_parent)
         or receipt.get("plan_sha256") != sha(origin["result"].get("plan"))
+        or receipt.get("observation_failure") != receipt.get("budget", {}).get("observation_failure")
+        or (
+            receipt.get("observation_failure") is not None
+            and (
+                prior.get("state") != "pending"
+                or prior.get("phases", {}).get("observe", {}).get("status") != "started"
+            )
+        )
         or any(origin["result"].get(k) != v for k, v in receipt.get("policies", {}).items())
         or receipt.get("source_entry") != combine(receipt["previous_source_entry"], request)
         or {k: v for k, v in origin["payload"].items() if k not in {"client_request_id", "budget_limit"}}
@@ -206,6 +214,24 @@ def ensure_runtime(task, domain, settings):
             "原账户模型配置已变化，请核对冻结来源与费用，未自动换配置继续。",
             409,
         )
+    if receipt.get("observation_failure") is not None:
+        from .budget import Budget
+
+        parent = next(t for t in chain if t["id"] == receipt["source_task_id"])
+        budget = Budget(settings)
+        with budget.db() as usage:
+            proof = failed_observation_proof(
+                domain,
+                budget,
+                usage,
+                parent,
+                receipt["previous_source_entry"],
+                receipt["previous_source_receipt"],
+            )
+        if proof != receipt["observation_failure"]:
+            raise DomainError(
+                "unknown_result", "原观察三份返回或结算依据已变化，保留原失败，未借补充重发。", 409
+            )
     # A queued child must not replay body work dispatched later by another
     # producer while it waited. Its own generation and legitimate descendants
     # are permitted; original parents and unrelated tasks are not promoted.
@@ -321,6 +347,49 @@ def completed_unverified_record(domain, current, entry):
             "仅已完整返回的来源待核停点可补充；未知派发、格式失败或已就绪结果不重做。",
             409,
         ) from error
+
+
+def failed_observation_record(domain, current, entry):
+    """Admit an untouched /2 format stop, not an accepted observation."""
+    from . import authored_source_execution as execution
+    from .author_source_observation_retry import pending_record
+
+    if (
+        current["status"] != "blocked_runtime"
+        or current["result"].get(authored.KEY) != authored.CURRENT_VERSION
+        or current["result"].get(execution.KEY) != execution.VERSION
+        or any(
+            item["result"].get(RECEIPT, {}).get("chapter") == entry["number"]
+            for item in authored.ancestry(current, domain)
+        )
+    ):
+        raise DomainError(
+            "author_clarification_checkpoint",
+            "仅新版首次观察的已知完整格式失败可显式补充；本章已有补充不借新标识重做。",
+            409,
+        )
+    record = pending_record(domain, current, entry)
+    if not execution.record_valid(record, current["result"].get(execution.SNAPSHOT)):
+        raise DomainError("author_clarification_checkpoint", "原观察执行依据不符，未补造回执。", 409)
+    return record
+
+
+def failed_observation_proof(domain, budget, usage, current, entry, record):
+    from . import authored_source_classification as classification
+    from . import authored_source_execution as execution
+    from .author_source_observation_retry import known_returned_proof, settled_provider
+
+    execution.ensure_runtime(current, domain, budget.settings)
+    settled_provider(usage, provider(budget, current))
+    return known_returned_proof(
+        domain,
+        usage,
+        current,
+        entry,
+        record,
+        budget.settings,
+        frame=classification.observation_request(entry, execution.VERSION),
+    )
 
 
 def checkpoint(domain, current, *, record_check=None, allow_running=False):
@@ -523,19 +592,57 @@ def frozen_basis(current, checkpoint_value, costs, shared, account):
 
 
 def preview(domain, budget, current, *, usage=None):
-    gate = checkpoint(domain, current)
+    number = current["result"].get("next_chapter")
+    pending = (
+        current["result"].get(authored.RECEIPTS, {}).get(f"chapter:{number}", {}).get("state") == "pending"
+    )
+    gate = checkpoint(domain, current, record_check=failed_observation_record if pending else None)
     branch, chapter, original, entry, record, tasks, chapters = gate
     auxiliary = auxiliary_family(domain, tasks)
+
+    def costs_and_proof(handle):
+        costs = family_budget(domain, handle, current, tasks, provider(budget, current), auxiliary)
+        if pending:
+            proof = failed_observation_proof(domain, budget, handle, current, entry, record)
+            # Family costs retain older settled calls without inventing their
+            # missing outputs. This gate proves only this source phase's returns.
+            costs = {**costs, "source_steps": proof, "observation_failure": proof}
+        else:
+            costs = {**costs, "source_steps": known_source_proof(domain, handle, record)}
+        return costs
+
     if usage is None:
         with budget.db() as handle:
-            costs = family_budget(domain, handle, current, tasks, provider(budget, current), auxiliary)
-            source_proof = known_source_proof(domain, handle, record)
+            costs = costs_and_proof(handle)
     else:
-        costs = family_budget(domain, usage, current, tasks, provider(budget, current), auxiliary)
-        source_proof = known_source_proof(domain, usage, record)
-    costs = {**costs, "source_steps": source_proof}
+        costs = costs_and_proof(usage)
     shared = budget.report()
     basis = frozen_basis(current, gate, costs, shared, provider(budget, current).public())
+    review = {
+        "state": record["state"],
+        "contract": deepcopy(record.get("contract")),
+        "bindings": deepcopy(record.get("bindings")),
+        "inventory": deepcopy(record["phases"]["observe"].get("response")),
+    }
+    if pending:
+        proof = costs["observation_failure"]
+        review["observation_failure"] = {
+            "kind": "known_returned_invalid_observation",
+            "proof": deepcopy(proof),
+            "raw_returns": [
+                {
+                    **deepcopy(step),
+                    "text": json.loads(
+                        domain.db.all(
+                            "SELECT result FROM task_steps WHERE task_id=? AND fingerprint=?",
+                            (current["id"], step["fingerprint"]),
+                        )[0]["result"]
+                    )["text"],
+                }
+                for step in proof["steps"]
+            ],
+            "notice": "三份原始返回完整但格式校验均失败；inventory为空，不是模型通过或有效来源观察。原started回执不改。",
+        }
     return {
         "version": VERSION,
         "source_task_id": current["id"],
@@ -547,12 +654,7 @@ def preview(domain, budget, current, *, usage=None):
         "baseline": basis,
         "original_source": deepcopy(original),
         "current_source": deepcopy(entry),
-        "source_review": {
-            "state": record["state"],
-            "contract": deepcopy(record.get("contract")),
-            "bindings": deepcopy(record.get("bindings")),
-            "inventory": deepcopy(record["phases"]["observe"]["response"]),
-        },
+        "source_review": review,
         "plan": deepcopy(current["result"]["plan"]),
         "policies": {k: deepcopy(v) for k, v in current["result"].items() if k.endswith("_version")},
         "adoption": current["payload"]["adoption"],
@@ -647,6 +749,8 @@ def clarify(domain, budget, current, request):
             "policy": "仅追加显式补充；独立保持通过后才继续正文，原情节与历史不改，非文学批准。",
             "author_literary_approval": "unverified",
         }
+        if "observation_failure" in observed["source_review"]:
+            receipt["observation_failure"] = deepcopy(observed["budget"]["observation_failure"])
         progress.update(continued_from=current["id"], **{KEY: VERSION, RECEIPT: receipt})
         progress[authored.RECEIPTS].pop(entry["key"])
         progress.pop(CHECKS, None)

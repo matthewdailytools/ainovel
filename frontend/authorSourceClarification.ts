@@ -2,6 +2,7 @@ import type { Account, Money, Task } from './api'
 import type { components } from './api-schema'
 import { readFlowBudget, type FlowBudget } from './flowContinuation'
 import { canonical, object } from './planRestart'
+import { returnedProof, type ReturnedObservationProof } from './authorSourceObservationRetry'
 
 export const AUTHOR_CLARIFICATION_VERSION = 'author-source-clarification/1'
 export const AUTHORED_SCOPE_VERSION = 'authored-source-scope/1'
@@ -33,7 +34,18 @@ export type ClarificationPreview = {
   }
   original_source: AuthorSourceEntry
   current_source: AuthorSourceEntry
-  source_review: { state: 'unverified'; contract: unknown; bindings: unknown; inventory: unknown }
+  source_review: {
+    state: 'unverified' | 'pending'
+    contract: unknown
+    bindings: unknown
+    inventory: unknown
+    observation_failure?: {
+      kind: 'known_returned_invalid_observation'
+      proof: ReturnedObservationProof
+      raw_returns: (ReturnedObservationProof['steps'][number] & { text: string })[]
+      notice: string
+    }
+  }
   plan: unknown
   policies: Record<string, unknown>
   adoption: 'manual' | 'automatic'
@@ -59,6 +71,26 @@ const policies = (task: Task) =>
   Object.fromEntries(Object.entries(task.result).filter(([key]) => key.endsWith('_version')))
 const emptyHash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 
+function pendingObservation(task: Task) {
+  const result = object(task.result),
+    record = object(object(result?.authored_source_scope_receipts)?.[`chapter:${result?.next_chapter}`]),
+    phases = object(record?.phases),
+    observe = object(phases?.observe)
+  return (
+    task.status === 'blocked_runtime' &&
+    result?.authored_source_scope_version === AUTHORED_SCOPE_CURRENT_VERSION &&
+    result.authored_source_observation_execution_version === 'authored-source-observation-execution/2' &&
+    record?.state === 'pending' &&
+    !!phases &&
+    Object.keys(phases).join(',') === 'observe' &&
+    observe?.status === 'started' &&
+    observe.owner_task_id === task.id &&
+    !('response' in observe) &&
+    !('response_sha256' in observe) &&
+    object(result.author_source_clarification)?.chapter !== result.next_chapter
+  )
+}
+
 export function clarificationUnavailableReason(task: Task) {
   const result = object(task.result),
     record = object(object(result?.authored_source_scope_receipts)?.[`chapter:${result?.next_chapter}`]),
@@ -81,6 +113,8 @@ export function clarificationUnavailableReason(task: Task) {
     result.pause_after_maintenance_requested
   )
     return '先处理活动任务、待审正文或维护，再核对来源停点。'
+  // This only enables a read. The server must prove all three complete failures.
+  if (pendingObservation(task)) return ''
   if (
     record?.state !== 'unverified' ||
     !phases ||
@@ -97,6 +131,36 @@ export function clarificationUnavailableReason(task: Task) {
   )
     return '仅已完整返回的来源待核停点可补充，未知派发或格式失败不能借此重发。'
   return ''
+}
+
+function failedObservationReview(
+  review: Record<string, unknown>,
+  source: Task,
+  account: Record<string, unknown>,
+) {
+  const failure = object(review.observation_failure),
+    proof = failure?.proof,
+    raw = failure?.raw_returns
+  return (
+    pendingObservation(source) &&
+    review.state === 'pending' &&
+    review.inventory === null &&
+    review.contract === null &&
+    review.bindings === null &&
+    failure?.kind === 'known_returned_invalid_observation' &&
+    text(failure.notice) &&
+    typeof account.kind === 'string' &&
+    typeof account.currency === 'string' &&
+    returnedProof(proof, source, account.kind, account.currency) &&
+    Array.isArray(raw) &&
+    raw.length === 3 &&
+    raw.every((value, index) => {
+      const row = object(value)
+      if (!row || !text(row.text)) return false
+      const { text: _text, ...step } = row
+      return same(step, proof.steps[index])
+    })
+  )
 }
 
 function sourceEntry(value: unknown, chapter: number): value is AuthorSourceEntry {
@@ -157,10 +221,12 @@ export function readClarificationPreview(value: unknown, source: Task): Clarific
       (key) => !hash(baseline[key]),
     ) ||
     !Array.isArray(baseline.manuscript_versions) ||
-    review.state !== 'unverified' ||
-    !same(review.contract, record?.contract) ||
+    review.state !== record?.state ||
+    (review.state !== 'unverified' && !failedObservationReview(review, source, account)) ||
+    (review.state === 'unverified' && review.observation_failure !== undefined) ||
+    !same(review.contract, record?.contract ?? null) ||
     !same(review.bindings, record?.bindings ?? null) ||
-    !same(review.inventory, observe?.response) ||
+    !same(review.inventory, observe?.response ?? null) ||
     !same(row.plan, source.result.plan) ||
     !same(row.policies, policies(source)) ||
     row.adoption !== source.payload.adoption ||
@@ -275,6 +341,8 @@ export function readClarificationChild(value: unknown, pending: PendingClarifica
     receipt.source_progress_sha256 !== preview.baseline.progress_sha256 ||
     receipt.plan_sha256 !== preview.baseline.plan_sha256 ||
     !same(receipt.baseline, preview.baseline) ||
+    (preview.source_review.observation_failure !== undefined &&
+      !same(receipt.observation_failure, preview.source_review.observation_failure.proof)) ||
     !same(receipt.request, pending.request) ||
     !same(receipt.policies, preview.policies) ||
     !same(receipt.account, preview.account) ||
