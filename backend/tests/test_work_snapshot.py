@@ -658,6 +658,18 @@ def test_rollback_keeps_numeric_review_but_blocks_completion_until_dependent_che
         length_targets={"min_chars": 1},
     )
 
+    forecast = verify(client.get(f"{route(branch)}/{saved['id']}/preview"))
+    affected = {row["id"]: row for row in forecast["affected_reports"]}
+    assert affected[delivered["id"]] == {
+        "id": delivered["id"],
+        "kind": "book_completion",
+        "scope": "book",
+        "scope_id": None,
+        "check_ids": [],
+    }
+    assert affected[scoped["id"]]["scope_id"] == second["id"]
+    assert "08" in affected[scoped["id"]]["check_ids"] and "09" not in affected[scoped["id"]]["check_ids"]
+
     request_restore(client, branch, saved["id"])
     current = verify(client.get(f"{inspections}/{scoped['id']}"))
     assert not current["current"] and item(current, "09")["current_status"] == "green"

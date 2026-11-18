@@ -4,6 +4,7 @@ import {
   outlineCardFromReference,
   outlinePromiseSeed,
   prepareOutlineVersion,
+  requiredPromiseSignature,
   validateOutlineActiveBasis,
   validateOutlineHistory,
   validateOutlineSyncObject,
@@ -149,6 +150,35 @@ describe('离线大纲正式版本', () => {
         plan: { ...input.plan, new_promises: [{ title: '未确认的计划' }] },
       }),
     ).toThrow('超出允许数量')
+  })
+
+  it('正式大纲同步保留作者必达窗口，确认签名随撤销或窗口调整变化', () => {
+    const input = fixture()
+    const [window] = input.plan.promises
+    const mandatory = { ...window, fulfillment: 'author_required' }
+    const version = prepareOutlineVersion({ ...input, plan: { ...input.plan, promises: [mandatory] } })
+    const wire = validateOutlineSyncObject('work', 'outline-version:outline-two', {
+      format: 'ainovel-manuscript-sync/1',
+      kind: 'outline-version',
+      branch_id: 'work',
+      version,
+    })
+    expect(wire).toMatchObject({ version: { plan: { promises: [mandatory] } } })
+    expect(describeOutlineVersion(version)).toContain('必须在回收窗口内兑现')
+    const original = requiredPromiseSignature(version.plan)
+    expect(original).not.toBe(requiredPromiseSignature(input.plan))
+    expect(original).not.toBe(
+      requiredPromiseSignature({
+        ...version.plan,
+        promises: [{ ...version.plan.promises[0], closes_chapter_id: 'first' }],
+      }),
+    )
+    expect(() =>
+      prepareOutlineVersion({
+        ...input,
+        plan: { ...input.plan, promises: [{ ...window, fulfillment: 'from_free_text' }] },
+      }),
+    ).toThrow('无法识别伏笔的必达约定')
   })
 
   it('按 SHA-256 区分同号卡片，仅接受对应正式修订的冻结摘要', async () => {
