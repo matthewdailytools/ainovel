@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import secrets
 import sqlite3
+from time import time
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -17,6 +18,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import Field, JsonValue, StringConstraints, ValidationError, model_validator
 
 from .db import DomainError
+from .chapter_conflicts import verified_chapter
 from .cloud_attachments import SCHEMA as ATTACHMENT_SCHEMA, register_routes as register_attachments
 from .manuscript_exchange import RevisionObject, _source_link
 from .outline_sync import OutlineVersionObject, parse_outline_object
@@ -137,12 +139,19 @@ class Push(Input):
 class Resolution(Input):
     change_id: Identifier
     parent_revision: Identifier
-    choice: Literal["current", "incoming", "merge"]
+    choice: Literal["current", "incoming", "merge", "merge_prose"]
     payload: Payload | None = None
     tombstone: bool | None = Field(default=None, strict=True)
+    content: str | None = Field(default=None, max_length=250_000)
 
     @model_validator(mode="after")
     def check_payload(self):
+        if self.choice == "merge_prose":
+            if self.content is None or self.payload is not None or self.tombstone is not None:
+                raise ValueError("正文合并须提供作者编辑的正文。")
+            return self
+        if self.content is not None:
+            raise ValueError("只有正文合并可提交编辑后的正文。")
         if self.choice == "merge":
             if self.tombstone is None or self.tombstone != (self.payload is None):
                 raise ValueError("合并时须明确是否删除，且只在保留对象时提供 JSON 对象。")
@@ -621,7 +630,8 @@ class SyncStore:
     def resolve(self, work, digest, identifier, data):
         with self.transaction(write=True) as tx:
             device = self._authorize(tx, work, digest)
-            fingerprint = _digest(_encoded(["resolve", device, identifier, data.model_dump()]))
+            request = data.model_dump(exclude={"content"} if data.choice != "merge_prose" else None)
+            fingerprint = _digest(_encoded(["resolve", device, identifier, request]))
             if replay := self._replay(tx, work, data.change_id, fingerprint):
                 return replay
             incoming = self._change(tx, work, identifier)
@@ -632,7 +642,12 @@ class SyncStore:
                 raise DomainError("sync_conflict_resolved", "冲突已有处理回执。", 409)
             if conflict.head_revision != data.parent_revision:
                 raise DomainError("sync_head_changed", "比较后又有新修订，请重新读取冲突。", 409)
-            if data.choice == "merge":
+            if data.choice == "merge_prose":
+                payload, tombstone = (
+                    self._merge_chapter_prose(tx, work, device, conflict, incoming, data),
+                    False,
+                )
+            elif data.choice == "merge":
                 payload, tombstone = data.payload, data.tombstone
             else:
                 chosen = (
@@ -663,6 +678,53 @@ class SyncStore:
                 (receipt.change_id, work, identifier),
             )
             return receipt
+
+    def _merge_chapter_prose(self, tx, work, device, conflict, incoming, data):
+        if not conflict.object_id.startswith("chapter:"):
+            raise DomainError("sync_chapter", "仅章节冲突可提交人工合并正文。", 409)
+        current = _receipt(self._change(tx, work, conflict.head_revision))
+        selected = verified_chapter(work, conflict.object_id, current.payload)
+        other = verified_chapter(work, conflict.object_id, _receipt(incoming).payload)
+        for candidate in (selected, other):
+            source = self._head(tx, work, f"revision:{candidate.head.id}")
+            if (
+                not source
+                or RevisionObject.model_validate_json(self._change(tx, work, source)["payload"]).revision
+                != candidate.head
+            ):
+                raise DomainError("sync_history", "比较章稿尚未收到可核对的原始修订。", 409)
+        stable = _digest(
+            _encoded([work, conflict.object_id, current.change_id, data.change_id, data.content])
+        )
+        revision = selected.head.model_copy(
+            update={
+                "id": stable,
+                "revision": selected.head.revision + 1,
+                "parent_id": selected.head.id,
+                "content": data.content,
+                "sha256": _digest(data.content),
+                "cause": "作者合并同步冲突",
+                "created": time(),
+            }
+        )
+        source = RevisionObject(
+            format="ainovel-manuscript-sync/1", kind="revision", branch_id=work, revision=revision
+        )
+        push = Push(
+            change_id=f"merge-source-{stable}",
+            object_id=f"revision:{stable}",
+            parent_revision=None,
+            payload=source.model_dump(),
+            tombstone=False,
+        )
+        fingerprint = _digest(_encoded(["push", device, push.model_dump()]))
+        self._push_source_revision(tx, work, device, push, _payload(push.payload), fingerprint)
+        return {
+            **selected.model_dump(),
+            "chapter": {**selected.chapter.model_dump(), "revision": revision.revision, "stale": 0},
+            "head": revision.model_dump(),
+        }
+
 
 def create_sync_app(database_path: Path, provisioning_token: str, browser_origins=()):
     if len(provisioning_token) < 32 or any(char.isspace() for char in provisioning_token):

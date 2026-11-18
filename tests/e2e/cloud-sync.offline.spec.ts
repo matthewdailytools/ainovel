@@ -125,12 +125,69 @@ test('桌面和离线 Web 同章修改产生可解决冲突，历史稿仍可查
     expect(restored.revision).toBeGreaterThan(2)
 
     await context.setOffline(true)
+    const webBeforeMerge = 'Web 合并前稿：学徒先看到刻痕。'
+    const desktopBeforeMerge = '桌面合并前稿：师姐随后辨认刻痕。'
+    const mergedProse = '学徒先看到刻痕，师姐随后辨认出旧印记。'
+    await editor.fill(webBeforeMerge)
+    await web.getByRole('button', { name: '保存正文到浏览器', exact: true }).click()
+    await expect(web.getByText(/本地已保存 · 修订 \d+/)).toBeVisible()
+    await save(restored.revision, desktopBeforeMerge)
+    await desktop('run')
+    await context.setOffline(false)
+    await sync.click()
+    await web.getByRole('button', { name: /^比较冲突/ }).click()
+    await compare.getByRole('button', { name: '手动合并正文', exact: true }).click()
+    const merge = compare.getByRole('textbox', { name: '合并正文', exact: true })
+    await expect(merge).toHaveValue(webBeforeMerge)
+    await merge.fill(mergedProse)
+    let mergeRequestId: string | undefined
+    await web.route(
+      '**/conflicts/*/resolve',
+      async (route) => {
+        mergeRequestId = route.request().postDataJSON().change_id
+        const submitted = await route.fetch()
+        expect(submitted.ok(), await submitted.text()).toBe(true)
+        await route.abort('connectionreset')
+      },
+      { times: 1 },
+    )
+    web.once('dialog', (dialog) => void dialog.accept())
+    await compare.getByRole('button', { name: '提交合并章稿' }).click()
+    await expect(editor).toHaveValue(mergedProse)
+    await expect(compare).toHaveCount(0)
+    expect(mergeRequestId).toBeTruthy()
+    const mergeEvents = await page.request.get(
+      `${cloud}/api/sync/works/${branch_id}/pull?after=0&limit=100`,
+      {
+        headers: { Authorization: `Bearer ${webToken}` },
+      },
+    )
+    expect(mergeEvents.ok(), await mergeEvents.text()).toBe(true)
+    const { changes: afterMergeChanges } = await mergeEvents.json()
+    expect(
+      afterMergeChanges
+        .filter(
+          (row: { status: string; payload?: { head?: { content: string } } }) =>
+            row.status === 'resolved' && row.payload?.head?.content === mergedProse,
+        )
+        .map((row: { change_id: string }) => row.change_id),
+    ).toEqual([mergeRequestId])
+    await desktop('run')
+    const merged = await (await page.request.get(`/api/chapters/${chapterId}`)).json()
+    expect(merged.content).toBe(mergedProse)
+    const afterMerge = await (await page.request.get(branchPath + '/manuscript-package')).json()
+    const texts = [...afterMerge.revisions, ...(afterMerge.source_revisions ?? [])].map(
+      (row: { content: string }) => row.content,
+    )
+    expect(texts).toEqual(expect.arrayContaining([webBeforeMerge, desktopBeforeMerge, mergedProse]))
+
+    await context.setOffline(true)
     await editor.fill('Web 归档冲突稿。')
     await web.getByRole('button', { name: '保存正文到浏览器', exact: true }).click()
-    await expect(web.getByText(/本地已保存 · 修订 5/)).toBeVisible()
+    await expect(web.getByText(/本地已保存 · 修订 \d+/)).toBeVisible()
     const archived = await page.request.post(`/api/chapters/${chapterId}/archive`, {
       headers,
-      data: { base_revision: restored.revision, archived: true },
+      data: { base_revision: merged.revision, archived: true },
     })
     expect(archived.ok(), await archived.text()).toBe(true)
     await desktop('run')
@@ -238,6 +295,14 @@ test('桌面和离线 Web 同章修改产生可解决冲突，历史稿仍可查
     await web.getByRole('button', { name: '查看来源修订 2 · delayed-' }).click()
     await expect(web.getByRole('region', { name: '来源章稿正文' }).getByText(sourceText)).toBeVisible()
     await expect(web.getByRole('button', { name: '1. 拾铃', exact: true })).toHaveCount(0)
+    await web.getByRole('button', { name: '停用作品同步', exact: true }).click()
+    await expect(web.getByRole('status').filter({ hasText: '本地模式' })).toBeVisible()
+    await context.setOffline(true)
+    await web.getByLabel('新章节名').fill('停用后继续写')
+    await web.getByRole('button', { name: '本地新建章节' }).click()
+    await editor.fill('这段内容保存在本机。')
+    await web.getByRole('button', { name: '保存正文到浏览器', exact: true }).click()
+    await expect(web.getByRole('status').filter({ hasText: '本地已保存 · 修订 1' })).toBeVisible()
   } finally {
     await context.close()
   }

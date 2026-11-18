@@ -565,7 +565,13 @@ export function Records({
         />
       </div>
       <ReadingMetricsPanel key={`reading-${branch.id}`} branchId={branch.id} chapters={chapters} />
-      <DesktopSyncPanel key={`sync-${branch.id}`} branchId={branch.id} notify={notify} refresh={refresh} />
+      <DesktopSyncPanel
+        key={`sync-${branch.id}`}
+        branchId={branch.id}
+        notify={notify}
+        refresh={refresh}
+        onForkSaved={() => onSnapshotRestored(branch.id)}
+      />
       <LocalPortableEvidence key={`evidence-${branch.id}`} branchId={branch.id} chapters={chapters} />
       <FinalizationPanel
         branchId={branch.id}

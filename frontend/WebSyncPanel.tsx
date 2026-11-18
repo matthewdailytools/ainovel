@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CloudAttachments } from './CloudAttachments'
 import { SyncScopePreview } from './SyncScopePreview'
+import { useLeaveGuard } from './leaveGuard'
 import type { LocalProject } from './offlineStore'
 import { describeOutlineVersion } from './outlineSyncModel'
 import { describeProjectVersion } from './projectSyncModel'
@@ -62,21 +63,30 @@ export function WebSyncPanel({
   unsaved,
   onApplied,
   onBusy,
+  onMergeDraftDirty,
 }: {
   project: LocalProject
   unsaved: boolean
   onApplied: () => Promise<void>
   onBusy: (busy: boolean) => void
+  onMergeDraftDirty: (dirty: boolean) => void
 }) {
   const [service, setService] = useState('')
   const [device, setDevice] = useState('')
   const [token, setToken] = useState('')
   const [status, setStatus] = useState<State>()
   const [compared, setCompared] = useState<Comparison>()
+  const [mergeText, setMergeText] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [message, setMessage] = useState('')
   const ready = !!service.trim() && !!device.trim()
+  const hasMergeDraft = mergeText !== undefined
+  useLeaveGuard(hasMergeDraft, '同步合并正文')
+  useEffect(() => {
+    onMergeDraftDirty(hasMergeDraft)
+    return () => onMergeDraftDirty(false)
+  }, [hasMergeDraft, onMergeDraftDirty])
   useEffect(() => {
     let active = true
     setStatus(undefined)
@@ -99,7 +109,7 @@ export function WebSyncPanel({
     }
   }, [project.branch.id, service, device, ready])
 
-  async function run(action: 'enable' | 'disable' | 'sync' | 'compare' | 'choose', value?: string) {
+  async function run(action: 'enable' | 'disable' | 'sync' | 'compare' | 'choose' | 'merge', value?: string) {
     if (busy || !ready) return
     setBusy(true)
     onBusy(true)
@@ -125,11 +135,27 @@ export function WebSyncPanel({
       }
       if (unsaved) throw new Error('请先保存当前章稿、立项或设定修改，再进行同步或合并。')
       const next =
-        action === 'choose' && compared && (value === 'local' || value === 'current' || value === 'incoming')
-          ? await resolveWebManuscript(project, scope, transport, compared, value)
-          : await syncWebManuscript(project, scope, transport)
+        action === 'merge' && compared && mergeText !== undefined
+          ? await resolveWebManuscript(project, scope, transport, compared, {
+              choice: 'merge_prose',
+              content: mergeText,
+            })
+          : action === 'choose' &&
+              compared &&
+              (value === 'local' || value === 'current' || value === 'incoming')
+            ? await resolveWebManuscript(project, scope, transport, compared, value)
+            : await syncWebManuscript(project, scope, transport)
       setStatus(next)
+      if (
+        compared?.incoming.conflict_id &&
+        action === 'merge' &&
+        next.conflicts.includes(compared.incoming.conflict_id)
+      ) {
+        setMessage('云端冲突仍待处理，合并输入已保留。')
+        return
+      }
       setCompared(undefined)
+      setMergeText(undefined)
       await onApplied()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '同步未完成。')
@@ -145,6 +171,10 @@ export function WebSyncPanel({
       onBusy(false)
     }
   }
+  const canMerge =
+    compared?.object?.kind === 'chapter' &&
+    compared.current.payload?.kind === 'chapter' &&
+    compared.incoming.payload?.kind === 'chapter'
   return (
     <details>
       <summary>作品云同步</summary>
@@ -152,7 +182,7 @@ export function WebSyncPanel({
       <p>
         工作版本编号 <code>{project.branch.id}</code>
       </p>
-      <fieldset disabled={busy || attachmentBusy}>
+      <fieldset disabled={busy || attachmentBusy || hasMergeDraft}>
         <legend>设备连接</legend>
         <label>
           同步服务地址
@@ -207,7 +237,13 @@ export function WebSyncPanel({
         </ul>
       )}
       {status?.conflicts.map((id) => (
-        <button key={id} type="button" title={id} disabled={busy} onClick={() => void run('compare', id)}>
+        <button
+          key={id}
+          type="button"
+          title={id}
+          disabled={busy || hasMergeDraft}
+          onClick={() => void run('compare', id)}
+        >
           比较冲突 {id.slice(0, 8)}
         </button>
       ))}
@@ -232,6 +268,48 @@ export function WebSyncPanel({
               </pre>
             </details>
           ))}
+          {canMerge && mergeText === undefined && (
+            <button
+              type="button"
+              disabled={busy || !token || unsaved}
+              onClick={() => {
+                if (compared.object?.kind === 'chapter') setMergeText(compared.object.head.content)
+              }}
+            >
+              手动合并正文
+            </button>
+          )}
+          {canMerge && mergeText !== undefined && (
+            <fieldset disabled={busy || !token || unsaved}>
+              <legend>手动合并冲突章节</legend>
+              <label>
+                合并正文
+                <textarea
+                  rows={12}
+                  maxLength={500_000}
+                  value={mergeText}
+                  onChange={(event) => setMergeText(event.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={Array.from(mergeText).length > 250_000}
+                onClick={() => {
+                  if (window.confirm('提交合并后的正文为新修订？双方原稿均保留。')) void run('merge')
+                }}
+              >
+                提交合并章稿
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('放弃当前合并输入？已保存稿仍可打开。')) setMergeText(undefined)
+                }}
+              >
+                放弃合并输入
+              </button>
+            </fieldset>
+          )}
           {(
             [
               ['local', '采用本机版'],
@@ -242,7 +320,7 @@ export function WebSyncPanel({
             <button
               key={choice}
               type="button"
-              disabled={busy || !token || unsaved}
+              disabled={busy || !token || unsaved || hasMergeDraft}
               onClick={() => {
                 const kind = compared.current.payload?.kind
                 const history =
@@ -268,7 +346,7 @@ export function WebSyncPanel({
         workId={project.branch.id}
         service={service}
         token={token}
-        inactive={!status?.enabled || busy}
+        inactive={!status?.enabled || busy || hasMergeDraft}
         onBusy={setAttachmentBusy}
       />
     </details>

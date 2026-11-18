@@ -87,6 +87,7 @@ export function OfflineWorkspace() {
   const [outlineDirty, setOutlineDirty] = useState(false)
   const [storyDirty, setStoryDirty] = useState(false)
   const [referenceDirty, setReferenceDirty] = useState(false)
+  const [syncMergeDirty, setSyncMergeDirty] = useState(false)
   const [includedExcerpts, setIncludedExcerpts] = useState<string[]>([])
   const [workbenchRefresh, setWorkbenchRefresh] = useState(0)
   const busy = localBusy || syncBusy
@@ -178,7 +179,7 @@ export function OfflineWorkspace() {
   function mayLeave(workChange = false) {
     if (
       workChange &&
-      (projectDirty || settingsDirty || outlineDirty || storyDirty || referenceDirty) &&
+      (projectDirty || settingsDirty || outlineDirty || storyDirty || referenceDirty || syncMergeDirty) &&
       !window.confirm('工作台有未确认的修改。是否离开当前作品？')
     )
       return false
@@ -398,6 +399,7 @@ export function OfflineWorkspace() {
                   localBusy
                 }
                 onBusy={setSyncBusy}
+                onMergeDraftDirty={setSyncMergeDirty}
                 onApplied={async () => {
                   const saved = (await listLocalProjects()).find(
                     (work) => work.branch.id === selected.branch.id,

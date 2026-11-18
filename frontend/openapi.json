@@ -1011,6 +1011,46 @@
         }
       }
     },
+    "/api/branches/{branch_id}/desktop-sync/conflicts/{conflict_id}/fork": {
+      "post": {
+        "summary": "Fork Sync",
+        "operationId": "fork_sync_api_branches__branch_id__desktop_sync_conflicts__conflict_id__fork_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "conflict_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Conflict Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "additionalProperties": true, "title": "Data" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/session": {
       "get": {
         "summary": "Session",

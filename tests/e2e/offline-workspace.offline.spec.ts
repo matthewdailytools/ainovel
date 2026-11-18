@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test'
+import { chromium, expect, test, type Page } from '@playwright/test'
+import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -154,6 +155,86 @@ test('浏览器返回容量错误时保留当前输入与上一保存修订', as
   await reopen.goto('/offline/')
   await selectManuscript(reopen)
   await expect(reopen.getByLabel('章节正文')).toHaveValue('')
+})
+
+test('Chromium 实际存储配额耗尽时正式章稿与待存输入仍可取回', async ({ browserName }) => {
+  test.skip(browserName !== 'chromium', '按站点覆盖配额使用 Chromium DevTools Protocol。')
+  const html = await readFile(resolve('dist/offline/index.html'))
+  const server = createServer((request, response) => {
+    const path = request.url || ''
+    if (path === '/') {
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<!doctype html>')
+    } else if (path === '/offline/') {
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html)
+    } else if (/^\/assets\/[\w.-]+\.(?:css|js)$/.test(path)) {
+      void readFile(resolve('dist', path.slice(1))).then(
+        (bytes) =>
+          response
+            .writeHead(200, { 'Content-Type': path.endsWith('.css') ? 'text/css' : 'text/javascript' })
+            .end(bytes),
+        () => response.writeHead(404).end(),
+      )
+    } else {
+      response.writeHead(404).end()
+    }
+  })
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
+  const { port } = server.address() as AddressInfo
+  const origin = `http://127.0.0.1:${port}`
+  try {
+    const isolated = await chromium.launchPersistentContext('', {
+      baseURL: origin,
+      serviceWorkers: 'block',
+      args: ['--disable-features=StaticStorageQuota'],
+    })
+    try {
+      const page = isolated.pages()[0]
+      await page.goto('/')
+      const cdp = await isolated.newCDPSession(page)
+      const quotaSize = 128 * 1024
+      // Override before the first write so IndexedDB cannot reuse cached quota.
+      await cdp.send('Storage.overrideQuotaForOrigin', { origin, quotaSize })
+      await expect
+        .poll(async () => (await page.evaluate(() => navigator.storage.estimate())).quota)
+        .toBe(quotaSize)
+      await createWorkspace(page)
+      const editor = page.getByLabel('章节正文')
+      const saved = '学徒先把铜铃放在窗台上。'
+      await editor.fill(saved)
+      await page.getByRole('button', { name: '保存正文到浏览器' }).click()
+      await expect(page.getByText('本地已保存 · 修订 1', { exact: true })).toBeVisible()
+      const estimate = await page.evaluate(() => navigator.storage.estimate())
+      expect(estimate.quota).toBe(quotaSize)
+      expect(estimate.usage).toBeGreaterThan(0)
+      expect(estimate.usage).toBeLessThan(quotaSize)
+
+      const pending = '尚未保存的手稿：' + randomBytes(150_000).toString('base64')
+      await editor.fill(pending)
+      await page.getByRole('button', { name: '保存正文到浏览器' }).click()
+      await expect(page.getByRole('alert').filter({ hasText: '浏览器空间不足，保存失败' })).toBeVisible()
+      await expect(editor).toHaveValue(pending)
+      await expect(page.getByText('修订 1 · 有未保存输入', { exact: true })).toBeVisible()
+      const draftStarted = page.waitForEvent('download')
+      await page.getByRole('button', { name: '下载当前草稿' }).click()
+      const draft = await draftStarted
+      expect(await readFile((await draft.path())!, 'utf8')).toBe(pending)
+
+      const reopened = await isolated.newPage()
+      await reopened.goto('/offline/')
+      await selectManuscript(reopened)
+      await expect(reopened.getByLabel('章节正文')).toHaveValue(saved)
+      const packStarted = reopened.waitForEvent('download')
+      await reopened.getByRole('button', { name: '导出稿件交换包' }).click()
+      const pack = await packStarted
+      const portable = JSON.parse(await readFile((await pack.path())!, 'utf8'))
+      expect(portable.revisions.map((row: { content: string }) => row.content)).toEqual(['', saved])
+    } finally {
+      await isolated.close()
+    }
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>((done) => server.close(() => done()))
+  }
 })
 
 test('离线重开可恢复暂存输入，同章保存稿更新时先比较再采用新基线', async ({ page, context }) => {

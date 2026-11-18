@@ -26,6 +26,7 @@ export type SyncReceipt = PushChange & {
 export type Resolution =
   | { choice: 'current' | 'incoming'; parent_revision: string }
   | { choice: 'merge'; parent_revision: string; payload: SyncPayload | null; tombstone: boolean }
+  | { choice: 'merge_prose'; parent_revision: string; content: string }
 type ResolutionRequest = Resolution & { change_id: string }
 
 export type SyncTransport = {
@@ -276,12 +277,23 @@ export function queueSyncResolution(
   changeId: string = crypto.randomUUID(),
 ): Promise<string> {
   if (value.choice === 'merge' && typeof value.tombstone !== 'boolean') invalid()
+  if (
+    value.choice === 'merge_prose' &&
+    (!objectId.startsWith('chapter:') ||
+      typeof value.content !== 'string' ||
+      value.content.length > 500_000 ||
+      Array.from(value.content).length > 250_000 ||
+      /\p{Surrogate}/u.test(value.content))
+  )
+    invalid('合并正文超出篇幅上限，或包含无效字符。')
   const request = {
     change_id: identifier(changeId),
     parent_revision: identifier(value.parent_revision),
     ...(value.choice === 'merge'
       ? { choice: value.choice, payload: body(value.payload, value.tombstone), tombstone: value.tombstone }
-      : { choice: value.choice }),
+      : value.choice === 'merge_prose'
+        ? { choice: value.choice, content: value.content }
+        : { choice: value.choice }),
   }
   return append(scope, {
     kind: 'resolve',

@@ -588,9 +588,19 @@ export async function resolveWebManuscript(
   scope: SyncScope,
   transport: SyncTransport,
   compared: Awaited<ReturnType<typeof prepareWebResolution>>,
-  choice: 'current' | 'incoming' | 'local',
+  choice: 'current' | 'incoming' | 'local' | { choice: 'merge_prose'; content: string },
 ) {
   const id = compared.incoming.conflict_id!
+  if (typeof choice === 'object') {
+    const waiting = (await readSyncState(scope)).pending.find(
+      (entry) => entry.kind === 'resolve' && entry.conflict_id === id,
+    )
+    if (waiting?.kind === 'resolve') {
+      if (waiting.request.choice !== 'merge_prose' || waiting.request.content !== choice.content)
+        throw new Error('已有一份合并请求等待回执，请先同步并核对结果。')
+      return syncWebManuscript(project, scope, transport)
+    }
+  }
   const fresh = await prepareWebResolution(project, scope, id)
   if (
     fresh.current.change_id !== compared.current.change_id ||
@@ -660,6 +670,14 @@ export async function resolveWebManuscript(
     )
       throw new Error('尚未取得该手法卡与云端对应的源修订，请先同步再比较。')
   }
+  if (
+    typeof choice === 'object' &&
+    (!fresh.incoming.object_id.startsWith('chapter:') ||
+      fresh.object?.kind !== 'chapter' ||
+      fresh.current.payload?.kind !== 'chapter' ||
+      fresh.incoming.payload?.kind !== 'chapter')
+  )
+    throw new Error('手动合并需要本机稿及两份仍可用的冲突正文。')
   const resolutionId = crypto.randomUUID()
   const objectId = compared.incoming.object_id
   await approveSyncResolution(scope, objectId, {
@@ -672,14 +690,16 @@ export async function resolveWebManuscript(
     scope,
     objectId,
     id,
-    choice === 'local'
-      ? {
-          choice: 'merge',
-          parent_revision,
-          payload: fresh.object as SyncPayload | null,
-          tombstone: !fresh.object,
-        }
-      : { choice, parent_revision },
+    typeof choice === 'object'
+      ? { ...choice, parent_revision }
+      : choice === 'local'
+        ? {
+            choice: 'merge',
+            parent_revision,
+            payload: fresh.object as SyncPayload | null,
+            tombstone: !fresh.object,
+          }
+        : { choice, parent_revision },
     resolutionId,
   )
   return syncWebManuscript(project, scope, transport)

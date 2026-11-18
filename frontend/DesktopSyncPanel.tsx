@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import type { Notify } from './App'
 import { CloudAttachments } from './CloudAttachments'
@@ -20,6 +20,8 @@ type SyncStatus = {
   conflicts: Conflict[]
   deferred: { object_id: string; reason: string }[]
 }
+type MergeResult = SyncStatus & { merge_receipt: { local_revision_id: string | null } }
+type ForkResult = { branch_id: string; branch_name: string; source_revision_id: string }
 type Side = {
   kind?: string
   revision_id?: string
@@ -185,20 +187,132 @@ function readable(side: Side, comparison: Comparison) {
   return side.head?.content ?? [side.novel?.title, side.novel?.brief].filter(Boolean).join('\n')
 }
 
+function chapterText(side: Side) {
+  return side?.kind === 'chapter' ? side.head?.content : undefined
+}
+
+function ChapterConflictActions({
+  comparison,
+  disabled,
+  run,
+  onMerge,
+  onFork,
+}: {
+  comparison: Comparison
+  disabled: boolean
+  run: (operation: () => Promise<void>) => Promise<void>
+  onMerge: (content: string, key: string) => Promise<void>
+  onFork: (choice: string, name: string, key: string) => Promise<ForkResult>
+}) {
+  const variants = [
+    { choice: 'local', label: '本机当前版', text: chapterText(comparison.local) },
+    { choice: 'current', label: '云端当前版', text: chapterText(comparison.remote.current.payload) },
+    { choice: 'incoming', label: '另一提交版', text: chapterText(comparison.remote.incoming.payload) },
+    { choice: 'base', label: '共同依据', text: chapterText(comparison.remote.base?.payload ?? null) },
+  ].filter((variant) => variant.text !== undefined)
+  const mergeAvailable = variants.filter(({ choice }) => choice !== 'base').length === 3
+  const [mode, setMode] = useState<'merge' | 'fork'>()
+  const [prose, setProse] = useState(chapterText(comparison.local) ?? '')
+  const [choice, setChoice] = useState(variants[0]?.choice ?? '')
+  const [name, setName] = useState('')
+  const [created, setCreated] = useState<ForkResult>()
+  const lastMerge = useRef<{ signature: string; key: string } | undefined>(undefined)
+  const lastFork = useRef<{ signature: string; key: string } | undefined>(undefined)
+  if (!variants.length) return null
+
+  function keyFor(action: 'merge' | 'fork', signature: string) {
+    const attempt = action === 'merge' ? lastMerge : lastFork
+    if (attempt.current?.signature !== signature) attempt.current = { signature, key: crypto.randomUUID() }
+    return attempt.current.key
+  }
+
+  return (
+    <div className="stack">
+      {mergeAvailable && (
+        <button type="button" disabled={disabled} onClick={() => setMode('merge')}>
+          手动合并正文
+        </button>
+      )}
+      <button type="button" disabled={disabled} onClick={() => setMode('fork')}>
+        另存到新工作分支
+      </button>
+      {mode === 'merge' && (
+        <fieldset disabled={disabled}>
+          <legend>编辑合并稿</legend>
+          <label>
+            合并后的正文
+            <textarea
+              value={prose}
+              rows={8}
+              maxLength={250000}
+              onChange={(event) => setProse(event.target.value)}
+            />
+          </label>
+          <p>提交后将保存新的云端正文修订，双方原稿保留在历史中。</p>
+          <button type="button" onClick={() => void run(() => onMerge(prose, keyFor('merge', prose)))}>
+            提交合并稿
+          </button>
+        </fieldset>
+      )}
+      {mode === 'fork' && (
+        <fieldset disabled={disabled}>
+          <legend>另存章节版本</legend>
+          <label>
+            要另存的章节版本
+            <select value={choice} onChange={(event) => setChoice(event.target.value)}>
+              {variants.map((variant) => (
+                <option key={variant.choice} value={variant.choice}>
+                  {variant.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            新工作分支名称
+            <input value={name} maxLength={200} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <p>复制本机当前工作，所选正文保存到新分支。当前分支和待处理冲突继续保留。</p>
+          <button
+            type="button"
+            disabled={!name.trim()}
+            onClick={() =>
+              void run(async () => {
+                const branchName = name.trim()
+                const result = await onFork(
+                  choice,
+                  branchName,
+                  keyFor('fork', JSON.stringify([choice, branchName])),
+                )
+                setCreated(result)
+              })
+            }
+          >
+            确认另存分支
+          </button>
+        </fieldset>
+      )}
+      {created && <p role="status">已另存到工作分支「{created.branch_name}」，可从工作分支下拉框打开。</p>}
+    </div>
+  )
+}
+
 export function DesktopSyncPanel({
   branchId,
   notify,
   refresh,
+  onForkSaved,
 }: {
   branchId: string
   notify: Notify
   refresh: () => Promise<unknown>
+  onForkSaved: () => Promise<unknown>
 }) {
   const path = `/branches/${branchId}/desktop-sync`
   const [origin, setOrigin] = useState('')
   const [token, setToken] = useState('')
   const [status, setStatus] = useState<SyncStatus>()
   const [comparison, setComparison] = useState<{ id: string; value: Comparison; key: string }>()
+  const [mergeNotice, setMergeNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const credential = { origin: origin.trim(), token: token.trim() }
@@ -285,6 +399,7 @@ export function DesktopSyncPanel({
           {status.enabled ? '已启用' : '本地模式'} · 游标 {status.cursor} · {status.pending} 条待发送或确认
         </p>
       )}
+      {mergeNotice && <p role="status">{mergeNotice}</p>}
       {[
         { label: '立项', source: status?.project_source },
         { label: '设定', source: status?.settings_source },
@@ -397,6 +512,42 @@ export function DesktopSyncPanel({
               {label}
             </button>
           ))}
+          <ChapterConflictActions
+            key={comparison.key}
+            comparison={comparison.value}
+            disabled={busy || !ready}
+            run={run}
+            onMerge={async (content, key) => {
+              const merged = await api<MergeResult>(`${path}/conflicts/${comparison.id}/resolve`, 'POST', {
+                ...credential,
+                choice: 'merge',
+                content,
+                parent_revision: comparison.value.remote.head_revision,
+                local_sha256: comparison.value.local_sha256,
+                idempotency_key: key,
+              })
+              setStatus(merged)
+              setComparison(undefined)
+              setMergeNotice(
+                merged.merge_receipt.local_revision_id
+                  ? '合并稿已保存为新正文修订。'
+                  : '云端已保存合并稿。本机待采用，当前正文已保留。',
+              )
+              await refresh()
+            }}
+            onFork={async (choice, branchName, key) => {
+              const saved = await api<ForkResult>(`${path}/conflicts/${comparison.id}/fork`, 'POST', {
+                ...credential,
+                choice,
+                branch_name: branchName,
+                parent_revision: comparison.value.remote.head_revision,
+                local_sha256: comparison.value.local_sha256,
+                idempotency_key: key,
+              })
+              await onForkSaved().catch(notify)
+              return saved
+            }}
+          />
         </section>
       )}
     </section>

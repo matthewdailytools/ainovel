@@ -6,21 +6,26 @@ from ipaddress import ip_address
 import json
 import re
 from threading import Lock
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from fastapi import Body
 import httpx
-from pydantic import Field, SecretStr, TypeAdapter, ValidationError
+from pydantic import Field, SecretStr, StringConstraints, TypeAdapter, ValidationError, model_validator
 
 from . import outline_sync, reference_sync, settings_sync, story_sync, workflow_archive
+from .chapter_conflicts import (
+    ChapterObject,
+    fork_chapter_tx,
+    fork_fingerprint,
+    fork_receipt,
+    verified_chapter,
+)
 from .cloud_sync import ComparedConflict, MAX_CURSOR, MAX_OBJECT_BYTES, Pulled, Receipt
 from .db import DomainError, dumps, uid
 from .manuscript_exchange import (
     PortableBranch,
-    PortableChapter,
     PortableEvidence,
-    PortableRevision,
     PortableWork,
     RevisionObject,
     _evidence,
@@ -71,6 +76,10 @@ CREATE TABLE IF NOT EXISTS desktop_sync_conflicts(
 CREATE TABLE IF NOT EXISTS desktop_sync_deferred(
  branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
  receipt TEXT NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(branch_id,object_id));
+CREATE TABLE IF NOT EXISTS desktop_sync_prose_merges(
+ branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id),change_id TEXT NOT NULL,
+ fingerprint TEXT NOT NULL,receipt TEXT,
+ PRIMARY KEY(branch_id,change_id));
 CREATE TABLE IF NOT EXISTS desktop_sync_story_pending(
  branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
  reason TEXT NOT NULL, PRIMARY KEY(branch_id,object_id));
@@ -152,11 +161,26 @@ class Connection(Input):
     token: SecretStr
 
 
-class Resolve(Connection):
+class ComparedAction(Connection):
     parent_revision: str = Field(pattern=r"^[A-Za-z0-9._:-]{1,128}$")
     local_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    choice: Literal["current", "incoming", "local"]
     idempotency_key: str = Field(pattern=r"^[A-Za-z0-9._:-]{8,128}$")
+
+
+class Resolve(ComparedAction):
+    choice: Literal["current", "incoming", "local", "merge"]
+    content: str | None = Field(default=None, max_length=250_000)
+
+    @model_validator(mode="after")
+    def check_prose(self):
+        if (self.choice == "merge") != (self.content is not None):
+            raise ValueError("人工合并须提供编辑后的正文。")
+        return self
+
+
+class ForkChapter(ComparedAction):
+    choice: Literal["current", "incoming", "local", "base"]
+    branch_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class BranchObject(Input):
@@ -164,13 +188,6 @@ class BranchObject(Input):
     kind: Literal["branch"]
     novel: PortableWork
     branch: PortableBranch
-
-
-class ChapterObject(Input):
-    format: Literal["ainovel-manuscript-sync/1"]
-    kind: Literal["chapter"]
-    chapter: PortableChapter
-    head: PortableRevision
 
 
 class EvidenceObject(Input):
@@ -378,7 +395,7 @@ def _remove_source_copies(tx, branch_id, history):
     )
 
 
-def _apply_chapter(tx, domain, branch_id, event):
+def _apply_chapter(tx, domain, branch_id, event, *, force_revision=False):
     chapter_id = event.object_id.removeprefix("chapter:")
     row = tx.execute("SELECT * FROM chapters WHERE id=?", (chapter_id,)).fetchone()
     if row and row["branch_id"] != branch_id:
@@ -453,7 +470,7 @@ def _apply_chapter(tx, domain, branch_id, event):
                 created=revision.created,
             )
         _remove_source_copies(tx, branch_id, history)
-    elif row["content"] != head.content:
+    elif row["content"] != head.content or force_revision:
         domain.revise_tx(tx, dict(row), head.content, f"云同步，来源修订 {head.id}")
     tx.execute(
         "UPDATE chapters SET position=?,title=?,archived=0 WHERE id=?",
@@ -463,7 +480,7 @@ def _apply_chapter(tx, domain, branch_id, event):
     tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
 
 
-def _apply(tx, domain, branch_id, event):
+def _apply(tx, domain, branch_id, event, *, prose_merge=False):
     if event.object_id.startswith("reference-card:"):
         value = reference_sync.parse_reference_object(
             branch_id, event.object_id, event.payload, event.tombstone
@@ -511,7 +528,7 @@ def _apply(tx, domain, branch_id, event):
         store_portable_evidence(tx, branch_id, wrapped.document)
         return
     if event.object_id.startswith("chapter:"):
-        _apply_chapter(tx, domain, branch_id, event)
+        _apply_chapter(tx, domain, branch_id, event, force_revision=prose_merge)
         return
     if event.object_id != f"branch:{branch_id}" or event.tombstone:
         raise DomainError("sync_scope", "同步对象超出当前文稿范围，需要人工检查。", 409)
@@ -582,6 +599,41 @@ def _verified_digest(branch_id, event):
     if event.tombstone:
         raise DomainError("sync_format", "同步对象和删除标记不一致。", 409)
     return _digest(payload)
+
+
+def _is_prose_merge(queued):
+    return bool(queued and queued["conflict_id"] and json.loads(queued["request"])["choice"] == "merge_prose")
+
+
+def _prose_merge_record(tx, branch_id, key, fingerprint):
+    row = tx.execute(
+        "SELECT fingerprint,receipt FROM desktop_sync_prose_merges WHERE branch_id=? AND change_id=?",
+        (branch_id, key),
+    ).fetchone()
+    if row and row["fingerprint"] != fingerprint:
+        raise DomainError("idempotency", "章节合并的提交编号已用于其他内容。", 409)
+    return row
+
+
+def _record_prose_merge(tx, branch_id, event):
+    chapter = verified_chapter(branch_id, event.object_id, event.payload)
+    known = _shadow(tx, branch_id, event.object_id)
+    local_revision_id = None
+    if known and known["remote_revision"] == event.change_id:
+        local = _local(tx, branch_id, event.object_id)
+        if local and local["head"]["sha256"] == chapter.head.sha256:
+            local_revision_id = local["head"]["id"]
+    receipt = {
+        "change_id": event.change_id,
+        "conflict_id": event.conflict_id,
+        "source_revision_id": chapter.head.id,
+        "source_parent_id": chapter.head.parent_id,
+        "local_revision_id": local_revision_id,
+    }
+    tx.execute(
+        "UPDATE desktop_sync_prose_merges SET receipt=? WHERE branch_id=? AND change_id=?",
+        (dumps(receipt), branch_id, event.change_id),
+    )
 
 
 class DesktopSync:
@@ -831,7 +883,7 @@ class DesktopSync:
         if not identical:
             tx.execute("SAVEPOINT apply_sync_object")
             try:
-                _apply(tx, self.domain, branch_id, incoming)
+                _apply(tx, self.domain, branch_id, incoming, prose_merge=_is_prose_merge(queued))
             except DomainError as error:
                 tx.execute("ROLLBACK TO apply_sync_object")
                 self._defer(tx, branch_id, incoming, error.message)
@@ -860,8 +912,16 @@ class DesktopSync:
                         "SELECT * FROM desktop_sync_outbox WHERE branch_id=? AND change_id=?",
                         (branch_id, row.change_id),
                     ).fetchone()
+                    if _is_prose_merge(queued) and (
+                        row.status != "resolved"
+                        or row.conflict_id != queued["conflict_id"]
+                        or row.object_id != queued["object_id"]
+                    ):
+                        raise DomainError("sync_response", "章节合并回执与比较冲突不一致。", 502)
                     self._consume(tx, branch_id, row, queued)
                     if queued:
+                        if _is_prose_merge(queued):
+                            _record_prose_merge(tx, branch_id, row)
                         tx.execute(
                             "DELETE FROM desktop_sync_outbox WHERE branch_id=? AND change_id=?",
                             (branch_id, row.change_id),
@@ -1036,7 +1096,12 @@ class DesktopSync:
                     branch_id, origin, token, path, Receipt, method="POST", data=json.loads(row["request"])
                 )
             except DomainError as error:
-                if row["conflict_id"] and error.code in {"sync_head_changed", "sync_conflict_resolved"}:
+                known_rejection = {"sync_head_changed", "sync_conflict_resolved"}
+                if _is_prose_merge(row):
+                    known_rejection.update(
+                        {"sync_chapter", "sync_history", "sync_object_size", "sync_input", "sync_replay"}
+                    )
+                if row["conflict_id"] and error.code in known_rejection:
                     with self.domain.db.connect(True) as tx:
                         tx.execute(
                             "DELETE FROM desktop_sync_outbox WHERE branch_id=? AND change_id=?",
@@ -1064,6 +1129,9 @@ class DesktopSync:
                 raise
             if result.change_id != row["change_id"] or result.object_id != row["object_id"]:
                 raise DomainError("sync_response", "同步回执和本机准备提交的对象不一致。", 502)
+            if _is_prose_merge(row):
+                # Apply the resolved head only after its new immutable source reaches the pull cursor.
+                continue
             with self.domain.db.connect(True) as tx:
                 self._consume(tx, branch_id, result, row)
                 tx.execute(
@@ -1119,14 +1187,35 @@ class DesktopSync:
     def resolve(self, branch_id, origin, token, identifier, data):
         with self._operation():
             self._bound(branch_id, origin)
+            merge = data.choice == "merge"
+            fingerprint = (
+                _sha(dumps([identifier, data.parent_revision, data.local_sha256, data.content]))
+                if merge
+                else None
+            )
+            with self.domain.db.connect() as tx:
+                record = (
+                    _prose_merge_record(tx, branch_id, data.idempotency_key, fingerprint) if merge else None
+                )
+            if record and record["receipt"]:
+                return {**self._state(branch_id), "merge_receipt": json.loads(record["receipt"])}
             remote = self._call(branch_id, origin, token, f"/conflicts/{identifier}", ComparedConflict)
             with self.domain.db.connect(True) as tx:
+                record = (
+                    _prose_merge_record(tx, branch_id, data.idempotency_key, fingerprint) if merge else None
+                )
+                if record and record["receipt"]:
+                    return {**self._state(branch_id), "merge_receipt": json.loads(record["receipt"])}
                 existing = tx.execute(
                     "SELECT * FROM desktop_sync_outbox WHERE branch_id=? AND object_id=?",
                     (branch_id, remote.object_id),
                 ).fetchone()
                 if existing:
-                    if existing["conflict_id"] != identifier or existing["change_id"] != data.idempotency_key:
+                    if (
+                        existing["conflict_id"] != identifier
+                        or existing["change_id"] != data.idempotency_key
+                        or _is_prose_merge(existing) != merge
+                    ):
                         raise DomainError("sync_pending", "该对象有待确认的提交，请先运行同步。", 409)
                 else:
                     local = _local(tx, branch_id, remote.object_id)
@@ -1190,6 +1279,15 @@ class DesktopSync:
                     }
                     if data.choice == "local":
                         request.update(payload=local, tombstone=local is None)
+                    if merge:
+                        for payload in (local, remote.current.payload, remote.incoming.payload):
+                            verified_chapter(branch_id, remote.object_id, payload)
+                        request.update(choice="merge_prose", content=data.content)
+                        if not record:
+                            tx.execute(
+                                "INSERT INTO desktop_sync_prose_merges VALUES(?,?,?,NULL)",
+                                (branch_id, data.idempotency_key, fingerprint),
+                            )
                     tx.execute(
                         "INSERT INTO desktop_sync_outbox VALUES(?,?,?,?,?,?)",
                         (
@@ -1203,7 +1301,40 @@ class DesktopSync:
                     )
             self._push(branch_id, origin, token)
             self._pull(branch_id, origin, token)
-            return self._state(branch_id)
+            state = self._state(branch_id)
+            if merge:
+                with self.domain.db.connect() as tx:
+                    record = _prose_merge_record(tx, branch_id, data.idempotency_key, fingerprint)
+                if not record or not record["receipt"]:
+                    raise DomainError("sync_pending", "章节合并已提交，等待同一提交编号的确认回执。", 409)
+                state["merge_receipt"] = json.loads(record["receipt"])
+            return state
+
+    def fork(self, branch_id, origin, token, identifier, data):
+        with self._operation():
+            self._bound(branch_id, origin)
+            fingerprint = fork_fingerprint(branch_id, identifier, data)
+            with self.domain.db.connect() as tx:
+                prior = fork_receipt(tx, data.idempotency_key, fingerprint)
+            if prior:
+                return prior
+            remote = self._call(branch_id, origin, token, f"/conflicts/{identifier}", ComparedConflict)
+            if remote.head_revision != data.parent_revision or remote.resolved_by:
+                raise DomainError("sync_compare", "云端内容已变化，请重新比较。", 409)
+            with self.domain.db.connect(True) as tx:
+                if prior := fork_receipt(tx, data.idempotency_key, fingerprint):
+                    return prior
+                local = _local(tx, branch_id, remote.object_id)
+                if data.local_sha256 != _digest(local):
+                    raise DomainError("sync_compare", "本机内容已变化，请重新比较。", 409)
+                side = {"current": remote.current, "incoming": remote.incoming, "base": remote.base}
+                candidate = side.get(data.choice)
+                selected = verified_chapter(
+                    branch_id,
+                    remote.object_id,
+                    local if data.choice == "local" else candidate.payload if candidate else None,
+                )
+                return fork_chapter_tx(tx, self.domain, branch_id, identifier, data, selected, fingerprint)
 
 
 def register_routes(app, domain):
@@ -1241,3 +1372,10 @@ def register_routes(app, domain):
             raise DomainError("sync_conflict", "同步冲突编号无效。")
         request, origin, token = _parse(Resolve, data)
         return client.resolve(branch_id, origin, token, conflict_id, request)
+
+    @app.post(prefix + "/conflicts/{conflict_id}/fork")
+    def fork_sync(branch_id: str, conflict_id: str, data: dict = Body()):
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", conflict_id):
+            raise DomainError("sync_conflict", "同步冲突编号无效。")
+        request, origin, token = _parse(ForkChapter, data)
+        return client.fork(branch_id, origin, token, conflict_id, request)
