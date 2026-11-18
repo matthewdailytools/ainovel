@@ -194,7 +194,9 @@ test('确认新大纲前分别显示实际章纲变化与旧稿候选，并对�
     '完本记录 · 全书',
   )
   await expect(reports).not.toContainText(unaffected.id)
-  await expect(reports).not.toContainText(/检查项 [^\n]*09/)
+  await expect(
+    reports.getByRole('listitem').filter({ hasText: /检查项 (?:\d{2}、)*09(?:、|$)/ }),
+  ).toHaveCount(0)
   const confirm = page.getByRole('button', { name: '确认已保存大纲' })
   await expect(confirm).toBeEnabled()
 
