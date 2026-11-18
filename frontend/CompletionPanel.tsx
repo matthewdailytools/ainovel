@@ -10,6 +10,7 @@ import {
   type ClosureKey,
   type CompletionReview,
 } from './CompletionReviewEvidence'
+import { storedTextOffset } from './inspectionEvidence'
 import { useLeaveGuard } from './leaveGuard'
 
 type ChapterOption = Pick<Chapter, 'id' | 'title' | 'position'>
@@ -145,16 +146,6 @@ function CompletionHistoryReview({ route }: { route: string }) {
   )
 }
 
-// A textarea presents CRLF as one line break. Translate the selection back to
-// offsets in the saved chapter so that quotes bind to the exact stored revision.
-function originalOffset(content: string, offset: number) {
-  let original = 0
-  for (let normalized = 0; normalized < offset && original < content.length; normalized += 1) {
-    original += content.slice(original, original + 2) === '\r\n' ? 2 : 1
-  }
-  return original
-}
-
 function EvidencePicker({
   chapters,
   onAdd,
@@ -220,12 +211,12 @@ function EvidencePicker({
             <textarea
               readOnly
               rows={5}
-              value={current.content}
+              value={current.content.replace(/\r\n?/g, '\n')}
               onSelect={(event) => {
                 const { selectionStart, selectionEnd } = event.currentTarget
                 setRange({
-                  start: originalOffset(current.content, selectionStart),
-                  end: originalOffset(current.content, selectionEnd),
+                  start: storedTextOffset(current.content, selectionStart),
+                  end: storedTextOffset(current.content, selectionEnd),
                 })
               }}
             />

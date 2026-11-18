@@ -10,6 +10,11 @@ test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范�
   })
   expect(created.ok()).toBe(true)
   const novel = await created.json()
+  const publishedContent = [
+    '学徒在井边拾铃。',
+    '先试旧尺。\r\n😀门内传出第二声。',
+    '🎐灯下有两个影子。\r\n守闸人抬头。',
+  ]
   const chapters: { chapter_id: string; published_at: string }[] = []
   for (const [title, day] of [
     ['拾铃', '01'],
@@ -22,6 +27,11 @@ test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范�
     })
     expect(created.ok()).toBe(true)
     const chapter = await created.json()
+    const saved = await page.request.put(`/api/chapters/${chapter.id}`, {
+      headers,
+      data: { base_revision: 0, content: publishedContent[chapters.length] },
+    })
+    expect(saved.ok(), await saved.text()).toBe(true)
     chapters.push({ chapter_id: chapter.id, published_at: `2026-11-${day}T00:00:00+08:00` })
   }
   await page.reload()
@@ -193,6 +203,87 @@ test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范�
   await expect(channelScroll).toBeFocused()
 
   const latestPath = `/api/branches/${novel.branch_id}/reading-metrics`
+  const originalReport = (await (await page.request.get(latestPath)).json()).latest
+  await expect(diagnosis).toContainText('入门章末 · 此版本尚未绑定发布章稿')
+  await expect(diagnosis).toContainText('回声开篇 · 此版本尚未绑定发布章稿')
+  for (const { chapter_id } of chapters.slice(1)) {
+    const revision = await page.request.put(`/api/chapters/${chapter_id}`, {
+      headers,
+      data: { base_revision: 1, content: '这是当前重写版，未用于本次统计。' },
+    })
+    expect(revision.ok(), await revision.text()).toBe(true)
+  }
+
+  async function bind(index: number, role: 'opening' | 'ending', expected: string) {
+    await panel.getByText('绑定发布章稿', { exact: true }).press('Enter')
+    await panel.getByRole('combobox', { name: '发布清单中的章节' }).selectOption(chapters[index].chapter_id)
+    const revision = panel.getByRole('combobox', { name: '保存稿修订' })
+    const previous = revision.locator('option').filter({ hasText: /^修订 1 ·/ })
+    await expect(previous).toHaveCount(1)
+    const revisionId = (await previous.getAttribute('value'))!
+    await revision.selectOption(revisionId)
+    const text = panel.getByRole('textbox', { name: '选择发布稿原文' })
+    await expect(text).toHaveValue(publishedContent[index].replaceAll('\r\n', '\n'))
+    await text.press('ControlOrMeta+a')
+    if (role === 'ending') {
+      await text.press('ArrowRight')
+      await text.press('Shift+Home')
+    } else {
+      await text.press('ArrowLeft')
+      await text.press('Shift+End')
+    }
+    await expect
+      .poll(() =>
+        text.evaluate((input: HTMLTextAreaElement) =>
+          input.value.slice(input.selectionStart, input.selectionEnd),
+        ),
+      )
+      .toBe(expected)
+    const choose = panel.getByRole('button', { name: role === 'ending' ? '设为章末选区' : '设为开篇选区' })
+    await expect(choose).toBeEnabled()
+    await choose.press('Enter')
+    const save = panel.getByRole('button', { name: '保存发布出处', exact: true })
+    await expect(save).toBeDisabled()
+    await panel.getByRole('checkbox', { name: '我确认此章稿与报告所列发布版本一致' }).check()
+    const stored = page.waitForResponse(
+      (response) => response.request().method() === 'POST' && response.url().endsWith('/published-text'),
+    )
+    await save.press('Enter')
+    const response = await stored
+    expect(response.status(), await response.text()).toBe(201)
+    const payload = response.request().postDataJSON()
+    const start = publishedContent[index].indexOf(expected)
+    expect(payload[role]).toEqual({ start, end: start + expected.length, quote: expected })
+    expect(payload.revision_id).toBe(revisionId)
+    expect(payload.sha256).toMatch(/^[a-f0-9]{64}$/)
+    const saved = await response.json()
+    expect(saved.report.metrics).toEqual(originalReport.report.metrics)
+    await expect(panel.getByText('已保存发布出处，沿用原报告的统计。', { exact: true })).toBeFocused()
+    return saved.id
+  }
+  await bind(1, 'ending', '😀门内传出第二声。')
+  const boundReport = await bind(2, 'opening', '🎐灯下有两个影子。')
+  expect(boundReport).not.toBe(originalReport.id)
+  const renamed = await page.request.patch(`/api/chapters/${chapters[1].chapter_id}`, {
+    headers,
+    data: { title: '当前目录叫法' },
+  })
+  expect(renamed.ok(), await renamed.text()).toBe(true)
+  await page.reload()
+  await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  const picker = panel.getByRole('combobox', { name: '发布报告', exact: true })
+  await expect(picker).toHaveValue(boundReport)
+  const publication = diagnosis.getByRole('region', { name: '入门到回声的发布原文', exact: true })
+  await publication.getByText('查看入门章末原文', { exact: true }).press('Enter')
+  await publication.getByText('查看回声开篇原文', { exact: true }).press('Enter')
+  await expect(publication.locator('blockquote')).toHaveText(['😀门内传出第二声。', '🎐灯下有两个影子。'])
+  await expect(publication).not.toContainText('当前重写版')
+  await expect(diagnosis).not.toContainText('当前目录叫法')
+  await picker.selectOption(originalReport.id)
+  await expect(diagnosis).toContainText('入门章末 · 此版本尚未绑定发布章稿')
+  await picker.selectOption(boundReport)
+  await expect(publication.getByText('查看入门章末原文', { exact: true })).toBeVisible()
+
   const oldResponse = await (await page.request.get(latestPath)).json()
   delete oldResponse.latest.report.diagnostics[0].channel_breakdown
   delete oldResponse.latest.report.access_mode

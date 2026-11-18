@@ -4,14 +4,17 @@ from bisect import bisect_left
 from collections import Counter, defaultdict
 from datetime import timedelta
 from hashlib import sha256
+import json
 from statistics import median
+from time import time
 from typing import Annotated, Literal
 
-from fastapi import File, UploadFile
+from fastapi import File, Query, UploadFile
 from pydantic import AwareDatetime, Field, StringConstraints, TypeAdapter, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 
-from .db import DomainError
+from .db import DomainError, dumps, uid
+from .domain import utf16_slice
 from .models import Input
 
 FORMAT = "ainovel-reading/1"
@@ -38,6 +41,56 @@ class PublishedChapter(Input):
     @property
     def opening(self):
         return self.opens_at if self.opens_at is not None else self.published_at
+
+
+class PublishedTextSelection(Input):
+    start: int = Field(strict=True, ge=0)
+    end: int = Field(strict=True, gt=0)
+    quote: str = Field(min_length=1, max_length=4000)
+
+
+class _PublishedTextSelections(Input):
+    opening: PublishedTextSelection | None = Field(default=None, exclude_if=lambda value: value is None)
+    ending: PublishedTextSelection | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class BindPublishedText(_PublishedTextSelections):
+    chapter_id: Label
+    revision_id: Label
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def require_anchor(self):
+        if self.opening is None and self.ending is None:
+            raise ValueError("请至少选择发布稿的章首或章末原文。")
+        return self
+
+
+class PublishedText(_PublishedTextSelections):
+    status: Literal["verified", "unavailable"]
+    revision_id: str
+    revision: int
+    sha256: str
+
+
+class ReportPublishedChapter(PublishedChapter):
+    title_at_import: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    release_position: int | None = Field(default=None, exclude_if=lambda value: value is None)
+    published_text: PublishedText | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class PublicationRevision(Input):
+    id: str
+    revision: int
+    created: float
+    cause: str
+
+
+class PublicationRevisionText(Input):
+    id: str
+    revision: int
+    content: str
+    sha256: str
 
 
 class PublicationChange(Input):
@@ -247,7 +300,7 @@ class ReadingReport(Input):
     extracted_at: AwareDatetime
     observed_from: AwareDatetime
     observed_until: AwareDatetime
-    chapters: list[PublishedChapter]
+    chapters: list[ReportPublishedChapter]
     publication_changes: list[PublicationChange] = Field(default_factory=list)
     read_definition: str
     completion_definition: str | None = None
@@ -281,6 +334,7 @@ class ReadingHistoryEntry(Input):
     release_version: str
     mode: Literal["events", "aggregate"]
     extracted_at: AwareDatetime
+    source_report_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def _metric(kind, chapter_id, numerator, denominator, *, target=None, incomplete=0, prior=0, **coverage):
@@ -586,62 +640,255 @@ def parse_import(blob):
         raise DomainError("reading_import_format", "追读文件格式无效。 " + " ".join(descriptions)) from error
 
 
-def store_import(domain, branch_id, blob):
-    branch = domain.branch(branch_id)
-    data = parse_import(blob)
-    chapters = {row["id"] for row in domain.db.all("SELECT id FROM chapters WHERE branch_id=?", (branch_id,))}
-    if any(chapter.chapter_id not in chapters for chapter in data.chapters):
-        raise DomainError("reading_import_scope", "发布清单包含不属于本工作版本的章节。", 409)
-    report = calculate_report(data)
-    artifact = domain.stage(
-        {"novel_id": branch["novel_id"], "branch_id": branch_id},
-        REPORT,
-        report.model_dump(mode="json"),
-        {"format": FORMAT, "source_sha256": sha256(blob).hexdigest()},
-        on_stage=lambda tx, identifier: tx.execute(
-            "UPDATE artifacts SET status='accepted' WHERE id=?", (identifier,)
-        ),
+def _insert_report(tx, branch_id, report, basis):
+    identifier = uid()
+    inserted = tx.execute(
+        "INSERT INTO artifacts(id,novel_id,branch_id,kind,payload,basis,status,created) "
+        "SELECT ?,novel_id,id,?,?,?,'accepted',? FROM branches WHERE id=?",
+        (identifier, REPORT, report.model_dump_json(), dumps(basis), time(), branch_id),
     )
-    return ImportedReport(id=artifact["id"], report=report)
+    if not inserted.rowcount:
+        raise DomainError("not_found", "工作版本不存在。", 404)
+    return identifier
+
+
+def store_import(domain, branch_id, blob):
+    domain.branch(branch_id)
+    data = parse_import(blob)
+    report = calculate_report(data)
+    with domain.db.connect(True) as tx:
+        titles = {
+            row["id"]: row["title"]
+            for row in tx.execute("SELECT id,title FROM chapters WHERE branch_id=?", (branch_id,))
+        }
+        if any(chapter.chapter_id not in titles for chapter in report.chapters):
+            raise DomainError("reading_import_scope", "发布清单包含不属于本工作版本的章节。", 409)
+        for position, chapter in enumerate(report.chapters, 1):
+            chapter.title_at_import = titles[chapter.chapter_id]
+            chapter.release_position = position
+        identifier = _insert_report(
+            tx, branch_id, report, {"format": FORMAT, "source_sha256": sha256(blob).hexdigest()}
+        )
+    return ImportedReport(id=identifier, report=report)
+
+
+def _stored_report(tx, branch_id, identifier):
+    row = tx.execute(
+        "SELECT id,payload,basis FROM artifacts WHERE branch_id=? AND id=? AND kind=? AND status='accepted'",
+        (branch_id, identifier, REPORT),
+    ).fetchone()
+    if row is None:
+        raise DomainError("not_found", "所选追读报告不存在。", 404)
+    return row
+
+
+def _report_chapter(tx, branch_id, identifier, chapter_id):
+    row = _stored_report(tx, branch_id, identifier)
+    report = ReadingReport.model_validate_json(row["payload"])
+    chapter = next((entry for entry in report.chapters if entry.chapter_id == chapter_id), None)
+    if (
+        chapter is None
+        or not tx.execute(
+            "SELECT 1 FROM chapters WHERE branch_id=? AND id=?", (branch_id, chapter_id)
+        ).fetchone()
+    ):
+        raise DomainError("reading_publication_scope", "所选章节不在本工作版本的发布清单中。", 404)
+    return row, report, chapter
+
+
+def _revision(tx, branch_id, chapter_id, revision_id):
+    row = tx.execute(
+        "SELECT r.id,r.revision,r.content FROM revisions r JOIN chapters c ON c.id=r.chapter_id "
+        "WHERE c.branch_id=? AND r.chapter_id=? AND r.id=?",
+        (branch_id, chapter_id, revision_id),
+    ).fetchone()
+    if row is None:
+        raise DomainError("reading_publication_revision", "本发布章节的所选保存修订不可用。", 404)
+    return row
+
+
+def _matches_selection(content, selection):
+    try:
+        _, selected, _ = utf16_slice(content, selection.start, selection.end)
+    except DomainError:
+        return False
+    return bool(selected.strip()) and selected == selection.quote
+
+
+def _report_view(tx, branch_id, identifier, report):
+    bound = {
+        chapter.chapter_id: chapter.published_text for chapter in report.chapters if chapter.published_text
+    }
+    if not bound:
+        return ImportedReport(id=identifier, report=report)
+    for source in bound.values():
+        source.status = "unavailable"
+    for row in tx.execute(
+        "SELECT r.id,r.chapter_id,r.revision,r.content FROM json_each(?) ids "
+        "JOIN revisions r ON r.id=ids.value JOIN chapters c ON c.id=r.chapter_id "
+        "WHERE c.branch_id=?",
+        (dumps([source.revision_id for source in bound.values()]), branch_id),
+    ):
+        source = bound.get(row["chapter_id"])
+        if (
+            source
+            and row["id"] == source.revision_id
+            and row["revision"] == source.revision
+            and sha256(row["content"].encode()).hexdigest() == source.sha256
+            and all(
+                _matches_selection(row["content"], item) for item in (source.opening, source.ending) if item
+            )
+        ):
+            source.status = "verified"
+    return ImportedReport(id=identifier, report=report)
+
+
+def bind_published_text(domain, branch_id, identifier, data):
+    # An omitted selection preserves an existing anchor. An explicit null clears it.
+    fingerprint = sha256(dumps([data.model_dump(), sorted(data.model_fields_set)]).encode()).hexdigest()
+    with domain.db.connect(True) as tx:
+        row, report, chapter = _report_chapter(tx, branch_id, identifier, data.chapter_id)
+        repeated = tx.execute(
+            "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+            "AND json_extract(basis,'$.source_report_id')=? "
+            "AND json_extract(basis,'$.publication_binding_sha256')=?",
+            (branch_id, REPORT, identifier, fingerprint),
+        ).fetchone()
+        if repeated:
+            return _report_view(
+                tx, branch_id, repeated["id"], ReadingReport.model_validate_json(repeated["payload"])
+            )
+        revision = _revision(tx, branch_id, data.chapter_id, data.revision_id)
+        content = revision["content"]
+        if sha256(content.encode()).hexdigest() != data.sha256:
+            raise DomainError(
+                "reading_publication_digest", "保存修订的内容摘要不同，请重新打开所选版本。", 409
+            )
+        previous = chapter.published_text
+        anchors = {
+            edge: getattr(previous, edge)
+            if previous and previous.revision_id == data.revision_id and edge not in data.model_fields_set
+            else getattr(data, edge)
+            for edge in ("opening", "ending")
+        }
+        if any(selection and not _matches_selection(content, selection) for selection in anchors.values()):
+            raise DomainError("reading_publication_selection", "选区与所选保存修订的原文不一致。")
+        publication = PublishedText(
+            status="verified",
+            revision_id=revision["id"],
+            revision=revision["revision"],
+            sha256=data.sha256,
+            **anchors,
+        )
+        if previous == publication:
+            return _report_view(tx, branch_id, identifier, report)
+        chapter.published_text = publication
+        basis = {
+            **json.loads(row["basis"]),
+            "source_report_id": identifier,
+            "publication_binding_sha256": fingerprint,
+        }
+        derived_id = _insert_report(tx, branch_id, report, basis)
+        return _report_view(tx, branch_id, derived_id, report)
 
 
 def register_routes(app, domain):
-    @app.get("/api/branches/{branch_id}/reading-metrics")
+    route = "/api/branches/{branch_id}/reading-metrics"
+    history = route + "/history"
+    saved = history + "/{identifier}"
+    published_text = saved + "/published-text"
+    publication_revisions = published_text + "/chapters/{chapter_id}/revisions"
+
+    @app.get(route)
     def latest_reading_metrics(branch_id: str) -> ReadingMetricsState:
         domain.branch(branch_id)
-        rows = domain.db.all(
-            "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
-            "ORDER BY created DESC,id DESC LIMIT 1",
-            (branch_id, REPORT),
-        )
-        if rows:
-            return ReadingMetricsState(
-                latest=ImportedReport(
-                    id=rows[0]["id"],
-                    report=ReadingReport.model_validate_json(rows[0]["payload"]),
-                ),
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            row = tx.execute(
+                "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+                "ORDER BY rowid DESC LIMIT 1",
+                (branch_id, REPORT),
+            ).fetchone()
+            latest = (
+                _report_view(tx, branch_id, row["id"], ReadingReport.model_validate_json(row["payload"]))
+                if row
+                else None
             )
-        return ReadingMetricsState(latest=None)
+        return ReadingMetricsState(latest=latest)
 
-    @app.get("/api/branches/{branch_id}/reading-metrics/history")
-    def reading_history(branch_id: str) -> list[ReadingHistoryEntry]:
+    @app.get(history)
+    def reading_history(
+        branch_id: str, before_id: Annotated[str | None, Query(min_length=1, max_length=200)] = None
+    ) -> list[ReadingHistoryEntry]:
         domain.branch(branch_id)
-        return domain.db.all(
-            "SELECT id,json_extract(payload,'$.release_version') AS release_version, "
-            "json_extract(payload,'$.mode') AS mode,json_extract(payload,'$.extracted_at') AS extracted_at "
-            "FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' ORDER BY rowid DESC LIMIT 50",
-            (branch_id, REPORT),
-        )
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            cursor = (
+                tx.execute(
+                    "SELECT rowid FROM artifacts WHERE id=? AND branch_id=? AND kind=? AND status='accepted'",
+                    (before_id, branch_id, REPORT),
+                ).fetchone()
+                if before_id
+                else None
+            )
+            if before_id and not cursor:
+                raise DomainError("reading_report_missing", "找不到此工作版本的追读报告。", 404)
+            before = cursor["rowid"] if cursor else None
+            return [
+                dict(row)
+                for row in tx.execute(
+                    "SELECT id,json_extract(payload,'$.release_version') AS release_version, "
+                    "json_extract(payload,'$.mode') AS mode,json_extract(payload,'$.extracted_at') AS extracted_at, "
+                    "json_extract(basis,'$.source_report_id') AS source_report_id "
+                    "FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+                    "AND (? IS NULL OR rowid<?) ORDER BY rowid DESC LIMIT 50",
+                    (branch_id, REPORT, before, before),
+                )
+            ]
 
-    @app.get("/api/branches/{branch_id}/reading-metrics/history/{identifier}")
+    @app.get(saved)
     def read_saved_report(branch_id: str, identifier: str) -> ImportedReport:
-        row = domain.db.one(
-            "SELECT id,payload FROM artifacts WHERE branch_id=? AND id=? AND kind=? AND status='accepted'",
-            (branch_id, identifier, REPORT),
-        )
-        return ImportedReport(id=row["id"], report=ReadingReport.model_validate_json(row["payload"]))
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            row = _stored_report(tx, branch_id, identifier)
+            return _report_view(tx, branch_id, identifier, ReadingReport.model_validate_json(row["payload"]))
 
-    @app.post("/api/branches/{branch_id}/reading-metrics/import", status_code=201)
+    @app.post(published_text, status_code=201)
+    def save_published_text(branch_id: str, identifier: str, data: BindPublishedText) -> ImportedReport:
+        return bind_published_text(domain, branch_id, identifier, data)
+
+    @app.get(publication_revisions)
+    def list_publication_revisions(
+        branch_id: str,
+        identifier: str,
+        chapter_id: str,
+        before_revision: Annotated[int | None, Query(ge=0)] = None,
+    ) -> list[PublicationRevision]:
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            _report_chapter(tx, branch_id, identifier, chapter_id)
+            return [
+                dict(row)
+                for row in tx.execute(
+                    "SELECT id,revision,created,cause FROM revisions WHERE chapter_id=? "
+                    "AND (? IS NULL OR revision<?) ORDER BY revision DESC LIMIT 50",
+                    (chapter_id, before_revision, before_revision),
+                )
+            ]
+
+    @app.get(publication_revisions + "/{revision_id}")
+    def read_publication_revision(
+        branch_id: str, identifier: str, chapter_id: str, revision_id: str
+    ) -> PublicationRevisionText:
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            _report_chapter(tx, branch_id, identifier, chapter_id)
+            revision = _revision(tx, branch_id, chapter_id, revision_id)
+            return PublicationRevisionText(
+                **dict(revision), sha256=sha256(revision["content"].encode()).hexdigest()
+            )
+
+    @app.post(route + "/import", status_code=201)
     async def import_reading_metrics(branch_id: str, file: Annotated[UploadFile, File()]) -> ImportedReport:
         blob = await file.read(MAX_BYTES + 1)
         if len(blob) > MAX_BYTES:

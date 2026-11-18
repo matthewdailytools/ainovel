@@ -6,6 +6,15 @@ export const softDeviationPolicy = 'soft-deviation-review/1'
 export const maxAuthorEvidence = 30
 export const maxSoftDeviations = 1000
 
+// A textarea counts a CRLF as one unit. Restore the UTF-16 offset in the saved text.
+export function storedTextOffset(content: string, textareaOffset: number) {
+  let original = 0
+  for (let normalized = 0; normalized < textareaOffset && original < content.length; normalized += 1) {
+    original += content.slice(original, original + 2) === '\r\n' ? 2 : 1
+  }
+  return original
+}
+
 type ScopedInspectionFinding = { scope: 'chapter' | 'volume'; scope_id: string; report_id: string }
 
 export function scopedInspectionFindings(basis: Record<string, unknown>): ScopedInspectionFinding[] {

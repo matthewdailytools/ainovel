@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 
 import pytest
 from fastapi.testclient import TestClient
@@ -540,3 +541,286 @@ def test_file_route_saves_only_summary_and_checks_publication_scope(domain, sett
         response = client.post(f"{route}/import", files={"file": ("reading.json", json.dumps(data))})
         assert response.status_code == 413
         assert client.get(route).json() == {"latest": imported}
+
+
+def import_readings(client, branch, data):
+    route = f"/api/branches/{branch}/reading-metrics"
+    response = client.post(route + "/import", files={"file": ("reading.json", json.dumps(data))})
+    assert response.status_code == 201, response.text
+    return route, response.json()
+
+
+def get_reading(client, route, **params):
+    response = client.get(route, params=params)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def selection(content, excerpt):
+    offset = content.index(excerpt)
+    start = len(content[:offset].encode("utf-16-le")) // 2
+    return {"start": start, "end": start + len(excerpt.encode("utf-16-le")) // 2, "quote": excerpt}
+
+
+def test_published_diagnosis_freezes_both_revisions_and_release_catalog(client, domain, story):
+    branch = story["branch_id"]
+    first = story["chapter_id"]
+    # Local work order deliberately differs from the measurement's publication order.
+    third = domain.create_chapter(branch, "原发布目录里的第三章")["id"]
+    second = domain.create_chapter(branch, "原发布目录里的第二章")["id"]
+    ending = "门外一声😀铃。"
+    opening = "😀铜铃忽然震响。"
+    saved_second = domain.save(second, 0, f"他停在旧门前。\n{ending}")
+    saved_third = domain.save(third, 0, f"{opening}\n他认出熟悉的节奏。")
+    data = {
+        **source("events", (first, second, third)),
+        "window_hours": 24,
+        "events": [
+            event(first, "pseudonym-selection-a", 1),
+            event(first, "pseudonym-selection-b", 1),
+            event(second, "pseudonym-selection-a", 5),
+            event(second, "pseudonym-selection-b", 5),
+            event(third, "pseudonym-selection-a", 13),
+        ],
+    }
+    route, original = import_readings(client, branch, data)
+    history = route + "/history"
+    original_route = f"{history}/{original['id']}"
+    report_before = original["report"]
+    (drop,) = report_before["diagnostics"]
+    assert (drop["chapter_id"], drop["target_chapter_id"], drop["denominator"]) == (second, third, 2)
+    assert [
+        (chapter["chapter_id"], chapter["release_position"]) for chapter in report_before["chapters"]
+    ] == [
+        (first, 1),
+        (second, 2),
+        (third, 3),
+    ]
+    assert all("published_text" not in chapter for chapter in report_before["chapters"])
+
+    assert client.patch(f"/api/chapters/{second}", json={"title": "当前更名的第二章"}).status_code == 200
+    domain.save(second, saved_second["revision"], "当前工作稿的替换结尾。")
+    domain.save(third, saved_third["revision"], "当前工作稿的替换开头。")
+
+    def bind(report_url, chapter, saved, edge, text):
+        revisions = report_url + f"/published-text/chapters/{chapter}/revisions"
+        rows = get_reading(client, revisions)
+        assert all(set(row) == {"id", "revision", "created", "cause"} for row in rows)
+        assert [row["revision"] for row in rows] == [2, 1, 0]
+        picked = next(row for row in rows if row["revision"] == saved["revision"])
+        proof = get_reading(client, f"{revisions}/{picked['id']}")
+        assert proof["content"] == saved["content"]
+        assert proof["sha256"] == sha256(saved["content"].encode()).hexdigest()
+        body = {
+            "chapter_id": chapter,
+            "revision_id": proof["id"],
+            "sha256": proof["sha256"],
+            edge: selection(proof["content"], text),
+        }
+        result = client.post(report_url + "/published-text", json=body)
+        assert result.status_code == 201, result.text
+        bound = result.json()
+        assert client.post(report_url + "/published-text", json=body).json() == bound
+        return bound, body
+
+    predecessor, second_proof = bind(original_route, second, saved_second, "ending", ending)
+    successor, third_proof = bind(f"{history}/{predecessor['id']}", third, saved_third, "opening", opening)
+    assert len({original["id"], predecessor["id"], successor["id"]}) == 3
+    final = successor["report"]
+    assert {key: final[key] for key in final if key != "chapters"} == {
+        key: report_before[key] for key in report_before if key != "chapters"
+    }
+    assert final["chapters"][0] == report_before["chapters"][0]
+    for index, proof, edge in [(1, second_proof, "ending"), (2, third_proof, "opening")]:
+        chapter = final["chapters"][index]
+        assert {key: chapter[key] for key in chapter if key != "published_text"} == report_before["chapters"][
+            index
+        ]
+        assert chapter["published_text"] == {
+            "status": "verified",
+            "revision_id": proof["revision_id"],
+            "revision": 1,
+            "sha256": proof["sha256"],
+            edge: proof[edge],
+        }
+    assert final["chapters"][1]["title_at_import"] == "原发布目录里的第二章"
+    assert get_reading(client, route)["latest"] == successor
+    assert get_reading(client, original_route) == original
+    predecessor_route = f"{history}/{predecessor['id']}"
+    assert get_reading(client, predecessor_route) == predecessor
+    rows = get_reading(client, history)
+    assert [(row["id"], row.get("source_report_id")) for row in rows] == [
+        (successor["id"], predecessor["id"]),
+        (predecessor["id"], original["id"]),
+        (original["id"], None),
+    ]
+    for row in rows:
+        stored = domain.artifact(row["id"])
+        assert "pseudonym-selection-" not in json.dumps(stored)
+        assert "events" not in stored["payload"] and "reader_access" not in stored["payload"]
+
+    assert (
+        client.post(
+            f"/api/chapters/{second}/archive", json={"base_revision": 2, "archived": True}
+        ).status_code
+        == 200
+    )
+    assert get_reading(client, f"{history}/{successor['id']}") == successor
+    # Simulate an absent original after partial local restore. The newer draft is never substituted.
+    with domain.db.connect(True) as tx:
+        tx.execute("DELETE FROM revisions WHERE id=?", (second_proof["revision_id"],))
+    historical = get_reading(client, f"{history}/{successor['id']}")["report"]
+    assert "published_text" not in historical["chapters"][0]
+    assert historical["chapters"][1]["published_text"] == {
+        **final["chapters"][1]["published_text"],
+        "status": "unavailable",
+    }
+    assert historical["chapters"][2]["published_text"] == final["chapters"][2]["published_text"]
+    assert "当前工作稿的替换结尾" not in json.dumps(historical, ensure_ascii=False)
+    assert historical["diagnostics"] == final["diagnostics"]
+
+
+def test_scoped_published_sources_reject_foreign_revisions_and_bad_anchors(client, domain, story):
+    branch = story["branch_id"]
+    first = story["chapter_id"]
+    in_report = domain.create_chapter(branch, "清单第二章")["id"]
+    not_in_report = domain.create_chapter(branch, "清单外的章节")["id"]
+    other = domain.create_novel("另一作品")
+    foreign = domain.create_chapter(other["branch_id"], "外部章")["id"]
+    content = "😀铜铃响了。"
+    for identifier in (first, in_report, not_in_report, foreign):
+        domain.save(identifier, 0, content)
+    route, imported = import_readings(
+        client, branch, {**source("aggregate", (first, in_report)), "counts": []}
+    )
+    history = route + "/history"
+    bind = f"{history}/{imported['id']}/published-text"
+    selected = bind + f"/chapters/{first}/revisions"
+    picked = get_reading(client, selected)[0]["id"]
+    local_other = get_reading(client, bind + f"/chapters/{in_report}/revisions")[0]["id"]
+    ref = {
+        "chapter_id": first,
+        "revision_id": picked,
+        "sha256": sha256(content.encode()).hexdigest(),
+        "opening": selection(content, "😀铜铃"),
+    }
+    foreign_revision = domain.db.one(
+        "SELECT id FROM revisions WHERE chapter_id=? AND revision=1", (foreign,)
+    )["id"]
+    assert client.get(bind + f"/chapters/{not_in_report}/revisions").status_code == 404
+    assert client.get(bind + f"/chapters/{foreign}/revisions").status_code == 404
+    for revision in (foreign_revision, local_other):
+        assert client.get(f"{selected}/{revision}").status_code == 404
+        rejected = client.post(bind, json={**ref, "revision_id": revision})
+        assert (rejected.status_code, rejected.json()["code"]) == (404, "reading_publication_revision")
+    foreign_bind = bind.replace(branch, other["branch_id"], 1)
+    assert client.post(foreign_bind, json=ref).status_code == 404
+    rejected = client.post(bind, json={**ref, "chapter_id": not_in_report})
+    assert (rejected.status_code, rejected.json()["code"]) == (404, "reading_publication_scope")
+    mismatch = client.post(bind, json={**ref, "sha256": "0" * 64})
+    assert (mismatch.status_code, mismatch.json()["code"]) == (409, "reading_publication_digest")
+    for anchor in (
+        {"start": 1, "end": 2, "quote": "😀"},
+        {"start": 0, "end": 100, "quote": content},
+        {"start": 3, "end": 2, "quote": "铜"},
+        {"start": 0, "end": 2, "quote": "🔔"},
+    ):
+        mismatch = client.post(bind, json={**ref, "opening": anchor})
+        assert (mismatch.status_code, mismatch.json()["code"]) == (400, "reading_publication_selection")
+    assert client.post(bind, json={**ref, "opening": None}).status_code == 422
+    assert [row["id"] for row in get_reading(client, history)] == [imported["id"]]
+    assert not imported["report"]["diagnostics"]
+    assert all(row["rate"] is None for row in imported["report"]["metrics"])
+    success = client.post(bind, json=ref)
+    assert success.status_code == 201, success.text
+    aggregate = success.json()["report"]
+    assert aggregate["metrics"] == imported["report"]["metrics"] and not aggregate["diagnostics"]
+    assert aggregate["chapters"][0]["published_text"]["opening"] == ref["opening"]
+    assert "published_text" not in aggregate["chapters"][1]
+
+
+def test_publication_revision_picker_pages_without_returning_contents(client, domain, story):
+    branch = story["branch_id"]
+    chapter = story["chapter_id"]
+    for revision in range(52):
+        domain.save(chapter, revision, f"已保存稿件 {revision + 1}")
+    route, imported = import_readings(client, branch, {**source("aggregate", (chapter,)), "counts": []})
+    revisions = f"{route}/history/{imported['id']}/published-text/chapters/{chapter}/revisions"
+    first = get_reading(client, revisions)
+    second = get_reading(client, revisions, before_revision=first[-1]["revision"])
+    assert len(first) == 50 and len(second) == 3
+    assert [row["revision"] for row in first + second] == list(range(52, -1, -1))
+    assert all("content" not in row for row in first + second)
+    chosen = second[0]
+    assert get_reading(client, f"{revisions}/{chosen['id']}")["content"] == "已保存稿件 2"
+
+
+def test_publication_history_reaches_earlier_reports_and_keeps_the_work_scope(client, domain, story):
+    chapter, branch = story["chapter_id"], story["branch_id"]
+    data = {**source("aggregate", (chapter,)), "counts": []}
+    identifiers = []
+    for index in range(51):
+        route, imported = import_readings(client, branch, {**data, "release_version": f"series-{index}"})
+        identifiers.append(imported["id"])
+    history = route + "/history"
+    first = get_reading(client, history)
+    second = get_reading(client, history, before_id=first[-1]["id"])
+    assert len(first) == 50 and len(second) == 1
+    assert [row["id"] for row in first + second] == identifiers[::-1]
+    other = domain.create_novel("另一作品")
+    assert (
+        client.get(
+            history.replace(branch, other["branch_id"]), params={"before_id": identifiers[0]}
+        ).status_code
+        == 404
+    )
+
+
+def test_rebinding_only_keeps_omitted_anchors_on_the_same_revision(client, domain, story):
+    branch = story["branch_id"]
+    chapter = story["chapter_id"]
+    first_text = "风声。铜铃响了。"
+    second_text = "门开。铜铃无声。"
+    domain.save(chapter, 0, first_text)
+    domain.save(chapter, 1, second_text)
+    route, original = import_readings(client, branch, {**source("aggregate", (chapter,)), "counts": []})
+
+    def path(identifier):
+        return f"{route}/history/{identifier}/published-text"
+
+    recent, earlier, _ = get_reading(client, path(original["id"]) + f"/chapters/{chapter}/revisions")
+
+    def submit(identifier, body):
+        result = client.post(path(identifier), json=body)
+        assert result.status_code == 201, result.text
+        payload = result.json()
+        return payload["id"], payload["report"]["chapters"][0]["published_text"]
+
+    opening = selection(first_text, "风声。")
+    original_ref = {
+        "chapter_id": chapter,
+        "revision_id": earlier["id"],
+        "sha256": sha256(first_text.encode()).hexdigest(),
+    }
+    opening_report, _ = submit(original["id"], {**original_ref, "opening": opening})
+    ending = selection(first_text, "铜铃响了。")
+    both, anchors = submit(opening_report, {**original_ref, "ending": ending})
+    assert anchors["opening"] == opening and anchors["ending"] == ending
+    assert submit(opening_report, {**original_ref, "ending": ending}) == (both, anchors)
+    assert submit(both, {**original_ref, "ending": ending}) == (both, anchors)
+    only_ending, anchors = submit(opening_report, {**original_ref, "opening": None, "ending": ending})
+    assert only_ending != both and "opening" not in anchors and anchors["ending"] == ending
+    _, updated = submit(
+        both,
+        {
+            **original_ref,
+            "revision_id": recent["id"],
+            "sha256": sha256(second_text.encode()).hexdigest(),
+            "opening": selection(second_text, "门开。"),
+        },
+    )
+    assert updated["revision"] == 2 and "ending" not in updated
+    assert (
+        get_reading(client, f"{route}/history/{both}")["report"]["chapters"][0]["published_text"]["ending"]
+        == ending
+    )

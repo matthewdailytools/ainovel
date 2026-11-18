@@ -68,6 +68,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/reading-metrics/history/{identifier}/published-text': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Save Published Text */
+    post: operations['save_published_text_api_branches__branch_id__reading_metrics_history__identifier__published_text_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/reading-metrics/history/{identifier}/published-text/chapters/{chapter_id}/revisions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Publication Revisions */
+    get: operations['list_publication_revisions_api_branches__branch_id__reading_metrics_history__identifier__published_text_chapters__chapter_id__revisions_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/reading-metrics/history/{identifier}/published-text/chapters/{chapter_id}/revisions/{revision_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Publication Revision */
+    get: operations['read_publication_revision_api_branches__branch_id__reading_metrics_history__identifier__published_text_chapters__chapter_id__revisions__revision_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/reading-metrics/import': {
     parameters: {
       query?: never
@@ -3171,6 +3222,17 @@ export interface components {
       /** Text */
       text: string
     }
+    /** BindPublishedText */
+    BindPublishedText: {
+      opening?: components['schemas']['PublishedTextSelection'] | null
+      ending?: components['schemas']['PublishedTextSelection'] | null
+      /** Chapter Id */
+      chapter_id: string
+      /** Revision Id */
+      revision_id: string
+      /** Sha256 */
+      sha256: string
+    }
     /** Body_import_book_api_library_import_post */
     Body_import_book_api_library_import_post: {
       /** File */
@@ -5125,17 +5187,52 @@ export interface components {
       /** Note */
       note: string
     }
-    /** PublishedChapter */
-    PublishedChapter: {
-      /** Chapter Id */
-      chapter_id: string
+    /** PublicationRevision */
+    PublicationRevision: {
+      /** Id */
+      id: string
+      /** Revision */
+      revision: number
+      /** Created */
+      created: number
+      /** Cause */
+      cause: string
+    }
+    /** PublicationRevisionText */
+    PublicationRevisionText: {
+      /** Id */
+      id: string
+      /** Revision */
+      revision: number
+      /** Content */
+      content: string
+      /** Sha256 */
+      sha256: string
+    }
+    /** PublishedText */
+    PublishedText: {
+      opening?: components['schemas']['PublishedTextSelection'] | null
+      ending?: components['schemas']['PublishedTextSelection'] | null
       /**
-       * Published At
-       * Format: date-time
+       * Status
+       * @enum {string}
        */
-      published_at: string
-      /** Opens At */
-      opens_at?: string | null
+      status: 'verified' | 'unavailable'
+      /** Revision Id */
+      revision_id: string
+      /** Revision */
+      revision: number
+      /** Sha256 */
+      sha256: string
+    }
+    /** PublishedTextSelection */
+    PublishedTextSelection: {
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Quote */
+      quote: string
     }
     /** ReadingDiagnosis */
     ReadingDiagnosis: {
@@ -5178,6 +5275,8 @@ export interface components {
        * Format: date-time
        */
       extracted_at: string
+      /** Source Report Id */
+      source_report_id?: string | null
     }
     /** ReadingInput */
     ReadingInput: {
@@ -5231,7 +5330,7 @@ export interface components {
        */
       observed_until: string
       /** Chapters */
-      chapters: components['schemas']['PublishedChapter'][]
+      chapters: components['schemas']['ReportPublishedChapter'][]
       /** Publication Changes */
       publication_changes?: components['schemas']['PublicationChange'][]
       /** Read Definition */
@@ -5504,6 +5603,23 @@ export interface components {
     RenameInput: {
       /** Title */
       title: string
+    }
+    /** ReportPublishedChapter */
+    ReportPublishedChapter: {
+      /** Chapter Id */
+      chapter_id: string
+      /**
+       * Published At
+       * Format: date-time
+       */
+      published_at: string
+      /** Opens At */
+      opens_at?: string | null
+      /** Title At Import */
+      title_at_import?: string | null
+      /** Release Position */
+      release_position?: number | null
+      published_text?: components['schemas']['PublishedText'] | null
     }
     /** ReportedCompletionCoverage */
     ReportedCompletionCoverage: {
@@ -6658,7 +6774,9 @@ export interface operations {
   }
   reading_history_api_branches__branch_id__reading_metrics_history_get: {
     parameters: {
-      query?: never
+      query?: {
+        before_id?: string | null
+      }
       header?: never
       path: {
         branch_id: string
@@ -6706,6 +6824,111 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ImportedReport']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_published_text_api_branches__branch_id__reading_metrics_history__identifier__published_text_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BindPublishedText']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ImportedReport']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_publication_revisions_api_branches__branch_id__reading_metrics_history__identifier__published_text_chapters__chapter_id__revisions_get: {
+    parameters: {
+      query?: {
+        before_revision?: number | null
+      }
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PublicationRevision'][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_publication_revision_api_branches__branch_id__reading_metrics_history__identifier__published_text_chapters__chapter_id__revisions__revision_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+        chapter_id: string
+        revision_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PublicationRevisionText']
         }
       }
       /** @description Validation Error */

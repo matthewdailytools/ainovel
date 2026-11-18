@@ -96,6 +96,15 @@
             "in": "path",
             "required": true,
             "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 200 }, { "type": "null" }],
+              "title": "Before Id"
+            }
           }
         ],
         "responses": {
@@ -142,6 +151,145 @@
           "200": {
             "description": "Successful Response",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImportedReport" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/reading-metrics/history/{identifier}/published-text": {
+      "post": {
+        "summary": "Save Published Text",
+        "operationId": "save_published_text_api_branches__branch_id__reading_metrics_history__identifier__published_text_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/BindPublishedText" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImportedReport" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/reading-metrics/history/{identifier}/published-text/chapters/{chapter_id}/revisions": {
+      "get": {
+        "summary": "List Publication Revisions",
+        "operationId": "list_publication_revisions_api_branches__branch_id__reading_metrics_history__identifier__published_text_chapters__chapter_id__revisions_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "before_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+              "title": "Before Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/PublicationRevision" },
+                  "title": "Response List Publication Revisions Api Branches  Branch Id  Reading Metrics History  Identifier  Published Text Chapters  Chapter Id  Revisions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/reading-metrics/history/{identifier}/published-text/chapters/{chapter_id}/revisions/{revision_id}": {
+      "get": {
+        "summary": "Read Publication Revision",
+        "operationId": "read_publication_revision_api_branches__branch_id__reading_metrics_history__identifier__published_text_chapters__chapter_id__revisions__revision_id__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Revision Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/PublicationRevisionText" } }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -6363,6 +6511,23 @@
         "required": ["id", "label", "text"],
         "title": "BasisExcerpt"
       },
+      "BindPublishedText": {
+        "properties": {
+          "opening": {
+            "anyOf": [{ "$ref": "#/components/schemas/PublishedTextSelection" }, { "type": "null" }]
+          },
+          "ending": {
+            "anyOf": [{ "$ref": "#/components/schemas/PublishedTextSelection" }, { "type": "null" }]
+          },
+          "chapter_id": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Chapter Id" },
+          "revision_id": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Revision Id" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "revision_id", "sha256"],
+        "title": "BindPublishedText"
+      },
       "Body_import_book_api_library_import_post": {
         "properties": {
           "file": { "type": "string", "contentMediaType": "application/octet-stream", "title": "File" },
@@ -9427,19 +9592,58 @@
         "required": ["chapter_id", "kind", "at", "note"],
         "title": "PublicationChange"
       },
-      "PublishedChapter": {
+      "PublicationRevision": {
         "properties": {
-          "chapter_id": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Chapter Id" },
-          "published_at": { "type": "string", "format": "date-time", "title": "Published At" },
-          "opens_at": {
-            "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }],
-            "title": "Opens At"
-          }
+          "id": { "type": "string", "title": "Id" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "created": { "type": "number", "title": "Created" },
+          "cause": { "type": "string", "title": "Cause" }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": ["chapter_id", "published_at"],
-        "title": "PublishedChapter"
+        "required": ["id", "revision", "created", "cause"],
+        "title": "PublicationRevision"
+      },
+      "PublicationRevisionText": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "content": { "type": "string", "title": "Content" },
+          "sha256": { "type": "string", "title": "Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "revision", "content", "sha256"],
+        "title": "PublicationRevisionText"
+      },
+      "PublishedText": {
+        "properties": {
+          "opening": {
+            "anyOf": [{ "$ref": "#/components/schemas/PublishedTextSelection" }, { "type": "null" }]
+          },
+          "ending": {
+            "anyOf": [{ "$ref": "#/components/schemas/PublishedTextSelection" }, { "type": "null" }]
+          },
+          "status": { "type": "string", "enum": ["verified", "unavailable"], "title": "Status" },
+          "revision_id": { "type": "string", "title": "Revision Id" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "sha256": { "type": "string", "title": "Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["status", "revision_id", "revision", "sha256"],
+        "title": "PublishedText"
+      },
+      "PublishedTextSelection": {
+        "properties": {
+          "start": { "type": "integer", "minimum": 0, "title": "Start" },
+          "end": { "type": "integer", "exclusiveMinimum": 0, "title": "End" },
+          "quote": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Quote" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["start", "end", "quote"],
+        "title": "PublishedTextSelection"
       },
       "ReadingDiagnosis": {
         "properties": {
@@ -9486,7 +9690,11 @@
           "id": { "type": "string", "title": "Id" },
           "release_version": { "type": "string", "title": "Release Version" },
           "mode": { "type": "string", "enum": ["events", "aggregate"], "title": "Mode" },
-          "extracted_at": { "type": "string", "format": "date-time", "title": "Extracted At" }
+          "extracted_at": { "type": "string", "format": "date-time", "title": "Extracted At" },
+          "source_report_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Source Report Id"
+          }
         },
         "additionalProperties": false,
         "type": "object",
@@ -9525,7 +9733,7 @@
           "observed_from": { "type": "string", "format": "date-time", "title": "Observed From" },
           "observed_until": { "type": "string", "format": "date-time", "title": "Observed Until" },
           "chapters": {
-            "items": { "$ref": "#/components/schemas/PublishedChapter" },
+            "items": { "$ref": "#/components/schemas/ReportPublishedChapter" },
             "type": "array",
             "title": "Chapters"
           },
@@ -9954,6 +10162,31 @@
         "type": "object",
         "required": ["title"],
         "title": "RenameInput"
+      },
+      "ReportPublishedChapter": {
+        "properties": {
+          "chapter_id": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Chapter Id" },
+          "published_at": { "type": "string", "format": "date-time", "title": "Published At" },
+          "opens_at": {
+            "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }],
+            "title": "Opens At"
+          },
+          "title_at_import": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Title At Import"
+          },
+          "release_position": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Release Position"
+          },
+          "published_text": {
+            "anyOf": [{ "$ref": "#/components/schemas/PublishedText" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "published_at"],
+        "title": "ReportPublishedChapter"
       },
       "ReportedCompletionCoverage": {
         "properties": {
