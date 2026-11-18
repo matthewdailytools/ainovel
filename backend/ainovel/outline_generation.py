@@ -3,7 +3,7 @@
 import json
 from typing import Annotated
 
-from pydantic import Field, StringConstraints
+from pydantic import Field, StringConstraints, ValidationError
 
 from .db import DomainError
 from .models import Input, ModuleInput
@@ -217,7 +217,8 @@ async def run(worker, request, frozen):
         tx.execute("BEGIN")
         if not _current(tx, request["branch_id"], frozen):
             raise DomainError("outline_candidate_stale", "排队后大纲依据或目录已改变，请重新提交。", 409)
-    chapter_ids = [chapter["id"] for chapter in frozen["chapters"]]
+    chapter_titles = {chapter["id"]: chapter["title"] for chapter in frozen["chapters"]}
+    chapter_ids = list(chapter_titles)
     setting_ids = [item["id"] for item in frozen["setting_basis"]["items"]]
     promise_ids = [row["id"] for row in frozen["promises"]]
     graph = {
@@ -231,7 +232,8 @@ async def run(worker, request, frozen):
     chapter = definitions["ChapterPlan"]["properties"]
     chapter["chapter_id"]["enum"] = chapter_ids
     eligible = {_card_key(card) for card in frozen.get("reference_cards", [])}
-    chapter["reference_cards"]["maxItems"] = len(eligible)
+    reference_limit = chapter["reference_cards"]["maxItems"]
+    chapter["reference_cards"]["maxItems"] = min(reference_limit, len(eligible))
     if setting_ids:
         chapter["setting_ids"]["items"]["enum"] = setting_ids
     else:
@@ -265,21 +267,31 @@ async def run(worker, request, frozen):
             "这是规划候选，不能把计划写成已发生的事实。"
         ),
     }
-    if eligible:
-        instruction["获准采用的手法卡"] = [
-            {key: value for key, value in card.items() if key != "source_title"}
-            for card in frozen["setting_basis"]["reference_cards"]
-            if _card_key(card) in eligible
-        ]
-        instruction["要求"] += (
-            "可按章纲需要选用获准手法卡。照填会话、卡片、修订编号，来源中提供 version_id 时也照填，"
-            "替换原作人物、场景和道具。"
-        )
     preserved = {
         row["chapter_id"]: row["reference_cards"]
         for _, _, row in _chapter_plans(frozen["outline"] or {"volumes": []})
-        if row.get("reference_cards")
+        if row["chapter_id"] in chapter_titles and row.get("reference_cards")
     }
+    card_summaries = {
+        _card_key(card): {key: value for key, value in card.items() if key != "source_title"}
+        for card in frozen["setting_basis"].get("reference_cards", [])
+    }
+    if preserved:
+        saved_keys = {_card_key(ref) for refs in preserved.values() for ref in refs}
+        instruction["已有章纲引用的手法卡摘要"] = [
+            card for key, card in card_summaries.items() if key in saved_keys
+        ]
+        instruction["要求"] += "已有章纲的手法卡引用会原样保留。参考其摘要规划原章，由系统保留原有引用。"
+    if eligible:
+        instruction["获准采用的手法卡"] = [card for key, card in card_summaries.items() if key in eligible]
+        instruction["各章可新增手法卡数"] = {
+            chapter_id: reference_limit - len(preserved.get(chapter_id, [])) for chapter_id in chapter_ids
+        }
+        instruction["要求"] += (
+            f"每章最终最多引用 {reference_limit} 张手法卡。按各章可新增数量安排本次获准采用的卡片。"
+            "只在新增引用中照填所选卡的会话、卡片、修订编号，来源中提供 version_id 时也照填。"
+            "替换原作人物、场景和道具。"
+        )
     required = frozen.get("required_promise_windows", {})
     for attempt in range(2):
         value = await worker.call(
@@ -303,10 +315,24 @@ async def run(worker, request, frozen):
                 saved = preserved.get(row["chapter_id"], [])
                 if saved:
                     selected = {(ref["session_id"], ref["card_id"]) for ref in saved}
-                    row["reference_cards"] = [
+                    merged = [
                         *saved,
                         *(ref for ref in chosen if (ref["session_id"], ref["card_id"]) not in selected),
                     ]
+                    if len(merged) > reference_limit:
+                        title = chapter_titles[row["chapter_id"]]
+                        raise DomainError(
+                            "outline_reference_limit",
+                            f"「{title}」已有 {len(saved)} 张手法卡。每章最多 {reference_limit} 张，"
+                            "请把新增引用安排到有余量的章纲，或先调整原大纲引用。",
+                        )
+                    row["reference_cards"] = merged
+            try:
+                plan = OutlinePlan.model_validate(plan).model_dump()
+            except ValidationError as error:
+                raise DomainError(
+                    "outline_plan", "合并原有内容后超出大纲结构的有效范围，请调整安排。"
+                ) from error
             _validate(graph, plan, frozen["setting_basis"], True)
             if [row["chapter_id"] for _, _, row in _chapter_plans(plan)] != chapter_ids:
                 raise DomainError("outline_coverage", "候选须按序覆盖现有目录的全部章节。")
@@ -314,7 +340,7 @@ async def run(worker, request, frozen):
         except DomainError as error:
             if attempt:
                 raise
-            instruction = {**instruction, "前次产物": plan, "修正要求": error.message}
+            instruction = {**instruction, "前次产物": value, "修正要求": error.message}
     if worker.cancelled():
         raise DomainError("cancelled", "任务已停止。", 409)
     artifact = worker.domain.stage(

@@ -2,13 +2,18 @@ import asyncio
 import json
 from uuid import uuid4
 
+import pytest
+
 from ainovel.db import dumps
 from ainovel.project_brief import ConfirmProject, confirm
 from ainovel.worker import Worker
-from test_outline_workspace import chapter_plan, setting_confirmation
+from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
+from test_reference_flow import SOURCE, reference as reference_fixture, update
+from test_reference_sync import card
 
 
 RESOURCE = {"id": "lamps", "title": "油灯库存", "detail": "库房只余两盏旧灯。", "adoption_state": "adopted"}
+reference = reference_fixture
 
 
 class Model:
@@ -217,3 +222,136 @@ def test_generated_outline_cannot_declare_or_change_author_required_promise(clie
     assert generated["status"] == "succeeded", generated
     artifact = client.get(endpoint + "/generation/" + generated["artifact_id"]).json()
     assert artifact["plan"]["promises"] == plan["promises"]
+
+
+@pytest.mark.parametrize("can_place", [True, False])
+def test_outline_card_merge_enforces_per_chapter_limit(client, domain, settings, story, reference, can_place):
+    endpoint, prompt, _, second = prepare(client, domain, story)
+    first_id, second_id = story["chapter_id"], second["id"]
+    update(
+        client,
+        domain,
+        reference,
+        cards=[card("😀渡口", id=f"fixed-{index}", technique=f"旧版手法 {index}") for index in range(8)],
+    )
+    source = reference["payload"]["source"]
+    other = client.post(
+        "/api/reference-sessions",
+        json={
+            **{key: source[key] for key in ("unit_id", "start", "end", "quote")},
+            "goal": "有限信息下取得局部进展",
+            "branch_id": story["branch_id"],
+        },
+    )
+    assert other.status_code == 201, other.text
+    update(client, domain, other.json(), cards=[card("😀渡口", technique="另选手法")])
+    options = client.get(endpoint + "/reference-options").json()
+
+    def address(item):
+        return {key: item[key] for key in ("session_id", "card_id", "revision", "version_id")}
+
+    old = [address(item) for item in options if item["session_id"] == reference["id"]]
+    new = address(next(item for item in options if item["session_id"] == other.json()["id"]))
+    assert len(old) == 8
+    chosen = {
+        "summary": "沿铃声查证。",
+        "volumes": [
+            {
+                "id": "v1",
+                "title": "遗铃",
+                "summary": "沿铃声查证。",
+                "units": [
+                    {
+                        "id": "u1",
+                        "title": "查证",
+                        "summary": "先试探，再确认。",
+                        "chapters": [
+                            {**chapter_plan(first_id, "门外核查"), "reference_cards": old},
+                            chapter_plan(second_id, "门内核查"),
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    previous = put_and_confirm(
+        client,
+        endpoint,
+        {**{key: prompt[key] for key in ("base_revision", "confirmation_id")}, "plan": chosen},
+    )["confirmed"]
+
+    class Candidate(Model):
+        async def generate(self, *args, **kwargs):
+            output = await super().generate(*args, **kwargs)
+            request = self.requests[-1]
+            assert request["各章可新增手法卡数"] == {first_id: 0, second_id: 8}
+            assert [address(item) for item in request["已有章纲引用的手法卡摘要"]] == old
+            assert [address(item) for item in request["获准采用的手法卡"]] == [new]
+            assert SOURCE not in dumps(request) and "😀渡口" not in dumps(request)
+            assert kwargs["schema"]["$defs"]["ChapterPlan"]["properties"]["reference_cards"]["maxItems"] == 1
+            current = json.loads(output["text"])
+            index = 1 if can_place and len(self.requests) > 1 else 0
+            current["volumes"][0]["units"][0]["chapters"][index]["reference_cards"] = [new]
+            return {
+                **output,
+                "text": dumps(current),
+                "call_id": f"offline-outline-limit-{len(self.requests)}",
+            }
+
+    queued = client.post(
+        endpoint + "/generation",
+        json={**prompt, "base_revision": previous["revision"], "reference_cards": [new]},
+    )
+    assert queued.status_code == 202, queued.text
+    model = Candidate()
+    assert asyncio.run(Worker(settings, model).run_once())
+    assert len(model.requests) == 2
+    assert "已有 8 张手法卡" in model.requests[1]["修正要求"]
+    task = client.get(endpoint + "/generation").json()[0]
+    if can_place:
+        assert task["status"] == "succeeded", task
+        response = client.get(endpoint + "/generation/" + task["artifact_id"])
+        assert response.status_code == 200, response.text
+        candidate = response.json()
+        rows = candidate["plan"]["volumes"][0]["units"][0]["chapters"]
+        assert [row["reference_cards"] for row in rows] == [old, [new]]
+        adopted = put_and_confirm(
+            client,
+            endpoint,
+            {
+                "base_revision": previous["revision"],
+                "confirmation_id": prompt["confirmation_id"],
+                "source_generation_id": candidate["id"],
+                "plan": candidate["plan"],
+            },
+        )["confirmed"]
+        assert [row["reference_cards"] for row in adopted["plan"]["volumes"][0]["units"][0]["chapters"]] == [
+            old,
+            [new],
+        ]
+        return
+
+    assert task["status"] == "blocked_runtime" and task["artifact_id"] is None
+    assert "请把新增引用安排到有余量的章纲" in task["error"]
+    relay_path = f"/api/branches/{story['branch_id']}/seven-stage-runs"
+    launch = client.post(
+        relay_path,
+        json={
+            "start_from": "settings",
+            "source_id": prompt["confirmation_id"],
+            "account": "deepseek",
+            "budget_limit": 1,
+            "client_request_id": uuid4().hex,
+            "auto_confirm_planning": True,
+            "reference_cards": [new],
+        },
+    )
+    assert launch.status_code == 202, launch.text
+    relay_model = Candidate()
+    worker = Worker(settings, relay_model)
+    for _ in range(3):
+        assert asyncio.run(worker.run_once())
+    task = domain.task(launch.json()["id"])
+    assert task["status"] == "needs_review" and task["result"]["seven_stage_run"]["stage"] == "outline"
+    assert "请把新增引用安排到有余量的章纲" in task["error"]
+    assert client.get(endpoint).json()["confirmed"] == previous
