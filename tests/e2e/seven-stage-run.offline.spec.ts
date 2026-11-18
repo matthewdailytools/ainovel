@@ -911,4 +911,60 @@ test('从确认大纲、保存正文和有效全书体检接力，逐段到达�
   await releases.getByRole('button', { name: '预览交付材料' }).click()
   await expect(releases.getByRole('button', { name: '确认完结', exact: true })).toBeDisabled()
   await expect(releases.getByRole('link', { name: '下载交付包', exact: true })).toHaveCount(0)
+
+  const chapterScope = { scope: 'chapter', scope_id: chapter.id }
+  const { preview: chapterPreview } = await (
+    await page.request.get(inspections, { params: chapterScope })
+  ).json()
+  const signedRed = await page.request.post(inspections, {
+    headers,
+    data: {
+      ...chapterScope,
+      basis_sha256: chapterPreview.basis_sha256,
+      author_reviews: [
+        {
+          check_id: '03',
+          status: 'red',
+          basis_note: '对照保存稿和人物已确认的身份。',
+          reason: '本章存在需复检的人物状态冲突。',
+          evidence: [
+            {
+              chapter_id: chapter.id,
+              revision: finalManuscript.revision,
+              start: 0,
+              end: finalManuscript.content.length,
+              quote: finalManuscript.content,
+            },
+          ],
+        },
+      ],
+    },
+  })
+  expect(signedRed.ok(), await signedRed.text()).toBe(true)
+  await releases.getByRole('button', { name: '核对最新完本依据' }).click()
+  await expect(releases.getByText('依据已更新，请重新生成。', { exact: true })).toBeVisible()
+  await expect(releases.getByRole('button', { name: '载入 AI 建议到空白项', exact: true })).toBeDisabled()
+  const inspectionGate = releases
+    .getByRole('list', { name: '本次拟确认的六项完本判定', exact: true })
+    .getByRole('listitem')
+    .filter({ hasText: '一致性与复检' })
+  await expect(inspectionGate).toContainText('红 · 阻断')
+  await expect(releases.getByRole('button', { name: '确认完结', exact: true })).toHaveCount(0)
+
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  await expect(panel.getByRole('status')).toHaveText('完本 · 等待处理检查点')
+  const resume = panel.getByRole('button', { name: '继续接力', exact: true })
+  await expect(resume).toBeEnabled()
+  await resume.press('Enter')
+  await expect(panel.getByText(/全书体检已有变化，请核对后继续/)).toBeVisible({ timeout: 20_000 })
+  await expect(resume).toBeEnabled()
+  await resume.press('Enter')
+  await expect(panel.getByRole('status')).toHaveText('校验 · 等待处理检查点', { timeout: 20_000 })
+  const reopened = await taskRecord(page, completion.id)
+  expect(reopened.result.seven_stage_run.stage).toBe('inspection')
+  expect(reopened.result.seven_stage_run.completion_id).toBeUndefined()
+  const afterRed = await remainingChildren(page, completion.id)
+  expect(afterRed.filter(({ payload }) => payload.completion_preparation)).toHaveLength(1)
+  expect(await (await page.request.get(chapterUrl)).json()).toMatchObject(finalManuscript)
 })

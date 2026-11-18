@@ -173,7 +173,7 @@ class Worker:
                     (time() + 90, self.task["id"], self.attempt),
                 )
 
-    def checkpoint(self, result, status="running", error=""):
+    def checkpoint(self, result, status="running", error="", *, before_write=None):
         with self.db.connect(True) as db:
             current = db.execute(
                 "SELECT attempt,cancel,lease_until FROM tasks WHERE id=?", (self.task["id"],)
@@ -224,6 +224,8 @@ class Worker:
                     result["scene_coverage"] = coverage(db, self.task["branch_id"])
                     if not result["scene_coverage"]["complete"]:
                         status, error = "blocked_creative", "新正文场景范围尚未完整核对，不能记录为制作完成。"
+            if before_write is not None:
+                before_write(db)
             db.execute(
                 "UPDATE tasks SET result=?,status=?,error=?,updated=? WHERE id=? AND attempt=?",
                 (dumps(result), status, error, time(), self.task["id"], self.attempt),

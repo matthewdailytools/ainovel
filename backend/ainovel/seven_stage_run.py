@@ -950,34 +950,48 @@ def _inspection_ready(report):
     return bool(
         report
         and report["current"]
+        and not report.get("current_red_checks")
         and all(item["current_status"] in {"green", "not_applicable"} for item in report["items"])
     )
 
 
 def _completion(worker, state):
-    from .book_completion import _evaluate, _latest
+    from .book_completion import _basis, _latest
     from .completion_preparation import KEY, KIND as PREPARATION
-    from .workflow_inspection import latest_book_inspection
 
     branch = worker.task["branch_id"]
     _unchanged(_story_revision(worker.domain, branch), state["story_revision"])
+
+    def read_current(tx):
+        basis, _, _, _, _, report, _ = _basis(tx, branch)
+        return basis, report, _latest(tx, branch, basis)
+
     with worker.db.connect() as tx:
         tx.execute("BEGIN")
-        selected = state.get("selected_inspection_id")
-        report = latest_book_inspection(tx, branch) if selected else None
-        preview = _evaluate(tx, branch)
-        record = _latest(tx, branch, preview["basis_sha256"])
-    if selected and (not _inspection_ready(report) or report["id"] != selected):
+        basis, report, record = read_current(tx)
+    if not _inspection_ready(report) or report["id"] != state.get("inspection_id"):
         state["completion_basis_changed"] = True
-        _checkpoint(worker, "needs_review", "选定的全书体检已有变化，请核对后继续。")
+        adopted = "选定的" if state.get("selected_inspection_id") else "本次采用的"
+        _checkpoint(worker, "needs_review", f"{adopted}全书体检已有变化，请核对后继续。")
         return
     if record and record["current"]:
-        state["completion_id"] = record["id"]
-        state["stage"] = "done"
-        state.pop("child_id", None)
-        _checkpoint(worker, "succeeded")
+
+        def finish(tx):
+            current_basis, current_report, current_record = read_current(tx)
+            if (
+                current_basis != basis
+                or not _inspection_ready(current_report)
+                or not current_record
+                or not current_record["current"]
+                or current_record["id"] != record["id"]
+            ):
+                raise DomainError("completion_changed", "写入接力结果前完本依据已变化，请核对后继续。", 409)
+            state["completion_id"] = current_record["id"]
+            state["stage"] = "done"
+            state.pop("child_id", None)
+
+        worker.checkpoint(worker.task["result"], "succeeded", before_write=finish)
         return
-    basis = preview["basis_sha256"]
     if state.get("completion_basis_sha256") not in {None, basis}:
         state["completion_basis_changed"] = True
         _checkpoint(
@@ -1018,6 +1032,8 @@ def run(worker):
             return
         if error.code not in STALE_BASIS:
             raise
+        if error.code == "completion_changed" and state["stage"] == "completion":
+            state["completion_basis_changed"] = True
         state["interruption"] = {"code": error.code, "message": error.message}
         _checkpoint(worker, "needs_review", error.message)
 

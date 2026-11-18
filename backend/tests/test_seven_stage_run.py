@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 import pytest
 
+from ainovel import seven_stage_run
 from ainovel.api import create_app
 from ainovel.backups import create_backup, unpack_verified
 from ainovel.budget import Budget
@@ -20,7 +21,7 @@ from test_project_brief import BRIEF, IDEA
 from test_reference_flow import SOURCE, reference as reference_fixture, update as update_reference
 from test_reference_flow import run as run_reference
 from test_work_snapshot import request_restore, route, save_project, verify
-from test_workflow_inspection import author
+from test_workflow_inspection import author, item, read, report
 
 
 BODY = "学徒进门听见铃响，获得一条新线索。"
@@ -714,6 +715,159 @@ def test_resume_from_written_manuscript_or_passed_inspection_only_runs_remaining
     assert state["stage"] == "completion" and state["inspection_id"] == updated
     assert model.calls == ["对账立项章纲与节奏", "准备完本收束核对建议", "起草完本交付简介"]
     assert domain.chapter(chapter_id)["revision"] == chapter["revision"]
+
+
+@pytest.mark.parametrize("timing", ["before_completion_stage", "before_preparation_queue", "before_success"])
+def test_red_inspection_stops_completion_and_same_run_resumes_after_review(
+    client, settings, story, monkeypatch, timing
+):
+    prefix = f"/api/branches/{story['branch_id']}"
+    runs = prefix + "/seven-stage-runs"
+    inspection = prefix + "/workflow-inspections"
+    completion = prefix + "/book-completion"
+    chapter = verify(
+        client.put(f"/api/chapters/{story['chapter_id']}", json={"base_revision": 0, "content": BODY})
+    )
+    put_and_confirm(
+        client,
+        prefix + "/outline-workspace",
+        {"base_revision": 0, "plan": plan([chapter], [])},
+    )
+    model = Model(settings=settings)
+
+    def sign_book():
+        preview = read(client, inspection)["preview"]
+        return report(
+            client,
+            inspection,
+            preview,
+            author_reviews=[
+                author(row["check_id"], chapter) for row in preview["items"] if row["status"] == "pending"
+            ],
+            length_targets={"expected_chapters": 1},
+        )
+
+    def sign_chapter(status):
+        preview = read(client, inspection, scope="chapter", scope_id=chapter["id"])["preview"]
+        return report(client, inspection, preview, author_reviews=[author("03", chapter, status)])
+
+    def confirm():
+        return client.post(
+            completion + "/confirm",
+            json={
+                "basis_sha256": read(client, completion)["basis_sha256"],
+                "read_note": "作者已通读保存稿。",
+                "ending": {"note": "主冲突已收束。"},
+                "characters": {"note": "已核对学徒身份。"},
+                "promises": {"note": "铜铃线索已处理。"},
+                "intro": "学徒循着铃声寻找线索。",
+                "spoiler_scope": "opening",
+                "sample_chapter_ids": [chapter["id"]],
+                "materials_reviewed": True,
+            },
+        )
+
+    sign_book()
+    origin = "inspection" if timing == "before_success" else "writing"
+    sources = read(client, runs + "/sources")
+    task = verify(
+        client.post(
+            runs,
+            json={
+                "start_from": origin,
+                "source_id": sources[f"{origin}_id"],
+                "account": "deepseek",
+                "budget_limit": 1,
+                "client_request_id": uid(),
+            },
+        ),
+        202,
+    )
+
+    def status():
+        current = read(client, f"/api/tasks/{task['id']}")
+        return current["status"], current["result"]["seven_stage_run"]
+
+    def resume():
+        verify(client.post(f"{runs}/{task['id']}/resume"))
+
+    original = None
+    with monkeypatch.context() as race:
+        if timing == "before_success":
+            drain(settings, model)
+            waiting, prepared = status()
+            assert waiting == "needs_review" and prepared["completion_preparation_id"]
+            original = verify(confirm(), 201)
+            original_download = f"{completion}/{original['id']}/export"
+            original_package = client.get(original_download)
+            assert original_package.status_code == 200, original_package.text
+            resume()
+            checkpoint = Worker.checkpoint
+
+            def checkpoint_with_red(worker, result, status="running", error="", **options):
+                if worker.task["id"] == task["id"] and status == "succeeded":
+                    sign_chapter("red")
+                return checkpoint(worker, result, status, error, **options)
+
+            race.setattr(Worker, "checkpoint", checkpoint_with_red)
+        else:
+            assert asyncio.run(Worker(settings, model).run_once())
+            stage_status, stage = status()
+            assert stage_status == "queued" and stage["stage"] == "completion"
+            assert not model.calls
+            if timing == "before_preparation_queue":
+                drive_child = seven_stage_run._drive_child
+
+                def queue_with_red(worker, state, step, kind, payload):
+                    if worker.task["id"] == task["id"] and step.startswith("completion-"):
+                        sign_chapter("red")
+                    return drive_child(worker, state, step, kind, payload)
+
+                race.setattr(seven_stage_run, "_drive_child", queue_with_red)
+            else:
+                sign_chapter("red")
+        drain(settings, model)
+
+    waiting, blocked = status()
+    assert waiting == "needs_review"
+    assert blocked["stage"] == "completion" and blocked["completion_basis_changed"]
+    assert "completion_id" not in blocked
+    prepared_count = model.calls.count("起草完本交付简介")
+    if original:
+        assert prepared_count == 1
+        assert blocked["children"] == prepared["children"]
+        assert not read(client, completion)["latest"]["current"]
+        assert client.get(original_download).content == original_package.content
+    else:
+        assert not prepared_count and not blocked["children"]
+    current = read(client, completion)
+    assert next(check for check in current["checks"] if check["id"] == "inspection")["status"] == "red"
+    assert verify(confirm(), 409)["code"] == "completion_blocked"
+
+    resume()
+    drain(settings, model)
+    waiting, at_inspection = status()
+    assert waiting == "needs_review" and at_inspection["stage"] == "inspection"
+    assert item(read(client, inspection)["latest"], "03")["current_status"] == "red"
+    assert model.calls.count("起草完本交付简介") == prepared_count
+    sign_chapter("green")
+    reviewed = sign_book()
+    official = verify(confirm(), 201)
+    resume()
+    drain(settings, model)
+    finished, receipt = status()
+    assert finished == "succeeded" and receipt["completion_id"] == official["id"]
+    assert receipt["inspection_id"] == official["manifest"]["inspection_id"] == reviewed["id"]
+    assert all(child in receipt["children"] for child in blocked["children"])
+    assert model.calls.count("起草完本交付简介") == prepared_count
+
+    download = f"{completion}/{official['id']}/export"
+    archive = client.get(download)
+    assert archive.status_code == 200, archive.text
+    sign_chapter("red")
+    assert not read(client, completion)["latest"]["current"]
+    assert client.get(download).content == archive.content
+    assert status()[0] == "succeeded"
 
 
 def test_budget_and_concurrent_edit_leave_original_intact(client, domain, settings, story):
