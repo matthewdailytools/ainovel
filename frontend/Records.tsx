@@ -4,6 +4,10 @@ import type { Notify } from './App'
 import { GenreSettings } from './GenreProfile'
 import { AuthorIntentPanel } from './AuthorIntent'
 import { FinalizationPanel } from './FinalizationPanel'
+import { ReadingMetricsPanel } from './ReadingMetricsPanel'
+import { InspectionPanel } from './InspectionPanel'
+import { CompletionPanel } from './CompletionPanel'
+import { WorkSnapshotPanel } from './WorkSnapshotPanel'
 import { StoryGraph } from './StoryGraph'
 import { type FeedbackHandoff } from './feedbackRevision'
 
@@ -35,12 +39,14 @@ export function Records({
   modelReady,
   notify,
   onReviseFeedback,
+  onSnapshotRestored,
 }: {
   branch: Branch
   account: string
   modelReady: boolean
   notify: Notify
   onReviseFeedback: (feedback: FeedbackHandoff) => void
+  onSnapshotRestored: (branchId: string) => Promise<void>
 }) {
   const [facts, setFacts] = useState<Fact[]>([])
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -528,6 +534,27 @@ export function Records({
           <pre>{source}</pre>
         </section>
       )}
+      <div id="bench-inspection" tabIndex={-1}>
+        <InspectionPanel key={branch.id} branchId={branch.id} chapters={chapters} />
+      </div>
+      <WorkSnapshotPanel
+        key={`snapshot-${branch.id}`}
+        branchId={branch.id}
+        chapters={chapters}
+        onRestored={async (id) => {
+          if (id === branch.id) await refresh()
+          await onSnapshotRestored(id)
+        }}
+      />
+      <div id="bench-completion" tabIndex={-1}>
+        <CompletionPanel
+          key={`completion-${branch.id}`}
+          branchId={branch.id}
+          chapters={chapters}
+          notify={notify}
+        />
+      </div>
+      <ReadingMetricsPanel key={`reading-${branch.id}`} branchId={branch.id} chapters={chapters} />
       <FinalizationPanel
         branchId={branch.id}
         refreshVersion={storyRevision}

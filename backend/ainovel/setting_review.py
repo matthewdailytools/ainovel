@@ -4,10 +4,11 @@ from typing import Literal
 
 from pydantic import Field
 
-from .conception import handoff_tx
+from .conception import CONFIRMATION, _latest, _read_payload, revision_tx
 from .db import DomainError
 from .evidence import source_units
 from .models import Input
+from .project_brief import confirmed_project_tx
 
 
 class SettingDecision(Input):
@@ -16,18 +17,45 @@ class SettingDecision(Input):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+def confirmed_world_basis(tx, branch_id, confirmation_id=None):
+    """Read authored rules without treating new story observations as edits to those rules."""
+    row = _latest(tx, branch_id, CONFIRMATION)
+    absent = {"confirmation_id": None, "items": []}
+    if not row or (confirmation_id and confirmation_id != row["id"]):
+        if confirmation_id:
+            raise DomainError("conception_snapshot", "所选世界设定确认版本已改变。", 409)
+        return absent
+    snapshot = _read_payload(row)
+    project = confirmed_project_tx(tx, branch_id)
+    if snapshot["revision"] != revision_tx(tx, branch_id) or snapshot.get("project_confirmation_id") != (
+        project["id"] if project else None
+    ):
+        if confirmation_id:
+            raise DomainError("conception_changed", "设定草稿已改变，请重新确认。", 409)
+        return absent
+    observed_ids = {source["item_id"] for source in snapshot.get("sources", [])}
+    return {
+        "confirmation_id": row["id"],
+        "revision": snapshot["revision"],
+        "items": [
+            {
+                "id": item["id"],
+                "title": item["title"],
+                "detail": item["detail"],
+                **({"setting_policy": item["setting_policy"]} if item.get("setting_policy") else {}),
+            }
+            for category in snapshot["categories"]
+            if category["id"] == "world" and not category["skipped"]
+            for item in category["items"]
+            if item["id"] not in observed_ids and item["detail"].strip()
+        ],
+    }
+
+
 def freeze_rule(snapshot, item_id):
-    for category in snapshot["categories"]:
-        if category["id"] == "world":
-            for item in category["items"]:
-                if item["id"] == item_id and item["detail"].strip():
-                    return {
-                        "confirmation_id": snapshot["id"],
-                        "revision": snapshot["revision"],
-                        "id": item_id,
-                        "title": item["title"],
-                        "detail": item["detail"],
-                    }
+    for item in snapshot["items"]:
+        if item["id"] == item_id:
+            return {"confirmation_id": snapshot["confirmation_id"], "revision": snapshot["revision"], **item}
     raise DomainError("setting_rule", "请选择已确认且有正文内容的世界设定条目。", 409)
 
 
@@ -40,7 +68,7 @@ def report_current(tx, artifact):
         return False
     rule = artifact["basis"]["rule"]
     try:
-        handoff_tx(tx, artifact["branch_id"], rule["confirmation_id"])
+        confirmed_world_basis(tx, artifact["branch_id"], rule["confirmation_id"])
     except DomainError as error:
         if error.code not in {"conception_snapshot", "conception_changed"}:
             raise
@@ -67,6 +95,7 @@ async def run(worker, request, rule):
         {
             "动作": "对照单条已确认设定与保存稿",
             "设定": rule["detail"],
+            **({"适用规则": rule["setting_policy"]} if rule.get("setting_policy") else {}),
             "可引用原文": units,
             "要求": (
                 "只判断给定设定与本次正文是否相符。明确违背填 fail，有证据支持相符填 pass，"

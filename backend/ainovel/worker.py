@@ -132,6 +132,9 @@ class Worker:
                     ("执行进程中断，模型结果可能未知；请查看账本后明确恢复。", row["id"]),
                 )
                 self.db.event(db, row["id"], "interrupted", {"unknown_result": True})
+            from .seven_stage_run import wake_waiting
+
+            wake_waiting(db)
             active = db.execute("SELECT id FROM tasks WHERE status='running' LIMIT 1").fetchone()
             if active:
                 return None
@@ -317,6 +320,16 @@ class Worker:
             if current_reference != self.task["result"].get("reference_snapshot"):
                 raise DomainError("reference_changed", "参考输入已改变，停止派发。", 409)
         expected = (context or {}).get("branch")
+        if parent_id := payload.get("seven_stage_run_id"):
+            parent = self.domain.task(parent_id)
+            if parent["cancel"] or parent["status"] == "cancelled":
+                raise DomainError("cancelled", "自动接力已取消，未派发子任务。", 409)
+        parent_basis = payload.get("seven_stage_story_revision")
+        if (
+            parent_basis is not None
+            and self.domain.branch(self.task["branch_id"])["story_revision"] != parent_basis
+        ):
+            raise DomainError("seven_stage_changed", "接力依据已更新，已停止派发旧任务。", 409)
         if expected and self.domain.branch(expected["id"])["story_revision"] != expected["story_revision"]:
             raise DomainError("story_changed", "故事版本在步骤之间改变，已停止后续调用。", 409)
         workflow_revision = (
@@ -917,6 +930,11 @@ class Worker:
 
     async def module(self):
         request = self.task["payload"]
+        if outline_generation := self.task["result"].get("outline_generation"):
+            from .outline_generation import run
+
+            await run(self, request, outline_generation)
+            return
         if rule := self.task["result"].get("setting_rule"):
             from .setting_review import run
 
@@ -944,6 +962,9 @@ class Worker:
         chapter = context["chapter"]
         if chapter and chapter["revision"] != request.get("base_revision"):
             raise DomainError("revision_conflict", "排队后正文已改变，请以新版本重试。", 409)
+        outline = self.task["result"].get("outline")
+        if outline:
+            context["采用章纲"] = outline
         instruction = {
             "action": action,
             "作者要求": request["instruction"],
@@ -1068,6 +1089,7 @@ class Worker:
                 "reference_session": self.task["result"].get("reference_snapshot"),
                 "scene_binding": context["longform"].get("scene_binding"),
                 "chapter_scenes": context.get("chapter_scenes"),
+                **({"outline": outline} if outline else {}),
             },
             self.task["id"],
             self.attempt,
@@ -2040,6 +2062,10 @@ class Worker:
                 from .source_corrected_candidate_recheck import run
 
                 await run(self)
+            elif task["kind"] == "seven_stage_run":
+                from .seven_stage_run import run
+
+                run(self)
             else:
                 await self.workflow()
         except Exception as error:

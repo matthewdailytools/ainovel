@@ -17,6 +17,13 @@ type Card = {
   exceptions: string
   evidence: string
 }
+type AnalysisScope = { start: number; end: number; card_id?: string }
+type HistoricalCard = {
+  revision: number
+  card: Card
+  source: ReferencePayload['source']
+  goal: string | null
+}
 type ReferencePayload = {
   source: {
     title: string
@@ -30,6 +37,7 @@ type ReferencePayload = {
   goal: string
   cards: Card[]
   selected_ids: string[]
+  pinned_revisions?: Record<string, number>
   plot: string
   fixed: string[]
   application_plan: string
@@ -45,6 +53,7 @@ const editable = (p: ReferencePayload) =>
     p.goal,
     p.cards,
     p.selected_ids,
+    p.pinned_revisions || {},
     p.plot,
     p.fixed,
     p.application_plan,
@@ -178,6 +187,8 @@ export function ReferenceWorkspace({
   const [task, setTask] = useState<Task>()
   const [tasks, setTasks] = useState<Task[]>([])
   const [historical, setHistorical] = useState<Artifact>()
+  const [historicalCard, setHistoricalCard] = useState<HistoricalCard>()
+  const [analysisScope, setAnalysisScope] = useState<AnalysisScope>()
   const [busy, setBusy] = useState(false)
   const [plotContractCheck, setPlotContractCheck] = useState(false)
   const [sourceIdentityContext, setSourceIdentityContext] = useState(false)
@@ -331,6 +342,7 @@ export function ReferenceWorkspace({
       goal,
       cards,
       selected_ids,
+      pinned_revisions: draft.pinned_revisions || {},
       plot,
       fixed: fixed.map((v) => v.trim()).filter(Boolean),
       application_plan,
@@ -343,7 +355,7 @@ export function ReferenceWorkspace({
     setBase(value.revision)
     setMessage('已保存采用规则及本次方案。旧结果仍保留在历史中，新动作使用此版本。')
   }
-  async function action(name: string, checkSaved = false) {
+  async function action(name: string, checkSaved = false, scope?: AnalysisScope) {
     if (!row || !draft) return
     const values = {
       action: name,
@@ -354,6 +366,7 @@ export function ReferenceWorkspace({
       source_identity_context:
         plotContractCheck && sourceIdentityContext && (name === 'draft' || name === 'check'),
       candidate_id: name === 'check' && !checkSaved ? candidate?.id : null,
+      ...(scope ? { analysis_scope: scope } : {}),
     }
     const signature = JSON.stringify(values)
     if (pending.current?.signature !== signature) pending.current = { signature, key: crypto.randomUUID() }
@@ -387,6 +400,49 @@ export function ReferenceWorkspace({
     )
   const stale = row.revision !== base
   const canRun = !busy && !running && !stale && !dirty && modelReady
+  const pinnedRevisions = draft.pinned_revisions || {}
+  const analysisCards = (artifacts.analyze?.payload.cards ?? []) as Card[]
+  const analyzedScope = artifacts.analyze?.payload.analysis_scope as
+    (AnalysisScope & { quote: string }) | undefined
+
+  function selectCard(cardId: string, selected: boolean, revision?: number) {
+    if (!draft) return
+    const pinned = { ...draft.pinned_revisions }
+    if (selected && revision !== undefined) pinned[cardId] = revision
+    else delete pinned[cardId]
+    const selectedIds = draft.selected_ids.filter((id) => id !== cardId)
+    edit({
+      selected_ids: selected ? [...selectedIds, cardId] : selectedIds,
+      pinned_revisions: pinned,
+    })
+  }
+
+  function editCard(card: Card) {
+    if (!draft || !row) return
+    const saved = row.payload.cards.find((item) => item.id === card.id)
+    const pinned = { ...draft.pinned_revisions }
+    let selectedIds = draft.selected_ids
+    if (selectedIds.includes(card.id) && pinned[card.id] === undefined) {
+      if (saved && JSON.stringify(saved) !== JSON.stringify(card)) pinned[card.id] = row.revision
+      if (!saved) selectedIds = selectedIds.filter((id) => id !== card.id)
+    }
+    edit({
+      cards: draft.cards.map((item) => (item.id === card.id ? card : item)),
+      selected_ids: selectedIds,
+      pinned_revisions: pinned,
+    })
+  }
+
+  function showCard(card: Card, revision: number) {
+    return perform(async () => {
+      setHistoricalCard(
+        await api<HistoricalCard>(
+          `/reference-sessions/${identifier}/cards/${encodeURIComponent(card.id)}/revisions/${revision}`,
+        ),
+      )
+    })
+  }
+
   return (
     <div className="page-pad reference-workspace">
       <div className="page-heading">
@@ -433,7 +489,22 @@ export function ReferenceWorkspace({
               <h3>规则和方案修订 {h.revision}（历史）</h3>
               <p>{h.application_plan || '此版本尚无应用方案'}</p>
               {h.cards.map((c) => (
-                <p key={c.id}>{c.technique}</p>
+                <div key={c.id}>
+                  <p>{c.technique}</p>
+                  <button type="button" disabled={busy} onClick={() => void showCard(c, h.revision)}>
+                    核对卡片修订 {h.revision}
+                  </button>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={pinnedRevisions[c.id] === h.revision}
+                      onChange={(e) => selectCard(c.id, e.target.checked, h.revision)}
+                    />
+                    <span>
+                      引用修订 {h.revision}：{c.technique}
+                    </span>
+                  </label>
+                </div>
               ))}
               {Object.entries(h.results).map(([stage, id]) => (
                 <button
@@ -458,10 +529,75 @@ export function ReferenceWorkspace({
               <pre>{JSON.stringify(historical.payload, null, 2)}</pre>
             </section>
           )}
+          {historicalCard && (
+            <section aria-label="手法卡引用依据">
+              <h3>手法卡修订 {historicalCard.revision}</h3>
+              <p>{historicalCard.card.technique}</p>
+              <p>
+                {historicalCard.source.title} · {historicalCard.source.source}
+              </p>
+              {historicalCard.goal && <p>学习目标 {historicalCard.goal}</p>}
+              <blockquote>{historicalCard.card.evidence}</blockquote>
+              <details>
+                <summary>
+                  参考选段 · UTF-16 {historicalCard.source.start}—{historicalCard.source.end}
+                </summary>
+                <blockquote>{historicalCard.source.quote}</blockquote>
+              </details>
+            </section>
+          )}
         </details>
         <details>
           <summary>查看固定版本选段快照</summary>
           <blockquote>{row.payload.source.quote}</blockquote>
+        </details>
+        <details>
+          <summary>选择局部重拆范围</summary>
+          <label>
+            原文内的重拆选区
+            <textarea
+              readOnly
+              rows={4}
+              value={row.payload.source.quote}
+              onSelect={(event) => {
+                const { selectionStart: start, selectionEnd: end } = event.currentTarget
+                setAnalysisScope((old) => (start < end ? { ...old, start, end } : undefined))
+              }}
+            />
+          </label>
+          {analysisScope && (
+            <>
+              <blockquote>
+                {row.payload.source.quote.slice(analysisScope.start, analysisScope.end)}
+              </blockquote>
+              <label>
+                重拆对象
+                <select
+                  value={analysisScope.card_id || ''}
+                  onChange={(event) =>
+                    setAnalysisScope({ ...analysisScope, card_id: event.target.value || undefined })
+                  }
+                >
+                  <option value="">提出补充卡草案</option>
+                  {row.payload.cards.map((card) => (
+                    <option key={card.id} value={card.id}>
+                      {card.technique}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+          <button
+            disabled={
+              !canRun ||
+              !analysisScope ||
+              !row.payload.source.quote.slice(analysisScope.start, analysisScope.end).trim()
+            }
+            onClick={() => void perform(() => action('analyze', false, analysisScope))}
+          >
+            重拆所选范围
+          </button>
         </details>
         <label>
           想学习什么
@@ -513,12 +649,47 @@ export function ReferenceWorkspace({
         {artifacts.analyze && (
           <>
             <p>{String(artifacts.analyze.payload.coverage_note || '')}</p>
-            <button
-              disabled={busy || running}
-              onClick={() => edit({ cards: artifacts.analyze.payload.cards as Card[], selected_ids: [] })}
-            >
-              载入分析卡供编辑和选择（尚未采用）
-            </button>
+            {analyzedScope ? (
+              <>
+                <h3>局部重拆草案</h3>
+                <blockquote>{analyzedScope.quote}</blockquote>
+                {analysisCards.map((card) => (
+                  <article className="fact" key={card.id}>
+                    <strong>{card.technique}</strong>
+                    <p>{card.observation}</p>
+                    <p>{card.interpretation}</p>
+                    <p>
+                      {card.conditions} {card.exceptions}
+                    </p>
+                    <blockquote>{card.evidence}</blockquote>
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        running ||
+                        stale ||
+                        (analyzedScope.card_id
+                          ? !draft.cards.some((item) => item.id === analyzedScope.card_id)
+                          : draft.cards.length >= 8 || draft.cards.some((item) => item.id === card.id))
+                      }
+                      onClick={() => {
+                        if (analyzedScope.card_id) editCard({ ...card, id: analyzedScope.card_id })
+                        else edit({ cards: [...draft.cards, card] })
+                      }}
+                    >
+                      {analyzedScope.card_id ? '用此草案重写原卡' : '载入补充卡草案'}
+                    </button>
+                  </article>
+                ))}
+              </>
+            ) : (
+              <button
+                disabled={busy || running}
+                onClick={() => edit({ cards: analysisCards, selected_ids: [], pinned_revisions: {} })}
+              >
+                载入分析卡供编辑和选择（尚未采用）
+              </button>
+            )}
           </>
         )}
         {!draft.cards.length && <p>尚无拆解卡。可先分析，也可手动整理。</p>}
@@ -527,17 +698,14 @@ export function ReferenceWorkspace({
             <label className="check">
               <input
                 type="checkbox"
-                checked={draft.selected_ids.includes(card.id)}
-                onChange={(e) =>
-                  edit({
-                    selected_ids: e.target.checked
-                      ? [...draft.selected_ids, card.id]
-                      : draft.selected_ids.filter((id) => id !== card.id),
-                  })
-                }
+                checked={draft.selected_ids.includes(card.id) && pinnedRevisions[card.id] === undefined}
+                onChange={(e) => selectCard(card.id, e.target.checked)}
               />
               <span>本次采用：{card.technique}</span>
             </label>
+            {pinnedRevisions[card.id] !== undefined && (
+              <p>当前仍引用修订 {pinnedRevisions[card.id]}。勾选本卡可改用这次编辑的内容。</p>
+            )}
             <details>
               <summary>编辑卡片 {index + 1}：观察、解释、写法与证据</summary>
               {(
@@ -546,7 +714,7 @@ export function ReferenceWorkspace({
                   interpretation: '作用解释（分析判断）',
                   technique: '可迁移写法',
                   conditions: '适用条件',
-                  exceptions: '例外',
+                  exceptions: '例外与须替换内容',
                   evidence: '逐字原文证据',
                 }) as [keyof Card, string][]
               ).map(([key, title]) => (
@@ -556,13 +724,7 @@ export function ReferenceWorkspace({
                     rows={2}
                     maxLength={2000}
                     value={card[key]}
-                    onChange={(e) =>
-                      edit({
-                        cards: draft.cards.map((c) =>
-                          c.id === card.id ? { ...c, [key]: e.target.value } : c,
-                        ),
-                      })
-                    }
+                    onChange={(e) => editCard({ ...card, [key]: e.target.value })}
                   />
                 </label>
               ))}
@@ -577,10 +739,10 @@ export function ReferenceWorkspace({
                 ...draft.cards,
                 {
                   id: crypto.randomUUID(),
-                  observation: '请填写原文观察',
-                  interpretation: '请填写可能作用',
-                  technique: '请填写可执行写法',
-                  conditions: '请填写适用场景',
+                  observation: '',
+                  interpretation: '',
+                  technique: '',
+                  conditions: '',
                   exceptions: '',
                   evidence: row.payload.source.quote.slice(0, 800),
                 },

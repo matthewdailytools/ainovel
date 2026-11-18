@@ -5,10 +5,11 @@ import json
 from time import time
 
 from pydantic import Field, StrictInt, StringConstraints
-from typing import Annotated
+from typing import Annotated, Literal
 
 from .db import DomainError, dumps, uid
 from .models import Input
+from .project_brief import ConfirmedProject, confirmed_project_tx
 from .story_graph import Source
 
 WORKSPACE = "conception_workspace"
@@ -31,11 +32,18 @@ Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, patt
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
+class SettingPolicy(Input):
+    strength: Literal["hard", "soft"]
+    scope: str = Field(default="", max_length=800)
+    exceptions: str = Field(default="", max_length=800)
+
+
 class ConceptionItem(Input):
     id: Identifier
     title: Title
     detail: str = Field(default="", max_length=4000)
     links: list[Identifier] = Field(default_factory=list, max_length=30)
+    setting_policy: SettingPolicy | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ConceptionCategory(Input):
@@ -108,6 +116,7 @@ class ConceptionWorkspace(Input):
     confirmation: ConceptionConfirmation | None
     observed: list[ConceptionObserved]
     sources: list[ConceptionSource]
+    project: ConfirmedProject | None = None
 
 
 def _latest(tx, branch_id, kind):
@@ -292,6 +301,9 @@ def _source_records(tx, branch_id, workspace):
 
 
 def _current(tx, branch, revision, confirmation, observed=None, source_records=None):
+    project = confirmed_project_tx(tx, branch["id"])
+    if confirmation.get("project_confirmation_id") != (project["id"] if project else None):
+        return False
     return confirmation["revision"] == revision and (
         confirmation["story_revision"] == branch["story_revision"]
         or (
@@ -354,6 +366,7 @@ def _snapshot_tx(tx, branch):
         "confirmation": confirmation,
         "observed": observed,
         "sources": evidence,
+        "project": confirmed_project_tx(tx, branch["id"]),
     }
 
 
@@ -406,7 +419,7 @@ def _persist(tx, branch, before, categories, generated=None):
 
 
 def save(domain, branch_id, data):
-    categories = [category.model_dump() for category in data.categories]
+    categories = [category.model_dump(exclude_none=True) for category in data.categories]
     with domain.db.connect(True) as tx:
         branch = _branch(tx, branch_id)
         before = _workspace(tx, branch_id)
@@ -446,6 +459,8 @@ def adopt(domain, branch_id, data):
         if not row:
             raise DomainError("conception_source", "本工作版本中没有该构思候选。", 404)
         basis = json.loads(row["basis"])
+        if project_id := basis.get("project_confirmation_id"):
+            confirmed_project_tx(tx, branch_id, project_id)
         if (
             basis.get("conception_revision") != before["revision"]
             or basis.get("story_revision") != branch["story_revision"]
@@ -454,7 +469,8 @@ def adopt(domain, branch_id, data):
         candidate = json.loads(row["payload"])
         source = {
             category["id"]: {
-                item["id"]: ConceptionItem.model_validate(item).model_dump() for item in category["items"]
+                item["id"]: ConceptionItem.model_validate(item).model_dump(exclude_none=True)
+                for item in category["items"]
             }
             for category in candidate["categories"]
         }
@@ -472,7 +488,7 @@ def adopt(domain, branch_id, data):
             for item in section.items:
                 if item.id in existing or item.id in origins or item.id not in source[section.id]:
                     raise DomainError("conception_source", "选择的条目不在本次候选中，或与现有条目标识冲突。")
-                value = item.model_dump()
+                value = item.model_dump(exclude_none=True)
                 categories[section.id]["items"].append(value)
                 categories[section.id]["skipped"] = False
                 origins[item.id] = {
@@ -480,6 +496,8 @@ def adopt(domain, branch_id, data):
                     "artifact_id": data.artifact_id,
                     "edited": value != source[section.id][item.id],
                 }
+                if project_id:
+                    origins[item.id]["project_confirmation_id"] = project_id
                 if evidence := candidate.get("source_evidence", {}).get(item.id):
                     from .domain import utf16_slice
 
@@ -527,6 +545,9 @@ def confirm(domain, branch_id, data):
             "note": data.note.strip(),
             "planning_brief": planning_brief if len(planning_brief) <= 30_000 else "",
         }
+        project = confirmed_project_tx(tx, branch_id)
+        if project:
+            payload["project_confirmation_id"] = project["id"]
         identifier = _insert(tx, branch, CONFIRMATION, payload, {"story_revision": branch["story_revision"]})
         _receipt(tx, data, identifier, fingerprint)
         return _snapshot_tx(tx, branch)
@@ -599,6 +620,9 @@ def queued_handoff_tx(tx, branch_id, kind, identifier):
 
 
 def register_routes(app, domain):
+    from .project_brief import register_routes as register_project_routes
+
+    register_project_routes(app, domain)
     path = "/api/branches/{branch_id}/conception"
 
     @app.get(path)

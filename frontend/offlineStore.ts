@@ -1,0 +1,449 @@
+const DATABASE = 'ainovel-offline-workspace'
+const FORMAT = 'ainovel-manuscript/1'
+export const maxManuscriptBytes = 24 * 1024 * 1024
+
+export type LocalNovel = { id: string; title: string; brief: string; created: number }
+export type LocalBranch = {
+  id: string
+  novel_id: string
+  name: string
+  mode: string
+  story_revision: number
+  created: number
+}
+export type LocalProject = { novel: LocalNovel; branch: LocalBranch }
+export type LocalChapter = {
+  id: string
+  branch_id: string
+  position: number
+  title: string
+  revision: number
+  archived: 0 | 1
+  stale: 0 | 1
+}
+export type LocalRevision = {
+  id: string
+  chapter_id: string
+  revision: number
+  parent_id: string | null
+  content: string
+  sha256: string
+  cause: string
+  created: number
+}
+export type ManuscriptPack = LocalProject & {
+  format: typeof FORMAT
+  chapters: LocalChapter[]
+  revisions: LocalRevision[]
+}
+type Store = 'projects' | 'chapters' | 'revisions'
+
+export class OfflineStoreError extends Error {
+  constructor(
+    readonly code: 'format' | 'ownership' | 'conflict' | 'quota' | 'database' | 'missing',
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
+function result<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+}
+
+function openDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DATABASE, 1)
+    let blocked = false
+    request.onblocked = () => {
+      blocked = true
+      reject(new OfflineStoreError('database', '已有窗口占用浏览器存储，请关闭其他离线写作窗口后重试。'))
+    }
+    request.onupgradeneeded = () => {
+      const db = request.result
+      db.createObjectStore('projects', { keyPath: 'novel.id' }).createIndex('byBranch', 'branch.id', {
+        unique: true,
+      })
+      db.createObjectStore('chapters', { keyPath: 'id' }).createIndex('byBranch', 'branch_id')
+      const revisions = db.createObjectStore('revisions', { keyPath: 'id' })
+      revisions.createIndex('byChapter', 'chapter_id')
+      revisions.createIndex('byRevision', ['chapter_id', 'revision'], { unique: true })
+    }
+    request.onsuccess = () => {
+      const db = request.result
+      db.onversionchange = () => db.close()
+      if (blocked) db.close()
+      else resolve(db)
+    }
+    request.onerror = () => reject(request.error)
+  })
+}
+
+async function transact<T>(
+  stores: Store[],
+  mode: IDBTransactionMode,
+  perform: (tx: IDBTransaction) => Promise<T>,
+): Promise<T> {
+  let db: IDBDatabase | undefined
+  try {
+    db = await openDatabase()
+    const tx = db.transaction(stores, mode)
+    const done = new Promise<DOMException | null>((resolve) => {
+      tx.oncomplete = () => resolve(null)
+      tx.onabort = () => resolve(tx.error ?? new DOMException('Transaction aborted', 'AbortError'))
+    })
+    let output: T
+    try {
+      output = await perform(tx)
+    } catch (error) {
+      try {
+        tx.abort()
+      } catch {
+        // The failed request may already have aborted the transaction.
+      }
+      await done
+      throw error
+    }
+    const failure = await done
+    if (failure) throw failure
+    return output
+  } catch (error) {
+    if (error instanceof OfflineStoreError) throw error
+    if (error instanceof DOMException && error.name === 'QuotaExceededError')
+      throw new OfflineStoreError('quota', '浏览器空间不足，保存失败。可暂留当前输入或下载草稿。')
+    if (error instanceof DOMException && error.name === 'ConstraintError')
+      throw new OfflineStoreError('conflict', '此记录的标识或修订已存在，本地数据保留。')
+    throw new OfflineStoreError('database', '浏览器存储暂不可用或格式较新，已保留原存储。')
+  } finally {
+    db?.close()
+  }
+}
+
+const newId = () => crypto.randomUUID().replaceAll('-', '')
+const now = () => Date.now() / 1000
+
+export async function manuscriptHash(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function invalid(message: string): never {
+  throw new OfflineStoreError('format', message)
+}
+
+function row(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('稿件交换包包含无效数据。')
+  return value as Record<string, unknown>
+}
+
+function fields(value: unknown, allowed: string[]): Record<string, unknown> {
+  const item = row(value)
+  if (Object.keys(item).some((key) => !allowed.includes(key)))
+    invalid('稿件交换包包含当前版本无法识别的字段。')
+  return item
+}
+
+function content(value: unknown, max: number, name: string, required = false): string {
+  if (
+    typeof value !== 'string' ||
+    value.length > max * 2 ||
+    Array.from(value).length > max ||
+    (required && !value.trim()) ||
+    /\p{Surrogate}/u.test(value)
+  )
+    invalid(`${name}缺失、过长或包含无效字符。`)
+  return value
+}
+
+function identity(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) invalid('稿件交换包包含无效标识。')
+  return value
+}
+
+function number(value: unknown, minimum = 0, integer = true): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < minimum ||
+    (integer && !Number.isSafeInteger(value))
+  )
+    invalid('稿件交换包包含无效序号或时间。')
+  return value
+}
+
+function flag(value: unknown): 0 | 1 {
+  if (value !== 0 && value !== 1) invalid('稿件交换包包含无效状态。')
+  return value
+}
+
+function workingMode(value: unknown) {
+  if (value !== 'advisory' && value !== 'assisted' && value !== 'automatic')
+    invalid('稿件交换包包含无效工作模式。')
+  return value
+}
+
+async function readProject(tx: IDBTransaction, projectId: string): Promise<LocalProject> {
+  const project = await result<LocalProject | undefined>(tx.objectStore('projects').get(projectId))
+  if (!project) throw new OfflineStoreError('missing', '离线作品已不存在，请重新打开。')
+  return project
+}
+
+async function readChapter(
+  tx: IDBTransaction,
+  project: LocalProject,
+  chapterId: string,
+): Promise<LocalChapter> {
+  const chapter = await result<LocalChapter | undefined>(tx.objectStore('chapters').get(chapterId))
+  if (!chapter || chapter.branch_id !== project.branch.id || chapter.archived)
+    throw new OfflineStoreError('ownership', '章节不属于当前作品，或已归档。')
+  return chapter
+}
+
+async function listChaptersTx(tx: IDBTransaction, branchId: string): Promise<LocalChapter[]> {
+  const chapters = await result<LocalChapter[]>(tx.objectStore('chapters').index('byBranch').getAll(branchId))
+  return chapters.sort((left, right) => left.position - right.position)
+}
+
+async function historyTx(tx: IDBTransaction, chapterId: string): Promise<LocalRevision[]> {
+  const revisions = await result<LocalRevision[]>(
+    tx.objectStore('revisions').index('byChapter').getAll(chapterId),
+  )
+  return revisions.sort((left, right) => left.revision - right.revision)
+}
+
+export function listLocalProjects(): Promise<LocalProject[]> {
+  return transact(['projects'], 'readonly', (tx) => result(tx.objectStore('projects').getAll()))
+}
+
+export async function createLocalProject(title: string, brief = ''): Promise<LocalProject> {
+  const novel = {
+    id: newId(),
+    title: content(title.trim(), 200, '作品名', true),
+    brief: content(brief, 30_000, '创作思路'),
+    created: now(),
+  }
+  const project = {
+    novel,
+    branch: {
+      id: newId(),
+      novel_id: novel.id,
+      name: '作者工作稿',
+      mode: 'advisory',
+      story_revision: 0,
+      created: now(),
+    },
+  }
+  await transact(['projects'], 'readwrite', (tx) => result(tx.objectStore('projects').add(project)))
+  return project
+}
+
+export function listLocalChapters(projectId: string): Promise<LocalChapter[]> {
+  return transact(['projects', 'chapters'], 'readonly', async (tx) =>
+    (await listChaptersTx(tx, (await readProject(tx, projectId)).branch.id)).filter(
+      (chapter) => !chapter.archived,
+    ),
+  )
+}
+
+export async function createLocalChapter(projectId: string, title: string): Promise<LocalChapter> {
+  const chapterTitle = content(title.trim(), 200, '章节名', true)
+  const emptyHash = await manuscriptHash('')
+  return transact(['projects', 'chapters', 'revisions'], 'readwrite', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const chapters = await listChaptersTx(tx, project.branch.id)
+    const chapter: LocalChapter = {
+      id: newId(),
+      branch_id: project.branch.id,
+      position: (chapters.at(-1)?.position ?? 0) + 1,
+      title: chapterTitle,
+      revision: 0,
+      archived: 0,
+      stale: 0,
+    }
+    const revision: LocalRevision = {
+      id: newId(),
+      chapter_id: chapter.id,
+      revision: 0,
+      parent_id: null,
+      content: '',
+      sha256: emptyHash,
+      cause: '新建空稿',
+      created: now(),
+    }
+    project.branch.story_revision += 1
+    await result(tx.objectStore('chapters').add(chapter))
+    await result(tx.objectStore('revisions').add(revision))
+    await result(tx.objectStore('projects').put(project))
+    return chapter
+  })
+}
+
+export function readLocalHistory(projectId: string, chapterId: string): Promise<LocalRevision[]> {
+  return transact(['projects', 'chapters', 'revisions'], 'readonly', async (tx) => {
+    await readChapter(tx, await readProject(tx, projectId), chapterId)
+    return historyTx(tx, chapterId)
+  })
+}
+
+export async function saveLocalChapter(
+  projectId: string,
+  chapterId: string,
+  baseId: string,
+  text: string,
+  restoreId?: string,
+): Promise<LocalRevision> {
+  if (restoreId) {
+    const previous = (await readLocalHistory(projectId, chapterId)).find((item) => item.id === restoreId)
+    if (!previous) throw new OfflineStoreError('missing', '历史稿件已不存在。')
+    text = previous.content
+  }
+  const body = content(text, 250_000, '正文')
+  const sha256 = await manuscriptHash(body)
+  return transact(['projects', 'chapters', 'revisions'], 'readwrite', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const chapter = await readChapter(tx, project, chapterId)
+    const versions = tx.objectStore('revisions')
+    const head = await result<LocalRevision | undefined>(
+      versions.index('byRevision').get([chapterId, chapter.revision]),
+    )
+    if (!head || head.id !== baseId)
+      throw new OfflineStoreError('conflict', '本章已有新修订。当前输入保留，请查看已保存的新稿后另行处理。')
+    if (head.content === body && !restoreId) return head
+    const revision = {
+      id: newId(),
+      chapter_id: chapterId,
+      revision: head.revision + 1,
+      parent_id: head.id,
+      content: body,
+      sha256,
+      cause: restoreId ? '恢复历史为新修订' : '作者编辑',
+      created: now(),
+    }
+    chapter.revision = revision.revision
+    chapter.stale = 0
+    project.branch.story_revision += 1
+    await result(versions.add(revision))
+    await result(tx.objectStore('chapters').put(chapter))
+    await result(tx.objectStore('projects').put(project))
+    return revision
+  })
+}
+
+export function exportLocalManuscript(projectId: string): Promise<ManuscriptPack> {
+  return transact(['projects', 'chapters', 'revisions'], 'readonly', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const chapters = await listChaptersTx(tx, project.branch.id)
+    const revisions = (await Promise.all(chapters.map((chapter) => historyTx(tx, chapter.id)))).flat()
+    return { format: FORMAT, ...project, chapters, revisions }
+  })
+}
+
+export async function validateManuscript(value: unknown): Promise<ManuscriptPack> {
+  const pack = fields(value, ['format', 'novel', 'branch', 'chapters', 'revisions'])
+  if (pack.format !== FORMAT) invalid('稿件交换包格式无法读取，请使用兼容版本。')
+  const n = fields(pack.novel, ['id', 'title', 'brief', 'created'])
+  const b = fields(pack.branch, ['id', 'novel_id', 'name', 'mode', 'story_revision', 'created'])
+  const novel = {
+    id: identity(n.id),
+    title: content(n.title, 200, '作品名', true),
+    brief: content(n.brief, 30_000, '创作思路'),
+    created: number(n.created, 0, false),
+  }
+  const branch = {
+    id: identity(b.id),
+    novel_id: identity(b.novel_id),
+    name: content(b.name, 200, '工作版本名', true),
+    mode: workingMode(b.mode),
+    story_revision: number(b.story_revision),
+    created: number(b.created, 0, false),
+  }
+  if (branch.novel_id !== novel.id) invalid('工作版本与作品标识不匹配。')
+  if (!Array.isArray(pack.chapters) || !Array.isArray(pack.revisions)) invalid('稿件交换包缺少目录或历史。')
+  if (pack.chapters.length > 5000 || pack.revisions.length > 50_000)
+    invalid('稿件交换包的章节或修订数量超过上限。')
+  const chaptersById = new Map<string, LocalChapter>()
+  const positions = new Set<number>()
+  for (const source of pack.chapters) {
+    const c = fields(source, ['id', 'branch_id', 'position', 'title', 'revision', 'archived', 'stale'])
+    const chapter = {
+      id: identity(c.id),
+      branch_id: identity(c.branch_id),
+      position: number(c.position, 1),
+      title: content(c.title, 200, '章节名', true),
+      revision: number(c.revision),
+      archived: flag(c.archived),
+      stale: flag(c.stale),
+    }
+    if (
+      chapter.branch_id !== branch.id ||
+      chaptersById.has(chapter.id) ||
+      (!chapter.archived && positions.has(chapter.position))
+    )
+      invalid('章节归属无效、目录位置冲突或编号重复。')
+    chaptersById.set(chapter.id, chapter)
+    if (!chapter.archived) positions.add(chapter.position)
+  }
+  const ids = new Set<string>()
+  const histories = new Map<string, LocalRevision[]>()
+  for (const source of pack.revisions) {
+    const r = fields(source, [
+      'id',
+      'chapter_id',
+      'revision',
+      'parent_id',
+      'content',
+      'sha256',
+      'cause',
+      'created',
+    ])
+    const item = {
+      id: identity(r.id),
+      chapter_id: identity(r.chapter_id),
+      revision: number(r.revision),
+      parent_id: r.parent_id === null ? null : identity(r.parent_id),
+      content: content(r.content, 250_000, '正文'),
+      sha256: content(r.sha256, 64, '内容哈希', true),
+      cause: content(r.cause, 4000, '修订原因'),
+      created: number(r.created, 0, false),
+    }
+    if (!chaptersById.has(item.chapter_id) || ids.has(item.id)) invalid('修订归属无效或编号重复。')
+    if (item.sha256 !== (await manuscriptHash(item.content))) invalid('正文内容哈希校验失败。')
+    ids.add(item.id)
+    if (!histories.has(item.chapter_id)) histories.set(item.chapter_id, [])
+    histories.get(item.chapter_id)!.push(item)
+  }
+  const chapters = [...chaptersById.values()].sort((left, right) => left.position - right.position)
+  const revisions = chapters.flatMap((chapter) => {
+    const history = histories.get(chapter.id)?.sort((left, right) => left.revision - right.revision) ?? []
+    if (
+      history.length !== chapter.revision + 1 ||
+      history.some(
+        (item, index) => item.revision !== index || item.parent_id !== (history[index - 1]?.id ?? null),
+      )
+    )
+      invalid('章节当前修订或父修订链不完整。')
+    return history
+  })
+  return { format: FORMAT, novel, branch, chapters, revisions }
+}
+
+export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
+  if (file.size > maxManuscriptBytes) invalid('稿件交换包超过 24 MiB。')
+  let value: unknown
+  try {
+    value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer()))
+  } catch {
+    invalid('无法读取稿件交换包 JSON。')
+  }
+  const { novel, branch, chapters, revisions } = await validateManuscript(value)
+  return transact(['projects', 'chapters', 'revisions'], 'readwrite', async (tx) => {
+    const project = { novel, branch }
+    await result(tx.objectStore('projects').add(project))
+    for (const chapter of chapters) await result(tx.objectStore('chapters').add(chapter))
+    for (const revision of revisions) await result(tx.objectStore('revisions').add(revision))
+    return project
+  })
+}

@@ -50,8 +50,14 @@ import {
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { latestArtifact, refreshArtifactList } from './artifactRefresh'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
-import type { ConceptionHandoff, ConceptionState } from './conception'
+import type { ConceptionHandoff } from './conception'
 import { SettingReviewReport } from './SettingReviewReport'
+import {
+  findChapterPlan,
+  outlineFields,
+  type ConfirmedWorldRules,
+  type OutlineView,
+} from './OutlineWorkspace'
 import {
   adviceDirectionBasis,
   checkDirectionTarget,
@@ -101,6 +107,8 @@ export function Writing({
   onClearFeedback,
   conceptionHandoff,
   onConceptionSettings,
+  outlineHandoff,
+  onOutline,
 }: {
   novel: Novel
   branch: Branch
@@ -112,6 +120,8 @@ export function Writing({
   onClearFeedback: () => void
   conceptionHandoff?: ConceptionHandoff
   onConceptionSettings: () => void
+  outlineHandoff?: { chapterId: string; reportId?: string }
+  onOutline: () => void
 }) {
   const [importOpen, setImportOpen] = useState(false)
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -146,23 +156,16 @@ export function Writing({
   const [fixed, setFixed] = useState('')
   const [profile, setProfile] = useState(presets[0])
   const [useConception, setUseConception] = useState(true)
-  const [settingWorkspace, setSettingWorkspace] = useState<ConceptionState>()
+  const [confirmedSetting, setConfirmedSetting] = useState<ConfirmedWorldRules>()
   const [settingItemId, setSettingItemId] = useState('')
-  const confirmedSetting = settingWorkspace?.confirmation?.current ? settingWorkspace.confirmation : undefined
-  const settingRules = confirmedSetting
-    ? (
-        settingWorkspace?.categories.find((category) => category.id === 'world' && !category.skipped)
-          ?.items ?? []
-      ).filter(
-        (item) =>
-          item.detail.trim() && !settingWorkspace?.sources.some((source) => source.item_id === item.id),
-      )
-    : []
+  const settingRules = confirmedSetting?.items ?? []
   const settingRule =
     action === 'review.chapter'
-      ? settingRules.find((item) => `${confirmedSetting?.id}/${item.id}` === settingItemId)
+      ? settingRules.find((item) => `${confirmedSetting?.confirmation_id}/${item.id}` === settingItemId)
       : undefined
   const conception = conceptionHandoff?.confirmation
+  const [outline, setOutline] = useState<OutlineView>()
+  const plannedChapter = findChapterPlan(outline?.confirmed, chapter?.id)
   const conceptionSnapshotId = useConception && actionsWithConception.has(action) ? conception?.id : undefined
   const [seenContract, setSeenContract] = useState<AuthorContract>()
   const [seenGenre, setSeenGenre] = useState<GenreProfile>()
@@ -272,10 +275,18 @@ export function Writing({
         if (rows.length)
           await loadChapter(
             rows.find((c) => c.id === feedbackHandoff?.chapter_id)?.id ||
+              rows.find((c) => c.id === outlineHandoff?.chapterId)?.id ||
               rows.find((c) => c.id === state.chapter_id)?.id ||
               rows[0].id,
-            feedbackHandoff ? 0 : state.cursor,
+            feedbackHandoff || outlineHandoff ? 0 : state.cursor,
           )
+        if (active && outlineHandoff?.reportId) {
+          const report = await api<Artifact>(`/artifacts/${outlineHandoff.reportId}`)
+          if (active && report.chapter_id === current.current?.id) {
+            setArtifacts((previous) => [report, ...previous.filter((row) => row.id !== report.id)])
+            setCandidateId(report.id)
+          }
+        }
       } catch (e) {
         if (active) notify(e)
       } finally {
@@ -286,6 +297,23 @@ export function Writing({
       active = false
     }
   }, [branch.id])
+  useEffect(() => {
+    let active = true
+    const refreshOutline = async () => {
+      try {
+        const view = await api<OutlineView>(`/branches/${branch.id}/outline-workspace`)
+        if (active) setOutline(view)
+      } catch (error) {
+        if (active) notify(error)
+      }
+    }
+    void refreshOutline()
+    const timer = setInterval(() => void refreshOutline(), 5000)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [branch.id, notify])
   async function save(): Promise<Chapter> {
     if (saving.current) return saving.current
     const run = async (): Promise<Chapter> => {
@@ -374,13 +402,13 @@ export function Writing({
           api<Artifact[]>(`/artifacts?branch_id=${branch.id}`),
           api<Task[]>(`/tasks?branch_id=${branch.id}`),
           api<Excerpt[]>(`/library/excerpts?novel_id=${novel.id}`),
-          api<ConceptionState>(`/branches/${branch.id}/conception`),
+          api<ConfirmedWorldRules>(`/branches/${branch.id}/outline-workspace/setting-options`),
         ])
         if (active) {
           setArtifacts((rows) => refreshArtifactList(rows, a))
           setTasks(t)
           setReferences(r)
-          setSettingWorkspace(settings)
+          setConfirmedSetting(settings)
         }
       } catch (e) {
         if (active) notify(e)
@@ -517,7 +545,11 @@ export function Writing({
     event.preventDefault()
     await doAction(async () => {
       const row = current.current ? await save() : undefined
-      if (action === 'review.chapter' && settingItemId && (!settingRule || !confirmedSetting))
+      if (
+        action === 'review.chapter' &&
+        settingItemId &&
+        (!settingRule || !confirmedSetting?.confirmation_id)
+      )
         throw new Error('已确认设定发生变化，请重新选择条目。')
       if (seenGenre?.branch_id !== branch.id) throw new Error('正在读取本版本题材配置，请稍后再生成。')
       if (seenContract?.branch_id !== branch.id) throw new Error('正在读取本版本创作约定，请稍后再生成。')
@@ -553,8 +585,8 @@ export function Writing({
         throw new Error('本次要求与来源记录合计过长，请缩短本次要求后再生成。')
       const data: ModuleInput = {
         include_scene_ranges: false,
-        ...(settingRule && confirmedSetting
-          ? { conception_snapshot_id: confirmedSetting.id, setting_item_id: settingRule.id }
+        ...(settingRule && confirmedSetting?.confirmation_id
+          ? { conception_snapshot_id: confirmedSetting.confirmation_id, setting_item_id: settingRule.id }
           : conceptionSnapshotId
             ? { conception_snapshot_id: conceptionSnapshotId }
             : {}),
@@ -581,6 +613,11 @@ export function Writing({
           contract_version: seenContract.contract_version,
         },
         reference_ids: selectedRefs,
+        ...(plannedChapter &&
+        outline?.confirmed &&
+        ['writing.advise', 'writing.rewrite_selection', 'writing.expand_plot'].includes(action)
+          ? { outline_revision_id: outline.confirmed.id }
+          : {}),
         account,
         max_output_tokens: 8192,
         context_position: bookDesign ? 0 : selection.start,
@@ -629,7 +666,7 @@ export function Writing({
     })
   }
   return (
-    <div className="writing-layout">
+    <div className="writing-layout" id="bench-writing" tabIndex={-1}>
       <aside className="chapter-sidebar">
         <div className="section-title">
           <span className="eyebrow">作品目录</span>
@@ -918,6 +955,30 @@ export function Writing({
                 ))}
               </div>
             )}
+            {plannedChapter && (
+              <details
+                className="notice"
+                key={`${plannedChapter.chapter.chapter_id}/${outline?.confirmed?.id}`}
+                open
+              >
+                <summary>本章章纲 · 修订 {outline?.confirmed?.revision}</summary>
+                <p>
+                  {plannedChapter.volume.title} / {plannedChapter.unit.title}
+                </p>
+                {!!outline?.stale.length && <p role="status">{outline.stale.join('，')}，待重新确认。</p>}
+                <dl>
+                  {Object.entries(outlineFields).map(([key, label]) => (
+                    <div key={key}>
+                      <dt>{label}</dt>
+                      <dd>{plannedChapter.chapter[key as keyof typeof outlineFields]}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <button type="button" onClick={onOutline}>
+                  打开大纲与台账
+                </button>
+              </details>
+            )}
             <Editor
               id={editorKey}
               initial={text}
@@ -934,6 +995,16 @@ export function Writing({
               </span>
               <button onClick={downloadDraft}>下载当前草稿</button>
             </div>
+            {!!outline?.promises.some((promise) => !!promise.due) && (
+              <div className="editor-footer" aria-label="今日事项">
+                <span>
+                  {outline.promises.filter((promise) => !!promise.due).length} 条伏笔处于回收窗口或已到期
+                </span>
+                <button type="button" onClick={onOutline}>
+                  查看伏笔窗口
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <div className="empty">
@@ -989,13 +1060,28 @@ export function Writing({
                   disabled={!!feedbackHandoff}
                   onClick={() => {
                     setAction('review.chapter')
-                    setSettingItemId(`${confirmedSetting?.id}/${rule.id}`)
+                    setSettingItemId(`${confirmedSetting?.confirmation_id}/${rule.id}`)
                   }}
                 >
                   用此设定对账
                 </button>
               </details>
             ))}
+          </details>
+        )}
+        {!!plannedChapter?.chapter.setting_ids?.length && (
+          <details className="notice">
+            <summary>本章章纲引用的设定</summary>
+            {(outline?.confirmed?.setting_basis.items ?? [])
+              .filter(({ id }) => plannedChapter.chapter.setting_ids?.includes(id))
+              .map((item) => (
+                <details key={item.id}>
+                  <summary>
+                    {item.title} · 修订 {outline?.confirmed?.setting_basis.revision}
+                  </summary>
+                  <p>{item.detail}</p>
+                </details>
+              ))}
           </details>
         )}
         {conception && (
@@ -1137,7 +1223,7 @@ export function Writing({
                   <option value={settingItemId}>设定已过期，请重新选择</option>
                 )}
                 {settingRules.map((rule) => (
-                  <option value={`${confirmedSetting?.id}/${rule.id}`} key={rule.id}>
+                  <option value={`${confirmedSetting?.confirmation_id}/${rule.id}`} key={rule.id}>
                     {rule.title}
                   </option>
                 ))}
@@ -1442,6 +1528,7 @@ export function Writing({
                 <Candidate
                   key={candidate.id}
                   artifact={candidate}
+                  currentOutlineId={outline?.stale.length ? undefined : outline?.confirmed?.id}
                   onIntentSettings={onGenreSettings}
                   novelId={novel.id}
                   branchId={branch.id}
@@ -1516,6 +1603,7 @@ export function Writing({
 
 function Candidate({
   artifact,
+  currentOutlineId,
   onIntentSettings,
   revisionDisabled,
   recheckDisabled,
@@ -1539,6 +1627,7 @@ function Candidate({
   onUpdate,
 }: {
   artifact: Artifact
+  currentOutlineId?: string
   onIntentSettings: () => void
   revisionDisabled: boolean
   recheckDisabled: boolean
@@ -1561,6 +1650,8 @@ function Candidate({
   onAccept: (request: CandidateAcceptanceInput) => Promise<void>
   onUpdate: () => Promise<void>
 }) {
+  const outlineBasis = artifact.basis.outline as
+    { id: string; revision: number; chapter: Record<keyof typeof outlineFields, string> } | undefined
   const [edit, setEdit] = useState(artifact.payload.text || '')
   const [editRevision, setEditRevision] = useState(artifact.candidate_revision)
   const candidateChanged = editRevision !== artifact.candidate_revision
@@ -1635,6 +1726,17 @@ function Candidate({
       <p className="small muted">
         {label(artifact.status)} · 基线修订 {artifact.base_revision ?? '设定'}。改变原文后采纳会再次校验。
       </p>
+      {outlineBasis && (
+        <details className="notice">
+          <summary>生成时的章纲 · 修订 {outlineBasis.revision}</summary>
+          {currentOutlineId !== outlineBasis.id && <p role="status">历史大纲，请按当前章纲重新生成。</p>}
+          {Object.entries(outlineFields).map(([key, label]) => (
+            <p key={key}>
+              {label} · {outlineBasis.chapter[key as keyof typeof outlineFields]}
+            </p>
+          ))}
+        </details>
+      )}
       {candidateChanged && (
         <div className="notice" role="status">
           <p>候选已在其他窗口更新。本地编辑仍保留，可先复制，再载入已保存的候选进行比较。</p>

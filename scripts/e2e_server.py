@@ -66,6 +66,52 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if instruction.get("动作") == "生成四级大纲候选":
+            chapters = instruction["章节目录"]
+            setting_ids = [rule["id"] for rule in instruction["已确认世界设定"]]
+            project = instruction["已确认立项"]
+            plan = {
+                "summary": project["brief"]["ending"] if project else "沿铃声寻找师姐。",
+                "volumes": [
+                    {
+                        "id": "v1",
+                        "title": "拾铃卷",
+                        "summary": "追查失散师姐的信物",
+                        "units": [
+                            {
+                                "id": "u1",
+                                "title": "辨铃",
+                                "summary": "验证门内外的规则",
+                                "chapters": [
+                                    {
+                                        "chapter_id": chapter["id"],
+                                        "goal": "检验铃身的断痕",
+                                        "obstacle": "门外没有铃声",
+                                        "turn": "发现旧记号",
+                                        "result": "得到可追查的新线索",
+                                        "setting_ids": setting_ids,
+                                    }
+                                    for chapter in chapters
+                                ],
+                            }
+                        ],
+                    }
+                ],
+                "promises": [
+                    {
+                        "promise_id": record["id"],
+                        "plant_chapter_id": chapters[0]["id"],
+                        "opens_chapter_id": chapters[-1]["id"],
+                        "closes_chapter_id": chapters[-1]["id"],
+                    }
+                    for record in instruction["可用伏笔"]
+                ],
+            }
+            return {
+                "text": json.dumps(plan),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-outline",
+            }
         if instruction.get("动作") == "对照单条已确认设定与保存稿":
             assert instruction["设定"] == "铜铃只在门内响。"
             unit = next(unit for unit in instruction["可引用原文"] if "门外响了" in unit["text"])
@@ -144,6 +190,26 @@ class Model(ReferenceModel):
                 ),
                 "usage": {"input": 1, "output": 1},
                 "call_id": "offline-conception-world-evidence",
+            }
+        if source_instruction.get("action") == "conception.generate.project":
+            assert source_instruction["作者创作思路"] == "学徒靠铜铃的断痕寻找师姐。"
+            return {
+                "text": json.dumps(
+                    {
+                        "position": "用世界规则推动信物悬疑",
+                        "track": "仙侠成长悬疑",
+                        "genre_ids": ["xianxia", "mystery"],
+                        "audience": "喜欢清晰线索与克制升级的读者",
+                        "distinction": "用听不到铃声的情形反推进门条件",
+                        "length": "一卷两章",
+                        "cadence": "",
+                        "ending": "学徒独自带铃离山。",
+                        "final_image": "静止的铜铃挂在旧门旁。",
+                    },
+                    ensure_ascii=False,
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-project-brief",
             }
         if source_instruction.get("action") == "conception.generate.category":
             title = source_instruction["category_title"]

@@ -1476,3 +1476,13 @@ summary {
   max-width: 100%;
   overflow: auto;
 }
+.bench-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px clamp(12px, 2vw, 24px);
+}
+
+.bench-navigation [aria-current='location'] {
+  font-weight: 700;
+}

@@ -352,6 +352,12 @@ class Domain:
             current = db.execute("SELECT status FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
             if current[0] != "candidate":
                 raise DomainError("candidate_state", "该产物已被拒绝或采纳。", 409)
+            if artifact["kind"] in {"chapter_draft", "text_patch"} and (
+                outline := artifact["basis"].get("outline")
+            ):
+                from .outline_workspace import chapter_basis
+
+                chapter_basis(db, artifact["branch_id"], artifact["chapter_id"], outline["id"])
             if attempt:
                 self.db.check_attempt(db, artifact["task_id"], attempt)
             payload = artifact["payload"]
@@ -804,18 +810,38 @@ class Domain:
             revision = db.execute("SELECT story_revision FROM branches WHERE id=?", (branch_id,)).fetchone()[
                 0
             ]
+            if (expected := payload.get("seven_stage_story_revision")) is not None and revision != expected:
+                raise DomainError("seven_stage_changed", "接力依据在排队时改变。", 409)
+            if parent_id := payload.get("seven_stage_run_id"):
+                parent = db.execute(
+                    "SELECT status,cancel FROM tasks WHERE id=? AND branch_id=? AND kind='seven_stage_run'",
+                    (parent_id, branch_id),
+                ).fetchone()
+                if not parent or parent["cancel"] or parent["status"] != "running":
+                    raise DomainError("cancelled", "自动接力已停止，未排队子任务。", 409)
             if kind == "conception_generate":
                 from .conception_generation import validate_basis_tx
 
                 validate_basis_tx(db, branch_id, payload)
             if identifier := payload.get("conception_snapshot_id"):
-                from .conception import queued_handoff_tx
-
-                initial["conception_snapshot"] = queued_handoff_tx(db, branch_id, kind, identifier)
                 if item_id := payload.get("setting_item_id"):
-                    from .setting_review import freeze_rule
+                    from .setting_review import confirmed_world_basis, freeze_rule
 
-                    initial["setting_rule"] = freeze_rule(initial["conception_snapshot"], item_id)
+                    initial["setting_rule"] = freeze_rule(
+                        confirmed_world_basis(db, branch_id, identifier), item_id
+                    )
+                else:
+                    from .conception import queued_handoff_tx
+
+                    initial["conception_snapshot"] = queued_handoff_tx(db, branch_id, kind, identifier)
+            if outline_id := payload.get("outline_revision_id"):
+                from .outline_workspace import chapter_basis
+
+                initial["outline"] = chapter_basis(db, branch_id, payload["chapter_id"], outline_id)
+            if outline_request := payload.get("outline_generation"):
+                from .outline_generation import freeze_tx
+
+                initial["outline_generation"] = freeze_tx(db, branch_id, outline_request)
             reader = db.execute(
                 "SELECT id FROM artifacts WHERE branch_id=? AND kind='reader' "
                 "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",

@@ -6,11 +6,23 @@ import { WorkflowPage } from './Workflow'
 import { Records } from './Records'
 import { Ideation } from './Ideation'
 import { ConceptionWorkspace } from './ConceptionWorkspace'
+import { OutlineWorkspace } from './OutlineWorkspace'
+import { ManuscriptExchange } from './ManuscriptExchange'
 import type { ConceptionDestination, ConceptionHandoff } from './conception'
 import { confirmLeave } from './leaveGuard'
 import type { FeedbackHandoff } from './feedbackRevision'
 
 export type Notify = (error: unknown) => void
+const benches = [
+  ['project', '立项', 'ideation'],
+  ['reference', '拆解', 'library'],
+  ['settings', '设定', 'ideation'],
+  ['outline', '大纲', 'outline'],
+  ['writing', '写作', 'writing'],
+  ['inspection', '校验', 'records'],
+  ['completion', '完本', 'records'],
+] as const
+
 export function App() {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
@@ -24,10 +36,16 @@ export function App() {
     selection.current = { novelId, branchId, generation: selection.current.generation + 1 }
   const selectionGeneration = selection.current.generation
   const [page, setPage] = useState('writing')
+  const [bench, setBench] = useState<{ id: string }>()
   const [quickConception, setQuickConception] = useState(false)
   const [conceptionHandoff, setConceptionHandoff] = useState<ConceptionHandoff>()
   const [workflowMode, setWorkflowMode] = useState<'assisted' | 'automatic'>('assisted')
   const [feedbackHandoff, setFeedbackHandoff] = useState<FeedbackHandoff>()
+  const [outlineHandoff, setOutlineHandoff] = useState<{
+    branchId: string
+    chapterId: string
+    reportId?: string
+  }>()
   const [account, setAccount] = useState('openai_1')
   const [title, setTitle] = useState('')
   const [creating, setCreating] = useState(false)
@@ -92,8 +110,18 @@ export function App() {
     return () => clearInterval(timer)
   }, [ready, refreshConfig, notify])
   function navigate(id: string) {
-    if (id !== page && confirmLeave()) setPage(id)
+    if (id !== page && confirmLeave()) {
+      setBench(undefined)
+      setOutlineHandoff(undefined)
+      setPage(id)
+    }
   }
+  useEffect(() => {
+    if (!bench) return
+    const section = document.getElementById('bench-' + bench.id)
+    section?.scrollIntoView({ block: 'start' })
+    section?.focus({ preventScroll: true })
+  }, [bench])
   function openConceptionWorkspace() {
     if (!confirmLeave()) return
     setQuickConception(false)
@@ -148,6 +176,7 @@ export function App() {
           {[
             ['writing', '写作'],
             ['ideation', '小说构思'],
+            ['outline', '大纲与台账'],
             ['library', '资料书库'],
             ['workflow', '整书创作'],
             ['records', '故事与审阅'],
@@ -303,6 +332,18 @@ export function App() {
                 ))}
               </select>
             </label>
+            <ManuscriptExchange
+              branchId={branch?.id}
+              notify={notify}
+              onImported={async (id) => {
+                setNovels(await api('/novels'))
+                if (!confirmLeave()) return
+                setBranches([])
+                setBranchId('')
+                setNovelId(id)
+                setPage('writing')
+              }}
+            />
             <details className="new-novel">
               <summary>＋ 新建作品</summary>
               <form onSubmit={createNovel}>
@@ -328,6 +369,26 @@ export function App() {
             </label>
           </div>
           <main id="main">
+            {branch && (
+              <nav className="bench-navigation" aria-label="七台工作流">
+                {benches.map(([id, label, destination]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-current={bench?.id === id && page === destination ? 'location' : undefined}
+                    onClick={() => {
+                      if ((destination !== page || quickConception) && !confirmLeave()) return
+                      setQuickConception(false)
+                      setOutlineHandoff(undefined)
+                      setBench({ id })
+                      setPage(destination)
+                    }}
+                  >
+                    {label}台
+                  </button>
+                ))}
+              </nav>
+            )}
             {!novel && page !== 'library' ? (
               <div className="welcome">
                 <span className="eyebrow">写下第一句，就可以开始</span>
@@ -418,6 +479,23 @@ export function App() {
                     onClearFeedback={() => setFeedbackHandoff(undefined)}
                     conceptionHandoff={selectedConception}
                     onConceptionSettings={openConceptionWorkspace}
+                    outlineHandoff={outlineHandoff?.branchId === branch.id ? outlineHandoff : undefined}
+                    onOutline={() => navigate('outline')}
+                  />
+                )}
+                {page === 'outline' && branch && (
+                  <OutlineWorkspace
+                    key={branch.id}
+                    branchId={branch.id}
+                    account={account}
+                    modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
+                    notify={notify}
+                    onWriting={(chapterId, reportId) => {
+                      if (!confirmLeave()) return
+                      setFeedbackHandoff(undefined)
+                      setOutlineHandoff({ branchId: branch.id, chapterId, reportId })
+                      setPage('writing')
+                    }}
                   />
                 )}
                 {page === 'library' && (
@@ -452,6 +530,7 @@ export function App() {
                   <Records
                     key={branch.id}
                     branch={branch}
+                    onSnapshotRestored={(id) => refreshBranches(branch.novel_id, id, selectionGeneration)}
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}

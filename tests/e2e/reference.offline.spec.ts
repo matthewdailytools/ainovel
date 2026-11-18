@@ -3,6 +3,71 @@ import { createHash } from 'node:crypto'
 
 const SOURCE = '😀渡口掌柜先问用途，又把水路图收回袖中。他只肯给半幅图，却记下了来客的目的地。'
 
+test('局部重拆保留手法卡旧引用，作者再选择新版', async ({ page }) => {
+  await page.goto('/')
+  const { csrf } = await (await page.request.get('/api/session')).json()
+  const imported = await page.request.post('/api/library/import', {
+    headers: { 'X-Ainovel-CSRF': csrf },
+    multipart: {
+      file: { name: '局部重拆样例.txt', mimeType: 'text/plain', buffer: Buffer.from(SOURCE) },
+    },
+  })
+  expect(imported.ok(), await imported.text()).toBeTruthy()
+  await page.getByRole('button', { name: '资料书库', exact: true }).click()
+  await page.getByText('局部重拆样例.txt', { exact: false }).first().click()
+  const reader = page.getByRole('textbox', { name: '资料原文' })
+  await expect(reader).toHaveValue(SOURCE)
+  await reader.press('ControlOrMeta+A')
+  await page.getByRole('button', { name: '拆解这段写法' }).click()
+  await page.getByRole('button', { name: '拆解选段写法' }).click()
+  await page.getByRole('button', { name: /载入分析卡供编辑和选择/ }).click()
+  const adopted = page.getByRole('checkbox', { name: /本次采用/ })
+  await adopted.check()
+  const save = page.getByRole('button', { name: '保存本次规则与方案' })
+  const saved = page.waitForResponse(
+    (response) => response.url().includes('/reference-sessions/') && response.request().method() === 'PATCH',
+  )
+  await save.click()
+  const first = await (await saved).json()
+  const card = first.payload.cards[0]
+  await page.getByText('选择局部重拆范围', { exact: true }).click()
+  const scope = page.getByRole('textbox', { name: '原文内的重拆选区' })
+  const part = '目的地。'
+  await scope.evaluate((element: HTMLTextAreaElement) => {
+    element.focus()
+    element.setSelectionRange(element.value.length, element.value.length)
+  })
+  for (let index = 0; index < part.length; index++) await page.keyboard.press('Shift+ArrowLeft')
+  expect(
+    await scope.evaluate((element: HTMLTextAreaElement) =>
+      element.value.slice(element.selectionStart, element.selectionEnd),
+    ),
+  ).toBe(part)
+  await page.getByLabel('重拆对象').selectOption(card.id)
+  const queued = page.waitForRequest(
+    (request) => request.url().endsWith('/actions') && request.method() === 'POST',
+  )
+  await page.getByRole('button', { name: '重拆所选范围' }).click()
+  expect((await queued).postDataJSON().analysis_scope).toEqual({
+    start: SOURCE.length - part.length,
+    end: SOURCE.length,
+    card_id: card.id,
+  })
+  await page.getByRole('button', { name: '用此草案重写原卡' }).click()
+  await expect(adopted).not.toBeChecked()
+  await expect(page.getByText(/当前仍引用修订/)).toContainText(String(first.revision))
+  await save.click()
+  await page.getByText('阶段任务与历史规则版本', { exact: true }).click()
+  await page.getByRole('button', { name: `核对卡片修订 ${first.revision}`, exact: true }).click()
+  await expect(page.getByRole('region', { name: '手法卡引用依据' })).toContainText(SOURCE)
+  await adopted.check()
+  const latest = page.waitForResponse(
+    (response) => response.url().includes('/reference-sessions/') && response.request().method() === 'PATCH',
+  )
+  await save.click()
+  expect((await (await latest).json()).payload.pinned_revisions).toEqual({})
+})
+
 test('书库选段到拆解、方案、试写、对照采纳和历史恢复', async ({ page }, testInfo) => {
   await page.goto('/')
   const initial = await (await page.request.get('/api/session')).json()

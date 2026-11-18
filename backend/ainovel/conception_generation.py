@@ -8,10 +8,12 @@ from uuid import UUID, uuid5
 
 from pydantic import AfterValidator, Field, StringConstraints, model_validator
 
+from .conception import SettingPolicy
 from .db import DomainError, dumps, uid
 from .evidence import source_units
 from .ideation_structure import Detail, substantive
 from .models import Input
+from .project_brief import DRAFT_KIND, IdeaText, confirmed_project_tx
 
 
 KIND = "conception_generate"
@@ -48,6 +50,11 @@ class ConceptionTaskInput(Input):
 class ConceptionGenerateInput(ConceptionTaskInput):
     category_id: Identifier | None = None
     instruction: str = Field(default="", max_length=6000)
+    project_confirmation_id: Identifier | None = None
+
+
+class ProjectGenerateInput(ConceptionTaskInput):
+    idea: IdeaText
 
 
 class ConceptionWorldExtractInput(ConceptionTaskInput):
@@ -58,6 +65,7 @@ class ConceptionProposalItem(Input):
     title: ProposalTitle
     detail: Detail
     links: list[Reference] = Field(max_length=12)
+    setting_policy: SettingPolicy | None = None
 
 
 class ConceptionCategoryProposal(Input):
@@ -108,10 +116,17 @@ def register_routes(app, domain, provider_ready):
             if fields.get("operation") == "world_extract"
             else VERSION,
         }
+        if payload.get("project_confirmation_id") is None:
+            payload.pop("project_confirmation_id", None)
         try:
             prior = domain.find_request(KIND, payload)
         except DomainError as error:
-            if error.code != "idempotency" or payload["conception_generation_version"] != VERSION:
+            if (
+                error.code != "idempotency"
+                or payload["conception_generation_version"] != VERSION
+                or "operation" in payload
+                or "project_confirmation_id" in payload
+            ):
                 raise
             prior = domain.find_request(
                 KIND,
@@ -132,6 +147,10 @@ def register_routes(app, domain, provider_ready):
     def generate_conception(branch_id: str, data: ConceptionGenerateInput):
         return queue_task(branch_id, data, {"instruction": data.instruction})
 
+    @app.post("/api/branches/{branch_id}/conception/project-brief/generate", status_code=202)
+    def generate_project(branch_id: str, data: ProjectGenerateInput):
+        return queue_task(branch_id, data, {"operation": "project_brief"})
+
     @app.post("/api/branches/{branch_id}/conception/extract-world", status_code=202)
     def extract_conception_world(branch_id: str, data: ConceptionWorldExtractInput):
         return queue_task(branch_id, data, {"operation": "world_extract"})
@@ -145,6 +164,8 @@ def validate_basis_tx(tx, branch_id, payload):
         raise DomainError("story_changed", "作品依据已更新，请刷新后重新生成。", 409)
     if revision_tx(tx, branch_id) != payload["base_revision"]:
         raise DomainError("conception_changed", "构思草稿已更新，请刷新核对后重新生成。", 409)
+    if identifier := payload.get("project_confirmation_id"):
+        confirmed_project_tx(tx, branch_id, identifier)
 
 
 def freeze(domain, payload):
@@ -162,6 +183,12 @@ def freeze(domain, payload):
     }
     if payload.get("operation") == "world_extract":
         return {**basis, "target_ids": ["world"], "world_sources": freeze_world_sources(domain, payload)}
+    project = current["project"]
+    if payload.get("operation") == "project_brief":
+        return {**basis, "idea": payload["idea"], "project_revision": project["revision"] if project else 0}
+    if identifier := payload.get("project_confirmation_id"):
+        if not project or project["id"] != identifier:
+            raise DomainError("project_brief_changed", "已确认立项已更新，请读取最新修订。", 409)
     categories = current["categories"]
     if payload["category_id"] is None:
         targets = [section["id"] for section in categories if not section["skipped"]]
@@ -197,6 +224,7 @@ def freeze(domain, payload):
             }
     return {
         **basis,
+        **({"confirmed_project": project} if project else {}),
         "categories": categories,
         "target_ids": targets,
         "definitions": list(existing_definitions.values()),
@@ -385,14 +413,31 @@ async def generate_category(worker, request, frozen, category, completed):
         ],
         "可关联构思与来源": references,
     }
+    if project := frozen.get("confirmed_project"):
+        context["已确认立项"] = project
+        instruction["立项交接"] = (
+            "以已确认立项的定位、限制和终局为规划依据。与原作者硬约定冲突时列出供作者核对。"
+        )
     if category["id"] == "world":
-        from .genre_catalog import setting_framework
+        from .genre_catalog import assemble_profile, setting_framework
 
-        context["设定框架"] = setting_framework(worker.genre_snapshot())
+        profile = worker.genre_snapshot()
+        if project:
+            profile = assemble_profile(
+                {
+                    "audience": profile["audience"],
+                    "genres": project["brief"]["genre_ids"],
+                    "mechanisms": profile.get("mechanism_requests", []),
+                    "author_exceptions": profile.get("author_exceptions", []),
+                    "text": profile.get("author_notes", ""),
+                }
+            )
+        context["设定框架"] = setting_framework(profile)
         instruction["设定框架用法"] = (
             "以主类型条目为底稿，辅类型只取与主线相交的规则，机制按适用场景挂载。"
             "优先交代规则触发、限制、代价、适用范围和例外；冲突单独列出供作者取舍。"
             "作者既定约定优先，区分世界规则、作者所知与人物所知。"
+            "为规则提供 setting_policy，使用 hard 表示明确限制或 soft 表示可调整倾向，写明适用范围与例外。"
             "条目是待确认设定，不是正文事实；题材清单按本书需要选用。"
         )
     contract = ConceptionCategoryProposal.model_json_schema()
@@ -431,6 +476,11 @@ async def generate_category(worker, request, frozen, category, completed):
                         "title": item.title,
                         "detail": item.detail,
                         "links": [links[link] for link in item.links],
+                        **(
+                            {"setting_policy": item.setting_policy.model_dump()}
+                            if category["id"] == "world" and item.setting_policy
+                            else {}
+                        ),
                     }
                     for index, item in enumerate(items, 1)
                 ],
@@ -566,22 +616,33 @@ def publish(worker, result, frozen, categories, source_evidence=None, model_revi
         content["issues"] = bundle_issues(frozen, categories)
     if model_review is not None:
         content["model_review"] = model_review
+    if project := frozen.get("confirmed_project"):
+        basis["project_confirmation_id"] = project["id"]
+        basis["project_revision"] = project["revision"]
+    persist_generation(worker, result, identifier, "conception_bundle", content, basis, progress, status)
+
+
+def persist_generation(
+    worker, result, identifier, kind, content, basis, progress, status, artifact_status="candidate"
+):
+    task = worker.task
     with worker.db.connect(True) as db:
         worker.db.check_attempt(db, task["id"], worker.attempt)
         validate_basis_tx(db, task["branch_id"], task["payload"])
         timestamp = time()
         db.execute(
-            "INSERT INTO artifacts(id,novel_id,branch_id,kind,payload,basis,task_id,created) "
-            "VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO artifacts(id,novel_id,branch_id,kind,payload,basis,task_id,created,status) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
             (
                 identifier,
                 task["novel_id"],
                 task["branch_id"],
-                "conception_bundle",
+                kind,
                 dumps(content),
                 dumps(basis),
                 task["id"],
                 timestamp,
+                artifact_status,
             ),
         )
         db.execute(
@@ -597,6 +658,23 @@ async def run(worker):
     frozen = result["conception_generation_snapshot"]
     if frozen["version"] not in {VERSION, LEGACY_VERSION}:
         raise DomainError("conception_version", "旧构思生成契约不受支持，请重新创建生成任务。", 409)
+    if worker.task["payload"].get("operation") == "project_brief":
+        from .project_brief import generate
+
+        brief = await generate(worker, frozen)
+        identifier = uid()
+        persist_generation(
+            worker,
+            result,
+            identifier,
+            DRAFT_KIND,
+            {"idea": frozen["idea"], "brief": brief},
+            {"story_revision": frozen["story_revision"], "project_revision": frozen["project_revision"]},
+            {"artifact_id": identifier},
+            "succeeded",
+            artifact_status="accepted",
+        )
+        return
     if "world_sources" in frozen:
         category, evidence = await extract_world(worker, frozen)
         publish(worker, result, frozen, [category], source_evidence=evidence)

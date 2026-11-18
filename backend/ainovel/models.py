@@ -81,6 +81,7 @@ class ModuleInput(Input):
     author_contract_basis: AuthorContractBasis | None = None
     conception_snapshot_id: str | None = Field(default=None, min_length=1, max_length=128)
     setting_item_id: str | None = Field(default=None, min_length=1, max_length=128)
+    outline_revision_id: str | None = Field(default=None, min_length=1, max_length=128)
     source_review_id: str | None = Field(default=None, min_length=1, max_length=128)
     finding_indices: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list, max_length=20)
 
@@ -91,6 +92,11 @@ class ModuleInput(Input):
 
     @model_validator(mode="after")
     def plot_check_action(self):
+        if self.outline_revision_id and (
+            self.action not in {"writing.advise", "writing.rewrite_selection", "writing.expand_plot"}
+            or not self.chapter_id
+        ):
+            raise ValueError("章纲交接仅用于当前章的写作辅助。")
         if self.setting_item_id and (
             self.action != "review.chapter" or not self.conception_snapshot_id or self.plot_contract_check
         ):

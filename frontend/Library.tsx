@@ -166,7 +166,7 @@ export function LibraryPage({
       />
     )
   return (
-    <div className="library-page page-pad">
+    <div className="library-page page-pad" id="bench-reference" tabIndex={-1}>
       <div className="page-heading">
         <div>
           <span className="eyebrow">资料，回到原文</span>

@@ -16,6 +16,7 @@ import story from '../fixtures/original-story.json'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
 import { StoryInheritance, type InheritanceSelection } from './StoryInheritance'
+import { SevenStageRunPanel } from './SevenStageRunPanel'
 import { characterFieldRepairEnabled } from './characterFieldRepair'
 import { CharacterFieldRepairOption, FrozenCharacterFieldRepairPolicy } from './CharacterRepairDetails'
 import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
@@ -318,7 +319,7 @@ export function WorkflowPage({
         <div>
           <span className="eyebrow">从情节，到一部小说</span>
           <h1>整书创作</h1>
-          <p>创作分工、采纳方式和任务范围分别设置。每次启动都建立独立工作版本。</p>
+          <p>可在当前工作版本接力七台，也可建立独立工作版本运行创作批次。</p>
         </div>
         <button
           onClick={() => {
@@ -333,6 +334,15 @@ export function WorkflowPage({
         </button>
       </div>
       <p role="status">{status}</p>
+      {branchId && (
+        <SevenStageRunPanel
+          key={branchId}
+          branchId={branchId}
+          account={account}
+          modelReady={modelReady}
+          notify={notify}
+        />
+      )}
       <div className="workflow-grid">
         <section className="card">
           <form onSubmit={start}>

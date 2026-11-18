@@ -7,6 +7,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     rolldownOptions: {
+      input: { app: 'index.html', offline: 'offline/index.html' },
       output: {
         codeSplitting: {
           groups: [

@@ -130,6 +130,19 @@ def create_app(settings=None, schema_only=False):
     app.state.settings, app.state.db, app.state.domain = settings, db, domain
     app.state.budget, app.state.library = budget, library
     register_finalization_routes(app, domain)
+    from .reading_metrics import register_routes as register_reading_metrics_routes
+
+    register_reading_metrics_routes(app, domain)
+    from .book_completion import register_routes as register_book_completion_routes
+    from .workflow_inspection import register_routes as register_workflow_inspection_routes
+
+    register_book_completion_routes(app, domain)
+    register_workflow_inspection_routes(app, domain)
+    from .manuscript_exchange import register_routes as register_manuscript_package_routes
+    from .work_snapshot import register_routes as register_work_snapshot_routes
+
+    register_manuscript_package_routes(app, domain)
+    register_work_snapshot_routes(app, domain)
     csrf, cookie = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     jobs = set()
     origins = {
@@ -372,6 +385,7 @@ def create_app(settings=None, schema_only=False):
             "author_contract_basis",
             "conception_snapshot_id",
             "setting_item_id",
+            "outline_revision_id",
             "source_review_id",
             "reference_session_id",
             "reference_revision",
@@ -388,6 +402,9 @@ def create_app(settings=None, schema_only=False):
     from .story_graph import register_routes as register_story_routes
 
     register_story_routes(app, domain)
+    from .outline_workspace import register_routes as register_outline_routes
+
+    register_outline_routes(app, domain)
     from .ideation import register_routes as register_ideation_routes
 
     register_ideation_routes(app, domain)
@@ -885,7 +902,9 @@ def create_app(settings=None, schema_only=False):
     def artifacts(branch_id: str, chapter_id: str | None = None):
         rows = db.all(
             "SELECT id FROM artifacts WHERE branch_id=?"
-            " AND kind NOT IN ('conception_workspace','conception_completion','conception_handoff','conception_bundle')"
+            " AND kind NOT IN ('conception_workspace','conception_completion','conception_handoff',"
+            "'conception_bundle','reading_metrics','project_brief','project_brief_draft','outline_generation_candidate',"
+            "'workflow_inspection','book_completion','work_snapshot')"
             + (" AND chapter_id=?" if chapter_id else "")
             + " ORDER BY created DESC LIMIT 50",
             (branch_id, chapter_id) if chapter_id else (branch_id,),
@@ -1275,6 +1294,12 @@ def create_app(settings=None, schema_only=False):
 
     register_reference_routes(app, domain, provider_ready)
     register_extraction_routes(app, domain, provider_ready)
+    from .outline_generation import register_routes as register_outline_generation_routes
+
+    register_outline_generation_routes(app, domain, provider_ready)
+    from .seven_stage_run import register_routes as register_seven_stage_run_routes
+
+    register_seven_stage_run_routes(app, domain, provider_ready)
 
     dist = ROOT / "dist"
     if dist.is_dir():
@@ -1283,6 +1308,8 @@ def create_app(settings=None, schema_only=False):
 
             dist = freeze_ui(dist, settings.data_dir)
         app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+        if (dist / "offline" / "index.html").is_file():
+            app.mount("/offline", StaticFiles(directory=dist / "offline", html=True), name="offline")
 
         @app.get("/", include_in_schema=False)
         def index():

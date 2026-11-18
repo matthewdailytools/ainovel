@@ -1,0 +1,624 @@
+import { useEffect, useState } from 'react'
+import type { Notify } from './App'
+import { api } from './api'
+import type { components } from './api-schema'
+import { useLeaveGuard } from './leaveGuard'
+import { OutlineGenerationPanel } from './OutlineGenerationPanel'
+
+type OutlinePlan = components['schemas']['OutlinePlan']
+type ChapterPlan = components['schemas']['ChapterPlan']
+type Setting = { id: string; title: string; detail: string }
+export type ConfirmedWorldRules = { confirmation_id: string | null; revision?: number; items: Setting[] }
+type OutlineRevision = {
+  id: string
+  revision: number
+  confirmed: boolean
+  plan: OutlinePlan
+  setting_basis: ConfirmedWorldRules
+}
+export type OutlineView = {
+  draft: OutlineRevision | null
+  confirmed: OutlineRevision | null
+  stale: string[]
+  chapters: { id: string; title: string; position: number }[]
+  promise_options: { id: string; title: string }[]
+  settings: {
+    chapter_id: string
+    setting: Setting
+    evidence: { report_id: string; source: { text: string } } | null
+  }[]
+  promises: {
+    promise_id: string
+    title: string
+    plant_chapter_id: string
+    opens_chapter_id: string
+    closes_chapter_id: string
+    state: string
+    due: 'open' | 'due' | null
+  }[]
+}
+
+const PromiseState: Record<string, string> = {
+  planned: '计划',
+  planted: '已埋设',
+  reinforced: '已推进',
+  resolved: '已回收',
+  retained: '作者确认保留',
+  abandoned: '作者确认放弃',
+  stale: '证据待复核',
+}
+
+export const outlineFields = {
+  goal: '目标',
+  obstacle: '阻碍',
+  turn: '转折',
+  result: '结果',
+} as const
+
+export function findChapterPlan(outline: OutlineRevision | null | undefined, chapterId: string | undefined) {
+  return outline?.plan.volumes
+    ?.flatMap((volume) =>
+      (volume.units ?? []).flatMap((unit) =>
+        (unit.chapters ?? []).map((chapter) => ({ volume, unit, chapter })),
+      ),
+    )
+    .find(({ chapter }) => chapter.chapter_id === chapterId)
+}
+
+export function OutlineWorkspace({
+  branchId,
+  account,
+  modelReady,
+  notify,
+  onWriting,
+}: {
+  branchId: string
+  account: string
+  modelReady: boolean
+  notify: Notify
+  onWriting: (chapterId: string, reportId?: string) => void
+}) {
+  const root = `/branches/${branchId}/outline-workspace`
+  const [view, setView] = useState<OutlineView>()
+  const [settings, setSettings] = useState<ConfirmedWorldRules>()
+  const [editing, setEditing] = useState<OutlinePlan>()
+  const [settingId, setSettingId] = useState<string | null>(null)
+  const [generationId, setGenerationId] = useState<string>()
+  const [cut, setCut] = useState<number>()
+  const [previous, setPrevious] = useState<OutlineRevision>()
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+  const baseline = view?.draft?.plan ?? { summary: '', volumes: [], promises: [] }
+  const dirty =
+    !!editing &&
+    (!!generationId ||
+      JSON.stringify(baseline) !== JSON.stringify(editing) ||
+      settingId !== (view?.draft?.setting_basis.confirmation_id ?? null))
+  useLeaveGuard(dirty, '大纲草稿')
+  useEffect(() => {
+    let active = true
+    void Promise.all([api<OutlineView>(root), api<ConfirmedWorldRules>(root + '/setting-options')])
+      .then(([data, available]) => {
+        if (!active) return
+        setView(data)
+        setSettings(available)
+        setEditing(data.draft?.plan ?? { summary: '', volumes: [], promises: [] })
+        setSettingId(data.draft?.setting_basis.confirmation_id ?? null)
+      })
+      .catch((error) => {
+        if (active) notify(error)
+      })
+    return () => {
+      active = false
+    }
+  }, [root, notify])
+  if (!view || !editing || !settings) return <p role="status">正在读取大纲与台账…</p>
+  const chapterName = (id: string) =>
+    view.chapters.find((chapter) => chapter.id === id)?.title ?? '已移出目录'
+  const chapters = [...view.chapters].sort((left, right) => left.position - right.position)
+  const usedChapters = new Set(
+    (editing.volumes ?? []).flatMap((volume) =>
+      (volume.units ?? []).flatMap((unit) => (unit.chapters ?? []).map((chapter) => chapter.chapter_id)),
+    ),
+  )
+  const frozen =
+    settingId && settingId === settings.confirmation_id
+      ? settings
+      : view.draft?.setting_basis.confirmation_id === settingId
+        ? view.draft.setting_basis
+        : undefined
+  async function run(action: () => Promise<void>) {
+    if (busy) return
+    setBusy(true)
+    setNotice('')
+    try {
+      await action()
+    } catch (error) {
+      notify(error)
+    } finally {
+      setBusy(false)
+    }
+  }
+  function edit(change: (plan: OutlinePlan) => void) {
+    setEditing((current) => {
+      if (!current) return current
+      const next = structuredClone(current)
+      change(next)
+      return next
+    })
+  }
+
+  return (
+    <div className="records" id="bench-outline" tabIndex={-1}>
+      <section className="card">
+        <h2>大纲与台账</h2>
+        <p>{view.confirmed ? `已确认大纲修订 ${view.confirmed.revision}` : '尚无确认大纲'}</p>
+        {!!view.stale.length && <p role="alert">{view.stale.join('，')}。请核对后重新确认。</p>}
+        {notice && <p role="status">{notice}</p>}
+        <OutlineGenerationPanel
+          branchId={branchId}
+          account={account}
+          modelReady={modelReady}
+          baseRevision={view.draft?.revision ?? 0}
+          confirmationId={settingId ?? settings.confirmation_id}
+          hasChapters={!!view.chapters.length}
+          dirty={dirty || busy}
+          notify={notify}
+          onLoad={(plan, confirmationId, candidateId) => {
+            setEditing(plan)
+            setSettingId(confirmationId)
+            setGenerationId(candidateId)
+          }}
+        />
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            void run(async () => {
+              const updated = await api<OutlineView>(root, 'PUT', {
+                base_revision: view.draft?.revision ?? 0,
+                confirmation_id: settingId,
+                source_generation_id: generationId,
+                plan: editing,
+              })
+              setView(updated)
+              setEditing(updated.draft?.plan)
+              setGenerationId(undefined)
+              setNotice(`已保存大纲草稿修订 ${updated.draft?.revision}。`)
+            })
+          }}
+        >
+          <fieldset disabled={busy}>
+            <label>
+              总纲
+              <textarea
+                required
+                maxLength={4000}
+                value={editing.summary}
+                onChange={(event) => {
+                  const value = event.target.value
+                  edit((plan) => {
+                    plan.summary = value
+                  })
+                }}
+              />
+            </label>
+            <label>
+              采用设定
+              <select
+                value={settingId ?? ''}
+                onChange={(event) => {
+                  const value = event.target.value || null
+                  setSettingId(value)
+                  setGenerationId(undefined)
+                  const allowed = value ? new Set(settings.items.map((item) => item.id)) : new Set<string>()
+                  edit((plan) => {
+                    for (const volume of plan.volumes ?? [])
+                      for (const unit of volume.units ?? [])
+                        for (const chapter of unit.chapters ?? [])
+                          chapter.setting_ids = (chapter.setting_ids ?? []).filter((id) => allowed.has(id))
+                  })
+                }}
+              >
+                <option value="">暂不挂载</option>
+                {settingId && settingId !== settings.confirmation_id && (
+                  <option value={settingId}>旧设定修订 {frozen?.revision}</option>
+                )}
+                {settings.confirmation_id && (
+                  <option value={settings.confirmation_id}>世界设定修订 {settings.revision}</option>
+                )}
+              </select>
+            </label>
+            {(editing.volumes ?? []).map((volume, volumeIndex) => (
+              <fieldset key={volume.id}>
+                <legend>第 {volumeIndex + 1} 卷</legend>
+                <label>
+                  卷名
+                  <input
+                    required
+                    maxLength={200}
+                    value={volume.title}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      edit((plan) => {
+                        plan.volumes![volumeIndex].title = value
+                      })
+                    }}
+                  />
+                </label>
+                <label>
+                  卷纲
+                  <textarea
+                    required
+                    maxLength={4000}
+                    value={volume.summary}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      edit((plan) => {
+                        plan.volumes![volumeIndex].summary = value
+                      })
+                    }}
+                  />
+                </label>
+                {(volume.units ?? []).map((unit, unitIndex) => {
+                  const update = (change: (entry: typeof unit) => void) =>
+                    edit((plan) => change(plan.volumes![volumeIndex].units![unitIndex]))
+                  return (
+                    <fieldset key={unit.id}>
+                      <legend>单元 {unitIndex + 1}</legend>
+                      <label>
+                        单元名
+                        <input
+                          required
+                          maxLength={200}
+                          value={unit.title}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            update((entry) => {
+                              entry.title = value
+                            })
+                          }}
+                        />
+                      </label>
+                      <label>
+                        单元纲
+                        <textarea
+                          required
+                          maxLength={4000}
+                          value={unit.summary}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            update((entry) => {
+                              entry.summary = value
+                            })
+                          }}
+                        />
+                      </label>
+                      {(unit.chapters ?? []).map((chapter, chapterIndex) => {
+                        const changeChapter = (change: (row: ChapterPlan) => void) =>
+                          update((entry) => change(entry.chapters![chapterIndex]))
+                        return (
+                          <fieldset key={chapter.chapter_id}>
+                            <legend>{chapterName(chapter.chapter_id)} · 章纲</legend>
+                            {Object.entries(outlineFields).map(([name, label]) => {
+                              const field = name as keyof typeof outlineFields
+                              return (
+                                <label key={field}>
+                                  {label}
+                                  <textarea
+                                    required
+                                    maxLength={4000}
+                                    value={chapter[field]}
+                                    onChange={(event) => {
+                                      const value = event.target.value
+                                      changeChapter((row) => {
+                                        row[field] = value
+                                      })
+                                    }}
+                                  />
+                                </label>
+                              )
+                            })}
+                            {!!frozen?.items.length && (
+                              <fieldset>
+                                <legend>计划采用的设定</legend>
+                                {frozen.items.map((item) => (
+                                  <label className="check" key={item.id}>
+                                    <input
+                                      type="checkbox"
+                                      checked={chapter.setting_ids?.includes(item.id) ?? false}
+                                      onChange={(event) => {
+                                        const checked = event.target.checked
+                                        changeChapter((row) => {
+                                          row.setting_ids = checked
+                                            ? [...(row.setting_ids ?? []), item.id]
+                                            : row.setting_ids?.filter((id) => id !== item.id)
+                                        })
+                                      }}
+                                    />
+                                    {item.title}
+                                  </label>
+                                ))}
+                              </fieldset>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => update((entry) => entry.chapters?.splice(chapterIndex, 1))}
+                            >
+                              移除章纲
+                            </button>
+                          </fieldset>
+                        )
+                      })}
+                      <label>
+                        加入已有章节
+                        <select
+                          value=""
+                          onChange={(event) => {
+                            const id = event.target.value
+                            if (!id) return
+                            update((entry) => {
+                              entry.chapters = [
+                                ...(entry.chapters ?? []),
+                                {
+                                  chapter_id: id,
+                                  goal: '',
+                                  obstacle: '',
+                                  turn: '',
+                                  result: '',
+                                  setting_ids: [],
+                                },
+                              ]
+                            })
+                          }}
+                        >
+                          <option value="">选择章节</option>
+                          {chapters
+                            .filter((chapter) => !usedChapters.has(chapter.id))
+                            .map((chapter) => (
+                              <option key={chapter.id} value={chapter.id}>
+                                {chapter.position}. {chapter.title}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => edit((plan) => plan.volumes![volumeIndex].units?.splice(unitIndex, 1))}
+                      >
+                        移除单元
+                      </button>
+                    </fieldset>
+                  )
+                })}
+                <button
+                  type="button"
+                  onClick={() =>
+                    edit((plan) => {
+                      const row = plan.volumes![volumeIndex]
+                      row.units = [
+                        ...(row.units ?? []),
+                        { id: crypto.randomUUID(), title: '', summary: '', chapters: [] },
+                      ]
+                    })
+                  }
+                >
+                  新增单元
+                </button>
+                <button type="button" onClick={() => edit((plan) => plan.volumes?.splice(volumeIndex, 1))}>
+                  移除卷
+                </button>
+              </fieldset>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                edit((plan) => {
+                  plan.volumes = [
+                    ...(plan.volumes ?? []),
+                    { id: crypto.randomUUID(), title: '', summary: '', units: [] },
+                  ]
+                })
+              }
+            >
+              新增卷
+            </button>
+            <h3>伏笔窗口</h3>
+            {(editing.promises ?? []).map((window, index) => (
+              <fieldset key={index}>
+                <legend>窗口 {index + 1}</legend>
+                <label>
+                  伏笔
+                  <select
+                    required
+                    value={window.promise_id}
+                    onChange={(event) => {
+                      const id = event.target.value
+                      edit((plan) => {
+                        plan.promises![index].promise_id = id
+                      })
+                    }}
+                  >
+                    <option value="">选择故事记录中的伏笔</option>
+                    {view.promise_options.map((item) => (
+                      <option value={item.id} key={item.id}>
+                        {item.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {(
+                  [
+                    ['plant_chapter_id', '埋设章'],
+                    ['opens_chapter_id', '开始回收'],
+                    ['closes_chapter_id', '最迟回收'],
+                  ] as const
+                ).map(([field, name]) => (
+                  <label key={field}>
+                    {name}
+                    <select
+                      required
+                      value={window[field]}
+                      onChange={(event) => {
+                        const id = event.target.value
+                        edit((plan) => {
+                          plan.promises![index][field] = id
+                        })
+                      }}
+                    >
+                      <option value="">选择章纲</option>
+                      {chapters
+                        .filter((chapter) => usedChapters.has(chapter.id))
+                        .map((chapter) => (
+                          <option key={chapter.id} value={chapter.id}>
+                            {chapter.title}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                ))}
+                <button type="button" onClick={() => edit((plan) => plan.promises?.splice(index, 1))}>
+                  移除窗口
+                </button>
+              </fieldset>
+            ))}
+            <button
+              type="button"
+              disabled={!view.promise_options.length || !usedChapters.size}
+              onClick={() =>
+                edit((plan) => {
+                  plan.promises = [
+                    ...(plan.promises ?? []),
+                    { promise_id: '', plant_chapter_id: '', opens_chapter_id: '', closes_chapter_id: '' },
+                  ]
+                })
+              }
+            >
+              新增伏笔窗口
+            </button>
+            {!view.promise_options.length && (
+              <p className="small">可先在「故事与审阅」建立伏笔记录，再安排窗口。</p>
+            )}
+            <p>
+              <button type="submit" className="primary" disabled={!dirty}>
+                保存大纲草稿
+              </button>
+              {dirty && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!window.confirm('放弃本次未保存的大纲编辑？')) return
+                    setEditing(baseline)
+                    setSettingId(view.draft?.setting_basis.confirmation_id ?? null)
+                    setGenerationId(undefined)
+                  }}
+                >
+                  重置未保存大纲
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={dirty || !view.draft || view.draft.confirmed}
+                onClick={() => {
+                  void run(async () => {
+                    const updated = await api<OutlineView>(root + '/confirm', 'POST', {
+                      base_revision: view.draft!.revision,
+                    })
+                    setView(updated)
+                    setEditing(updated.draft?.plan)
+                    setNotice(`已确认大纲修订 ${updated.confirmed?.revision}。`)
+                  })
+                }}
+              >
+                确认已保存大纲
+              </button>
+            </p>
+          </fieldset>
+        </form>
+        {view.draft && view.draft.revision > 1 && (
+          <details>
+            <summary>查看历史大纲</summary>
+            <label>
+              修订编号
+              <input
+                type="number"
+                min={1}
+                max={view.draft.revision}
+                value={cut ?? ''}
+                onChange={(event) => setCut(event.target.valueAsNumber || undefined)}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={busy || !cut}
+              onClick={() =>
+                void run(async () => {
+                  setPrevious(await api<OutlineRevision>(root + '/revisions/' + cut))
+                })
+              }
+            >
+              读取历史
+            </button>
+            {previous && (
+              <>
+                <h3>
+                  修订 {previous.revision} · {previous.confirmed ? '已确认' : '草稿'}
+                </h3>
+                <p>{previous.plan.summary}</p>
+                {(previous.plan.volumes ?? []).map((volume) => (
+                  <details key={volume.id}>
+                    <summary>{volume.title}</summary>
+                    <p>{volume.summary}</p>
+                    {volume.units?.map((unit) => (
+                      <div key={unit.id}>
+                        <h4>{unit.title}</h4>
+                        <p>{unit.summary}</p>
+                        {unit.chapters?.map((chapter) => (
+                          <p key={chapter.chapter_id}>
+                            {chapterName(chapter.chapter_id)} · {chapter.goal} · {chapter.obstacle} ·{' '}
+                            {chapter.turn} · {chapter.result}
+                          </p>
+                        ))}
+                      </div>
+                    ))}
+                  </details>
+                ))}
+              </>
+            )}
+          </details>
+        )}
+      </section>
+      {view.confirmed && (
+        <section className="card">
+          <h3>设定台账</h3>
+          {!view.settings.length && <p>当前大纲尚未安排设定引用。</p>}
+          <ul>
+            {view.settings.map(({ chapter_id, setting, evidence }) => (
+              <li key={`${chapter_id}/${setting.id}`}>
+                <button type="button" onClick={() => onWriting(chapter_id, evidence?.report_id)}>
+                  {chapterName(chapter_id)}
+                </button>{' '}
+                {setting.title} · {evidence ? '已有正文对账证据' : '计划'}
+                {evidence && <blockquote>{evidence.source.text}</blockquote>}
+              </li>
+            ))}
+          </ul>
+          <h3>伏笔台账</h3>
+          {!view.promises.length && <p>当前大纲尚未安排伏笔窗口。</p>}
+          <ul>
+            {view.promises.map((entry) => (
+              <li key={entry.promise_id}>
+                {entry.title} · {PromiseState[entry.state]}
+                {entry.due === 'open' ? ' · 已进入回收窗口' : entry.due === 'due' ? ' · 回收已到期' : ''}{' '}
+                计划于{chapterName(entry.plant_chapter_id)}埋设，最迟
+                <button type="button" onClick={() => onWriting(entry.closes_chapter_id)}>
+                  {chapterName(entry.closes_chapter_id)}
+                </button>
+                回收
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  )
+}

@@ -46,6 +46,35 @@ async function checkedCall(page: Page, taskId: string, stage: string, snapshotId
     .toContain(`offline-conception-${stage}-${snapshotId}`)
 }
 
+test('立项建议可修改并以确认终局交给世界设定', async ({ page }) => {
+  const { base } = await openWorkbench(page, '遗铃 · 立项交接')
+  await page.getByText('立项台', { exact: true }).click()
+  await page.getByRole('textbox', { name: '创作思路', exact: true }).fill('学徒靠铜铃的断痕寻找师姐。')
+  await page.getByRole('button', { name: 'AI 分析立项', exact: true }).click()
+  await page.getByRole('button', { name: '载入 AI 立项建议', exact: true }).click()
+  await expect(page.getByRole('combobox', { name: '主类型', exact: true })).toHaveValue('xianxia')
+  const ending = page.getByRole('textbox', { name: '终局', exact: true })
+  await expect(ending).toHaveValue('学徒独自带铃离山。')
+  await ending.fill('师姐与学徒在门内共同修复铜铃。')
+  await page.getByRole('button', { name: '确认立项', exact: true }).click()
+  await expect(page.getByText('立项台 · 已确认修订 1', { exact: true })).toBeVisible()
+  const project = (await readWorkbench(page, base)).project
+  expect(project?.brief.ending).toBe('师姐与学徒在门内共同修复铜铃。')
+  expect(project?.candidate_id).toBeTruthy()
+  await page.getByRole('button', { name: '去完善世界设定', exact: true }).click()
+  const queued = page.waitForResponse(
+    (response) => response.url().endsWith(`${base}/generate`) && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: '生成当前类别', exact: true }).click()
+  const response = await queued
+  expect(response.ok(), await response.text()).toBe(true)
+  expect(response.request().postDataJSON()).toMatchObject({
+    category_id: 'world',
+    project_confirmation_id: project?.id,
+  })
+  await expect(page.getByText('本草案使用立项修订 1。', { exact: true })).toBeVisible()
+})
+
 test('遗铃从确认设定到正文对账并保留过期证据', async ({ page }) => {
   const { base, chapterId, headers } = await openWorkbench(page, '遗铃', '😀学徒拾起铜铃。')
   await page

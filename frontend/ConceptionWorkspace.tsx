@@ -5,6 +5,7 @@ import { AuthorIntentPanel } from './AuthorIntent'
 import { ConceptionCandidateReview, ConceptionItemEditor, ConceptionQuote } from './ConceptionItems'
 import { ConceptionWorldExtract } from './ConceptionWorldExtract'
 import { GenreSettings } from './GenreProfile'
+import { ProjectBriefPanel, type ProjectDraft } from './ProjectBrief'
 import { StoryGraph } from './StoryGraph'
 import { useLeaveGuard } from './leaveGuard'
 import {
@@ -65,6 +66,7 @@ export function ConceptionWorkspace({
   const [storyOpen, setStoryOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [tasks, setTasks] = useState<GenerationTask[]>([])
+  const [projectTasks, setProjectTasks] = useState<GenerationTask[]>([])
   const [taskId, setTaskId] = useState('')
   const [candidate, setCandidate] = useState<{
     artifact: Artifact
@@ -85,7 +87,7 @@ export function ConceptionWorkspace({
   const alive = useRef(true)
   const pending = useRef(new Map<string, { signature: string; key: string }>())
   const task = tasks.find((row) => row.id === taskId) || (taskId ? undefined : tasks[0])
-  const activeTask = tasks.find((row) => ['queued', 'running'].includes(row.status))
+  const activeTask = [...tasks, ...projectTasks].find((row) => ['queued', 'running'].includes(row.status))
   const artifactId = task?.result.artifact_id || task?.result.partial_artifact_id
   const categories = draft?.categories || state?.categories || []
   const category = categories.find((entry) => entry.id === categoryId) || categories[0]
@@ -140,7 +142,9 @@ export function ConceptionWorkspace({
       try {
         const rows = await api<GenerationTask[]>(`/tasks?branch_id=${encodeURIComponent(branch.id)}`)
         if (active) {
-          setTasks(rows.filter((row) => row.kind === 'conception_generate'))
+          const generation = rows.filter((row) => row.kind === 'conception_generate')
+          setTasks(generation.filter((row) => row.payload.operation !== 'project_brief'))
+          setProjectTasks(generation.filter((row) => row.payload.operation === 'project_brief'))
           setTaskError('')
         }
       } catch (failure) {
@@ -269,6 +273,7 @@ export function ConceptionWorkspace({
         category_id: id,
         instruction: instruction.trim(),
         account,
+        ...(state.project ? { project_confirmation_id: state.project.id } : {}),
         ...(budget ? { budget_limit: Number(budget) } : {}),
       },
       'client_request_id',
@@ -277,6 +282,33 @@ export function ConceptionWorkspace({
     setTasks((current) => [row, ...current.filter((entry) => entry.id !== row.id)])
     setTaskId(row.id)
     setStatus('已提交构思生成任务。')
+  }
+  async function generateProject(idea: string) {
+    if (!state || draft) return
+    const row = await post<GenerationTask>(
+      'project-brief/generate',
+      { ...baseRevision(state), idea, account, ...(budget ? { budget_limit: Number(budget) } : {}) },
+      'client_request_id',
+    )
+    if (alive.current) setProjectTasks((current) => [row, ...current.filter((entry) => entry.id !== row.id)])
+  }
+  async function confirmProject(value: ProjectDraft) {
+    let confirmed = false
+    await perform(async () => {
+      const signature = JSON.stringify(value)
+      const action = 'project-brief'
+      const prior = pending.current.get(action)
+      const request = prior?.signature === signature ? prior : { signature, key: crypto.randomUUID() }
+      pending.current.set(action, request)
+      await api(`${path}/${action}`, 'PUT', { ...value, idempotency_key: request.key })
+      pending.current.delete(action)
+      await refresh()
+      if (alive.current) {
+        confirmed = true
+        setStatus('立项已确认，生成设定时将使用新修订。')
+      }
+    })
+    return confirmed
   }
   async function extractWorld(chapterIds: string[], limit?: number) {
     if (!state || draft) return
@@ -354,7 +386,11 @@ export function ConceptionWorkspace({
   const candidateStale = !!(
     candidate &&
     (candidate.artifact.basis.conception_revision !== state?.revision ||
-      candidate.artifact.basis.story_revision !== state?.story_revision)
+      candidate.artifact.basis.story_revision !== state?.story_revision ||
+      !!(
+        candidate.artifact.basis.project_confirmation_id &&
+        candidate.artifact.basis.project_confirmation_id !== state?.project?.id
+      ))
   )
   const sourceIds = new Set(state?.sources?.map((source) => source.item_id))
   const plannedPreview = state?.categories.flatMap((entry) => {
@@ -376,7 +412,22 @@ export function ConceptionWorkspace({
 
   return (
     <div className="conception-workspace">
-      <section className="card" aria-label="按类别完善小说设定">
+      <div id="bench-project" tabIndex={-1}>
+        {state && (
+          <ProjectBriefPanel
+            key={branch.id}
+            project={state.project}
+            storyRevision={state.story_revision}
+            task={projectTasks[0]}
+            busy={busy || dirty || (!!activeTask && activeTask.payload.operation !== 'project_brief')}
+            modelReady={modelReady && !badBudget}
+            onGenerate={(idea) => void perform(() => generateProject(idea))}
+            onConfirm={confirmProject}
+            onWorld={() => selectCategory('world')}
+          />
+        )}
+      </div>
+      <section id="bench-settings" tabIndex={-1} className="card" aria-label="按类别完善小说设定">
         <h2>构思工作台</h2>
         <p className="small muted">{branch.name} · 从任意类别开始，随时返回补充，也可以先跳过。</p>
         {feedback('settings')}
@@ -496,6 +547,7 @@ export function ConceptionWorkspace({
                     <ConceptionItemEditor
                       item={item}
                       choices={choices}
+                      worldSetting={category.id === 'world'}
                       onChange={(next) =>
                         updateCategory({
                           ...category,
@@ -625,6 +677,7 @@ export function ConceptionWorkspace({
         <h2>AI 构思辅助</h2>
         {feedback('generation')}
         <p className="small">生成会发送本次要求、本工作版本已保存的构思、创作约定与题材。结果保留为草案。</p>
+        {state?.project && <p className="small">将沿用立项修订 {state.project.revision}。</p>}
         {!modelReady && <p className="small muted">模型账户尚未配置密钥或单价。手动编辑和确认仍可使用。</p>}
         {dirty && <p className="small muted">请先保存本窗口的构思设定，然后生成或采用草案。</p>}
         <fieldset disabled={!state || busy}>
@@ -736,23 +789,30 @@ export function ConceptionWorkspace({
           </p>
         )}
         {candidate?.artifact.id === artifactId && candidate && (
-          <ConceptionCandidateReview
-            key={`${candidate.artifact.id}:${candidate.artifact.status}`}
-            categories={state?.categories || []}
-            candidates={candidate.categories}
-            evidence={candidate.evidence}
-            issues={candidate.issues}
-            modelReview={candidate.modelReview}
-            busy={busy || dirty || !!activeTask}
-            stale={candidateStale}
-            rejected={candidate.artifact.status === 'rejected'}
-            onReject={
-              task?.status === 'succeeded' && candidate.artifact.status === 'candidate'
-                ? () => void perform(() => reject(candidate.artifact), 'generation')
-                : undefined
-            }
-            onAdopt={(selected) => void perform(() => adopt(candidate.artifact.id, selected), 'generation')}
-          />
+          <>
+            {!!candidate.artifact.basis.project_revision && (
+              <p className="small">
+                本草案使用立项修订 {String(candidate.artifact.basis.project_revision)}。
+              </p>
+            )}
+            <ConceptionCandidateReview
+              key={`${candidate.artifact.id}:${candidate.artifact.status}`}
+              categories={state?.categories || []}
+              candidates={candidate.categories}
+              evidence={candidate.evidence}
+              issues={candidate.issues}
+              modelReview={candidate.modelReview}
+              busy={busy || dirty || !!activeTask}
+              stale={candidateStale}
+              rejected={candidate.artifact.status === 'rejected'}
+              onReject={
+                task?.status === 'succeeded' && candidate.artifact.status === 'candidate'
+                  ? () => void perform(() => reject(candidate.artifact), 'generation')
+                  : undefined
+              }
+              onAdopt={(selected) => void perform(() => adopt(candidate.artifact.id, selected), 'generation')}
+            />
+          </>
         )}
       </section>
 

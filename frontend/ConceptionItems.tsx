@@ -33,10 +33,12 @@ export function ConceptionQuote({
 export function ConceptionItemEditor({
   item,
   choices,
+  worldSetting,
   onChange,
 }: {
   item: ConceptionItem
   choices: ConceptionItem[]
+  worldSetting?: boolean
   onChange: (item: ConceptionItem) => void
 }) {
   const [target, setTarget] = useState('')
@@ -52,6 +54,49 @@ export function ConceptionItemEditor({
           onChange={(event) => onChange({ ...item, title: event.target.value })}
         />
       </label>
+      {worldSetting && (
+        <fieldset>
+          <legend>规则约束</legend>
+          <label>
+            约束强度
+            <select
+              value={item.setting_policy?.strength ?? ''}
+              onChange={(event) => {
+                const value = event.target.value
+                onChange({
+                  ...item,
+                  setting_policy:
+                    value === 'hard' || value === 'soft'
+                      ? { scope: '', exceptions: '', ...item.setting_policy, strength: value }
+                      : null,
+                })
+              }}
+            >
+              <option value="">待定</option>
+              <option value="hard">硬规定</option>
+              <option value="soft">可调整设定</option>
+            </select>
+          </label>
+          {item.setting_policy &&
+            (['scope', 'exceptions'] as const).map((key) => (
+              <label key={key}>
+                {key === 'scope' ? '适用范围' : '例外'}
+                <textarea
+                  rows={2}
+                  maxLength={800}
+                  value={item.setting_policy?.[key] ?? ''}
+                  onChange={(event) => {
+                    if (item.setting_policy)
+                      onChange({
+                        ...item,
+                        setting_policy: { ...item.setting_policy, [key]: event.target.value },
+                      })
+                  }}
+                />
+              </label>
+            ))}
+        </fieldset>
+      )}
       <label>
         设定内容
         <textarea
@@ -230,6 +275,7 @@ export function ConceptionCandidateReview({
                 <ConceptionItemEditor
                   item={item}
                   choices={choices}
+                  worldSetting={category.id === 'world'}
                   onChange={(next) =>
                     setEdits((rows) =>
                       rows.map((row) =>

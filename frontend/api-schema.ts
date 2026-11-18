@@ -17,6 +17,246 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/reading-metrics': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Latest Reading Metrics */
+    get: operations['latest_reading_metrics_api_branches__branch_id__reading_metrics_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/reading-metrics/import': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Import Reading Metrics */
+    post: operations['import_reading_metrics_api_branches__branch_id__reading_metrics_import_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/book-completion': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Book Completion */
+    get: operations['book_completion_api_branches__branch_id__book_completion_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/book-completion/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Preview Completion */
+    post: operations['preview_completion_api_branches__branch_id__book_completion_preview_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/book-completion/confirm': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Confirm Completion */
+    post: operations['confirm_completion_api_branches__branch_id__book_completion_confirm_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/book-completion/{identifier}/export': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Export Completion */
+    get: operations['export_completion_api_branches__branch_id__book_completion__identifier__export_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/workflow-inspections': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Inspections */
+    get: operations['inspections_api_branches__branch_id__workflow_inspections_get']
+    put?: never
+    /** Inspect */
+    post: operations['inspect_api_branches__branch_id__workflow_inspections_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/workflow-inspections/{inspection_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Inspection */
+    get: operations['inspection_api_branches__branch_id__workflow_inspections__inspection_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/manuscript-package': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Package */
+    get: operations['get_package_api_branches__branch_id__manuscript_package_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/manuscript-packages/import': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Import Package */
+    post: operations['import_package_api_manuscript_packages_import_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/work-snapshots': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Work Snapshots */
+    get: operations['list_work_snapshots_api_branches__branch_id__work_snapshots_get']
+    put?: never
+    /** Save Work Snapshot */
+    post: operations['save_work_snapshot_api_branches__branch_id__work_snapshots_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/work-snapshots/{snapshot_id}/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Preview Work Snapshot */
+    get: operations['preview_work_snapshot_api_branches__branch_id__work_snapshots__snapshot_id__preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/work-snapshots/{snapshot_id}/restore': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Restore Work Snapshot */
+    post: operations['restore_work_snapshot_api_branches__branch_id__work_snapshots__snapshot_id__restore_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/work-snapshots/{snapshot_id}/chapters/{chapter_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Diff Work Snapshot Chapter */
+    get: operations['diff_work_snapshot_chapter_api_branches__branch_id__work_snapshots__snapshot_id__chapters__chapter_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/session': {
     parameters: {
       query?: never
@@ -338,6 +578,75 @@ export interface paths {
     }
     /** At Time */
     get: operations['at_time_api_branches__branch_id__story_context_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/outline-workspace': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Outline Workspace */
+    get: operations['outline_workspace_api_branches__branch_id__outline_workspace_get']
+    /** Save Workspace */
+    put: operations['save_workspace_api_branches__branch_id__outline_workspace_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/outline-workspace/confirm': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Confirm Workspace */
+    post: operations['confirm_workspace_api_branches__branch_id__outline_workspace_confirm_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/outline-workspace/revisions/{revision}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Outline Revision */
+    get: operations['outline_revision_api_branches__branch_id__outline_workspace_revisions__revision__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/outline-workspace/setting-options': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Setting Options */
+    get: operations['setting_options_api_branches__branch_id__outline_workspace_setting_options_get']
     put?: never
     post?: never
     delete?: never
@@ -671,6 +980,24 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/conception/project-brief': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Project */
+    get: operations['get_project_api_branches__branch_id__conception_project_brief_get']
+    /** Confirm Project */
+    put: operations['confirm_project_api_branches__branch_id__conception_project_brief_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/conception': {
     parameters: {
       query?: never
@@ -734,6 +1061,23 @@ export interface paths {
     put?: never
     /** Generate Conception */
     post: operations['generate_conception_api_branches__branch_id__conception_generate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/conception/project-brief/generate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Generate Project */
+    post: operations['generate_project_api_branches__branch_id__conception_project_brief_generate_post']
     delete?: never
     options?: never
     head?: never
@@ -1699,6 +2043,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/reference-sessions/{identifier}/cards/{card_id}/revisions/{revision}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Card */
+    get: operations['get_card_api_reference_sessions__identifier__cards__card_id__revisions__revision__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/reference-sessions/{identifier}/actions': {
     parameters: {
       query?: never
@@ -1768,6 +2129,110 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/outline-workspace/generation': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** History */
+    get: operations['history_api_branches__branch_id__outline_workspace_generation_get']
+    put?: never
+    /** Start */
+    post: operations['start_api_branches__branch_id__outline_workspace_generation_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/outline-workspace/generation/{identifier}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Proposal */
+    get: operations['proposal_api_branches__branch_id__outline_workspace_generation__identifier__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/seven-stage-runs': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Runs */
+    get: operations['runs_api_branches__branch_id__seven_stage_runs_get']
+    put?: never
+    /** Create Run */
+    post: operations['create_run_api_branches__branch_id__seven_stage_runs_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/seven-stage-runs/{task_id}/pause': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Pause Run */
+    post: operations['pause_run_api_branches__branch_id__seven_stage_runs__task_id__pause_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/seven-stage-runs/{task_id}/resume': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Resume Run */
+    post: operations['resume_run_api_branches__branch_id__seven_stage_runs__task_id__resume_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/seven-stage-runs/{task_id}/cancel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Run */
+    post: operations['cancel_run_api_branches__branch_id__seven_stage_runs__task_id__cancel_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1824,6 +2289,13 @@ export interface components {
       selected_ids: string[]
       /** Idempotency Key */
       idempotency_key: string
+    }
+    /** AggregateCount */
+    AggregateCount: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Unique Readers */
+      unique_readers: number | null
     }
     /** ArchiveInput */
     ArchiveInput: {
@@ -1936,6 +2408,25 @@ export interface components {
       /** Time Evidence */
       time_evidence?: components['schemas']['Source'][]
     }
+    /** AuthorReview */
+    AuthorReview: {
+      /**
+       * Check Id
+       * @enum {string}
+       */
+      check_id: '01' | '02' | '03' | '04' | '05' | '06' | '07' | '08' | '09' | '10'
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'green' | 'yellow' | 'red' | 'not_applicable'
+      /** Basis Note */
+      basis_note: string
+      /** Reason */
+      reason: string
+      /** Evidence */
+      evidence?: components['schemas']['Source'][]
+    }
     /** Body_import_book_api_library_import_post */
     Body_import_book_api_library_import_post: {
       /** File */
@@ -1948,6 +2439,11 @@ export interface components {
     }
     /** Body_import_chapter_api_branches__branch_id__import_post */
     Body_import_chapter_api_branches__branch_id__import_post: {
+      /** File */
+      file: string
+    }
+    /** Body_import_reading_metrics_api_branches__branch_id__reading_metrics_import_post */
+    Body_import_reading_metrics_api_branches__branch_id__reading_metrics_import_post: {
       /** File */
       file: string
     }
@@ -2007,6 +2503,21 @@ export interface components {
       /** Title */
       title: string
     }
+    /** ChapterPlan */
+    ChapterPlan: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Goal */
+      goal: string
+      /** Obstacle */
+      obstacle: string
+      /** Turn */
+      turn: string
+      /** Result */
+      result: string
+      /** Setting Ids */
+      setting_ids?: string[]
+    }
     /** Character */
     Character: {
       /** Title */
@@ -2037,6 +2548,49 @@ export interface components {
        * @default
        */
       profile: string
+    }
+    /** ClosureReview */
+    ClosureReview: {
+      /** Note */
+      note: string
+      /** Sources */
+      sources?: components['schemas']['Source'][]
+    }
+    /** Cohort */
+    Cohort: {
+      /**
+       * Started From
+       * Format: date-time
+       */
+      started_from: string
+      /**
+       * Started Before
+       * Format: date-time
+       */
+      started_before: string
+      /** Channel */
+      channel?: string | null
+    }
+    /** CompletionRequest */
+    CompletionRequest: {
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Read Note */
+      read_note: string
+      ending: components['schemas']['ClosureReview']
+      characters: components['schemas']['ClosureReview']
+      promises: components['schemas']['ClosureReview']
+      /** Intro */
+      intro: string
+      /**
+       * Spoiler Scope
+       * @enum {string}
+       */
+      spoiler_scope: 'opening' | 'whole'
+      /** Sample Chapter Ids */
+      sample_chapter_ids: string[]
+      /** Materials Reviewed */
+      materials_reviewed: boolean
     }
     /** ConceptionCategory */
     ConceptionCategory: {
@@ -2084,6 +2638,8 @@ export interface components {
        * @default
        */
       instruction: string
+      /** Project Confirmation Id */
+      project_confirmation_id?: string | null
     }
     /** ConceptionIssue */
     ConceptionIssue: {
@@ -2105,6 +2661,7 @@ export interface components {
       detail: string
       /** Links */
       links?: string[]
+      setting_policy?: components['schemas']['SettingPolicy'] | null
     }
     /** ConceptionObserved */
     ConceptionObserved: {
@@ -2144,6 +2701,7 @@ export interface components {
       observed: components['schemas']['ConceptionObserved'][]
       /** Sources */
       sources: components['schemas']['ConceptionSource'][]
+      project?: components['schemas']['ConfirmedProject'] | null
     }
     /** ConceptionWorldExtractInput */
     ConceptionWorldExtractInput: {
@@ -2193,6 +2751,35 @@ export interface components {
        * @default
        */
       note: string
+    }
+    /** ConfirmOutline */
+    ConfirmOutline: {
+      /** Base Revision */
+      base_revision: number
+    }
+    /** ConfirmProject */
+    ConfirmProject: {
+      /** Base Revision */
+      base_revision: number
+      /** Idempotency Key */
+      idempotency_key: string
+      /** Idea */
+      idea: string
+      brief: components['schemas']['ProjectBrief']
+      /** Candidate Id */
+      candidate_id?: string | null
+    }
+    /** ConfirmedProject */
+    ConfirmedProject: {
+      /** Id */
+      id: string
+      /** Revision */
+      revision: number
+      /** Idea */
+      idea: string
+      brief: components['schemas']['ProjectBrief']
+      /** Candidate Id */
+      candidate_id: string | null
     }
     /** ContinuationInput */
     ContinuationInput: {
@@ -2321,6 +2908,10 @@ export interface components {
       cards?: components['schemas']['ReferenceCard'][]
       /** Selected Ids */
       selected_ids?: string[]
+      /** Pinned Revisions */
+      pinned_revisions?: {
+        [key: string]: number
+      }
       /**
        * Plot
        * @default
@@ -2487,6 +3078,24 @@ export interface components {
       /** Reason */
       reason: string
     }
+    /** GenerateOutline */
+    GenerateOutline: {
+      /** Base Revision */
+      base_revision: number
+      /** Confirmation Id */
+      confirmation_id?: string | null
+      /** Account */
+      account: string
+      /**
+       * Instruction
+       * @default
+       */
+      instruction: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
+    }
     /** GenreProfileBasis */
     GenreProfileBasis: {
       /** Source Artifact Id */
@@ -2517,6 +3126,37 @@ export interface components {
       /** Idempotency Key */
       idempotency_key: string
     }
+    /** ImportedReport */
+    ImportedReport: {
+      /** Id */
+      id: string
+      report: components['schemas']['ReadingReport']
+    }
+    /** InspectionInput */
+    InspectionInput: {
+      /**
+       * Scope
+       * @default book
+       * @enum {string}
+       */
+      scope: 'chapter' | 'volume' | 'book'
+      /** Scope Id */
+      scope_id?: string | null
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Author Reviews */
+      author_reviews?: components['schemas']['AuthorReview'][]
+      length_targets?: components['schemas']['LengthTargets'] | null
+    }
+    /** LengthTargets */
+    LengthTargets: {
+      /** Min Chars */
+      min_chars?: number | null
+      /** Max Chars */
+      max_chars?: number | null
+      /** Expected Chapters */
+      expected_chapters?: number | null
+    }
     /** ManualFinalizationInput */
     ManualFinalizationInput: {
       /** Base Story Revision */
@@ -2530,6 +3170,20 @@ export interface components {
       note: string
       /** Dispositions */
       dispositions?: components['schemas']['FinalizationDisposition'][]
+    }
+    /** ManuscriptPackage */
+    ManuscriptPackage: {
+      /**
+       * Format
+       * @constant
+       */
+      format: 'ainovel-manuscript/1'
+      novel: components['schemas']['PortableWork']
+      branch: components['schemas']['PortableBranch']
+      /** Chapters */
+      chapters: components['schemas']['PortableChapter'][]
+      /** Revisions */
+      revisions: components['schemas']['PortableRevision'][]
     }
     /** Mapping */
     Mapping: {
@@ -2554,6 +3208,34 @@ export interface components {
        * @default false
        */
       allow_duplicate: boolean
+    }
+    /** Metric */
+    Metric: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'adjacent_follow' | 'first_chapter_retention' | 'chapter_completion' | 'aggregate_ratio'
+      /** Chapter Id */
+      chapter_id: string
+      /** Target Chapter Id */
+      target_chapter_id?: string | null
+      /** Numerator */
+      numerator: number | null
+      /** Denominator */
+      denominator: number | null
+      /** Rate */
+      rate: number | null
+      /**
+       * Excluded Incomplete
+       * @default 0
+       */
+      excluded_incomplete: number
+      /**
+       * Excluded Prior Or Tied
+       * @default 0
+       */
+      excluded_prior_or_tied: number
     }
     /** ModuleInput */
     ModuleInput: {
@@ -2636,6 +3318,8 @@ export interface components {
       conception_snapshot_id?: string | null
       /** Setting Item Id */
       setting_item_id?: string | null
+      /** Outline Revision Id */
+      outline_revision_id?: string | null
       /** Source Review Id */
       source_review_id?: string | null
       /** Finding Indices */
@@ -2662,6 +3346,19 @@ export interface components {
       /** Base Story Revision */
       base_story_revision: number
     }
+    /** NativeMetric */
+    NativeMetric: {
+      /** Name */
+      name: string
+      /** Definition */
+      definition: string
+      /** Value */
+      value: number
+      /** Unit */
+      unit: string
+      /** Chapter Id */
+      chapter_id?: string | null
+    }
     /** NovelInput */
     NovelInput: {
       /** Title */
@@ -2671,6 +3368,42 @@ export interface components {
        * @default
        */
       brief: string
+    }
+    /** OutlineGenerationTask */
+    OutlineGenerationTask: {
+      /** Id */
+      id: string
+      /** Status */
+      status: string
+      /** Error */
+      error: string
+      /** Created */
+      created: number
+      /** Artifact Id */
+      artifact_id: string | null
+    }
+    /** OutlinePlan */
+    OutlinePlan: {
+      /** Summary */
+      summary: string
+      /** Volumes */
+      volumes?: components['schemas']['VolumePlan'][]
+      /** Promises */
+      promises?: components['schemas']['PromiseWindow'][]
+    }
+    /** OutlineProposal */
+    OutlineProposal: {
+      /** Id */
+      id: string
+      /** Base Revision */
+      base_revision: number
+      /** Confirmation Id */
+      confirmation_id: string | null
+      /** Project Revision */
+      project_revision: number | null
+      /** Current */
+      current: boolean
+      plan: components['schemas']['OutlinePlan']
     }
     /** PlanRestartInput */
     PlanRestartInput: {
@@ -2695,6 +3428,119 @@ export interface components {
       plot: string
       /** Fixed */
       fixed?: string[]
+    }
+    /** PortableBranch */
+    PortableBranch: {
+      /** Id */
+      id: string
+      /** Novel Id */
+      novel_id: string
+      /** Name */
+      name: string
+      /**
+       * Mode
+       * @enum {string}
+       */
+      mode: 'advisory' | 'assisted' | 'automatic'
+      /** Story Revision */
+      story_revision: number
+      /** Created */
+      created: number
+    }
+    /** PortableChapter */
+    PortableChapter: {
+      /** Id */
+      id: string
+      /** Branch Id */
+      branch_id: string
+      /** Position */
+      position: number
+      /** Title */
+      title: string
+      /** Revision */
+      revision: number
+      /**
+       * Archived
+       * @enum {integer}
+       */
+      archived: 0 | 1
+      /**
+       * Stale
+       * @enum {integer}
+       */
+      stale: 0 | 1
+    }
+    /** PortableRevision */
+    PortableRevision: {
+      /** Id */
+      id: string
+      /** Chapter Id */
+      chapter_id: string
+      /** Revision */
+      revision: number
+      /** Parent Id */
+      parent_id: string | null
+      /** Content */
+      content: string
+      /** Sha256 */
+      sha256: string
+      /** Cause */
+      cause: string
+      /** Created */
+      created: number
+    }
+    /** PortableWork */
+    PortableWork: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Brief */
+      brief: string
+      /** Created */
+      created: number
+    }
+    /** ProjectBrief */
+    ProjectBrief: {
+      /** Position */
+      position: string
+      /** Track */
+      track: string
+      /** Genre Ids */
+      genre_ids: string[]
+      /** Audience */
+      audience: string
+      /** Distinction */
+      distinction: string
+      /** Length */
+      length: string
+      /**
+       * Cadence
+       * @default
+       */
+      cadence: string
+      /** Ending */
+      ending: string
+      /**
+       * Final Image
+       * @default
+       */
+      final_image: string
+    }
+    /** ProjectGenerateInput */
+    ProjectGenerateInput: {
+      /** Base Revision */
+      base_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
+      /** Idea */
+      idea: string
     }
     /** Promise */
     Promise: {
@@ -2744,6 +3590,27 @@ export interface components {
        */
       note: string
     }
+    /** PromiseWindow */
+    PromiseWindow: {
+      /** Promise Id */
+      promise_id: string
+      /** Plant Chapter Id */
+      plant_chapter_id: string
+      /** Opens Chapter Id */
+      opens_chapter_id: string
+      /** Closes Chapter Id */
+      closes_chapter_id: string
+    }
+    /** PublishedChapter */
+    PublishedChapter: {
+      /** Chapter Id */
+      chapter_id: string
+      /**
+       * Published At
+       * Format: date-time
+       */
+      published_at: string
+    }
     /** ReadingInput */
     ReadingInput: {
       /** Chapter Id */
@@ -2757,6 +3624,67 @@ export interface components {
       note: string
       /** Base Revision */
       base_revision: number
+    }
+    /** ReadingMetricsState */
+    ReadingMetricsState: {
+      latest: components['schemas']['ImportedReport'] | null
+    }
+    /** ReadingReport */
+    ReadingReport: {
+      /**
+       * Format
+       * @constant
+       */
+      format: 'ainovel-reading/1'
+      /**
+       * Mode
+       * @enum {string}
+       */
+      mode: 'events' | 'aggregate'
+      /** Source */
+      source: string
+      /** Release Version */
+      release_version: string
+      /** Timezone */
+      timezone: string
+      /**
+       * Extracted At
+       * Format: date-time
+       */
+      extracted_at: string
+      /**
+       * Observed From
+       * Format: date-time
+       */
+      observed_from: string
+      /**
+       * Observed Until
+       * Format: date-time
+       */
+      observed_until: string
+      /** Chapters */
+      chapters: components['schemas']['PublishedChapter'][]
+      /** Read Definition */
+      read_definition: string
+      /** Completion Definition */
+      completion_definition?: string | null
+      cohort?: components['schemas']['Cohort'] | null
+      /** Window Hours */
+      window_hours?: number | null
+      /** Event Rows */
+      event_rows?: number | null
+      /** Distinct Readers */
+      distinct_readers?: number | null
+      /** Event Channels */
+      event_channels?: string[]
+      /** Counts */
+      counts?: components['schemas']['AggregateCount'][]
+      /** Native Metrics */
+      native_metrics?: components['schemas']['NativeMetric'][]
+      /** Metrics */
+      metrics: components['schemas']['Metric'][]
+      /** Notes */
+      notes: string[]
     }
     /** RecheckCorrectionInput */
     RecheckCorrectionInput: {
@@ -2834,6 +3762,22 @@ export interface components {
        * @default false
        */
       check_saved: boolean
+      analysis_scope?: components['schemas']['ReferenceAnalysisScope'] | null
+    }
+    /** ReferenceAnalysisScope */
+    ReferenceAnalysisScope: {
+      /**
+       * Start
+       * @description 选段内的 UTF-16 起点
+       */
+      start: number
+      /**
+       * End
+       * @description 选段内的 UTF-16 终点
+       */
+      end: number
+      /** Card Id */
+      card_id?: string | null
     }
     /** ReferenceCard */
     ReferenceCard: {
@@ -2910,13 +3854,6 @@ export interface components {
       /** Title */
       title: string
     }
-    /** RestoreInput */
-    RestoreInput: {
-      /** Base Revision */
-      base_revision: number
-      /** Revision Id */
-      revision_id: string
-    }
     /** ResumeInput */
     ResumeInput: {
       /**
@@ -2966,6 +3903,16 @@ export interface components {
       /** Content */
       content: string
     }
+    /** SaveOutline */
+    SaveOutline: {
+      /** Base Revision */
+      base_revision: number
+      /** Confirmation Id */
+      confirmation_id?: string | null
+      /** Source Generation Id */
+      source_generation_id?: string | null
+      plan: components['schemas']['OutlinePlan']
+    }
     /** SaveRecord */
     SaveRecord: {
       /** Base Story Revision */
@@ -2997,6 +3944,20 @@ export interface components {
        * @default false
        */
       archived: boolean
+    }
+    /** SavedReferenceCard */
+    SavedReferenceCard: {
+      /** Session Id */
+      session_id: string
+      /** Revision */
+      revision: number
+      card: components['schemas']['ReferenceCard']
+      /** Source */
+      source: {
+        [key: string]: unknown
+      }
+      /** Goal */
+      goal: string | null
     }
     /** SceneOrderAudit */
     SceneOrderAudit: {
@@ -3069,6 +4030,37 @@ export interface components {
       /** End */
       end: number
     }
+    /** SettingPolicy */
+    SettingPolicy: {
+      /**
+       * Strength
+       * @enum {string}
+       */
+      strength: 'hard' | 'soft'
+      /**
+       * Scope
+       * @default
+       */
+      scope: string
+      /**
+       * Exceptions
+       * @default
+       */
+      exceptions: string
+    }
+    /** SnapshotInput */
+    SnapshotInput: {
+      /** Label */
+      label: string
+      /**
+       * Scope
+       * @default book
+       * @enum {string}
+       */
+      scope: 'chapter' | 'volume' | 'book'
+      /** Scope Id */
+      scope_id?: string | null
+    }
     /** Source */
     Source: {
       /** Chapter Id */
@@ -3104,6 +4096,36 @@ export interface components {
       client_request_id: string
       /** Budget Limit */
       budget_limit?: number | null
+    }
+    /** StartRun */
+    StartRun: {
+      /**
+       * Start From
+       * @enum {string}
+       */
+      start_from: 'idea' | 'settings' | 'outline'
+      /** Source Id */
+      source_id?: string | null
+      /** Idea */
+      idea?: string | null
+      /** Chapter Count */
+      chapter_count?: number | null
+      /** Account */
+      account: string
+      /** Budget Limit */
+      budget_limit: number
+      /** Client Request Id */
+      client_request_id: string
+      /**
+       * Auto Confirm Planning
+       * @default false
+       */
+      auto_confirm_planning: boolean
+      /**
+       * Auto Adopt Body
+       * @default false
+       */
+      auto_adopt_body: boolean
     }
     /** State */
     State: {
@@ -3168,6 +4190,17 @@ export interface components {
       /** Quote */
       quote: string
     }
+    /** UnitPlan */
+    UnitPlan: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Summary */
+      summary: string
+      /** Chapters */
+      chapters?: components['schemas']['ChapterPlan'][]
+    }
     /** ValidationError */
     ValidationError: {
       /** Location */
@@ -3180,6 +4213,17 @@ export interface components {
       input?: unknown
       /** Context */
       ctx?: Record<string, never>
+    }
+    /** VolumePlan */
+    VolumePlan: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Summary */
+      summary: string
+      /** Units */
+      units?: components['schemas']['UnitPlan'][]
     }
     /** WorkflowInput */
     WorkflowInput: {
@@ -3275,6 +4319,27 @@ export interface components {
       genre_profile_basis?: components['schemas']['GenreProfileBasis'] | null
       author_contract_basis?: components['schemas']['AuthorContractBasis'] | null
     }
+    /** RestoreInput */
+    ainovel__models__RestoreInput: {
+      /** Base Revision */
+      base_revision: number
+      /** Revision Id */
+      revision_id: string
+    }
+    /** RestoreInput */
+    ainovel__work_snapshot__RestoreInput: {
+      /** Basis Sha256 */
+      basis_sha256: string
+      /**
+       * Mode
+       * @enum {string}
+       */
+      mode: 'in_place' | 'new_branch'
+      /** Branch Name */
+      branch_name?: string | null
+      /** Idempotency Key */
+      idempotency_key: string
+    }
   }
   responses: never
   parameters: never
@@ -3332,6 +4397,537 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  latest_reading_metrics_api_branches__branch_id__reading_metrics_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReadingMetricsState']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  import_reading_metrics_api_branches__branch_id__reading_metrics_import_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['Body_import_reading_metrics_api_branches__branch_id__reading_metrics_import_post']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ImportedReport']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  book_completion_api_branches__branch_id__book_completion_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_completion_api_branches__branch_id__book_completion_preview_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CompletionRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_completion_api_branches__branch_id__book_completion_confirm_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CompletionRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  export_completion_api_branches__branch_id__book_completion__identifier__export_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  inspections_api_branches__branch_id__workflow_inspections_get: {
+    parameters: {
+      query?: {
+        scope?: 'chapter' | 'volume' | 'book'
+        scope_id?: string | null
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  inspect_api_branches__branch_id__workflow_inspections_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['InspectionInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  inspection_api_branches__branch_id__workflow_inspections__inspection_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        inspection_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_package_api_branches__branch_id__manuscript_package_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ManuscriptPackage']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  import_package_api_manuscript_packages_import_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ManuscriptPackage']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_work_snapshots_api_branches__branch_id__work_snapshots_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_work_snapshot_api_branches__branch_id__work_snapshots_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SnapshotInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_work_snapshot_api_branches__branch_id__work_snapshots__snapshot_id__preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        snapshot_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  restore_work_snapshot_api_branches__branch_id__work_snapshots__snapshot_id__restore_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        snapshot_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ainovel__work_snapshot__RestoreInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  diff_work_snapshot_chapter_api_branches__branch_id__work_snapshots__snapshot_id__chapters__chapter_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        snapshot_id: string
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
         headers: {
           [name: string]: unknown
         }
@@ -3819,7 +5415,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['RestoreInput']
+        'application/json': components['schemas']['ainovel__models__RestoreInput']
       }
     }
     responses: {
@@ -4108,6 +5704,170 @@ export interface operations {
         base_story_revision?: number | null
         chapter_revision?: number | null
       }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  outline_workspace_api_branches__branch_id__outline_workspace_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_workspace_api_branches__branch_id__outline_workspace_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveOutline']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_workspace_api_branches__branch_id__outline_workspace_confirm_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ConfirmOutline']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  outline_revision_api_branches__branch_id__outline_workspace_revisions__revision__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        revision: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  setting_options_api_branches__branch_id__outline_workspace_setting_options_get: {
+    parameters: {
+      query?: never
       header?: never
       path: {
         branch_id: string
@@ -4830,6 +6590,72 @@ export interface operations {
       }
     }
   }
+  get_project_api_branches__branch_id__conception_project_brief_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConfirmedProject'] | null
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_project_api_branches__branch_id__conception_project_brief_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ConfirmProject']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConfirmedProject']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_workspace_api_branches__branch_id__conception_get: {
     parameters: {
       query?: never
@@ -4978,6 +6804,41 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['ConceptionGenerateInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  generate_project_api_branches__branch_id__conception_project_brief_generate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ProjectGenerateInput']
       }
     }
     responses: {
@@ -6945,6 +8806,39 @@ export interface operations {
       }
     }
   }
+  get_card_api_reference_sessions__identifier__cards__card_id__revisions__revision__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        identifier: string
+        card_id: string
+        revision: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SavedReferenceCard']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   start_reference_api_reference_sessions__identifier__actions_post: {
     parameters: {
       query?: never
@@ -7096,6 +8990,266 @@ export interface operations {
         'application/json': components['schemas']['AdoptExtraction']
       }
     }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  history_api_branches__branch_id__outline_workspace_generation_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OutlineGenerationTask'][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  start_api_branches__branch_id__outline_workspace_generation_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['GenerateOutline']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OutlineGenerationTask']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  proposal_api_branches__branch_id__outline_workspace_generation__identifier__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OutlineProposal']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  runs_api_branches__branch_id__seven_stage_runs_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_run_api_branches__branch_id__seven_stage_runs_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StartRun']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  pause_run_api_branches__branch_id__seven_stage_runs__task_id__pause_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  resume_run_api_branches__branch_id__seven_stage_runs__task_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  cancel_run_api_branches__branch_id__seven_stage_runs__task_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
     responses: {
       /** @description Successful Response */
       200: {
