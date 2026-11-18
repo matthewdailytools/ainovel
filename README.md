@@ -101,7 +101,7 @@ uv run python -m ainovel.cloud_sync_server --port 8888
 uv run python -m ainovel.cloud_sync_server --host 0.0.0.0 --port 8443 --tls-certfile 'fullchain.pem' --tls-keyfile 'private-key.pem'
 ```
 
-启动入口要求非回环监听提供 TLS 证书和私钥，最低 TLS 1.2。加密私钥的口令可由 `AINOVEL_SYNC_TLS_KEY_PASSWORD` 注入。使用客户端访问实际同步地址的 `/api/sync/health` 核对证书链、主机名及 SQLite 读取状态。数据库不可读时返回 `503 sync_storage`。再以独立设备凭据核对作品权限。本机工作台的 `AINOVEL_OFFLINE_SYNC_ORIGINS` 配置相应同步服务地址。
+启动入口要求非回环监听提供 TLS 证书和私钥，最低 TLS 1.2。加密私钥的口令可由 `AINOVEL_SYNC_TLS_KEY_PASSWORD` 注入。使用客户端访问实际同步地址的 `/api/sync/health` 核对证书链、主机名及 SQLite 结构和读取状态。活动库不可读或缺少服务所需结构时返回 `503 sync_storage`，运行中的同步请求保持缺失的恢复路径可用。再以独立设备凭据核对作品权限。本机工作台的 `AINOVEL_OFFLINE_SYNC_ORIGINS` 配置相应同步服务地址。
 
 生产部署使用静态加密存储。设置实际 `AINOVEL_SYNC_DB` 后，可用有系统状态查询权限的操作员运行 `uv run python -m ainovel.cloud_sync_storage --backup-dir <现有备份目录>`。预检读取数据库目录、现有数据库和 WAL／SHM，以及所指定的备份卷。附件跟随 SQLite 保存。支持 Windows 已完成且保护开启的本地 BitLocker 固定卷，以及 Linux 直接挂载在完整 AES-XTS dm-crypt 映射上的 ext4。无法验证的卷返回退出码 `2`。预检保持只读，密钥恢复、账户退出与数据保留还需针对实际部署验收。[七台云同步验收](docs/acceptance/七台云同步验收.md)
 
@@ -118,6 +118,8 @@ uv run python -m ainovel.cloud_sync_backup restore --file 'D:/sync-backups/ledge
 启用时，客户端通过带作品权限的 `GET /api/sync/works/{work_id}/checkpoint` 核对账本身份。恢复库要求在拉取、推送、处理冲突及附件请求中提交相符的 `X-Ainovel-Ledger`。旧副本即使拿到新凭据，也会保留旧账本绑定、本机稿和待同步记录。用独立浏览器配置或隔离的 `AINOVEL_DATA_DIR` 打开新副本，再选择连接恢复库。保留原端和独立备份以核对恢复点之后的编辑及回执。[云账本恢复步骤](docs/acceptance/七台云同步验收.md)
 
 ### 备份、恢复与付费验收
+
+独立 Web 在页面底部提供「独立作品备份」。下载 `.ainovel-backup` 后，可在同一浏览器应用的干净配置中离线选择「从独立备份恢复作品」。该文件按记录校验，保留已保存稿件、修订、来源和冻结交付，手法卡原句按作者选带。恢复保留已有作品。桌面与独立 Web 的 `.json` 稿件交换包继续用于跨端导入，导入上限为 24 MiB。桌面全库备份使用下列命令。[本机和浏览器备份验收](docs/acceptance/七台工作流实施验收.md)
 
 ```powershell
 uv run python -m ainovel backup
