@@ -8635,5 +8635,16 @@
     "result": "passed",
     "record": "2026-11-18-source-checkpoint-lineage-regression.md",
     "fix_of": "assisted4-clarified-lineage-false-cross-dispatch-20261118"
+  },
+  {
+    "id": "source-checkpoint-lineage-f042f5b-full-ci-deployed-20261118",
+    "date": "2026-11-18",
+    "commit": "f042f5b",
+    "module": "两处来源停点合批工程与实际部署",
+    "scenario": "同SHA完整CI 44244204194通过。本地2832后端通过、1启动错误在稳定构建后复测通过；无头166通过、3项定向复测通过，保留首轮日志。备份db06ec7a隔离恢复39业务表、2账本表、1692条账目一致，8766发布。真实仍为3／12和1／12，未知预留保留。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-18-source-checkpoint-lineage-regression.md",
+    "fix_of": "assisted4-clarified-lineage-false-cross-dispatch-20261118"
   }
 ]
