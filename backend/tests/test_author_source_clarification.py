@@ -360,6 +360,117 @@ def test_late_external_body_dispatch_stops_queued_child_but_nonce_still_reveals_
     assert lookup.status_code == 200 and lookup.json()["task"]["id"] == worker.task["id"]
 
 
+@pytest.mark.parametrize("external_body", [False, True])
+def test_retry_parent_clarification_allows_own_body_but_still_rejects_other_producers(
+    settings, domain, story, client, external_body
+):
+    from ainovel import author_source_observation_retry as retry
+    from ainovel import authored_source_classification as classification
+    from ainovel.models import ModuleInput
+    from helpers.authored_classification_fixture import native as classified_native
+    from helpers.author_observation_retry_fixture import known_returned_failure, wrong_unit
+
+    old_worker, failed, _, _ = known_returned_failure(settings, domain, story, client=client)
+    preview = client.get(f"/api/tasks/{failed['id']}/author-source-observation-retry-preview")
+    assert preview.status_code == 200, preview.text
+    retried = client.post(
+        f"/api/tasks/{failed['id']}/author-source-observation-retries",
+        json={
+            "version": retry.VERSION,
+            "client_request_id": "retry-parent-before-explicit-clarification",
+            "preview_basis_sha256": preview.json()["request_basis"]["preview_basis_sha256"],
+            "reason": "保留旧返回与费用，显式核对原来源。",
+        },
+    )
+    assert retried.status_code == 202, retried.text
+    retry_worker = Worker(settings)
+    retry_frames = classified_native(retry_worker, transform=wrong_unit)
+    assert asyncio.run(retry_worker.run_once()) and len(retry_frames) == 3
+    parent = domain.task(retried.json()["id"])
+    assert parent["status"] == "blocked_runtime"
+    assert parent["result"][retry.RECEIPT]["task_id"] == parent["id"]
+    body = ready_request(
+        client,
+        parent,
+        nonce="clarification-after-retry-parent-format-failure",
+        clarification="交易失败与双方未交付仍须保持，借尺仍须按约归还；没有另改结果。",
+        reason="只补充原意，保留三份观察格式失败及费用。",
+    )
+    posted = client.post(f"/api/tasks/{parent['id']}/author-source-clarifications", json=body)
+    assert posted.status_code == 202, posted.text
+    child = posted.json()
+    assert child["result"][retry.RECEIPT]["task_id"] == parent["id"]
+    assert child["result"][bridge.RECEIPT]["observation_failure"]
+    old_steps = domain.db.all("SELECT * FROM task_steps ORDER BY task_id,fingerprint")
+    old_chapters = domain.db.all("SELECT * FROM chapters ORDER BY id")
+    with old_worker.budget.db() as usage:
+        old_calls = [dict(row) for row in usage.execute("SELECT * FROM calls ORDER BY id")]
+    if external_body:
+        chapter = domain.db.all(
+            "SELECT * FROM chapters WHERE branch_id=? AND position=1", (parent["branch_id"],)
+        )[0]
+        other = domain.queue(
+            "module",
+            ModuleInput(
+                novel_id=parent["novel_id"],
+                branch_id=parent["branch_id"],
+                chapter_id=chapter["id"],
+                base_revision=0,
+                action="writing.expand_plot",
+                instruction="另一次正文生产者，禁止与澄清子任务重复派发。",
+                account="deepseek",
+            ).model_dump(exclude_none=True),
+            parent["branch_id"],
+        )
+        with domain.db.connect(True) as tx:
+            domain.db.event(tx, other["id"], "chapter_started", {"number": 1})
+        cancelled = client.post(f"/api/tasks/{other['id']}/cancel")
+        assert cancelled.status_code == 200 and cancelled.json()["status"] == "cancelled"
+    worker = Worker(settings)
+    frames = classified_native(worker)
+    assert asyncio.run(worker.run_once())
+    current = domain.task(child["id"])
+    assert worker.task["id"] == child["id"]
+    events = domain.db.all("SELECT kind,payload FROM task_events WHERE task_id=? ORDER BY id", (child["id"],))
+    if external_body:
+        assert current["status"] == "blocked_runtime" and frames == []
+        assert [json.loads(event["payload"])["code"] for event in events if event["kind"] == "stopped"] == [
+            "author_observation_retry_late"
+        ]
+        assert not any(event["kind"] == "step_dispatched" for event in events)
+        assert not domain.db.all("SELECT id FROM artifacts WHERE task_id=?", (child["id"],))
+    else:
+        assert current["status"] == "needs_review", current["error"]
+        assert [frame["任务"]["动作"] for frame in frames[:5]] == [
+            authored.ACTION,
+            "仅依据作者原话整理本场景情节",
+            classification.ACTION,
+            bridge.ACTION,
+            "按章纲写完整正文",
+        ]
+        assert current["result"][bridge.CHECKS]["status"] == "ready"
+        assert any(event["kind"] == "chapter_started" for event in events)
+        assert any(
+            event["kind"] == "step_dispatched"
+            and json.loads(event["payload"])["action"] == "按章纲写完整正文"
+            for event in events
+        )
+        assert current["result"]["waiting_artifact"]
+    assert current["payload"]["plots"] == parent["payload"]["plots"]
+    assert current["result"]["plan"] == parent["result"]["plan"]
+    assert domain.db.all("SELECT * FROM chapters ORDER BY id") == old_chapters
+    old_ids = {row["task_id"] for row in old_steps}
+    assert [
+        row
+        for row in domain.db.all("SELECT * FROM task_steps ORDER BY task_id,fingerprint")
+        if row["task_id"] in old_ids
+    ] == old_steps
+    with old_worker.budget.db() as usage:
+        assert [
+            dict(row) for row in usage.execute("SELECT * FROM calls ORDER BY id") if row["task_id"] in old_ids
+        ] == old_calls
+
+
 @pytest.mark.parametrize("limit_kind", ["run", "global"])
 def test_budget_boundaries_do_not_create_or_reset_task_or_calls(settings, domain, story, client, limit_kind):
     from decimal import Decimal

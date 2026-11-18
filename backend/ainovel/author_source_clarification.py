@@ -227,6 +227,7 @@ def ensure_runtime(task, domain, settings):
                 parent,
                 receipt["previous_source_entry"],
                 receipt["previous_source_receipt"],
+                active_task=task,
             )
         if proof != receipt["observation_failure"]:
             raise DomainError(
@@ -374,12 +375,16 @@ def failed_observation_record(domain, current, entry):
     return record
 
 
-def failed_observation_proof(domain, budget, usage, current, entry, record):
+def failed_observation_proof(domain, budget, usage, current, entry, record, *, active_task=None):
     from . import authored_source_classification as classification
     from . import authored_source_execution as execution
     from .author_source_observation_retry import known_returned_proof, settled_provider
 
-    execution.ensure_runtime(current, domain, budget.settings)
+    if active_task is not None:
+        # The parent supplies the historical proof. The competing-producer guard
+        # must use the lineage of the task that is actually about to dispatch.
+        execution.validate_execution(current, domain)
+    execution.ensure_runtime(active_task if active_task is not None else current, domain, budget.settings)
     settled_provider(usage, provider(budget, current))
     return known_returned_proof(
         domain,

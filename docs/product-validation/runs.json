@@ -8613,5 +8613,27 @@
     "result": "blocked",
     "record": "2026-11-18-source-checkpoint-runtime.md",
     "fix_of": ""
+  },
+  {
+    "id": "assisted4-clarified-lineage-false-cross-dispatch-20261118",
+    "date": "2026-11-18",
+    "commit": "961be08",
+    "module": "半自动原检查点的写前续接",
+    "scenario": "隔离原第4章走完来源和澄清保持后，旧父任务护栏误把当前合法子任务章启动判为其他生产者，首次正文派发被拒。原稿、旧回执、账本不改，观察使用合成回执。",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-18-source-checkpoint-lineage-regression.md",
+    "fix_of": ""
+  },
+  {
+    "id": "source-checkpoint-lineage-and-first-chapter-offline-20261118",
+    "date": "2026-11-18",
+    "commit": "working-tree",
+    "module": "两条原任务的隔离接线与恢复",
+    "scenario": "半自动改用当前合法链判派发，真正其他生产者仍被拦截。原半自动第4章和全自动第2章在独立副本走到保存、维护、暂停与导出恢复。超时后快照的两套原稿和1692条费用恢复一致；真实续跑仍受回执与结算阻断。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-18-source-checkpoint-lineage-regression.md",
+    "fix_of": "assisted4-clarified-lineage-false-cross-dispatch-20261118"
   }
 ]
