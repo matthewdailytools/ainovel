@@ -385,6 +385,16 @@ async def generate_category(worker, request, frozen, category, completed):
         ],
         "可关联构思与来源": references,
     }
+    if category["id"] == "world":
+        from .genre_catalog import setting_framework
+
+        context["设定框架"] = setting_framework(worker.genre_snapshot())
+        instruction["设定框架用法"] = (
+            "以主类型条目为底稿，辅类型只取与主线相交的规则，机制按适用场景挂载。"
+            "优先交代规则触发、限制、代价、适用范围和例外；冲突单独列出供作者取舍。"
+            "作者既定约定优先，区分世界规则、作者所知与人物所知。"
+            "条目是待确认设定，不是正文事实；题材清单按本书需要选用。"
+        )
     contract = ConceptionCategoryProposal.model_json_schema()
     if len(reference_ids) <= 250:
         contract["$defs"]["ConceptionProposalItem"]["properties"]["links"]["items"]["enum"] = [

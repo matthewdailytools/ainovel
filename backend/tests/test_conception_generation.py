@@ -9,6 +9,7 @@ from ainovel.db import DomainError, uid
 from ainovel.domain import utf16_slice
 from ainovel.providers import RequestNotSent
 from ainovel.worker import Worker
+from test_genre_integration import adopt_reader
 
 
 class ProposalProvider:
@@ -86,6 +87,19 @@ def queue(client, path, state, category_id=None, *, key=None, instruction="根�
     response = client.post(path + "/generate", json=data)
     assert response.status_code == 202, response.text
     return response.json(), data
+
+
+def test_world_generation_uses_frozen_mixed_setting_framework(client, domain, settings, story):
+    adopt_reader(domain, story, genres=["xianxia", "mystery"])
+    endpoint, state = workspace(client, story)
+    task, _ = queue(client, endpoint, state, "world")
+    model = ProposalProvider()
+    assert asyncio.run(Worker(settings, model).run_once())
+    assert domain.task(task["id"])["status"] == "succeeded"
+    framework = model.requests[0]["上下文"]["设定框架"]
+    assert framework["primary"]["id"] == "xianxia"
+    assert [entry["id"] for entry in framework["secondary"]] == ["mystery"]
+    assert framework["author_exceptions"]
 
 
 @pytest.mark.parametrize("category_id", [None, "objects"])

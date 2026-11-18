@@ -166,6 +166,38 @@ def assemble_profile(reader: Mapping[str, object] | None) -> dict[str, Any]:
     }
 
 
+def setting_framework(profile: Mapping[str, Any]) -> dict[str, Any]:
+    """Select setting topics from the frozen catalogue profile for M3."""
+    topics = profile.get("required_topics", [])
+
+    def group(identifier):
+        return [
+            {"title": topic["title"], "items": topic["items"]}
+            for topic in topics
+            if topic["group"] == identifier
+        ]
+
+    genre_ids = profile.get("genre_ids", [])
+    genres = {entry["id"]: entry["name"] for entry in _catalog()["genres"]}
+    selected = [
+        {"id": identifier, "name": genres[identifier], "topics": group(identifier)}
+        for identifier in genre_ids
+    ]
+    primary = next((entry for entry in selected if entry["name"] == profile.get("primary_genre")), None)
+    return {
+        "catalog_version": profile.get("catalog_version"),
+        "common": ["人物与关系", "时间地点", "资源与组织", "主要冲突", "终局与披露边界"],
+        "primary": primary,
+        "secondary": [entry for entry in selected if entry is not primary],
+        "mechanisms": [
+            {"id": identifier, "topics": group(identifier)} for identifier in profile.get("mechanism_ids", [])
+        ],
+        "custom_genres": profile.get("custom_genres", []),
+        "author_exceptions": profile.get("author_exceptions", []),
+        "conflicts": profile.get("conflicts", []),
+    }
+
+
 _ACTIONS = {
     "writing.advise": "scene",
     "writing.expand_plot": "scene",

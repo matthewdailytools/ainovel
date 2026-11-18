@@ -4,7 +4,20 @@ import re
 
 import pytest
 
-from ainovel.genre_catalog import assemble_profile, get_catalog, profile_for_action
+from ainovel.genre_catalog import assemble_profile, get_catalog, profile_for_action, setting_framework
+
+
+def test_setting_framework_covers_catalogue_and_separates_mixed_genres():
+    for genre in get_catalog()["genres"]:
+        framework = setting_framework(assemble_profile({"genres": [genre["id"]]}))
+        assert framework["primary"]["id"] == genre["id"]
+        assert framework["primary"]["topics"]
+        assert framework["secondary"] == []
+    mixed = setting_framework(assemble_profile({"genres": ["xianxia", "mystery"], "mechanisms": ["无CP"]}))
+    assert mixed["primary"]["id"] == "xianxia"
+    assert mixed["secondary"][0]["id"] == "mystery"
+    assert mixed["mechanisms"][0]["topics"]
+    assert "无CP" in mixed["author_exceptions"]
 
 
 def test_runtime_catalog_reuses_all_reviewed_genres_topics_and_channel_variants():
