@@ -46,7 +46,7 @@ test('桌面比较并发的设定正文证据，采用远端撤回后仍可回�
           ...selection,
           quote_sha256: digest(original.slice(selection.start, selection.end)),
         },
-        idempotency_key: key,
+        idempotency_key: `${chapter.id}-${key}`,
       },
     })
     expect(response.ok(), await response.text()).toBe(true)
@@ -71,7 +71,9 @@ test('桌面比较并发的设定正文证据，采用远端撤回后仍可回�
   const panel = page.getByRole('region', { name: '作品云同步', exact: true })
   await panel.getByLabel('同步服务地址').fill(cloud)
   await panel.getByLabel('设备凭据').fill(desktopToken)
-  await panel.getByRole('button', { name: '启用作品同步', exact: true }).press('Enter')
+  const enable = panel.getByRole('button', { name: '启用作品同步', exact: true })
+  await expect(enable).toBeEnabled()
+  await enable.press('Enter')
   const sync = panel.getByRole('button', { name: '同步当前工作版本', exact: true })
   await expect(sync).toBeEnabled()
   await sync.press('Enter')
@@ -121,8 +123,22 @@ test('桌面比较并发的设定正文证据，采用远端撤回后仍可回�
     expect((await accepted.json()).status).toBe('applied')
   }
 
+  await expect(sync).toBeEnabled()
   await sync.press('Enter')
-  await panel.getByRole('button', { name: /^比较设定正文证据 setting-use:/ }).press('Enter')
+  const compareButton = panel.getByRole('button', { name: /^比较设定正文证据 setting-use:/ })
+  await expect(compareButton).toBeEnabled()
+  const [compared] = await Promise.all([
+    page.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname
+      return (
+        response.request().method() === 'POST' &&
+        path.startsWith(`/api/branches/${branch}/desktop-sync/conflicts/`) &&
+        path.endsWith('/compare')
+      )
+    }),
+    compareButton.press('Enter'),
+  ])
+  expect(compared.ok(), await compared.text()).toBe(true)
   const compare = panel.getByRole('region', { name: '云同步冲突比较' })
   for (const [label, proof, text] of [
     ['本机当前版', local, '作者已确认正文使用'],
@@ -139,8 +155,10 @@ test('桌面比较并发的设定正文证据，采用远端撤回后仍可回�
     await expect(details).toContainText(`使用证明修订 ${proof.id}`)
     await expect(details).not.toContainText(selected)
   }
+  const adoptCloud = compare.getByRole('button', { name: '采用云端当前版', exact: true })
+  await expect(adoptCloud).toBeEnabled()
   page.once('dialog', (dialog) => void dialog.accept())
-  await compare.getByRole('button', { name: '采用云端当前版', exact: true }).press('Enter')
+  await adoptCloud.press('Enter')
   await expect(compare).toHaveCount(0)
   await expect(panel.getByRole('button', { name: /^比较设定正文证据/ })).toHaveCount(0)
   const adopted = await (await page.request.get(`${uses}/${remote.id}`)).json()
