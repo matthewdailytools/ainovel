@@ -13,8 +13,10 @@ from ainovel.manuscript_exchange import export_manuscript, import_manuscript
 from ainovel.workflow_archive import (
     WorkflowHistory,
     validate_workflow_history,
+    validate_workflow_object,
 )
-from test_workflow_inspection import author, source
+from ainovel.workflow_inspection import _item, _sha
+from test_workflow_inspection import author, save_inspection_story_record, source
 
 
 def _members(response):
@@ -170,3 +172,71 @@ def test_restored_workflow_proofs_remain_historical_until_native_author_confirma
         assert other.get(completion + f"/history/{record['id']}").json()["revalidation_request"] is None
         assert not other.get(completion).json()["latest"]["current"]
         assert _members(other.get(pointer)) == original_zip
+
+
+def test_state_conflict_archive_uses_frozen_chapters_and_refuses_changed_verdict_or_quote(
+    client, domain, story
+):
+    branch_id = story["branch_id"]
+    branch = f"/api/branches/{branch_id}"
+    route = branch + "/workflow-inspections"
+    first = domain.save(story["chapter_id"], 0, "😀沈砚左手骨折。")
+    second = domain.create_chapter(branch_id, "第二章")
+    second = domain.save(second["id"], 0, "隔雾看去，沈砚左手完好。")
+    person = save_inspection_story_record(client, branch, {"kind": "character", "title": "沈砚"})
+    event = save_inspection_story_record(
+        client,
+        branch,
+        {"kind": "event", "title": "渡口交接", "status": "actual", "sources": [source(first)]},
+    )
+    for chapter, value in ((first, "骨折"), (second, "完好")):
+        save_inspection_story_record(
+            client,
+            branch,
+            {
+                "kind": "state",
+                "title": value,
+                "character_id": person["id"],
+                "event_id": event["id"],
+                "category": "injury",
+                "key": "左手伤势",
+                "value": value,
+                "audience": "author",
+                "truth": "actual",
+                "sources": [source(chapter)],
+            },
+        )
+    preview = client.get(route).json()["preview"]
+    created = client.post(route, json={"basis_sha256": preview["basis_sha256"]})
+    assert created.status_code == 201, created.text
+    assert created.json()["items"][2]["status"] == "red"
+    domain.save(story["chapter_id"], first["revision"], "沈砚处理了左手的伤。")
+    package = export_manuscript(domain, branch_id)
+    history = package.workflow_history
+    originals = {row.id: row for row in package.revisions}
+    frozen = history.inspections[0]
+    assert validate_workflow_object(frozen, branch_id, originals.get, None) == frozen
+    assert frozen.report.items[2].basis["state_conflicts"][0]["event_id"] == event["id"]
+
+    green = history.model_dump()
+    green["inspections"][0]["report"]["items"][2]["status"] = "green"
+    with pytest.raises(DomainError, match="须保留红项"):
+        validate_workflow_history(WorkflowHistory.model_validate(green), branch_id, originals)
+
+    bad_quote = history.model_dump()
+    report = bad_quote["inspections"][0]["report"]
+    check = report["items"][2]
+    side = check["basis"]["state_conflicts"][0]["sides"][0]
+    # Change both witnesses and recalculate hashes to exercise the exact revision/selection check.
+    side["sources"][0]["start"] += 1
+    for row in check["basis"]["records"]:
+        if row["id"] == side["record_id"]:
+            row["sources"][0]["start"] = side["sources"][0]["start"]
+    check["basis_sha256"] = _item(
+        "03", "", check["basis"], manifest=report["chapters"], scope=report["scope"]
+    )["basis_sha256"]
+    report["basis_sha256"] = _sha(
+        [report["scope"], report["scope_id"], [item["basis_sha256"] for item in report["items"]]]
+    )
+    with pytest.raises(DomainError, match="第 03 项冲突.*原文范围无效"):
+        validate_workflow_history(WorkflowHistory.model_validate(bad_quote), branch_id, originals)

@@ -757,3 +757,267 @@ def test_same_check_keeps_independent_volume_red_when_chapter_findings_change(cl
     changed_volume = read(client, f"{route}/{updated_volume_red['id']}")
     assert item(changed_volume, "03")["current_status"] == "outdated"
     assert complete().status_code == 409
+
+
+def save_inspection_story_record(client, branch, payload, previous=None):
+    revision = read(client, branch + "/story-graph")["story_revision"]
+    route = branch + "/story-records"
+    data = {"base_story_revision": revision, "record": payload}
+    response = (
+        client.put(f"{route}/{previous['id']}", json={**data, "base_revision": previous["revision"]})
+        if previous
+        else client.post(route, json=data)
+    )
+    assert response.status_code == (200 if previous else 201), response.text
+    return next(row for row in response.json()["records"] if row["payload"]["title"] == payload["title"])
+
+
+@pytest.mark.parametrize("shared_volume", [False, True])
+def test_known_character_conflicts_freeze_both_sources_and_block_completion(
+    client, domain, story, shared_volume
+):
+    branch_id = story["branch_id"]
+    branch = f"/api/branches/{branch_id}"
+    unrelated = domain.save(story["chapter_id"], 0, "船驶离渡口。")
+    made = domain.create_chapter(branch_id, "第二章")
+    first = domain.save(made["id"], 0, "😀沈砚左手骨折。")
+    made = domain.create_chapter(branch_id, "第三章")
+    second = domain.save(made["id"], 0, "隔着雾，沈砚左手完好。")
+    chapters = (unrelated, first, second)
+    volumes = ((unrelated,), (first, second)) if shared_volume else ((unrelated,), (first,), (second,))
+    put_and_confirm(
+        client,
+        branch + "/outline-workspace",
+        {
+            "base_revision": 0,
+            "plan": {
+                "summary": "核对渡口交接。",
+                "volumes": [
+                    {
+                        "id": f"v{index}",
+                        "title": f"第{index}卷",
+                        "summary": "渡口交接。",
+                        "units": [
+                            {
+                                "id": f"u{index}",
+                                "title": "线索",
+                                "summary": "核对线索。",
+                                "chapters": [
+                                    {**chapter_plan(chapter["id"], "核对船上见闻"), "setting_ids": []}
+                                    for chapter in volume
+                                ],
+                            }
+                        ],
+                    }
+                    for index, volume in enumerate(volumes, 1)
+                ],
+            },
+        },
+    )
+    person = save_inspection_story_record(client, branch, {"kind": "character", "title": "沈砚"})
+    event = save_inspection_story_record(
+        client,
+        branch,
+        {
+            "kind": "event",
+            "title": "渡口交接",
+            "status": "actual",
+            "story_order": 1,
+            "participants": [person["id"]],
+            "sources": [source(first)],
+        },
+    )
+    state = {
+        "kind": "state",
+        "character_id": person["id"],
+        "event_id": event["id"],
+        "category": "injury",
+        "key": "左手伤势",
+        "audience": "author",
+        "truth": "actual",
+    }
+    first_evidence = {**source(first), "start": 2, "quote": "沈砚左手骨折。"}
+    first_state = save_inspection_story_record(
+        client, branch, {**state, "title": "左手骨折", "value": "骨折", "sources": [first_evidence]}
+    )
+    route = endpoint(story)
+    completion = branch + "/book-completion"
+    publication = {
+        "read_note": "作者已经通读。",
+        "ending": {"note": "故事以船离开渡口结束。"},
+        "characters": {"note": "沈砚已完成交接。"},
+        "promises": {"note": "这里没有另设伏笔。"},
+        "intro": "沈砚到达渡口。",
+        "spoiler_scope": "opening",
+        "sample_chapter_ids": [unrelated["id"], first["id"]],
+        "materials_reviewed": True,
+    }
+
+    def sign_book():
+        preview = read(client, route)["preview"]
+        return report(
+            client,
+            route,
+            preview,
+            author_reviews=[
+                author(check["check_id"], first) for check in preview["items"] if check["status"] == "pending"
+            ],
+            length_targets={"expected_chapters": len(chapters)},
+        )
+
+    original = sign_book()
+    second_evidence = {**source(second), "start": 4, "quote": "沈砚左手完好。"}
+    second_state = save_inspection_story_record(
+        client, branch, {**state, "title": "左手完好", "value": "完好", "sources": [second_evidence]}
+    )
+    ids = {first_state["id"], second_state["id"]}
+    context = read(client, branch + "/story-context", story_order=1)
+    assert [{row["id"] for row in group} for group in context["conflicts"]] == [ids]
+    for chapter in chapters:
+        preview = read(client, route, scope="chapter", scope_id=chapter["id"])["preview"]
+        assert item(preview, "03")["status"] == "pending"
+        assert "state_conflicts" not in item(preview, "03")["basis"]
+    for index, volume in enumerate(volumes, 1):
+        preview = read(client, route, scope="volume", scope_id=f"v{index}")["preview"]
+        check = item(preview, "03")
+        if len(volume) == 2:
+            assert check["status"] == "red"
+            assert {side["record_id"] for side in check["basis"]["state_conflicts"][0]["sides"]} == ids
+        else:
+            assert check["status"] == "pending" and "state_conflicts" not in check["basis"]
+
+    state_preview = read(client, route)
+    preview = state_preview["preview"]
+    conflict = item(preview, "03")
+    assert conflict["status"] == "red"
+    assert item(state_preview["latest"], "03")["current_status"] == "outdated"
+    assert item(state_preview["latest"], "09")["current_status"] == "green"
+    (group,) = conflict["basis"]["state_conflicts"]
+    assert (group["character_id"], group["story_order"], group["event_id"]) == (person["id"], 1, None)
+    assert {side["record_id"] for side in group["sides"]} == ids
+    assert {side["value"]: side["sources"] for side in group["sides"]} == {
+        "骨折": [first_evidence],
+        "完好": [second_evidence],
+    }
+    assert not state_preview["latest"]["current"] and state_preview["latest"]["id"] == original["id"]
+    for status in ("green", "yellow", "not_applicable"):
+        attempted = client.post(
+            route,
+            json={"basis_sha256": preview["basis_sha256"], "author_reviews": [author("03", first, status)]},
+        )
+        assert attempted.status_code == 409 and attempted.json()["code"] == "inspection_state_conflict"
+    blocked = sign_book()
+    assert item(blocked, "03")["current_status"] == "red"
+    completion_basis = read(client, completion)["basis_sha256"]
+    refused = client.post(completion + "/confirm", json={**publication, "basis_sha256": completion_basis})
+    assert refused.status_code == 409 and refused.json()["code"] == "completion_blocked"
+    sources_route = f"{route}/{blocked['id']}/source-context/03"
+
+    def validate_sources():
+        entries = read(client, sources_route)["entries"]
+        assert len(entries) == 2
+        for entry in entries:
+            expected = next(
+                row for row in (first_evidence, second_evidence) if row["chapter_id"] == entry["chapter_id"]
+            )
+            exact = read(client, sources_route, source_index=entry["index"])["context"]
+            assert {key: entry[key] for key in ("chapter_id", "revision", "start", "end")} == {
+                key: expected[key] for key in ("chapter_id", "revision", "start", "end")
+            }
+            assert exact["quote"] == expected["quote"]
+
+    validate_sources()
+    revised = domain.save(second["id"], second["revision"], "隔着雾，沈砚的左手明显骨折。")
+    stale = read(client, route)
+    assert item(stale["preview"], "03")["status"] == "outdated"
+    assert "state_conflicts" not in item(stale["preview"], "03")["basis"]
+    saved = item(read(client, f"{route}/{blocked['id']}"), "03")
+    assert (saved["status"], saved["current_status"]) == ("red", "outdated")
+    validate_sources()
+
+    save_inspection_story_record(
+        client,
+        branch,
+        {**state, "title": "左手伤势已核对", "value": "骨折", "sources": [source(revised)]},
+        previous=second_state,
+    )
+    signed = sign_book()
+    assert {row["check_id"]: row["current_status"] for row in signed["items"]} == {
+        row["check_id"]: "green" for row in signed["items"]
+    }
+    basis = read(client, completion)["basis_sha256"]
+    delivered = client.post(completion + "/confirm", json={**publication, "basis_sha256": basis})
+    assert delivered.status_code == 201, delivered.text
+    assert delivered.json()["manifest"]["inspection_id"] == signed["id"]
+
+
+def test_state_conflict_scope_and_time_are_supported_by_both_source_records(client, domain, story):
+    branch = f"/api/branches/{story['branch_id']}"
+    first = domain.save(story["chapter_id"], 0, "沈砚左手骨折。沈砚左手完好。")
+    person = save_inspection_story_record(client, branch, {"kind": "character", "title": "沈砚"})
+    route = endpoint(story)
+    events = {}
+    for name, order in (("arrival", 1), ("departure", 2), ("anchor_a", None), ("anchor_b", None)):
+        events[name] = save_inspection_story_record(
+            client,
+            branch,
+            {
+                "kind": "event",
+                "title": name,
+                "status": "actual",
+                "story_order": order,
+                "sources": [source(first)],
+            },
+        )["id"]
+
+    def save_state(key, value, event_id, audience):
+        quote = f"沈砚左手{value}。"
+        start = first["content"].index(quote)
+        return save_inspection_story_record(
+            client,
+            branch,
+            {
+                "kind": "state",
+                "title": f"{key} {value} {audience}",
+                "character_id": person["id"],
+                "event_id": events[event_id],
+                "category": "injury",
+                "key": key,
+                "audience": audience,
+                "truth": "actual",
+                "sources": [{**source(first), "start": start, "end": start + len(quote), "quote": quote}],
+                "value": value,
+            },
+        )
+
+    for key, left, right, other_audience in (
+        ("不同时间", "arrival", "departure", "author"),
+        ("不同视域", "arrival", "arrival", "reader"),
+        ("不明时间的两个锚点", "anchor_a", "anchor_b", "author"),
+    ):
+        save_state(key, "骨折", left, "author")
+        save_state(key, "完好", right, other_audience)
+    scope = {"scope": "chapter", "scope_id": first["id"]}
+    check = item(read(client, route, **scope)["preview"], "03")
+    assert check["status"] == "pending" and "state_conflicts" not in check["basis"]
+
+    left = save_state("相同的确切事件", "骨折", "anchor_a", "author")
+    right = save_state("相同的确切事件", "完好", "anchor_a", "author")
+    check = item(read(client, route, **scope)["preview"], "03")
+    assert check["status"] == "red"
+    (group,) = check["basis"]["state_conflicts"]
+    assert group["story_order"] is None and group["event_id"] == events["anchor_a"]
+    assert {side["record_id"] for side in group["sides"]} == {left["id"], right["id"]}
+    signed = report(
+        client, route, read(client, route, **scope)["preview"], author_reviews=[author("03", first, "red")]
+    )
+    assert item(signed, "03")["current_status"] == "red"
+    evidence = f"{route}/{signed['id']}/source-context/03"
+    entries = [
+        entry
+        for entry in read(client, evidence)["entries"]
+        if left["id"] in entry["label"] or right["id"] in entry["label"]
+    ]
+    assert len(entries) == 2
+    sources = [read(client, evidence, source_index=entry["index"])["context"]["quote"] for entry in entries]
+    assert set(sources) == {"沈砚左手骨折。", "沈砚左手完好。"}

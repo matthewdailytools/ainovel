@@ -24,6 +24,7 @@ CONTEXT_CHARS = 240
 class _SourceLocator(Source):
     quote: str | None = Field(default=None, min_length=1, max_length=4000)
     setting_use: InspectionSettingUse | None = None
+    state_record_id: str | None = None
 
 
 class InspectionEvidenceAddress(Input):
@@ -60,8 +61,20 @@ def _proposed_sources(item):
     for source in _rows(review.get("evidence")):
         yield "作者核对", source
     basis = item["basis"]
+    conflict_records = set()
+    for group in _rows(basis.get("state_conflicts")):
+        for side in _rows(group.get("sides")):
+            identifier = side.get("record_id")
+            if not isinstance(identifier, str):
+                continue
+            conflict_records.add(identifier)
+            label = f"{side.get('title') or item['title']} · {side.get('value', '')} · 记录 {identifier}"
+            for source in _rows(side.get("sources")):
+                yield label, {**source, "state_record_id": identifier}
     for key in ("records", "events", "knowledge"):
         for record in _rows(basis.get(key)):
+            if key == "records" and isinstance(record.get("id"), str) and record["id"] in conflict_records:
+                continue
             for source in _rows(record.get("sources")):
                 yield record.get("title") or item["title"], source
             for stage in _rows(record.get("stages")):
@@ -158,6 +171,7 @@ def _addresses(tx, branch_id, item, bindings):
             source.end,
             source.quote,
             source.setting_use.version_id if source.setting_use else None,
+            source.state_record_id,
         )
         if source.start >= source.end or key in used:
             continue
@@ -270,7 +284,7 @@ def register_routes(app, domain):
 
             def address(index):
                 label, source = sources[index]
-                data = source.model_dump(exclude={"quote", "setting_use"})
+                data = source.model_dump(exclude={"quote", "setting_use", "state_record_id"})
                 return InspectionEvidenceAddress(
                     **data,
                     index=index,

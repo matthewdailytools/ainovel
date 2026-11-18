@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createDeliveryZip } from './deliveryArchive'
 import { scopedInspectionFindings, type InspectionExcerpt } from './inspectionEvidence'
+import { InspectionStateConflicts } from './InspectionSources'
 import {
   manuscriptHash,
   readLocalSourceRevision,
@@ -114,7 +115,7 @@ export function OfflineWorkflowHistory({
           start >= end ||
           version.content.slice(start, end) !== quote
         )
-          throw new Error('原章稿与这处作者核对选区不一致。')
+          throw new Error('原章稿与报告中的选区不一致。')
         originalExcerpt = { start, end, quote }
       }
       if (token === request.current) {
@@ -154,6 +155,24 @@ export function OfflineWorkflowHistory({
                   {item.title} · {inspectionLabels[item.status]}
                 </summary>
                 <p>{item.summary}</p>
+                {item.check_id === '03' && (
+                  <InspectionStateConflicts
+                    basis={item.basis}
+                    openOriginal={(evidence, description) => {
+                      const binding = inspection.chapter_bindings.find(
+                        (row) => row.id === evidence.chapter_id && row.revision === evidence.revision,
+                      )
+                      return (
+                        binding && (
+                          <button type="button" onClick={() => void showOriginal(binding, { evidence })}>
+                            查看{description} · 修订 {evidence.revision} · 选区 {evidence.start}–
+                            {evidence.end}
+                          </button>
+                        )
+                      )
+                    }}
+                  />
+                )}
                 {scopedInspectionFindings(item.basis).map((finding) => {
                   const related = reports.get(finding.report_id)?.report
                   const original =

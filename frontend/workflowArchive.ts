@@ -179,29 +179,122 @@ function verifyChapters(
   )
 }
 
+function parseSource(value: unknown): Source {
+  const row = record(value, ['chapter_id', 'revision', 'start', 'end', 'quote'])
+  return {
+    chapter_id: id(row.chapter_id),
+    revision: integer(row.revision),
+    start: integer(row.start),
+    end: integer(row.end, 1),
+    quote: text(row.quote, 4000, 1),
+  }
+}
+
+function verifySource(source: Source, chapters: ReadonlyMap<string, FrozenRevision>, label = '作者') {
+  const { chapter_id, revision, start, end, quote } = source
+  const original = chapters.get(chapter_id)
+  if (
+    original?.revision !== revision ||
+    end <= start ||
+    end > original.content.length ||
+    original.content.slice(start, end) !== quote ||
+    !quote.trim()
+  )
+    invalid(`历史报告的${label}引文与原稿选区不一致。`)
+  return source
+}
+
 function verifySources(
   value: unknown,
   chapters: ReadonlyMap<string, FrozenRevision>,
   limit = maxAuthorEvidence,
-): Source[] {
-  return list(value, limit).map((entry) => {
-    const row = record(entry, ['chapter_id', 'revision', 'start', 'end', 'quote'])
-    const chapter_id = id(row.chapter_id)
-    const revision = integer(row.revision)
-    const start = integer(row.start)
-    const end = integer(row.end, 1)
-    const quote = text(row.quote, 4000, 1)
-    const source = chapters.get(chapter_id)
+) {
+  return list(value, limit).map((entry) => verifySource(parseSource(entry), chapters))
+}
+
+export function inspectionStateConflicts(basis: Record<string, unknown>) {
+  if (!Object.hasOwn(basis, 'state_conflicts')) return []
+  return list(basis.state_conflicts, 200_000, 1).map((entry) => {
+    const group = record(entry, [
+      'character_id',
+      'category',
+      'key',
+      'audience',
+      'story_order',
+      'event_id',
+      'sides',
+    ])
+    const story_order =
+      group.story_order === null ? null : integer(group.story_order, -Number.MAX_SAFE_INTEGER)
+    const event_id = group.event_id === null ? null : id(group.event_id)
+    const sides = list(group.sides, 200_000, 2).map((entry) => {
+      const side = record(entry, ['record_id', 'revision', 'title', 'value', 'event_id', 'sources'])
+      return {
+        record_id: id(side.record_id),
+        revision: integer(side.revision),
+        title: text(side.title, 200, 1),
+        value: text(side.value, 4000, 1),
+        event_id: id(side.event_id),
+        sources: list(side.sources, 30, 1).map(parseSource),
+      }
+    })
     if (
-      source?.revision !== revision ||
-      end <= start ||
-      end > source.content.length ||
-      source.content.slice(start, end) !== quote ||
-      !quote.trim()
+      (story_order === null) === (event_id === null) ||
+      new Set(sides.map(({ record_id }) => record_id)).size !== sides.length ||
+      new Set(sides.map(({ value }) => value)).size < 2 ||
+      (event_id && sides.some((side) => side.event_id !== event_id))
     )
-      invalid('历史报告的作者引文与原稿选区不一致。')
-    return { chapter_id, revision, start, end, quote }
+      invalid('历史报告第 03 项缺少同一时点下互相矛盾的记录。')
+    return {
+      character_id: id(group.character_id),
+      category: choice(group.category, ['knowledge', 'capability', 'resource', 'injury', 'other']),
+      key: text(group.key, 100, 1),
+      audience: choice(group.audience, ['author', 'character', 'reader']),
+      story_order,
+      event_id,
+      sides,
+    }
   })
+}
+
+function verifyStateConflicts(basis: Record<string, unknown>, chapters: ReadonlyMap<string, FrozenRevision>) {
+  const groups = inspectionStateConflicts(basis)
+  const frozen = new Map(
+    list(basis.records, 200_000).map((value) => {
+      const row = record(value)
+      return [row.id, row]
+    }),
+  )
+  for (const { character_id, category, key, audience, sides } of groups) {
+    for (const { record_id, revision, title, value, event_id, sources } of sides) {
+      const original = frozen.get(record_id)
+      const expected = {
+        character_id,
+        category,
+        key,
+        audience,
+        revision,
+        title,
+        value,
+        event_id,
+        kind: 'state',
+        truth: 'actual',
+      }
+      if (
+        !original ||
+        Object.entries(expected).some(([field, value]) => original[field] !== value) ||
+        !Array.isArray(original.invalid_reasons) ||
+        original.invalid_reasons.length !== 0 ||
+        !Array.isArray(original.sources)
+      )
+        return invalid('历史报告第 03 项的冲突与冻结人物状态记录不一致。')
+      const excerpts = new Set(original.sources.map((entry) => compactJSON(entry)))
+      for (const source of sources) {
+        if (!excerpts.has(compactJSON(source))) invalid('历史报告第 03 项的冲突与冻结人物状态记录不一致。')
+        verifySource(source, chapters, '第 03 项冲突')
+      }
+    }
+  }
 }
 
 function parseAuthorReview(value: unknown, check: string, chapters: ReadonlyMap<string, FrozenRevision>) {
@@ -309,6 +402,11 @@ async function parseInspection(
       invalid('历史体检缺少十处检查或包含未获准的免查。')
     const author_review =
       item.author_review != null ? parseAuthorReview(item.author_review, check_id, originals) : undefined
+    if (Object.hasOwn(basis, 'state_conflicts')) {
+      if (check_id !== '03' || status !== 'red' || (author_review && author_review.status !== 'red'))
+        invalid('有确定的人物状态冲突时，第 03 项须保留红项。')
+      verifyStateConflicts(basis, originals)
+    }
     const policy = basis.soft_deviation_policy
     const signed = author_review?.soft_deviation_report_ids ?? []
     if (policy != null && (check_id !== '05' || policy !== softDeviationPolicy))

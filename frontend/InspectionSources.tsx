@@ -1,9 +1,56 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { api } from './api'
 import type { components } from './api-schema'
+import type { InspectionExcerpt } from './inspectionEvidence'
+import { inspectionStateConflicts } from './workflowArchive'
 
 type EvidencePage = components['schemas']['InspectionEvidencePage']
 type EvidenceContext = components['schemas']['InspectionEvidenceContext']
+
+const stateAudience = { author: '作者所知', character: '人物所知', reader: '读者所知' }
+
+export function InspectionStateConflicts({
+  basis,
+  openOriginal,
+}: {
+  basis: Record<string, unknown>
+  openOriginal?: (evidence: InspectionExcerpt, description: string) => ReactNode
+}) {
+  const conflicts = inspectionStateConflicts(basis)
+  if (!conflicts.length) return null
+  return (
+    <ul aria-label="已确定的人物状态冲突">
+      {conflicts.map(({ sides, key, audience, story_order }) => (
+        <li key={sides[0].record_id} style={{ overflowWrap: 'anywhere' }}>
+          <details>
+            <summary>
+              {key} · {stateAudience[audience]} ·{' '}
+              {story_order === null ? '同一事件' : `故事时点 ${story_order}`}
+            </summary>
+            <ul>
+              {sides.map((side) => (
+                <li key={side.record_id}>
+                  <p>
+                    {side.title} · 记录值「{side.value}」
+                  </p>
+                  <p className="small">
+                    记录 {side.record_id} · 修订 {side.revision}
+                  </p>
+                  {side.sources.map((source, index) => (
+                    <blockquote key={`${source.chapter_id}/${source.start}/${index}`}>
+                      {source.quote}
+                      {openOriginal?.(source, `${side.title} · 原文 ${index + 1}`)}
+                    </blockquote>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </details>
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 function SourceOriginal({ route, source }: { route: string; source: EvidencePage['entries'][number] }) {
   const [context, setContext] = useState<EvidenceContext>()

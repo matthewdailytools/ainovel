@@ -28,7 +28,7 @@ from .scene_time import SceneTime, event_basis_valid
 from .setting_review import confirmed_world_basis, outline_setting_items
 from .setting_use_portability import Digest, Identifier
 from .settings_portability import SettingsEvidence
-from .story_graph import Source, graph_snapshot, sources
+from .story_graph import Source, graph_snapshot, known_state_conflicts, sources
 
 KIND = "workflow_inspection"
 LENGTH_TARGET_KIND = "inspection_length_target"
@@ -545,6 +545,11 @@ def _evaluate(tx, branch_id, scope, scope_id, *, roll_up=True):
     windows, planned_promises = _scope_promise_windows(outline, ids, scope)
     records = _graph_rows(graph, ids, scope, planned_promises, {window["promise_id"] for window in windows})
     people = [row for row in records if row["kind"] in {"character", "state", "relationship"}]
+    state_conflicts = known_state_conflicts(graph, ids)
+    people_basis = {
+        "records": people,
+        **({"state_conflicts": state_conflicts} if state_conflicts else {}),
+    }
     events = [row for row in records if row["kind"] == "event"]
     knowledge = [row for row in records if row.get("category") == "knowledge"]
     scenes = _scene_rows(tx, branch_id, chapters, graph)
@@ -602,9 +607,13 @@ def _evaluate(tx, branch_id, scope, scope_id, *, roll_up=True):
         ),
         item(
             "03",
-            "结合维护的人物与关系记录核对身份、状态及变化。",
-            {"records": people},
-            _record_status(people),
+            (
+                f"同一故事时点有 {len(state_conflicts)} 组相互矛盾的人物状态，请核对双方原文并更正记录。"
+                if state_conflicts
+                else "结合维护的人物与关系记录核对身份、状态及变化。"
+            ),
+            people_basis,
+            "red" if state_conflicts else _record_status(people),
         ),
         item(
             "04",
@@ -770,6 +779,10 @@ def _apply_author_reviews(tx, branch_id, report, reviews, chapters):
             raise DomainError("inspection_duplicate", "同一检查只能提交一份本轮作者核对。")
         seen.add(review.check_id)
         item = checks[review.check_id]
+        if review.check_id == "03" and item["basis"].get("state_conflicts") and review.status != "red":
+            raise DomainError(
+                "inspection_state_conflict", "同一故事时点仍有相互矛盾的人物状态，请先更正记录再签认。", 409
+            )
         if review.status == "not_applicable" and not item["can_mark_not_applicable"]:
             raise DomainError("inspection_required", f"{item['title']}须核对，不能标为不适用。")
         for evidence in review.evidence:

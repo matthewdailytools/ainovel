@@ -434,6 +434,67 @@ def save_record_tx(tx, branch_id, data, identifier=None, *, new_identifier=None,
     return identifier
 
 
+def _state_groups(states, events):
+    groups = {}
+    for row in states:
+        payload = row["payload"]
+        slot = (payload["character_id"], payload["category"], payload["key"], payload["audience"])
+        event_id = payload["event_id"]
+        order = events[event_id]["story_order"]
+        at = order if order is not None else event_id
+        groups.setdefault(slot, {}).setdefault(at, []).append(row)
+    return groups
+
+
+def _incompatible_state_values(group):
+    return len({row["payload"]["value"] for row in group}) > 1
+
+
+def known_state_conflicts(snapshot, chapter_ids):
+    """Compare actual, source-backed assertions only at a provably common time."""
+    valid = [row for row in snapshot["records"] if not row["archived"] and not row["invalid_reasons"]]
+    events = {
+        row["id"]: row["payload"]
+        for row in valid
+        if row["kind"] == "event"
+        and row["payload"]["status"] == "actual"
+        and any(source["quote"].strip() for source in row["payload"]["sources"])
+    }
+    states = []
+    for row in valid:
+        payload = row["payload"]
+        if row["kind"] != "state" or payload["truth"] != "actual" or payload["event_id"] not in events:
+            continue
+        visible = [
+            source
+            for source in payload["sources"]
+            if source["chapter_id"] in chapter_ids and source["quote"].strip()
+        ]
+        if visible:
+            states.append({**row, "payload": {**payload, "sources": visible}})
+    return [
+        {
+            "character_id": character_id,
+            "category": category,
+            "key": key,
+            "audience": audience,
+            "story_order": at if isinstance(at, int) else None,
+            "event_id": at if isinstance(at, str) else None,
+            "sides": [
+                {
+                    "record_id": row["id"],
+                    "revision": row["revision"],
+                    **{name: row["payload"][name] for name in ("title", "value", "event_id", "sources")},
+                }
+                for row in group
+            ],
+        }
+        for (character_id, category, key, audience), by_time in _state_groups(states, events).items()
+        for at, group in by_time.items()
+        if _incompatible_state_values(group)
+    ]
+
+
 def query_context(
     domain,
     branch_id,
@@ -540,16 +601,9 @@ def query_context(
             states.append(row)
     # A later explicit story event supersedes an older assertion of the same slot.
     # Assertions at the SAME story order remain conflicting, never last-write-wins.
-    groups = {}
-    for row in states:
-        p = row["payload"]
-        key = (p["character_id"], p["category"], p["key"], p["audience"])
-        groups.setdefault(key, []).append(row)
-    for key, group in groups.items():
-        latest = max(events[r["payload"]["event_id"]]["story_order"] for r in group)
-        groups[key] = [r for r in group if events[r["payload"]["event_id"]]["story_order"] == latest]
-    states = [r for group in groups.values() for r in group]
-    conflicts = [group for group in groups.values() if len({r["payload"]["value"] for r in group}) > 1]
+    groups = [by_time[max(by_time)] for by_time in _state_groups(states, events).values()]
+    states = [row for group in groups for row in group]
+    conflicts = [group for group in groups if _incompatible_state_values(group)]
     return {
         "states": states,
         "conflicts": conflicts,

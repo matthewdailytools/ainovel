@@ -870,6 +870,123 @@ def test_red_inspection_stops_completion_and_same_run_resumes_after_review(
     assert status()[0] == "succeeded"
 
 
+def test_known_same_time_state_conflict_stops_relay_until_story_is_corrected(client, settings, story):
+    prefix = f"/api/branches/{story['branch_id']}"
+    inspection = prefix + "/workflow-inspections"
+    completion = prefix + "/book-completion"
+    runs = prefix + "/seven-stage-runs"
+    content = "学徒听见铃响。左手骨折。左手完好。"
+    chapter = verify(
+        client.put(f"/api/chapters/{story['chapter_id']}", json={"base_revision": 0, "content": content})
+    )
+    put_and_confirm(client, prefix + "/outline-workspace", {"base_revision": 0, "plan": plan([chapter], [])})
+
+    def sign_book():
+        preview = read(client, inspection)["preview"]
+        return report(
+            client,
+            inspection,
+            preview,
+            author_reviews=[
+                author(row["check_id"], chapter) for row in preview["items"] if row["status"] == "pending"
+            ],
+        )
+
+    def quote(text):
+        start = len(content[: content.index(text)].encode("utf-16-le")) // 2
+        return {
+            "chapter_id": chapter["id"],
+            "revision": chapter["revision"],
+            "start": start,
+            "end": start + len(text.encode("utf-16-le")) // 2,
+            "quote": text,
+        }
+
+    def save_record(record, archived=None):
+        graph = read(client, prefix + "/story-graph")
+        request = {"base_story_revision": graph["story_revision"], "record": record}
+        if archived:
+            result = verify(
+                client.put(
+                    f"{prefix}/story-records/{archived['id']}",
+                    json={**request, "base_revision": archived["revision"], "archived": True},
+                )
+            )
+        else:
+            result = verify(client.post(prefix + "/story-records", json=request), 201)
+        return next(row for row in result["records"] if row["payload"]["title"] == record["title"])
+
+    actor = save_record({"kind": "character", "title": "无名学徒"})
+    event = save_record(
+        {
+            "kind": "event",
+            "title": "听铃",
+            "status": "actual",
+            "story_order": 1,
+            "participants": [actor["id"]],
+            "sources": [quote("学徒听见铃响。")],
+        }
+    )
+    condition = {
+        "kind": "state",
+        "character_id": actor["id"],
+        "event_id": event["id"],
+        "category": "injury",
+        "key": "左手伤势",
+        "audience": "author",
+        "truth": "actual",
+    }
+    save_record({**condition, "title": "左手骨折", "value": "骨折", "sources": [quote("左手骨折。")]})
+    previous = sign_book()
+    assert read(client, runs + "/sources")["inspection_id"] == previous["id"]
+    conflicting = save_record(
+        {**condition, "title": "左手完好", "value": "完好", "sources": [quote("左手完好。")]}
+    )
+    sources = read(client, runs + "/sources")
+    assert sources["inspection_id"] is None
+    task = verify(
+        client.post(
+            runs,
+            json={
+                "start_from": "writing",
+                "source_id": sources["writing_id"],
+                "account": "deepseek",
+                "budget_limit": 1,
+                "client_request_id": uid(),
+            },
+        ),
+        202,
+    )
+    task_route = f"/api/tasks/{task['id']}"
+    resume = f"{runs}/{task['id']}/resume"
+    model = Model(settings=settings)
+    drain(settings, model)
+
+    waiting = read(client, task_route)
+    state = waiting["result"]["seven_stage_run"]
+    assert waiting["status"] == "needs_review" and state["stage"] == "inspection"
+    assert "completion_id" not in state
+    blocked = sign_book()
+    assert item(blocked, "03")["current_status"] == "red"
+    verify(client.post(resume))
+    drain(settings, model)
+    assert read(client, task_route)["result"]["seven_stage_run"]["stage"] == "inspection"
+    assert read(client, runs + "/sources")["inspection_id"] is None
+    assert "起草完本交付简介" not in model.calls
+
+    save_record(conflicting["payload"], archived=conflicting)
+    current = sign_book()
+    assert read(client, runs + "/sources")["inspection_id"] == current["id"]
+    verify(client.post(resume))
+    drain(settings, model)
+    next_step = read(client, task_route)
+    review = next_step["result"]["seven_stage_run"]
+    assert next_step["status"] == "needs_review" and review["stage"] == "completion"
+    assert review["inspection_id"] == current["id"] and review["completion_preparation_id"]
+    assert read(client, completion)["latest"] is None
+    assert model.calls.count("起草完本交付简介") == 1
+
+
 def test_budget_and_concurrent_edit_leave_original_intact(client, domain, settings, story):
     _, endpoint, run_id = start(client, domain, story, "outline", budget_limit=0.000001)
     model = Model(settings=settings)

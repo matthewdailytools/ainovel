@@ -3,7 +3,7 @@ import { api, ApiError, type Chapter } from './api'
 import type { components } from './api-schema'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { InspectionSemanticPanel, type InspectionSuggestion } from './InspectionSemanticPanel'
-import { InspectionSources } from './InspectionSources'
+import { InspectionSources, InspectionStateConflicts } from './InspectionSources'
 import {
   coversInspectionExcerpt,
   maxAuthorEvidence,
@@ -104,9 +104,24 @@ const newReview = (id: string): Review => ({
 function canOpenSources(item: Item) {
   return (
     !!item.author_review?.evidence.length ||
-    ['records', 'events', 'knowledge', 'reports', 'scenes', 'review_blockers', 'author_setting_uses'].some(
-      (key) => Array.isArray(item.basis[key]) && (item.basis[key] as unknown[]).length > 0,
-    )
+    [
+      'records',
+      'events',
+      'knowledge',
+      'reports',
+      'scenes',
+      'review_blockers',
+      'author_setting_uses',
+      'state_conflicts',
+    ].some((key) => Array.isArray(item.basis[key]) && (item.basis[key] as unknown[]).length > 0)
+  )
+}
+
+function knownStateConflict(item: Item | undefined) {
+  return (
+    item?.check_id === '03' &&
+    Array.isArray(item.basis.state_conflicts) &&
+    !!item.basis.state_conflicts.length
   )
 }
 
@@ -329,6 +344,7 @@ function CheckList({
           {item.check_id === '08' && (
             <CheckCardReferences basis={item.basis} chapters={chapters} branchId={branchId} />
           )}
+          {item.check_id === '03' && <InspectionStateConflicts basis={item.basis} />}
           {reportId && canOpenSources(item) && (
             <InspectionSources
               route={`/branches/${encodeURIComponent(branchId)}/workflow-inspections/${encodeURIComponent(reportId)}/source-context/${item.check_id}`}
@@ -631,6 +647,13 @@ export function InspectionPanel({
     const validReviews = Object.values(reviews).filter(
       (review) => review.status || review.reason || review.basis_note || review.evidence.length,
     )
+    if (
+      knownStateConflict(data.preview.items.find(({ check_id }) => check_id === '03')) &&
+      validReviews.some(({ check_id, status }) => check_id === '03' && status !== 'red')
+    ) {
+      setError('第 03 项有已确定的人物状态冲突。请先修正故事记录再复检。')
+      return
+    }
     const settingReview = validReviews.find(({ check_id }) => check_id === '05')
     const settingDeviations =
       softDeviations(data.preview.items.find(({ check_id }) => check_id === '05')?.basis ?? {}) ?? []
@@ -799,6 +822,7 @@ export function InspectionPanel({
                     >
                       <option value="">待填</option>
                       {decisions
+                        .filter((status) => !knownStateConflict(selectedCheck) || status === 'red')
                         .filter(
                           (status) => status !== 'not_applicable' || selectedCheck?.can_mark_not_applicable,
                         )
@@ -809,6 +833,9 @@ export function InspectionPanel({
                         ))}
                     </select>
                   </label>
+                  {knownStateConflict(selectedCheck) && (
+                    <p>两条正式记录互相矛盾。请在故事记录中修正，再复检当前稿件。</p>
+                  )}
                   {review.status === 'green' && deviations.length > 0 && (
                     <fieldset>
                       <legend>已发现的软设定偏离</legend>

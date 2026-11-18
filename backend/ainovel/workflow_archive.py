@@ -2,7 +2,7 @@
 
 from hashlib import sha256
 import json
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError, model_validator
 
@@ -19,6 +19,7 @@ from .domain import utf16_slice
 from .models import Input
 from .project_portability import Identifier
 from .setting_use_portability import validate_version as validate_setting_use_version
+from .story_graph import Source
 from .workflow_inspection import (
     AuthorReview,
     CheckId,
@@ -80,6 +81,28 @@ class ArchivedAuthorReview(AuthorReview):
     candidate_result: Literal["pass", "fail", "unknown"] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+
+
+class StateConflictSide(Input):
+    record_id: Identifier
+    revision: int = Field(ge=0)
+    title: str = Field(min_length=1, max_length=200)
+    value: str = Field(min_length=1, max_length=4000)
+    event_id: Identifier
+    sources: list[Source] = Field(min_length=1, max_length=30)
+
+
+class StateConflict(Input):
+    character_id: Identifier
+    category: Literal["knowledge", "capability", "resource", "injury", "other"]
+    key: str = Field(min_length=1, max_length=100)
+    audience: Literal["author", "character", "reader"]
+    story_order: int | None
+    event_id: Identifier | None
+    sides: list[StateConflictSide] = Field(min_length=2, max_length=200_000)
+
+
+STATE_CONFLICTS = TypeAdapter(Annotated[list[StateConflict], Field(min_length=1, max_length=200_000)])
 
 
 class InspectionItem(Input):
@@ -311,17 +334,63 @@ def _chapters(manifest, bindings, revision_for, retain_content):
     return result
 
 
-def _sources(sources, chapters):
+def _sources(sources, chapters, *, label="作者核对"):
     for source in sources:
         revision = chapters.get(source.chapter_id)
         if not revision or source.revision != revision["revision"]:
-            _bad("稿件包作者核对引用了报告范围之外的正文修订。")
+            _bad(f"稿件包{label}引用了报告范围之外的正文修订。")
         try:
             quote = utf16_slice(revision["content"], source.start, source.end)[1]
         except DomainError as error:
-            raise DomainError("manuscript_workflow", "稿件包报告的作者核对原文范围无效。", 409) from error
+            raise DomainError("manuscript_workflow", f"稿件包报告的{label}原文范围无效。", 409) from error
         if quote != source.quote or not quote.strip():
-            _bad("稿件包报告的作者核对引文与原稿不一致。")
+            _bad(f"稿件包报告的{label}引文与原稿不一致。")
+
+
+def _state_conflict_sources(item):
+    if "state_conflicts" not in item.basis:
+        return []
+    if (
+        item.check_id != "03"
+        or item.status != "red"
+        or (item.author_review and item.author_review.status != "red")
+    ):
+        _bad("有确定的人物状态冲突时，第 03 项须保留红项。")
+    try:
+        conflicts = STATE_CONFLICTS.validate_python(item.basis["state_conflicts"], strict=True)
+    except ValidationError:
+        _bad("稿件包中第 03 项的人物状态冲突格式无效。")
+    records = item.basis.get("records")
+    if not isinstance(records, list):
+        _bad("稿件包中第 03 项缺少冲突所对应的人物状态记录。")
+    by_id = {row["id"]: row for row in records if isinstance(row, dict) and isinstance(row.get("id"), str)}
+    original = []
+    for conflict in conflicts:
+        if (
+            (conflict.story_order is None) == (conflict.event_id is None)
+            or len({side.record_id for side in conflict.sides}) != len(conflict.sides)
+            or len({side.value for side in conflict.sides}) < 2
+            or (conflict.event_id and any(side.event_id != conflict.event_id for side in conflict.sides))
+        ):
+            _bad("稿件包中第 03 项缺少同一时点下互相矛盾的记录。")
+        for side in conflict.sides:
+            frozen = by_id.get(side.record_id)
+            expected = {
+                **conflict.model_dump(include={"character_id", "category", "key", "audience"}),
+                **side.model_dump(include={"revision", "title", "value", "event_id"}),
+                "kind": "state",
+                "truth": "actual",
+            }
+            if (
+                not frozen
+                or any(frozen.get(key) != value for key, value in expected.items())
+                or frozen.get("invalid_reasons") != []
+                or not isinstance(frozen.get("sources"), list)
+                or any(source.model_dump() not in frozen.get("sources", []) for source in side.sources)
+            ):
+                _bad("稿件包中第 03 项的冲突与冻结人物状态记录不一致。")
+            original.extend(side.sources)
+    return original
 
 
 def _setting_use_sources(item, plan_basis, manifest, branch_id, revision_for, setting_use, settings):
@@ -411,13 +480,16 @@ def _validate_inspection(archived, branch_id, revision_for, setting_use, setting
         or (report.scope == "volume" and not report.chapters)
     ):
         _bad("稿件包的体检范围和章稿清单不一致。")
+    conflicts = [source for item in report.items for source in _state_conflict_sources(item)]
     retain = {
         source.chapter_id
         for item in report.items
         if item.author_review
         for source in item.author_review.evidence
     }
+    retain.update(source.chapter_id for source in conflicts)
     chapters = _chapters(report.chapters, archived.chapter_bindings, revision_for, retain)
+    _sources(conflicts, chapters, label="第 03 项冲突")
     manifest = [chapter.model_dump() for chapter in report.chapters]
     chapters_by_id = {chapter.id: chapter for chapter in report.chapters}
     if [item.check_id for item in report.items] != [f"{number:02d}" for number in range(1, 11)]:

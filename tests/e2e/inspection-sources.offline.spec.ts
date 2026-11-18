@@ -158,6 +158,119 @@ test('全书体检汇总当前章级红项并可用键盘回到原报告的选�
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
 })
 
+test('M6-03 已知人物状态冲突拦住普通签认，桌面与离线历史均回读双方原文', async ({ page, context }) => {
+  const work = await createWork(page, '拾铃学徒 · 相同时点的伤势')
+  const east = await work.chapter('桥东', '😀学徒的左手骨折。')
+  const west = await work.chapter('桥西', '🐚学徒的左手完好。')
+  const citation = (chapter: typeof east) => ({
+    chapter_id: chapter.id,
+    revision: chapter.revision,
+    start: 2,
+    end: chapter.content.length,
+    quote: chapter.content.slice(2),
+  })
+  async function record(payload: Record<string, unknown>) {
+    const { story_revision } = await checked(await page.request.get(`${work.branch}/story-graph`))
+    const result = await checked(
+      await page.request.post(`${work.branch}/story-records`, {
+        headers: work.headers,
+        data: { base_story_revision: story_revision, record: payload },
+      }),
+    )
+    return result.records.find(
+      ({ payload: row }: { payload: { title: string } }) => row.title === payload.title,
+    )
+  }
+  const actor = await record({ kind: 'character', title: '拾铃学徒' })
+  const moment = await record({
+    kind: 'event',
+    title: '铃响',
+    status: 'actual',
+    story_order: 1,
+    participants: [actor.id],
+    sources: [citation(east)],
+  })
+  const condition = {
+    kind: 'state',
+    character_id: actor.id,
+    event_id: moment.id,
+    category: 'injury',
+    key: '左手伤势',
+    audience: 'author',
+    truth: 'actual',
+  }
+  const injured = await record({ ...condition, title: '左手骨折', value: '骨折', sources: [citation(east)] })
+  const uninjured = await record({
+    ...condition,
+    title: '左手完好',
+    value: '完好',
+    sources: [citation(west)],
+  })
+
+  await page.setViewportSize({ width: 320, height: 900 })
+  const panel = await work.openInspection()
+  await panel.getByText('本次依据与未核查项', { exact: true }).press('Enter')
+  await panel.getByRole('button', { name: '核对 03', exact: true }).press('Enter')
+  const decisions = panel.getByRole('combobox', { name: '作者判定', exact: true })
+  await expect(decisions).toBeVisible()
+  await expect(decisions.locator('option[value=green]')).toHaveCount(0)
+  await expect(decisions.locator('option[value=yellow]')).toHaveCount(0)
+  await expect(decisions.locator('option[value=red]')).toHaveCount(1)
+
+  const recorded = page.waitForResponse(
+    (response) => response.request().method() === 'POST' && response.url().endsWith('/workflow-inspections'),
+  )
+  await panel.getByRole('button', { name: '生成体检单', exact: true }).press('Enter')
+  const report = await checked(await recorded)
+  const result = panel.getByRole('region', { name: '体检单结果', exact: true })
+  const conflictCheck = result.getByRole('listitem').filter({ hasText: '03 人物身份、关系与状态' }).first()
+  await expect(conflictCheck.getByText('阻断', { exact: true })).toBeVisible()
+  const conflictName = '左手伤势 · 作者所知 · 故事时点 1'
+  const sides = conflictCheck.getByRole('list', { name: '已确定的人物状态冲突', exact: true })
+  await sides.getByText(conflictName, { exact: true }).press('Enter')
+  await expect(sides).toContainText(injured.id)
+  await expect(sides).toContainText(uninjured.id)
+  await conflictCheck.getByText('查看体检原文', { exact: true }).press('Enter')
+  for (const chapter of [east, west]) {
+    await conflictCheck.getByText(new RegExp(`^打开${chapter.title}原文`)).press('Enter')
+    await expect(
+      conflictCheck.getByRole('region', { name: new RegExp(`^${chapter.title}原文`) }).locator('mark'),
+    ).toHaveText(citation(chapter).quote)
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
+
+  const pack = await page.request.get(`${work.branch}/manuscript-package`)
+  expect(pack.ok(), await pack.text()).toBe(true)
+  const buffer = await pack.body()
+  const altered = JSON.parse(buffer.toString())
+  const alteredReport = altered.workflow_history.inspections.find(
+    ({ id }: { id: string }) => id === report.id,
+  )
+  alteredReport.report.items.find(({ check_id }: { check_id: string }) => check_id === '03').status = 'green'
+
+  await page.goto('/offline/')
+  await expect(page.getByText('离线页面就绪', { exact: true })).toBeVisible()
+  await context.setOffline(true)
+  const input = page.getByLabel('导入新离线作品')
+  await input.setInputFiles({
+    name: '改写冲突报告.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(altered)),
+  })
+  await expect(page.getByRole('alert')).toContainText('有确定的人物状态冲突时，第 03 项须保留红项。')
+  await expect(page.getByText('历次体检与完本交付', { exact: true })).toHaveCount(0)
+  await input.setInputFiles({ name: '伤势冲突.json', mimeType: 'application/json', buffer })
+  await page.getByText('历次体检与完本交付', { exact: true }).press('Enter')
+  const history = page.getByRole('group', { name: '历次体检与完本交付', exact: true })
+  await history.getByText(/人物身份、关系与状态.*红/).press('Enter')
+  await history.getByText(conflictName, { exact: true }).press('Enter')
+  const original = history.getByRole('region', { name: '历史报告引用正文', exact: true })
+  await history.getByRole('button', { name: /^查看左手骨折 · 原文/ }).press('Enter')
+  await expect(original.locator('mark')).toHaveText(citation(east).quote)
+  await history.getByRole('button', { name: /^查看左手完好 · 原文/ }).press('Enter')
+  await expect(original.locator('mark')).toHaveText(citation(west).quote)
+})
+
 test('全书逐条签认 31 章的软偏离，独立 Web 可验证并读回签认', async ({ page, context }) => {
   const work = await createWork(page, '遗铃 · 软设定签认')
   const chapters: { id: string; revision: number }[] = []
