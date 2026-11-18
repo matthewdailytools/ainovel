@@ -50,7 +50,8 @@ import {
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { latestArtifact, refreshArtifactList } from './artifactRefresh'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
-import type { ConceptionHandoff } from './conception'
+import type { ConceptionHandoff, ConceptionState } from './conception'
+import { SettingReviewReport } from './SettingReviewReport'
 import {
   adviceDirectionBasis,
   checkDirectionTarget,
@@ -145,6 +146,22 @@ export function Writing({
   const [fixed, setFixed] = useState('')
   const [profile, setProfile] = useState(presets[0])
   const [useConception, setUseConception] = useState(true)
+  const [settingWorkspace, setSettingWorkspace] = useState<ConceptionState>()
+  const [settingItemId, setSettingItemId] = useState('')
+  const confirmedSetting = settingWorkspace?.confirmation?.current ? settingWorkspace.confirmation : undefined
+  const settingRules = confirmedSetting
+    ? (
+        settingWorkspace?.categories.find((category) => category.id === 'world' && !category.skipped)
+          ?.items ?? []
+      ).filter(
+        (item) =>
+          item.detail.trim() && !settingWorkspace?.sources.some((source) => source.item_id === item.id),
+      )
+    : []
+  const settingRule =
+    action === 'review.chapter'
+      ? settingRules.find((item) => `${confirmedSetting?.id}/${item.id}` === settingItemId)
+      : undefined
   const conception = conceptionHandoff?.confirmation
   const conceptionSnapshotId = useConception && actionsWithConception.has(action) ? conception?.id : undefined
   const [seenContract, setSeenContract] = useState<AuthorContract>()
@@ -161,6 +178,7 @@ export function Writing({
     plotContractCheck,
     sourceIdentityContext,
     conceptionSnapshotId,
+    settingItemId,
   ])
   const [submittedAssistantForm, setSubmittedAssistantForm] = useState(assistantFormSignature)
   useLeaveGuard(assistantFormSignature !== submittedAssistantForm, '未提交的写作辅助设置')
@@ -352,15 +370,17 @@ export function Writing({
     let active = true
     const poll = async () => {
       try {
-        const [a, t, r] = await Promise.all([
+        const [a, t, r, settings] = await Promise.all([
           api<Artifact[]>(`/artifacts?branch_id=${branch.id}`),
           api<Task[]>(`/tasks?branch_id=${branch.id}`),
           api<Excerpt[]>(`/library/excerpts?novel_id=${novel.id}`),
+          api<ConceptionState>(`/branches/${branch.id}/conception`),
         ])
         if (active) {
           setArtifacts((rows) => refreshArtifactList(rows, a))
           setTasks(t)
           setReferences(r)
+          setSettingWorkspace(settings)
         }
       } catch (e) {
         if (active) notify(e)
@@ -497,6 +517,8 @@ export function Writing({
     event.preventDefault()
     await doAction(async () => {
       const row = current.current ? await save() : undefined
+      if (action === 'review.chapter' && settingItemId && (!settingRule || !confirmedSetting))
+        throw new Error('已确认设定发生变化，请重新选择条目。')
       if (seenGenre?.branch_id !== branch.id) throw new Error('正在读取本版本题材配置，请稍后再生成。')
       if (seenContract?.branch_id !== branch.id) throw new Error('正在读取本版本创作约定，请稍后再生成。')
       if (action === 'writing.rewrite_selection' && !selection.text)
@@ -531,15 +553,20 @@ export function Writing({
         throw new Error('本次要求与来源记录合计过长，请缩短本次要求后再生成。')
       const data: ModuleInput = {
         include_scene_ranges: false,
-        ...(conceptionSnapshotId ? { conception_snapshot_id: conceptionSnapshotId } : {}),
+        ...(settingRule && confirmedSetting
+          ? { conception_snapshot_id: confirmedSetting.id, setting_item_id: settingRule.id }
+          : conceptionSnapshotId
+            ? { conception_snapshot_id: conceptionSnapshotId }
+            : {}),
         action,
         novel_id: novel.id,
         branch_id: branch.id,
         chapter_id: bookDesign ? null : (row?.id ?? null),
         base_revision: bookDesign ? null : (row?.revision ?? null),
-        instruction: submittedInstruction,
-        plot_contract_check: plotAuditEnabled(action, plotContractCheck),
-        source_identity_context: plotAuditEnabled(action, plotContractCheck) && sourceIdentityContext,
+        instruction: settingRule ? '单条设定对账' : submittedInstruction,
+        plot_contract_check: !settingRule && plotAuditEnabled(action, plotContractCheck),
+        source_identity_context:
+          !settingRule && plotAuditEnabled(action, plotContractCheck) && sourceIdentityContext,
         fixed: fixed
           .split('\n')
           .map((v) => v.trim())
@@ -950,6 +977,27 @@ export function Writing({
           />
         )}
         <GenreProfileNotice branchId={branch.id} onSettings={onGenreSettings} onResolved={setSeenGenre} />
+        {!!settingRules.length && (
+          <details className="notice">
+            <summary>已确认世界设定 · 修订 {confirmedSetting?.revision}</summary>
+            {settingRules.map((rule) => (
+              <details key={rule.id}>
+                <summary>{rule.title}</summary>
+                <p>{rule.detail}</p>
+                <button
+                  type="button"
+                  disabled={!!feedbackHandoff}
+                  onClick={() => {
+                    setAction('review.chapter')
+                    setSettingItemId(`${confirmedSetting?.id}/${rule.id}`)
+                  }}
+                >
+                  用此设定对账
+                </button>
+              </details>
+            ))}
+          </details>
+        )}
         {conception && (
           <div className="notice">
             <label className="check">
@@ -1080,6 +1128,22 @@ export function Writing({
               </p>
             </>
           )}
+          {action === 'review.chapter' && (settingRules.length > 0 || !!settingItemId) && (
+            <label>
+              对账设定
+              <select value={settingItemId} onChange={(event) => setSettingItemId(event.target.value)}>
+                <option value="">普通审稿</option>
+                {!settingRule && settingItemId && (
+                  <option value={settingItemId}>设定已过期，请重新选择</option>
+                )}
+                {settingRules.map((rule) => (
+                  <option value={`${confirmedSetting?.id}/${rule.id}`} key={rule.id}>
+                    {rule.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {directionBasis && (
             <section className="notice" aria-label="作者选定方向来源">
               <p role="status">方向已载入本章补写表单；载入操作本身未生成或改动正文。可继续编辑情节要求。</p>
@@ -1101,12 +1165,13 @@ export function Writing({
               value={instruction}
               onChange={(e) => setInstruction(e.target.value)}
               rows={5}
-              required
+              required={!settingRule}
+              disabled={!!settingRule}
               maxLength={20_000}
               placeholder="例如：两人在渡口议价，交易失败且不发生战斗。补足试探和收场。"
             />
           </label>
-          {plotAuditEnabled(action, true) && (
+          {!settingRule && plotAuditEnabled(action, true) && (
             <PlotAuditOption
               checked={plotContractCheck}
               disabled={busy}
@@ -1166,9 +1231,11 @@ export function Writing({
             </fieldset>
           </details>
           <p className="small muted">
-            {designActions.has(action) && designScope === 'book'
-              ? '发送已采用本书设定、当前工作版本的有效故事资料及最近正文、主动选入的资料；不限定在当前打开章之前。'
-              : '发送当前章、有效前文与主动选入的资料。'}
+            {settingRule
+              ? '仅核对所选设定与保存稿。'
+              : designActions.has(action) && designScope === 'book'
+                ? '发送已采用本书设定、当前工作版本的有效故事资料及最近正文、主动选入的资料；不限定在当前打开章之前。'
+                : '发送当前章、有效前文与主动选入的资料。'}
             候选与正文分开保存。
           </p>
           <button
@@ -1190,7 +1257,9 @@ export function Writing({
                   ? '本版本有任务执行中'
                   : seenGenre?.branch_id !== branch.id || seenContract?.branch_id !== branch.id
                     ? '正在读取本书约定…'
-                    : '生成候选 →'}
+                    : settingRule
+                      ? '运行设定对账'
+                      : '生成候选 →'}
           </button>
         </form>
         {activeTask && (
@@ -1327,14 +1396,18 @@ export function Writing({
                   {visibleArtifacts.map((a, i) => (
                     <option key={a.id} value={a.id}>
                       候选 {visibleArtifacts.length - i} ·{' '}
-                      {correctionKindLabel(a.kind) ||
-                        (a.kind === 'candidate_recheck' ? '候选复检报告' : a.kind)}{' '}
+                      {a.kind === 'setting_review'
+                        ? '设定对账'
+                        : correctionKindLabel(a.kind) ||
+                          (a.kind === 'candidate_recheck' ? '候选复检报告' : a.kind)}{' '}
                       · {isCorrectionReceiptKind(a.kind) ? '只读记录' : label(a.status)}
                     </option>
                   ))}
                 </select>
               </label>
-              {candidate && isCorrectionReceiptKind(candidate.kind) ? (
+              {candidate?.kind === 'setting_review' ? (
+                <SettingReviewReport key={candidate.id} report={candidate} />
+              ) : candidate && isCorrectionReceiptKind(candidate.kind) ? (
                 <SourceCorrectionArtifact
                   key={candidate.id}
                   artifact={candidate}

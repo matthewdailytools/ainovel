@@ -66,6 +66,16 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if instruction.get("动作") == "对照单条已确认设定与保存稿":
+            assert instruction["设定"] == "铜铃只在门内响。"
+            unit = next(unit for unit in instruction["可引用原文"] if "门外响了" in unit["text"])
+            return {
+                "text": json.dumps(
+                    {"result": "fail", "evidence": unit["source_id"], "reason": "门外响铃违背设定。"}
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-setting-review",
+            }
         source_result = source_correction_output(instruction)
         if source_result is None:
             source_result = source_correction_body_output(instruction)

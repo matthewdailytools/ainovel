@@ -251,6 +251,12 @@ class Domain:
         artifact = self.db.one("SELECT * FROM artifacts WHERE id=?", (artifact_id,))
         for key in ("payload", "basis"):
             artifact[key] = json.loads(artifact[key])
+        if artifact["kind"] == "setting_review":
+            from .setting_review import report_current
+
+            with self.db.connect() as tx:
+                tx.execute("BEGIN")
+                artifact["basis"]["current"] = report_current(tx, artifact)
         artifact["candidate_revision"] = artifact["payload"].get("_candidate_revision", 0)
         if artifact["kind"] in {"chapter_draft", "text_patch"}:
             from .memory_selection import facts_sha256
@@ -806,6 +812,10 @@ class Domain:
                 from .conception import queued_handoff_tx
 
                 initial["conception_snapshot"] = queued_handoff_tx(db, branch_id, kind, identifier)
+                if item_id := payload.get("setting_item_id"):
+                    from .setting_review import freeze_rule
+
+                    initial["setting_rule"] = freeze_rule(initial["conception_snapshot"], item_id)
             reader = db.execute(
                 "SELECT id FROM artifacts WHERE branch_id=? AND kind='reader' "
                 "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",

@@ -2634,6 +2634,8 @@ export interface components {
       author_contract_basis?: components['schemas']['AuthorContractBasis'] | null
       /** Conception Snapshot Id */
       conception_snapshot_id?: string | null
+      /** Setting Item Id */
+      setting_item_id?: string | null
       /** Source Review Id */
       source_review_id?: string | null
       /** Finding Indices */

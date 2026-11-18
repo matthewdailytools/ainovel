@@ -371,6 +371,7 @@ def create_app(settings=None, schema_only=False):
             "genre_profile_basis",
             "author_contract_basis",
             "conception_snapshot_id",
+            "setting_item_id",
             "source_review_id",
             "reference_session_id",
             "reference_revision",

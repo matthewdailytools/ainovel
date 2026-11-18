@@ -4587,6 +4587,10 @@
             "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
             "title": "Conception Snapshot Id"
           },
+          "setting_item_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Setting Item Id"
+          },
           "source_review_id": {
             "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
             "title": "Source Review Id"

@@ -80,6 +80,7 @@ class ModuleInput(Input):
     genre_profile_basis: GenreProfileBasis | None = None
     author_contract_basis: AuthorContractBasis | None = None
     conception_snapshot_id: str | None = Field(default=None, min_length=1, max_length=128)
+    setting_item_id: str | None = Field(default=None, min_length=1, max_length=128)
     source_review_id: str | None = Field(default=None, min_length=1, max_length=128)
     finding_indices: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list, max_length=20)
 
@@ -90,6 +91,10 @@ class ModuleInput(Input):
 
     @model_validator(mode="after")
     def plot_check_action(self):
+        if self.setting_item_id and (
+            self.action != "review.chapter" or not self.conception_snapshot_id or self.plot_contract_check
+        ):
+            raise ValueError("设定对账须绑定已确认构思，且单独执行。")
         if self.source_identity_context and not self.plot_contract_check:
             raise ValueError("角色限定核对需要同时开启情节逐项核对。")
         if self.plot_contract_check and self.action not in {

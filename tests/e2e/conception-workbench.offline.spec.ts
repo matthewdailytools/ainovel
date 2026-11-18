@@ -46,6 +46,58 @@ async function checkedCall(page: Page, taskId: string, stage: string, snapshotId
     .toContain(`offline-conception-${stage}-${snapshotId}`)
 }
 
+test('遗铃从确认设定到正文对账并保留过期证据', async ({ page }) => {
+  const { base, chapterId, headers } = await openWorkbench(page, '遗铃', '😀学徒拾起铜铃。')
+  await page
+    .getByRole('navigation', { name: '构思类别' })
+    .getByRole('button', { name: /世界设定/ })
+    .click()
+  await page.getByRole('button', { name: '添加构思项目', exact: true }).click()
+  await page.getByRole('textbox', { name: '项目名称', exact: true }).fill('铃声规则')
+  await page.getByRole('textbox', { name: '设定内容', exact: true }).fill('铜铃只在门内响。')
+  await page.getByRole('button', { name: '保存构思设定', exact: true }).click()
+  await expect
+    .poll(
+      async () =>
+        (await readWorkbench(page, base)).categories.find((category) => category.id === 'world')?.items[0]
+          ?.detail,
+    )
+    .toBe('铜铃只在门内响。')
+  await page.getByRole('textbox', { name: '保留事项说明', exact: true }).fill('先写开篇。')
+  await page.getByRole('button', { name: '确认当前构思', exact: true }).click()
+  await page.getByRole('button', { name: '去写作（使用构思）', exact: true }).click()
+  await page.getByRole('button', { name: /渡口暗号/ }).click()
+  const editor = page.locator('.cm-content[contenteditable=true]')
+  await editor.press('End')
+  await editor.press('Enter')
+  await page.keyboard.insertText('铜铃在门外响了。')
+  await page.getByText(/已确认世界设定 · 修订/).click()
+  await page.getByText('铃声规则', { exact: true }).click()
+  await page.getByRole('button', { name: '用此设定对账' }).click()
+  const queued = page.waitForResponse(
+    (response) => response.url().endsWith('/api/modules') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: '运行设定对账' }).click()
+  const response = await queued
+  expect(response.ok(), await response.text()).toBe(true)
+  const report = page.getByRole('region', { name: '设定对账结果' })
+  await expect(report.getByRole('status')).toHaveText('当前版本 · 冲突')
+  await report.getByRole('link', { name: '查看对应设定' }).click()
+  await expect(report.getByRole('region', { name: '设定依据' })).toBeFocused()
+  await report.getByRole('link', { name: '查看对应正文段落' }).click()
+  const evidence = report.getByRole('region', { name: '正文依据' })
+  await expect(evidence).toBeFocused()
+  await expect(evidence).toContainText('铜铃在门外响了。')
+  const current = await (await page.request.get(`/api/chapters/${chapterId}`)).json()
+  const updated = await page.request.put(`/api/chapters/${chapterId}`, {
+    headers,
+    data: { base_revision: current.revision, content: '铜铃在门内响了。' },
+  })
+  expect(updated.ok(), await updated.text()).toBe(true)
+  await expect(report.getByRole('status')).toContainText('已过期')
+  await expect(evidence).toContainText('铜铃在门外响了。')
+})
+
 test('按作品保存同级分类与项目，刷新恢复，并带缺项确认后交接写作', async ({ page }) => {
   const { base, novel, chapterId, headers } = await openWorkbench(
     page,
