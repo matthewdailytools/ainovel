@@ -1,6 +1,7 @@
 """Isolated SQLite sync service for explicitly provisioned works and devices."""
 
 from contextlib import closing, contextmanager
+from functools import cache
 from hashlib import sha256
 import json
 import os
@@ -46,6 +47,18 @@ MAX_REQUEST_BYTES = MAX_OBJECT_BYTES * 2
 MAX_PULL_BYTES = MAX_OBJECT_BYTES * 4
 MAX_CURSOR = (1 << 53) - 1
 APP_ID = 0x414E5359
+STORAGE_ERROR = "同步存储暂不可读。"
+SQLITE_STORAGE_ERRORS = {
+    sqlite3.SQLITE_BUSY,
+    sqlite3.SQLITE_CANTOPEN,
+    sqlite3.SQLITE_CORRUPT,
+    sqlite3.SQLITE_FULL,
+    sqlite3.SQLITE_IOERR,
+    sqlite3.SQLITE_LOCKED,
+    sqlite3.SQLITE_NOTADB,
+    sqlite3.SQLITE_READONLY,
+    sqlite3.SQLITE_SCHEMA,
+}
 WITHHELD_PREFIX = "withheld:"
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")]
 Authorization = Annotated[str, Header(max_length=512)]
@@ -310,11 +323,36 @@ def _withheld(tx, work, sequence):
     )
 
 
+def _schema(tx):
+    return [
+        tuple(row)
+        for row in tx.execute(
+            "SELECT type,name,tbl_name,sql FROM sqlite_schema "
+            "WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*' ORDER BY type,name"
+        )
+    ]
+
+
+@cache
+def _expected_schema():
+    with closing(sqlite3.connect(":memory:")) as tx:
+        tx.executescript(SCHEMA + ATTACHMENT_SCHEMA)
+        return _schema(tx)
+
+
+def is_ledger_schema(tx):
+    return (
+        tx.execute("PRAGMA application_id").fetchone()[0] == APP_ID
+        and tx.execute("PRAGMA user_version").fetchone()[0] == cloud_ledger.DB_VERSION
+        and _schema(tx) == _expected_schema()
+    )
+
+
 class SyncStore:
     def __init__(self, path):
-        self.path = Path(path)
+        self.path = Path(path).absolute()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.transaction(snapshot=True) as tx:
+        with self.transaction(snapshot=True, create=True) as tx:
             identifier = tx.execute("PRAGMA application_id").fetchone()[0]
             version = tx.execute("PRAGMA user_version").fetchone()[0]
             if (identifier, version) not in {(0, 0), (APP_ID, 1), (APP_ID, cloud_ledger.DB_VERSION)}:
@@ -338,34 +376,43 @@ class SyncStore:
             tx.commit()
 
     def check_readiness(self):
-        database = self.path.absolute().as_uri() + "?mode=ro"
+        database = self.path.as_uri() + "?mode=ro"
         try:
             with closing(sqlite3.connect(database, uri=True, timeout=1)) as tx:
-                identifier = tx.execute("PRAGMA application_id").fetchone()[0]
-                version = tx.execute("PRAGMA user_version").fetchone()[0]
-                if identifier != APP_ID or version != cloud_ledger.DB_VERSION:
-                    raise sqlite3.DatabaseError("unexpected synchronization schema")
+                tx.execute("BEGIN")
+                if not is_ledger_schema(tx):
+                    raise DomainError("sync_storage", STORAGE_ERROR, 503)
                 cloud_ledger.identity(tx)
                 tx.execute("SELECT id, sequence FROM sync_works LIMIT 1").fetchone()
         except sqlite3.Error as error:
-            raise DomainError("sync_storage", "同步存储暂不可读。", 503) from error
+            raise DomainError("sync_storage", STORAGE_ERROR, 503) from error
 
     @contextmanager
-    def transaction(self, *, write=False, snapshot=False, streaming=False):
-        tx = sqlite3.connect(self.path, isolation_level=None, timeout=10, check_same_thread=not streaming)
-        tx.row_factory = sqlite3.Row
+    def transaction(self, *, write=False, snapshot=False, streaming=False, create=False):
+        # Only initialization may create a database. Requests must leave a missing restore target alone.
+        database = self.path.as_uri() + ("?mode=rwc" if create else "?mode=rw")
         try:
-            tx.execute("PRAGMA foreign_keys=ON")
-            tx.execute("PRAGMA temp_store=MEMORY")
-            if write:
-                tx.execute("BEGIN IMMEDIATE")
-            elif snapshot:
-                tx.execute("BEGIN")
-            yield tx
-            if write:
-                tx.commit()
-        finally:
-            tx.close()
+            with closing(
+                sqlite3.connect(
+                    database, uri=True, isolation_level=None, timeout=10, check_same_thread=not streaming
+                )
+            ) as tx:
+                tx.row_factory = sqlite3.Row
+                tx.execute("PRAGMA foreign_keys=ON")
+                tx.execute("PRAGMA temp_store=MEMORY")
+                if write:
+                    tx.execute("BEGIN IMMEDIATE")
+                elif snapshot:
+                    tx.execute("BEGIN")
+                yield tx
+                if write:
+                    tx.commit()
+        except sqlite3.DatabaseError as error:
+            # Extended SQLite result codes share the low byte of the primary code.
+            code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+            if isinstance(error, sqlite3.OperationalError) or code in SQLITE_STORAGE_ERRORS:
+                raise DomainError("sync_storage", STORAGE_ERROR, 503) from error
+            raise
 
     def grant(self, work, data):
         _check_reserved(data.device_id)

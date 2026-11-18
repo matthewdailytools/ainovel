@@ -2,7 +2,6 @@
 
 import argparse
 from contextlib import closing, contextmanager
-from functools import cache
 from hashlib import file_digest, sha256
 import json
 import os
@@ -14,8 +13,8 @@ from tempfile import TemporaryDirectory
 from time import monotonic
 
 from . import cloud_ledger
-from .cloud_attachments import CHUNK_BYTES, FILE_BYTES, SCHEMA as ATTACHMENT_SCHEMA
-from .cloud_sync import APP_ID, MAX_CURSOR, SCHEMA
+from .cloud_attachments import CHUNK_BYTES, FILE_BYTES
+from .cloud_sync import MAX_CURSOR, is_ledger_schema
 from .cloud_sync_storage import StorageProofError, verify_storage
 from .db import DomainError
 
@@ -54,26 +53,8 @@ def _readonly(path, *, standalone=False):
         yield tx
 
 
-def _schema(tx):
-    return tx.execute(
-        "SELECT type,name,tbl_name,sql FROM sqlite_schema "
-        "WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*' ORDER BY type,name"
-    ).fetchall()
-
-
-@cache
-def _expected_schema():
-    with closing(sqlite3.connect(":memory:")) as tx:
-        tx.executescript(SCHEMA + ATTACHMENT_SCHEMA)
-        return _schema(tx)
-
-
 def _check_schema(tx):
-    if (
-        tx.execute("PRAGMA application_id").fetchone()[0] != APP_ID
-        or tx.execute("PRAGMA user_version").fetchone()[0] != cloud_ledger.DB_VERSION
-        or _schema(tx) != _expected_schema()
-    ):
+    if not is_ledger_schema(tx):
         raise SyncBackupError("文件不是当前格式的独立云同步数据库。")
     try:
         return cloud_ledger.identity(tx)
