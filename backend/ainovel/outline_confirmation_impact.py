@@ -11,9 +11,12 @@ from .outline_workspace import (
     _check_project,
     _decode,
     _latest,
+    _required_promises_changed,
     _settings,
     _validate,
+    _write_confirmation,
 )
+from .restore_impact import AffectedReport, forecast, invalidated_reports, report_basis
 from .story_graph import graph_snapshot
 
 
@@ -45,6 +48,7 @@ class OutlineConfirmationImpact(Input):
     outline_fields: list[OutlineField]
     chapter_changes: list[OutlineChapterChange]
     frozen_candidates: list[OutlineFrozenCandidate]
+    affected_reports: list[AffectedReport]
 
 
 def _chapter_values(plan, basis):
@@ -104,6 +108,23 @@ def _frozen_candidates(tx, branch_id, previous, graph):
     ]
 
 
+def _affected_reports(tx, branch_id, draft, previous, graph):
+    if not tx.execute(
+        "SELECT 1 FROM artifacts WHERE branch_id=? AND status='accepted' "
+        "AND kind IN ('workflow_inspection','book_completion') LIMIT 1",
+        (branch_id,),
+    ).fetchone():
+        return []
+    kinds = {"workflow_inspection", "book_completion"}
+    before = [row for row in report_basis(tx, branch_id) if row["kind"] in kinds]
+    if not before:
+        return []
+    requirement_changed = _required_promises_changed(previous["plan"] if previous else None, draft["plan"])
+    with forecast(tx):
+        _write_confirmation(tx, branch_id, draft, graph, requirement_changed)
+        return invalidated_reports(before, report_basis(tx, branch_id))
+
+
 def confirmation_impact(tx, branch_id, draft, previous, graph):
     old_plan = previous["plan"] if previous else _EMPTY_PLAN
     old_basis = previous["setting_basis"] if previous else {}
@@ -141,13 +162,13 @@ def confirmation_impact(tx, branch_id, draft, previous, graph):
         ],
         "chapter_changes": changes,
         "frozen_candidates": _frozen_candidates(tx, branch_id, previous, graph),
+        "affected_reports": _affected_reports(tx, branch_id, draft, previous, graph),
     }
     return {**impact, "basis_sha256": sha256(dumps([branch_id, impact]).encode()).hexdigest()}
 
 
 def read_confirmation_impact(domain, branch_id, base_revision):
-    with domain.db.connect() as tx:
-        tx.execute("BEGIN")
+    with domain.db.connect(True) as tx:
         row = _latest(tx, branch_id)
         _check_base(row, base_revision)
         if row is None or row["confirmed"]:

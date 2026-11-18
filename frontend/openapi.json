@@ -8435,6 +8435,11 @@
             "items": { "$ref": "#/components/schemas/OutlineFrozenCandidate" },
             "type": "array",
             "title": "Frozen Candidates"
+          },
+          "affected_reports": {
+            "items": { "$ref": "#/components/schemas/AffectedReport" },
+            "type": "array",
+            "title": "Affected Reports"
           }
         },
         "additionalProperties": false,
@@ -8447,7 +8452,8 @@
           "basis_sha256",
           "outline_fields",
           "chapter_changes",
-          "frozen_candidates"
+          "frozen_candidates",
+          "affected_reports"
         ],
         "title": "OutlineConfirmationImpact"
       },

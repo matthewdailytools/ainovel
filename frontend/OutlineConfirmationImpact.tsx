@@ -1,3 +1,5 @@
+import { RestoreReportList, type RestoreAffectedReport } from './ChapterRestorePreview'
+
 const chapterFields = {
   placement: '卷、单元或章序',
   goal: '目标',
@@ -34,9 +36,16 @@ export type OutlineConfirmationImpact = {
     chapter_id: string
     title: string
   }[]
+  affected_reports: RestoreAffectedReport[]
 }
 
-export function OutlineImpactDetails({ impact }: { impact: OutlineConfirmationImpact }) {
+export function OutlineImpactDetails({
+  impact,
+  scopeNames,
+}: {
+  impact: OutlineConfirmationImpact
+  scopeNames: ReadonlyMap<string, string>
+}) {
   return (
     <>
       <p>
@@ -82,6 +91,7 @@ export function OutlineImpactDetails({ impact }: { impact: OutlineConfirmationIm
           <p>当前没有受本次确认影响的待采纳候选。</p>
         )}
       </section>
+      <RestoreReportList reports={impact.affected_reports} scopeNames={scopeNames} />
     </>
   )
 }

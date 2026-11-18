@@ -4579,6 +4579,8 @@ export interface components {
       chapter_changes: components['schemas']['OutlineChapterChange'][]
       /** Frozen Candidates */
       frozen_candidates: components['schemas']['OutlineFrozenCandidate'][]
+      /** Affected Reports */
+      affected_reports: components['schemas']['AffectedReport'][]
     }
     /** OutlineFrozenCandidate */
     OutlineFrozenCandidate: {

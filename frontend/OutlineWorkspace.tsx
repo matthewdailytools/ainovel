@@ -822,7 +822,17 @@ export function OutlineWorkspace({
                     </button>
                   </>
                 )}
-                {checkedImpact?.value && <OutlineImpactDetails impact={checkedImpact.value} />}
+                {checkedImpact?.value && (
+                  <OutlineImpactDetails
+                    impact={checkedImpact.value}
+                    scopeNames={
+                      new Map([
+                        ...view.chapters.map(({ id, title }) => [id, title] as const),
+                        ...(view.confirmed?.plan.volumes ?? []).map(({ id, title }) => [id, title] as const),
+                      ])
+                    }
+                  />
+                )}
               </section>
             )}
             {view.requires_promise_confirmation && !dirty && (

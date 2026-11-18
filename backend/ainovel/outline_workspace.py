@@ -1,5 +1,6 @@
 """Versioned four-level outline and read-side ledgers for the writing workspace."""
 
+from copy import deepcopy
 import json
 from time import time
 from typing import Annotated, Literal
@@ -369,10 +370,9 @@ def confirm_outline_tx(tx, branch_id, data, *, before_write=None, source_confirm
             impact = confirmation_impact(tx, branch_id, draft, previous, graph)
             if data.impact_sha256 != impact["basis_sha256"]:
                 raise DomainError("outline_impact_changed", "大纲确认影响已更新，请重新核对后确认。", 409)
-        basis["outline_story_receipt"] = _materialize_promises(tx, graph, plan, draft["revision"])
-        if requirement_changed:
-            basis["required_promises_confirmation"] = "formal_source" if source_confirmed else "author"
-        _insert(tx, branch_id, data.base_revision + 1, True, plan, basis)
+        _write_confirmation(
+            tx, branch_id, draft, graph, requirement_changed, source_confirmed=source_confirmed
+        )
         from .work_snapshot import checkpoint_tx
 
         checkpoint_tx(
@@ -381,6 +381,16 @@ def confirm_outline_tx(tx, branch_id, data, *, before_write=None, source_confirm
             "从稿件包恢复四级大纲" if basis.get("manuscript_outline_source") else "确认四级大纲",
         )
     return _view(tx, branch_id)
+
+
+def _write_confirmation(tx, branch_id, draft, graph, requirement_changed, *, source_confirmed=False):
+    """Write the adopted plan without publishing a separate checkpoint."""
+    plan = deepcopy(draft["plan"])
+    basis = {**draft["setting_basis"]}
+    basis["outline_story_receipt"] = _materialize_promises(tx, graph, plan, draft["revision"])
+    if requirement_changed:
+        basis["required_promises_confirmation"] = "formal_source" if source_confirmed else "author"
+    _insert(tx, branch_id, draft["revision"] + 1, True, plan, basis)
 
 
 def _materialize_promises(tx, graph, plan, draft_revision):
