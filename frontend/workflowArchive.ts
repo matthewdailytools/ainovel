@@ -1,3 +1,5 @@
+import { coversInspectionExcerpt, softDeviationPolicy, softDeviations } from './inspectionEvidence'
+
 type FrozenRevision = { id: string; chapter_id: string; revision: number; sha256: string; content: string }
 type Digest = (text: string) => Promise<string>
 type ChapterBinding = { id: string; revision: number; revision_id: string; sha256: string }
@@ -152,15 +154,18 @@ function parseAuthorReview(value: unknown, check: string, chapters: ReadonlyMap<
     'source_candidate_id',
     'author_overrides_candidate',
     'candidate_result',
+    'soft_deviation_report_ids',
   ])
   const status = choice(review.status, ['green', 'yellow', 'red', 'not_applicable'])
   const evidence = verifySources(review.evidence ?? [], chapters)
   const author_overrides_candidate = flag(review.author_overrides_candidate ?? false)
   const source_candidate_id = optionalId(review.source_candidate_id)
+  const soft_deviation_report_ids = list(review.soft_deviation_report_ids ?? [], 1000).map(id)
   if (
     review.check_id !== check ||
     ((status === 'green' || status === 'red') && !evidence.length) ||
-    (author_overrides_candidate && (status !== 'green' || !source_candidate_id))
+    (author_overrides_candidate && (status !== 'green' || !source_candidate_id)) ||
+    new Set(soft_deviation_report_ids).size !== soft_deviation_report_ids.length
   )
     invalid('历史报告的作者裁定与原检查项不一致。')
   return {
@@ -171,6 +176,7 @@ function parseAuthorReview(value: unknown, check: string, chapters: ReadonlyMap<
     source_candidate_id,
     basis_note: text(review.basis_note, 2000, 1),
     reason: text(review.reason, 2000, 1),
+    ...(soft_deviation_report_ids.length ? { soft_deviation_report_ids } : {}),
     ...(review.candidate_result != null
       ? { candidate_result: choice(review.candidate_result, ['pass', 'fail', 'unknown']) }
       : {}),
@@ -232,20 +238,39 @@ async function parseInspection(
     ])
     const check_id = String(index + 1).padStart(2, '0')
     const status = choice(item.status, statuses)
+    const basis = record(item.basis)
     const can_mark_not_applicable = flag(item.can_mark_not_applicable)
     if (item.check_id !== check_id || (status === 'not_applicable' && !can_mark_not_applicable))
       invalid('历史体检缺少十处检查或包含未获准的免查。')
+    const author_review =
+      item.author_review != null ? parseAuthorReview(item.author_review, check_id, originals) : undefined
+    const policy = basis.soft_deviation_policy
+    const signed = author_review?.soft_deviation_report_ids ?? []
+    if (policy != null && (check_id !== '05' || policy !== softDeviationPolicy))
+      invalid('历史体检的软设定裁定口径无效。')
+    if (policy && status === 'green') {
+      const required = softDeviations(basis)
+      if (
+        author_review?.status !== 'green' ||
+        !required?.length ||
+        signed.length !== required.length ||
+        required.some(
+          ({ id, source }) =>
+            !signed.includes(id) ||
+            !author_review.evidence.some((excerpt) => coversInspectionExcerpt(excerpt, source)),
+        )
+      )
+        invalid('历史体检的软设定签认缺少原偏离记录或对应引文。')
+    } else if (signed.length) invalid('历史体检的软设定签认与原检查项不一致。')
     return {
       check_id,
       status,
       can_mark_not_applicable,
       title: text(item.title, 200, 1),
       summary: text(item.summary, 4000),
-      basis: record(item.basis),
+      basis,
       basis_sha256: hash(item.basis_sha256),
-      ...(item.author_review != null
-        ? { author_review: parseAuthorReview(item.author_review, check_id, originals) }
-        : {}),
+      ...(author_review ? { author_review } : {}),
     }
   })
   const basis_sha256 = hash(report.basis_sha256)

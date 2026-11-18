@@ -8,7 +8,7 @@ from time import time
 from functools import cache, partial
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import Field, StringConstraints, ValidationError, model_validator
 
 from .author_contract import assemble_contract
 from .conception import (
@@ -31,10 +31,12 @@ from .story_graph import Source, graph_snapshot, sources
 KIND = "workflow_inspection"
 LENGTH_TARGET_KIND = "inspection_length_target"
 VERSION = "m6-inspection/1"
+SOFT_DEVIATION_POLICY = "soft-deviation-review/1"
 COUNT_VERSION = "正文有效字符/1，排除 Markdown 标题行、常见排版标记、空白和不可见字符，计入标点"
 Scope = Literal["chapter", "volume", "book"]
 CheckId = Literal["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+ReportId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 LABELS = {
     "01": "立项及作者约定与正文",
     "02": "章纲必达与章稿",
@@ -57,6 +59,9 @@ class AuthorReview(Input):
     evidence: list[Source] = Field(default_factory=list, max_length=30)
     source_candidate_id: str | None = Field(default=None, min_length=1, max_length=128)
     author_overrides_candidate: bool = Field(default=False, strict=True)
+    soft_deviation_report_ids: list[ReportId] = Field(
+        default_factory=list, max_length=1000, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def needs_evidence(self):
@@ -64,6 +69,12 @@ class AuthorReview(Input):
             raise ValueError("确认通过或冲突时须引用所查正文。")
         if self.author_overrides_candidate and (self.source_candidate_id is None or self.status != "green"):
             raise ValueError("作者裁定须引用候选，并明确给出本次通过结论。")
+        if self.soft_deviation_report_ids and (
+            self.check_id != "05"
+            or self.status != "green"
+            or len(set(self.soft_deviation_report_ids)) != len(self.soft_deviation_report_ids)
+        ):
+            raise ValueError("软设定偏离回执须各引用一次，并用于第 05 项的作者通过裁定。")
         return self
 
 
@@ -444,7 +455,7 @@ def _evaluate(tx, branch_id, scope, scope_id):
     elif outline["stale"] or world_needs_confirmation:
         rule_status = "outdated"
     elif failures:
-        rule_status = "pending"
+        rule_status = "yellow"
     elif rules and rules <= covered:
         rule_status = "green"
     else:
@@ -521,7 +532,11 @@ def _evaluate(tx, branch_id, scope, scope_id):
         item(
             "05",
             f"计划引用 {len(rules)} 项，已有 {len(rules & covered)} 项的当前相符证据。"
-            + ("发现可调整设定的偏离，请核对取舍。" if failures and rule_status == "pending" else ""),
+            + (
+                "发现可调整设定的偏离，可修稿复检或逐条引用原文并记录取舍。"
+                if rule_status == "yellow"
+                else ""
+            ),
             {
                 "confirmation_id": world["confirmation_id"],
                 "rules": world["items"],
@@ -530,6 +545,8 @@ def _evaluate(tx, branch_id, scope, scope_id):
                 "outline_id": plan_basis["outline_id"],
                 "outline_stale": outline["stale"],
                 "world_needs_confirmation": world_needs_confirmation,
+                # Reclassifying a frozen soft finding requires reassessment only for the affected check.
+                **({"soft_deviation_policy": SOFT_DEVIATION_POLICY} if rule_status == "yellow" else {}),
             },
             rule_status,
             can_mark_not_applicable=(
@@ -595,6 +612,52 @@ def _evaluate(tx, branch_id, scope, scope_id):
     }, chapters
 
 
+def _contains_source(citation, original):
+    if (
+        citation.chapter_id != original.chapter_id
+        or citation.revision != original.revision
+        or not citation.start <= original.start < original.end <= citation.end
+    ):
+        return False
+    try:
+        return (
+            utf16_slice(citation.quote, original.start - citation.start, original.end - citation.start)[1]
+            == original.quote
+        )
+    except DomainError:
+        return False
+
+
+def validate_soft_deviation_review(basis, review):
+    reports = basis.get("reports")
+    if not isinstance(reports, list) or not all(isinstance(row, dict) for row in reports):
+        raise DomainError("inspection_soft_deviation", "软设定偏离的原对账依据无效。", 409)
+    failed = [row for row in reports if row.get("result") == "fail"]
+    failures = {row["report_id"]: row for row in failed if isinstance(row.get("report_id"), str)}
+    if not failures or len(failures) != len(failed) or set(review.soft_deviation_report_ids) != set(failures):
+        raise DomainError("inspection_soft_deviation", "通过前须明确核对本范围的全部软设定偏离。", 409)
+    for row in failures.values():
+        rule = row.get("rule")
+        policy = rule.get("setting_policy") if isinstance(rule, dict) else None
+        if not isinstance(policy, dict) or policy.get("strength") != "soft":
+            raise DomainError("inspection_soft_deviation", "作者裁定须关联已采用的软设定。", 409)
+        evidence = row["evidence"] if isinstance(row.get("evidence"), dict) else {}
+        try:
+            original = Source(
+                chapter_id=row.get("chapter_id"),
+                revision=row.get("revision"),
+                start=evidence.get("start"),
+                end=evidence.get("end"),
+                quote=evidence.get("text"),
+            )
+        except ValidationError as error:
+            raise DomainError("inspection_soft_deviation", "软设定偏离缺少有效原文，须复检。", 409) from error
+        if not original.quote.strip() or not any(
+            _contains_source(source, original) for source in review.evidence
+        ):
+            raise DomainError("inspection_soft_deviation", "本次裁定须逐条引用覆盖偏离位置的当前正文。", 409)
+
+
 def _apply_author_reviews(tx, branch_id, report, reviews, chapters):
     indexed = {row["id"]: row for row in chapters}
     checks = {row["check_id"]: row for row in report["items"]}
@@ -615,6 +678,16 @@ def _apply_author_reviews(tx, branch_id, report, reviews, chapters):
                 or utf16_slice(chapter["content"], evidence.start, evidence.end)[1] != evidence.quote
             ):
                 raise DomainError("inspection_evidence", "作者核对引文与冻结正文范围不一致。", 409)
+        soft_deviations_resolved = (
+            item["check_id"] == "05"
+            and item["status"] == "yellow"
+            and item["basis"].get("soft_deviation_policy") == SOFT_DEVIATION_POLICY
+            and review.status == "green"
+        )
+        if soft_deviations_resolved:
+            validate_soft_deviation_review(item["basis"], review)
+        elif review.soft_deviation_report_ids:
+            raise DomainError("inspection_soft_deviation", "当前检查没有可按软设定处理的偏离。", 409)
         recorded = review.model_dump()
         if review.source_candidate_id:
             from .inspection_semantic import candidate_for_review_tx
@@ -633,7 +706,7 @@ def _apply_author_reviews(tx, branch_id, report, reviews, chapters):
                 )
             recorded["candidate_result"] = candidate["result"]
         item["author_review"] = recorded
-        if item["status"] == "pending" or review.status == "red":
+        if item["status"] == "pending" or review.status == "red" or soft_deviations_resolved:
             item["status"] = review.status
         elif item["status"] == "green" and review.status == "yellow":
             item["status"] = review.status

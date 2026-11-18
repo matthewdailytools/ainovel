@@ -477,6 +477,65 @@
         }
       }
     },
+    "/api/branches/{branch_id}/workflow-inspections/{inspection_id}/source-context/{check_id}": {
+      "get": {
+        "summary": "Inspection Sources",
+        "operationId": "inspection_sources_api_branches__branch_id__workflow_inspections__inspection_id__source_context__check_id__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "inspection_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Inspection Id" }
+          },
+          {
+            "name": "check_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"],
+              "type": "string",
+              "title": "Check Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 0, "default": 0, "title": "Offset" }
+          },
+          {
+            "name": "source_index",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+              "title": "Source Index"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/InspectionEvidencePage" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/manuscript-package": {
       "get": {
         "summary": "Get Package",
@@ -5716,6 +5775,12 @@
             "title": "Author Overrides Candidate",
             "default": false
           },
+          "soft_deviation_report_ids": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1 },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Soft Deviation Report Ids"
+          },
           "candidate_result": {
             "anyOf": [{ "type": "string", "enum": ["pass", "fail", "unknown"] }, { "type": "null" }],
             "title": "Candidate Result"
@@ -5972,6 +6037,12 @@
             "type": "boolean",
             "title": "Author Overrides Candidate",
             "default": false
+          },
+          "soft_deviation_report_ids": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1 },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Soft Deviation Report Ids"
           }
         },
         "additionalProperties": false,
@@ -6179,6 +6250,14 @@
       },
       "ChannelFollow": {
         "properties": {
+          "excluded_ineligible": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Excluded Ineligible"
+          },
+          "excluded_access_unknown": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Excluded Access Unknown"
+          },
           "channel": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Channel" },
           "numerator": { "type": "integer", "title": "Numerator" },
           "denominator": { "type": "integer", "title": "Denominator" },
@@ -7546,6 +7625,55 @@
         "required": ["id", "position", "title", "revision", "sha256", "chars", "stale"],
         "title": "InspectionChapter"
       },
+      "InspectionEvidenceAddress": {
+        "properties": {
+          "index": { "type": "integer", "title": "Index" },
+          "label": { "type": "string", "title": "Label" },
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "chapter_title": { "type": "string", "title": "Chapter Title" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "start": { "type": "integer", "title": "Start" },
+          "end": { "type": "integer", "title": "End" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["index", "label", "chapter_id", "chapter_title", "revision", "start", "end"],
+        "title": "InspectionEvidenceAddress"
+      },
+      "InspectionEvidenceContext": {
+        "properties": {
+          "address": { "$ref": "#/components/schemas/InspectionEvidenceAddress" },
+          "revision_id": { "type": "string", "title": "Revision Id" },
+          "before": { "type": "string", "title": "Before" },
+          "quote": { "type": "string", "title": "Quote" },
+          "after": { "type": "string", "title": "After" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["address", "revision_id", "before", "quote", "after"],
+        "title": "InspectionEvidenceContext"
+      },
+      "InspectionEvidencePage": {
+        "properties": {
+          "entries": {
+            "items": { "$ref": "#/components/schemas/InspectionEvidenceAddress" },
+            "type": "array",
+            "title": "Entries"
+          },
+          "total": { "type": "integer", "title": "Total" },
+          "previous_offset": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Previous Offset"
+          },
+          "context": {
+            "anyOf": [{ "$ref": "#/components/schemas/InspectionEvidenceContext" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["entries", "total"],
+        "title": "InspectionEvidencePage"
+      },
       "InspectionInput": {
         "properties": {
           "scope": {
@@ -7781,6 +7909,14 @@
       },
       "Metric": {
         "properties": {
+          "excluded_ineligible": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Excluded Ineligible"
+          },
+          "excluded_access_unknown": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Excluded Access Unknown"
+          },
           "kind": {
             "type": "string",
             "enum": ["adjacent_follow", "first_chapter_retention", "chapter_completion", "aggregate_ratio"],
@@ -7795,7 +7931,14 @@
           "denominator": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Denominator" },
           "rate": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Rate" },
           "excluded_incomplete": { "type": "integer", "title": "Excluded Incomplete", "default": 0 },
-          "excluded_prior_or_tied": { "type": "integer", "title": "Excluded Prior Or Tied", "default": 0 }
+          "excluded_prior_or_tied": { "type": "integer", "title": "Excluded Prior Or Tied", "default": 0 },
+          "channel_breakdown": {
+            "anyOf": [
+              { "items": { "$ref": "#/components/schemas/ChannelFollow" }, "type": "array" },
+              { "type": "null" }
+            ],
+            "title": "Channel Breakdown"
+          }
         },
         "additionalProperties": false,
         "type": "object",
@@ -8758,7 +8901,11 @@
       "PublishedChapter": {
         "properties": {
           "chapter_id": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Chapter Id" },
-          "published_at": { "type": "string", "format": "date-time", "title": "Published At" }
+          "published_at": { "type": "string", "format": "date-time", "title": "Published At" },
+          "opens_at": {
+            "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }],
+            "title": "Opens At"
+          }
         },
         "additionalProperties": false,
         "type": "object",
@@ -8864,6 +9011,16 @@
             "title": "Completion Definition"
           },
           "cohort": { "anyOf": [{ "$ref": "#/components/schemas/Cohort" }, { "type": "null" }] },
+          "access_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["shared_opening", "shared_opening_assumed", "reader_eligibility", "unknown"]
+              },
+              { "type": "null" }
+            ],
+            "title": "Access Mode"
+          },
           "window_hours": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Window Hours" },
           "event_rows": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Event Rows" },
           "distinct_readers": {

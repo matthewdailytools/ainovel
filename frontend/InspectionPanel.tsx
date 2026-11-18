@@ -3,17 +3,18 @@ import { api, ApiError, type Chapter } from './api'
 import type { components } from './api-schema'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { InspectionSemanticPanel, type InspectionSuggestion } from './InspectionSemanticPanel'
+import { InspectionSources } from './InspectionSources'
+import {
+  coversInspectionExcerpt,
+  softDeviations,
+  type InspectionExcerpt,
+  type SoftDeviation,
+} from './inspectionEvidence'
 
 type Scope = 'book' | 'volume' | 'chapter'
 type Status = 'green' | 'yellow' | 'red' | 'pending' | 'outdated' | 'not_applicable'
 type Conclusion = Exclude<Status, 'pending' | 'outdated'>
-type Evidence = {
-  chapter_id: string
-  revision: number
-  start: number
-  end: number
-  quote: string
-}
+type Evidence = InspectionExcerpt
 type Review = {
   check_id: string
   status: Conclusion | ''
@@ -21,6 +22,7 @@ type Review = {
   reason: string
   evidence: Evidence[]
   source_candidate_id?: string
+  soft_deviation_report_ids?: string[]
   author_overrides_candidate?: boolean
   candidate_result?: InspectionSuggestion['result']
 }
@@ -95,6 +97,15 @@ const newReview = (id: string): Review => ({
   reason: '',
   evidence: [],
 })
+
+function canOpenSources(item: Item) {
+  return (
+    !!item.author_review?.evidence.length ||
+    ['records', 'events', 'knowledge', 'reports', 'scenes', 'review_blockers'].some(
+      (key) => Array.isArray(item.basis[key]) && (item.basis[key] as unknown[]).length > 0,
+    )
+  )
+}
 
 function StatusBadge({ status }: { status: Status }) {
   const shade = shades[status]
@@ -242,11 +253,13 @@ function CheckList({
   items,
   chapters,
   branchId,
+  reportId,
   onChoose,
 }: {
   items: Item[]
   chapters: Preview['chapters']
   branchId: string
+  reportId?: string
   onChoose?: (item: Item) => void
 }) {
   return (
@@ -267,6 +280,9 @@ function CheckList({
                 作者核对 · {labels[item.author_review.status as Conclusion]} · {item.author_review.reason}
               </p>
               <p>对照依据 {item.author_review.basis_note}</p>
+              {!!item.author_review.soft_deviation_report_ids?.length && (
+                <p>已签认 {item.author_review.soft_deviation_report_ids.length} 条软设定偏离。</p>
+              )}
               {item.author_review.evidence.map((source, index) => (
                 <blockquote key={index}>
                   {source.quote}
@@ -279,6 +295,11 @@ function CheckList({
           )}
           {item.check_id === '08' && (
             <CheckCardReferences basis={item.basis} chapters={chapters} branchId={branchId} />
+          )}
+          {reportId && canOpenSources(item) && (
+            <InspectionSources
+              route={`/branches/${encodeURIComponent(branchId)}/workflow-inspections/${encodeURIComponent(reportId)}/source-context/${item.check_id}`}
+            />
           )}
           <details>
             <summary>对照依据</summary>
@@ -493,6 +514,7 @@ export function InspectionPanel({
   const choices = scope === 'volume' ? volumes : chapters
   const review = reviews[selected] ?? newReview(selected)
   const selectedCheck = data?.preview.items.find((item) => item.check_id === selected)
+  const deviations = selectedCheck?.check_id === '05' ? (softDeviations(selectedCheck.basis) ?? []) : []
   const requiresCandidateResolution =
     !!review.source_candidate_id && review.candidate_result !== 'pass' && review.status === 'green'
   const change = (values: Partial<Review>) =>
@@ -500,6 +522,23 @@ export function InspectionPanel({
       ...current,
       [selected]: { ...(current[selected] ?? newReview(selected)), ...values },
     }))
+  function markSoftDeviation(deviation: SoftDeviation, checked: boolean) {
+    const previous = review.soft_deviation_report_ids ?? []
+    if (!checked) {
+      change({ soft_deviation_report_ids: previous.filter((id) => id !== deviation.id) })
+      return
+    }
+    const covered = review.evidence.some((excerpt) => coversInspectionExcerpt(excerpt, deviation.source))
+    if (!covered && review.evidence.length >= 30) {
+      setError('引文已达 30 处。请移除一处引文，再核对本条偏离。')
+      return
+    }
+    setError('')
+    change({
+      soft_deviation_report_ids: [...previous, deviation.id],
+      evidence: covered ? review.evidence : [...review.evidence, deviation.source],
+    })
+  }
   const visible = historyId ? historical : data?.latest
   function loadSuggestion(candidateId: string, suggestion: InspectionSuggestion) {
     const id = suggestion.check_id
@@ -572,6 +611,20 @@ export function InspectionPanel({
       )
     ) {
       setError('请完成已编辑项目的判定和说明。确认通过或阻断时请引用正文。')
+      return
+    }
+    const settingReview = validReviews.find(({ check_id }) => check_id === '05')
+    const settingDeviations =
+      softDeviations(data.preview.items.find(({ check_id }) => check_id === '05')?.basis ?? {}) ?? []
+    if (
+      settingReview?.status === 'green' &&
+      settingDeviations.some(
+        ({ id, source }) =>
+          !settingReview.soft_deviation_report_ids?.includes(id) ||
+          !settingReview.evidence.some((excerpt) => coversInspectionExcerpt(excerpt, source)),
+      )
+    ) {
+      setError('请逐条核对当前软设定偏离并保留本次取舍依据。')
       return
     }
     setSaving(true)
@@ -703,6 +756,8 @@ export function InspectionPanel({
                         change({
                           status: event.target.value as Review['status'],
                           author_overrides_candidate: false,
+                          soft_deviation_report_ids:
+                            event.target.value === 'green' ? review.soft_deviation_report_ids : undefined,
                         })
                       }
                     >
@@ -718,6 +773,24 @@ export function InspectionPanel({
                         ))}
                     </select>
                   </label>
+                  {review.status === 'green' && deviations.length > 0 && (
+                    <fieldset>
+                      <legend>已发现的软设定偏离</legend>
+                      {deviations.map((deviation) => (
+                        <div key={deviation.id}>
+                          <label className="check">
+                            <input
+                              type="checkbox"
+                              checked={review.soft_deviation_report_ids?.includes(deviation.id) ?? false}
+                              onChange={(event) => markSoftDeviation(deviation, event.target.checked)}
+                            />
+                            核对并引用「{deviation.ruleTitle}」的偏离
+                          </label>
+                          <blockquote>{deviation.source.quote}</blockquote>
+                        </div>
+                      ))}
+                    </fieldset>
+                  )}
                   {requiresCandidateResolution && (
                     <label className="check">
                       <input
@@ -871,6 +944,7 @@ export function InspectionPanel({
                     items={visible.items}
                     chapters={visible.chapters}
                     branchId={branchId}
+                    reportId={visible.id}
                   />
                 </section>
               )}

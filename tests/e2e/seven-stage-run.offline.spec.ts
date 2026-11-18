@@ -3,6 +3,52 @@ import type { ConceptionState } from '../../frontend/conception'
 
 const idea = '学徒靠铜铃的断痕寻找师姐。'
 
+async function authorHeaders(page: Page) {
+  const { csrf }: { csrf: string } = await (await page.request.get('/api/session')).json()
+  return { 'X-Ainovel-CSRF': csrf }
+}
+
+async function startFromPanel(page: Page, branch: string) {
+  const start = page
+    .getByRole('region', { name: '七台自动接力' })
+    .getByRole('button', { name: '启动七台接力' })
+  await expect(start).toBeEnabled()
+  const response = page.waitForResponse(
+    (entry) => entry.request().method() === 'POST' && entry.url().endsWith(`${branch}/seven-stage-runs`),
+  )
+  const [entry] = await Promise.all([response, start.press('Enter')])
+  return entry
+}
+
+async function taskRecord(page: Page, id: string) {
+  const response = await page.request.get('/api/tasks/' + id)
+  expect(response.ok(), await response.text()).toBe(true)
+  return response.json()
+}
+
+async function remainingChildren(page: Page, runId: string) {
+  const parent = await taskRecord(page, runId)
+  const ids: string[] = parent.result.seven_stage_run.children
+  return Promise.all(
+    ids.map(async (id) => {
+      const { kind, payload } = await taskRecord(page, id)
+      const transcript = await page.request.get(`/api/tasks/${id}/transcript`)
+      expect(transcript.ok(), await transcript.text()).toBe(true)
+      const {
+        steps,
+      }: { steps: { result: { call_id: string; usage: { input: number; output: number } } }[] } =
+        await transcript.json()
+      expect(steps.length).toBeGreaterThan(0)
+      for (const { result } of steps) {
+        expect(result.call_id).toBeTruthy()
+        expect(result.usage.input).toBeGreaterThan(0)
+        expect(result.usage.output).toBeGreaterThan(0)
+      }
+      return { kind, payload, steps }
+    }),
+  )
+}
+
 async function createEmptyWork(page: Page, title: string) {
   await page.goto('/')
   await page.getByText('＋ 新建作品', { exact: true }).click()
@@ -18,6 +64,33 @@ async function createEmptyWork(page: Page, title: string) {
     page.getByRole('combobox', { name: '作品', exact: true }).locator('option:checked'),
   ).toHaveText(title)
   return '/api/branches/' + branch_id
+}
+
+async function authorProject(page: Page, branch: string, ending: string) {
+  await page.getByRole('button', { name: '立项台', exact: true }).click()
+  const project = page.locator('#bench-project')
+  await project.getByText('立项台', { exact: true }).press('Enter')
+  await project.getByRole('combobox', { name: '主类型', exact: true }).selectOption('mystery')
+  for (const [label, value] of [
+    ['创作思路', '学徒向守闸人借尺，核对闸门上的公开刻度。'],
+    ['核心定位', '用公开记录复测门前的异响。'],
+    ['赛道', '短篇求证悬疑'],
+    ['读者定位', '偏好线索能回查的读者'],
+    ['差异化', '学徒只检查与记录，把维修交给守闸人。'],
+    ['篇幅目标', '一卷一章'],
+    ['终局', ending],
+  ]) {
+    await project.getByRole('textbox', { name: label, exact: true }).fill(value)
+  }
+  const confirmed = page.waitForResponse(
+    (entry) =>
+      entry.request().method() === 'PUT' && entry.url().endsWith(`${branch}/conception/project-brief`),
+  )
+  await project.getByRole('button', { name: '确认立项', exact: true }).click()
+  const signed = await confirmed
+  expect(signed.ok(), await signed.text()).toBe(true)
+  await expect(project.getByText('立项台 · 已确认修订 1')).toBeVisible()
+  return (await signed.json()) as NonNullable<ConceptionState['project']>
 }
 
 async function openEmptyRun(page: Page, title: string) {
@@ -185,28 +258,93 @@ test('从创意启动但未授权确认规划时停在立项草案', async ({ pa
   await expect(project.getByRole('button', { name: '载入 AI 立项建议', exact: true })).toBeVisible()
 })
 
+test('从页面提交已确认立项，拒绝旧修订后只执行设定及其后续任务', async ({ page }) => {
+  const branch = await createEmptyWork(page, '后台验证 · 从已确认立项接力')
+  const old = await authorProject(page, branch, '学徒把复测记录留在门房。')
+  await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  const panel = page.getByRole('region', { name: '七台自动接力', exact: true })
+  await expect(panel.getByLabel('接力起点')).toHaveValue('project')
+  await expect(panel.getByRole('option', { name: '从已确认立项接力 · 修订 1' })).toBeEnabled()
+  await expect(panel.getByRole('option', { name: '从已确认设定接力', exact: true })).toBeDisabled()
+  await panel.getByLabel('新建章节数').fill('1')
+  await panel.getByLabel('本次接力总预算（所选账户币种）').fill('1')
+  await panel.getByRole('checkbox', { name: '授权确认本次生成的规划产物' }).check()
+  await panel.getByRole('checkbox', { name: '授权采纳通过检查的空章正文候选' }).check()
+
+  const ending = '守闸人核对记录，当面把旧铜铃交还给学徒。'
+  const changed = await page.request.put(branch + '/conception/project-brief', {
+    headers: await authorHeaders(page),
+    data: {
+      base_revision: old.revision,
+      idempotency_key: 'project-relay-browser-later-version',
+      idea: old.idea,
+      brief: { ...old.brief, ending },
+    },
+  })
+  expect(changed.ok(), await changed.text()).toBe(true)
+  const current = await changed.json()
+  const rejected = await startFromPanel(page, branch)
+  expect(rejected.request().postDataJSON()).toMatchObject({ start_from: 'project', source_id: old.id })
+  expect(rejected.status()).toBe(409)
+  expect((await rejected.json()).code).toBe('project_brief_changed')
+  await expect(panel.getByRole('alert')).toContainText('请选择当前已确认的立项')
+  expect(await (await page.request.get(branch + '/seven-stage-runs')).json()).toEqual([])
+
+  await panel.getByRole('button', { name: '核对接力起点' }).click()
+  await expect(panel.getByRole('option', { name: '从已确认立项接力 · 修订 2' })).toBeEnabled()
+  const response = await startFromPanel(page, branch)
+  expect(response.ok(), await response.text()).toBe(true)
+  expect(response.request().postDataJSON()).toMatchObject({
+    start_from: 'project',
+    source_id: current.id,
+    chapter_count: 1,
+    auto_confirm_planning: true,
+    auto_adopt_body: true,
+  })
+  const run = await response.json()
+  expect(run.result.seven_stage_run).toMatchObject({ stage: 'settings', project_id: current.id })
+  await expect(panel.getByRole('status')).toHaveText('校验 · 等待处理检查点', { timeout: 30_000 })
+  const {
+    result: { seven_stage_run: state },
+  } = await taskRecord(page, run.id)
+  expect(state).toMatchObject({ stage: 'inspection', project_id: current.id })
+  expect(state.inspection_candidate_id && state.inspection_id).toBeTruthy()
+  expect(state.completion_preparation_id).toBeUndefined()
+  const children = await remainingChildren(page, run.id)
+  expect(
+    children.map(({ kind, payload }) => [kind, payload.project_confirmation_id ?? payload.action]),
+  ).toEqual([
+    ['conception_generate', current.id],
+    ['module', 'outline.plan'],
+    ['module', 'writing.expand_plot'],
+    ['module', 'review.chapter'],
+  ])
+  expect(children[0].payload.target_category_ids).toEqual(['core', 'characters', 'world', 'relationships'])
+
+  const after: ConceptionState = await (await page.request.get(branch + '/conception')).json()
+  expect(after.project).toEqual(current)
+  expect(after.confirmation).toMatchObject({ id: state.setting_id, current: true })
+  const { confirmed } = await (await page.request.get(branch + '/outline-workspace')).json()
+  expect(confirmed).toMatchObject({
+    id: state.outline_id,
+    setting_basis: { project_id: current.id, confirmation_id: state.setting_id },
+    plan: { summary: ending },
+  })
+  expect(state.completed_chapters).toHaveLength(1)
+  const [chapter] = state.completed_chapters
+  const saved = await (await page.request.get('/api/chapters/' + chapter.id)).json()
+  expect(saved.revision).toBe(chapter.revision)
+  expect(saved.content).toContain('先把公开刻度抄进本子')
+  const { latest } = await (await page.request.get(branch + '/workflow-inspections')).json()
+  expect(latest).toMatchObject({ id: state.inspection_id, scope: 'book', current: true })
+})
+
 test('从作者确认的设定开始接力，冻结立项与设定并在校验台待签', async ({ page }) => {
   const branch = await createEmptyWork(page, '后台验证 · 作者设定接力')
   const ending = '作者决定只留下复测读数，闸门由守闸人处理。'
   const rule = '学徒只用守闸人借出的尺复测公开刻度。'
-  await page.getByRole('button', { name: '立项台', exact: true }).click()
-  const projectPanel = page.locator('#bench-project')
-  await projectPanel.getByText('立项台', { exact: true }).press('Enter')
-  await projectPanel.getByRole('combobox', { name: '主类型', exact: true }).selectOption('mystery')
-  for (const [label, value] of [
-    ['创作思路', '学徒向守闸人借尺，核对闸门上的公开刻度。'],
-    ['核心定位', '用公开记录复测门前的异响。'],
-    ['赛道', '短篇求证悬疑'],
-    ['读者定位', '偏好线索能回查的读者'],
-    ['差异化', '学徒只检查与记录，把维修交给守闸人。'],
-    ['篇幅目标', '一卷一章'],
-    ['终局', ending],
-  ]) {
-    await projectPanel.getByRole('textbox', { name: label, exact: true }).fill(value)
-  }
-  await projectPanel.getByRole('button', { name: '确认立项', exact: true }).click()
-  await expect(projectPanel.getByText('立项台 · 已确认修订 1')).toBeVisible()
-  await projectPanel.getByRole('button', { name: '去完善世界设定', exact: true }).click()
+  await authorProject(page, branch, ending)
+  await page.locator('#bench-project').getByRole('button', { name: '去完善世界设定', exact: true }).click()
   const settings = page.getByRole('region', { name: '按类别完善小说设定' })
   await expect(settings.getByRole('heading', { name: '世界设定', exact: true })).toBeVisible()
   await settings.getByRole('button', { name: '添加构思项目', exact: true }).click()
@@ -303,7 +441,7 @@ test('从作者确认的设定开始接力，冻结立项与设定并在校验�
   ).toBe(basis.project_id)
 })
 
-test('从作者确认的大纲接力写作，在体检检查点等待处理', async ({ page }) => {
+test('从确认大纲、保存正文和有效全书体检接力，逐段到达校验与完本停点', async ({ page }) => {
   await page.goto('/')
   const { csrf } = await (await page.request.get('/api/session')).json()
   const headers = { 'X-Ainovel-CSRF': csrf }
@@ -387,23 +525,194 @@ test('从作者确认的大纲接力写作，在体检检查点等待处理', as
   expect(task.result.seven_stage_run.inspection_candidate_id).toBeTruthy()
   await expect(panel.getByRole('button', { name: '继续接力' })).toBeVisible()
 
-  page.once('dialog', (confirmation) => void confirmation.accept())
-  await panel.getByRole('button', { name: '停止本次接力' }).click()
-  await expect(panel.getByLabel('接力起点')).toBeEnabled()
+  async function stopRelay() {
+    page.once('dialog', (confirmation) => void confirmation.accept())
+    await panel.getByRole('button', { name: '停止本次接力' }).click()
+    await expect(panel.getByLabel('接力起点')).toBeEnabled()
+  }
+  const chapterUrl = '/api/chapters/' + chapter.id
+  async function revise(base_revision: number, content: string) {
+    const written = await page.request.put(chapterUrl, { headers, data: { base_revision, content } })
+    expect(written.ok(), await written.text()).toBe(true)
+    return (await written.json()) as { revision: number; content: string }
+  }
+  const runs = branch + '/seven-stage-runs'
+  const sources = async () => (await page.request.get(runs + '/sources')).json()
+  await stopRelay()
   await panel.getByRole('button', { name: '核对接力起点' }).click()
   await expect(panel.getByRole('option', { name: '从已保存的完整正文接力' })).toBeEnabled()
   await expect(panel.getByRole('option', { name: '从已通过的全书体检接力' })).toBeDisabled()
+  const originalBasis = await sources()
   await panel.getByLabel('接力起点').selectOption('writing')
   await expect(panel.getByRole('checkbox', { name: '授权采纳通过检查的空章正文候选' })).toHaveCount(0)
-  const nextRequest = page.waitForResponse(
-    (entry) => entry.request().method() === 'POST' && entry.url().endsWith('/seven-stage-runs'),
-  )
-  await panel.getByRole('button', { name: '启动七台接力' }).click()
-  const next = await nextRequest
-  expect(next.ok(), await next.text()).toBe(true)
-  expect(next.request().postDataJSON()).toMatchObject({ start_from: 'writing', auto_adopt_body: false })
-  expect((await next.json()).result.seven_stage_run).toMatchObject({
-    stage: 'inspection',
-    completed_chapters: [{ id: chapter.id, revision: 1, existing: true }],
+  const updated = await revise(saved.revision, saved.content + '\n\n作者留了一份核对记录。')
+  const beforeWriting = await sources()
+  expect(beforeWriting.writing_id).not.toBe(originalBasis.writing_id)
+  const staleWriting = await startFromPanel(page, branch)
+  expect(staleWriting.request().postDataJSON()).toMatchObject({
+    start_from: 'writing',
+    source_id: originalBasis.writing_id,
   })
+  expect(staleWriting.status()).toBe(409)
+  expect((await staleWriting.json()).code).toBe('inspection_changed')
+  await expect(panel.getByRole('alert')).toContainText('请重新核对当前已保存正文和全书体检')
+  expect((await (await page.request.get(runs)).json()).map(({ id }: { id: string }) => id)).toEqual([run.id])
+  await panel.getByRole('button', { name: '核对接力起点' }).click()
+  const next = await startFromPanel(page, branch)
+  expect(next.ok(), await next.text()).toBe(true)
+  expect(next.request().postDataJSON()).toMatchObject({
+    start_from: 'writing',
+    source_id: beforeWriting.writing_id,
+    auto_adopt_body: false,
+    auto_confirm_planning: false,
+  })
+  const writing = await next.json()
+  const writtenChapters = [{ id: chapter.id, revision: updated.revision, existing: true }]
+  expect(writing.result.seven_stage_run).toMatchObject({
+    stage: 'inspection',
+    outline_id: outlineId,
+    completed_chapters: writtenChapters,
+  })
+  await expect(panel.getByRole('status')).toHaveText('校验 · 等待处理检查点', { timeout: 20_000 })
+  const {
+    result: { seven_stage_run: inspected },
+  } = await taskRecord(page, writing.id)
+  expect(inspected).toMatchObject({
+    stage: 'inspection',
+    outline_id: outlineId,
+    completed_chapters: writtenChapters,
+  })
+  expect(inspected.inspection_candidate_id && inspected.inspection_id).toBeTruthy()
+  const checks = await remainingChildren(page, writing.id)
+  expect(checks).toHaveLength(1)
+  expect(checks[0]).toMatchObject({
+    kind: 'module',
+    payload: { action: 'review.chapter', inspection_semantic: { scope: 'book' } },
+  })
+  expect(checks[0].steps).toHaveLength(1)
+  const candidate = await (
+    await page.request.get('/api/artifacts/' + inspected.inspection_candidate_id)
+  ).json()
+  expect(candidate.payload.chapters).toEqual([
+    expect.objectContaining({ id: chapter.id, revision: updated.revision }),
+  ])
+  expect(await (await page.request.get(chapterUrl)).json()).toMatchObject(updated)
+
+  const inspections = branch + '/workflow-inspections'
+  const { latest } = await (await page.request.get(inspections)).json()
+  expect(latest).toMatchObject({ id: inspected.inspection_id, scope: 'book', current: true })
+  expect(
+    latest.items.some(({ current_status }: { current_status: string }) => current_status === 'pending'),
+  ).toBe(true)
+  await stopRelay()
+
+  async function signInspection(content: { revision: number; content: string }) {
+    const { preview } = await (await page.request.get(inspections)).json()
+    const response = await page.request.post(inspections, {
+      headers,
+      data: {
+        basis_sha256: preview.basis_sha256,
+        author_reviews: preview.items
+          .filter(({ status }: { status: string }) => status === 'pending')
+          .map(({ check_id }: { check_id: string }) => ({
+            check_id,
+            status: 'green',
+            basis_note: '逐项核对采用章纲及当前保存原文。',
+            reason: '正文显示学徒只做检查，未改动闸门。',
+            evidence: [
+              {
+                chapter_id: chapter.id,
+                revision: content.revision,
+                start: 0,
+                end: content.content.length,
+                quote: content.content,
+              },
+            ],
+          })),
+      },
+    })
+    expect(response.ok(), await response.text()).toBe(true)
+    const report = await response.json()
+    expect(report).toMatchObject({ scope: 'book', current: true })
+    expect(
+      report.items.every(({ current_status }: { current_status: string }) =>
+        ['green', 'not_applicable'].includes(current_status),
+      ),
+    ).toBe(true)
+    expect((await sources()).inspection_id).toBe(report.id)
+    return report
+  }
+  const signedEarlier = await signInspection(updated)
+  await panel.getByRole('button', { name: '核对接力起点' }).click()
+  await panel.getByLabel('接力起点').selectOption('inspection')
+  const finalManuscript = await revise(updated.revision, updated.content + '\n\n守闸人签收复测记录。')
+  expect((await sources()).inspection_id).toBeNull()
+  const staleInspection = await startFromPanel(page, branch)
+  expect(staleInspection.request().postDataJSON()).toMatchObject({
+    start_from: 'inspection',
+    source_id: signedEarlier.id,
+  })
+  expect(staleInspection.status()).toBe(409)
+  expect((await staleInspection.json()).code).toBe('inspection_changed')
+  await expect(panel.getByRole('alert')).toContainText('请重新核对当前已保存正文和全书体检')
+  expect((await (await page.request.get(runs)).json()).map(({ id }: { id: string }) => id).sort()).toEqual(
+    [run.id, writing.id].sort(),
+  )
+  const historical = await (await page.request.get(inspections + '/' + signedEarlier.id)).json()
+  expect(historical).toMatchObject({ id: signedEarlier.id, current: false })
+  await panel.getByRole('button', { name: '核对接力起点' }).click()
+  await expect(panel.getByRole('option', { name: '从已通过的全书体检接力' })).toBeDisabled()
+  await expect(panel.getByRole('button', { name: '启动七台接力' })).toBeDisabled()
+
+  const signedCurrent = await signInspection(finalManuscript)
+  await panel.getByRole('button', { name: '核对接力起点' }).click()
+  await expect(panel.getByRole('option', { name: '从已通过的全书体检接力' })).toBeEnabled()
+  const finish = await startFromPanel(page, branch)
+  expect(finish.ok(), await finish.text()).toBe(true)
+  expect(finish.request().postDataJSON()).toMatchObject({
+    start_from: 'inspection',
+    source_id: signedCurrent.id,
+    auto_adopt_body: false,
+    auto_confirm_planning: false,
+  })
+  const completion = await finish.json()
+  const finalChapters = [{ id: chapter.id, revision: finalManuscript.revision, existing: true }]
+  expect(completion.result.seven_stage_run).toMatchObject({
+    stage: 'completion',
+    inspection_id: signedCurrent.id,
+    outline_id: outlineId,
+    completed_chapters: finalChapters,
+  })
+  await expect(panel.getByRole('status')).toHaveText('完本 · 等待处理检查点', { timeout: 20_000 })
+  const {
+    result: { seven_stage_run: prepared },
+  } = await taskRecord(page, completion.id)
+  expect(prepared).toMatchObject({
+    stage: 'completion',
+    inspection_id: signedCurrent.id,
+    outline_id: outlineId,
+    completed_chapters: finalChapters,
+  })
+  expect(prepared.completion_preparation_id).toBeTruthy()
+  expect(prepared.completion_id).toBeUndefined()
+  const preparation = await remainingChildren(page, completion.id)
+  expect(preparation).toHaveLength(1)
+  expect(preparation[0]).toMatchObject({
+    kind: 'module',
+    payload: { completion_preparation: { spoiler_scope: 'opening' } },
+  })
+  expect(preparation[0].steps).toHaveLength(2)
+  expect((await (await page.request.get(inspections)).json()).latest.id).toBe(signedCurrent.id)
+  expect(await (await page.request.get(chapterUrl)).json()).toMatchObject(finalManuscript)
+  const releases = page.getByRole('region', { name: '完本与交付', exact: true })
+  await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await expect(releases).toBeVisible()
+  await releases.getByText('AI 准备完本建议', { exact: true }).click()
+  await releases.getByRole('button', { name: '载入 AI 建议到空白项' }).click()
+  await expect(releases.getByRole('textbox', { name: '简介', exact: true })).toHaveValue(
+    '学徒从铜铃的来历追起。',
+  )
+  await releases.getByRole('button', { name: '预览交付材料' }).click()
+  await expect(releases.getByRole('button', { name: '确认完结', exact: true })).toBeDisabled()
+  await expect(releases.getByRole('link', { name: '下载交付包', exact: true })).toHaveCount(0)
 })

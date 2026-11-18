@@ -48,6 +48,10 @@ def select(report, kind, chapter, target=None):
     )
 
 
+def access(chapter, reader, available_from):
+    return {"chapter_id": chapter, "reader_key": reader, "available_from": available_from}
+
+
 def test_diagnosis_uses_comparable_transitions_and_explicit_release_changes():
     data = {
         **source("events"),
@@ -56,6 +60,11 @@ def test_diagnosis_uses_comparable_transitions_and_explicit_release_changes():
             *(event("one", reader, 1) for reader in ("a", "b", "c")),
             *(event("two", reader, 5) for reader in ("a", "b", "c")),
             event("three", "a", 13),
+        ],
+        "reader_access": [
+            access(chapter, reader, f"2026-11-{day}T00:00:00+08:00")
+            for chapter, day in (("two", "05"), ("three", "13"))
+            for reader in ("a", "b", "c")
         ],
         "publication_changes": [
             {
@@ -81,6 +90,138 @@ def test_diagnosis_uses_comparable_transitions_and_explicit_release_changes():
     assert (diagnosis.publication_gap_hours, diagnosis.median_publication_gap_hours) == (192, 144)
     assert [change.kind for change in diagnosis.changes] == ["access"]
     assert not calculate_report(parse({**data, "window_hours": 48})).diagnostics
+    partial = calculate_report(parse({**data, "reader_access": data["reader_access"][:-1]}))
+    uncertain = select(partial, "adjacent_follow", "two", "three")
+    assert (uncertain.numerator, uncertain.denominator, uncertain.excluded_access_unknown) == (1, 2, 1)
+    assert not partial.diagnostics
+
+
+def test_entitlements_exclude_denied_readers_and_use_last_of_read_open_and_grant():
+    data = {
+        **source("events", ("one", "two")),
+        "window_hours": 24,
+        "events": [
+            event("one", "allowed", 1, channel="subscriber"),
+            event("one", "denied-a", 1, channel="discovery"),
+            event("one", "denied-b", 1, channel="discovery"),
+            event("two", "allowed", 9),
+        ],
+        "reader_access": [
+            access("two", "allowed", "2026-11-09T00:00:00+08:00"),
+            access("two", "denied-a", None),
+            access("two", "denied-b", None),
+        ],
+    }
+    data["chapters"][1]["opens_at"] = "2026-11-06T00:00:00+08:00"
+    report = calculate_report(parse(data))
+    assert report.access_mode == "reader_eligibility"
+    pair = select(report, "adjacent_follow", "one", "two")
+    assert (pair.numerator, pair.denominator, pair.rate) == (1, 1, 1.0)
+    assert (pair.excluded_ineligible, pair.excluded_access_unknown, pair.excluded_incomplete) == (2, 0, 0)
+    assert [
+        (row.channel, row.numerator, row.denominator, row.excluded_ineligible)
+        for row in pair.channel_breakdown
+    ] == [("discovery", 0, 0, 2), ("subscriber", 1, 1, 0)]
+    retention = select(report, "first_chapter_retention", "one", "two")
+    assert (retention.numerator, retention.denominator) == (1, 1)
+    assert "allowed" not in report.model_dump_json() and "denied-a" not in report.model_dump_json()
+
+    data["reader_access"][0]["available_from"] = "2026-11-02T00:00:00+08:00"
+    data["events"][-1] = event("two", "allowed", 7)
+    pair = select(calculate_report(parse(data)), "adjacent_follow", "one", "two")
+    assert (pair.numerator, pair.denominator) == (1, 1)
+    data["events"][0] = event("one", "allowed", 10, channel="subscriber")
+    data["events"][-1] = event("two", "allowed", 11)
+    pair = select(calculate_report(parse(data)), "adjacent_follow", "one", "two")
+    assert (pair.numerator, pair.denominator) == (1, 1)
+
+
+def test_qualification_coverage_is_separate_from_late_window_and_already_read():
+    data = {
+        **source("events", ("one", "two")),
+        "access_mode": "reader_eligibility",
+        "window_hours": 48,
+        "events": [
+            event("one", "known", 1, channel="direct"),
+            event("one", "late", 1, channel="direct"),
+            event("one", "unknown", 1, channel="newsletter"),
+            event("one", "denied", 1, channel="newsletter"),
+            event("one", "prior", 10, channel="archive"),
+            event("two", "known", 6),
+            event("two", "unknown", 6),
+            event("two", "prior", 7),
+        ],
+        "reader_access": [
+            access("two", "known", "2026-11-05T00:00:00+08:00"),
+            access("two", "late", "2026-11-13T02:00:00+08:00"),
+            access("two", "denied", None),
+        ],
+    }
+    report = calculate_report(parse(data))
+    pair = select(report, "adjacent_follow", "one", "two")
+    assert (pair.numerator, pair.denominator) == (1, 1)
+    assert (
+        pair.excluded_ineligible,
+        pair.excluded_access_unknown,
+        pair.excluded_incomplete,
+        pair.excluded_prior_or_tied,
+    ) == (1, 1, 1, 1)
+    for field in (
+        "numerator",
+        "denominator",
+        "excluded_ineligible",
+        "excluded_access_unknown",
+        "excluded_incomplete",
+        "excluded_prior_or_tied",
+    ):
+        assert sum(getattr(row, field) for row in pair.channel_breakdown) == getattr(pair, field)
+    assert (
+        calculate_report(
+            parse(
+                {
+                    **data,
+                    "events": list(reversed(data["events"])),
+                    "reader_access": list(reversed(data["reader_access"])),
+                }
+            )
+        )
+        == report
+    )
+
+    for invalid in [
+        [*data["reader_access"], access("two", "known", None)],
+        [access("two", "known", None)],
+        [access("two", "known", "2026-11-07T00:00:00+08:00")],
+        [access("two", "late", "2026-11-15T00:00:00+08:00")],
+        [access("wrong-chapter", "unknown", None)],
+    ]:
+        with pytest.raises(DomainError, match="追读文件格式无效"):
+            parse({**data, "reader_access": invalid})
+
+
+def test_unobserved_qualification_reports_assumption_or_explicit_unknown():
+    data = {
+        **source("events", ("one", "two")),
+        "window_hours": 24,
+        "events": [event("one", "a", 1), event("one", "b", 1), event("two", "a", 6)],
+    }
+    assumed = calculate_report(parse(data))
+    assert assumed.access_mode == "shared_opening_assumed"
+    assert select(assumed, "adjacent_follow", "one", "two").rate == 0.5
+    restricted = {
+        **data,
+        "publication_changes": [
+            {"chapter_id": "two", "kind": "access", "at": "2026-11-05T00:00:00+08:00", "note": "权限有变化。"}
+        ],
+    }
+    for value in [restricted, {**data, "access_mode": "unknown"}]:
+        report = calculate_report(parse(value))
+        pair = select(report, "adjacent_follow", "one", "two")
+        assert report.access_mode == "unknown"
+        assert (pair.rate, pair.denominator, pair.excluded_access_unknown) == (None, 0, 2)
+    declared = calculate_report(parse({**restricted, "access_mode": "shared_opening"}))
+    assert declared.access_mode == "shared_opening"
+    assert select(declared, "adjacent_follow", "one", "two").rate == 0.5
 
 
 def test_diagnosis_attributes_each_reader_to_one_source_channel_and_keeps_exclusions():
@@ -138,6 +279,7 @@ def test_saved_diagnosis_can_distinguish_preexisting_reports_without_channel_bre
     item = document["report"]["diagnostics"][0]
     assert item["channel_breakdown"][0]["denominator"] == 2 and "anonymous-" not in response.text
     del item["channel_breakdown"]
+    del document["report"]["access_mode"]
     with domain.db.connect(True) as tx:
         tx.execute(
             "UPDATE artifacts SET payload=? WHERE id=?", (json.dumps(document["report"]), document["id"])
@@ -145,6 +287,7 @@ def test_saved_diagnosis_can_distinguish_preexisting_reports_without_channel_bre
     historical = client.get(f"{base}/history/{document['id']}")
     assert historical.status_code == 200
     assert historical.json()["report"]["diagnostics"] == [{**item, "channel_breakdown": None}]
+    assert "access_mode" not in historical.json()["report"]
 
 
 def test_dedup_prior_reader_late_release_and_incomplete_window():
@@ -266,6 +409,7 @@ def test_file_route_saves_only_summary_and_checks_publication_scope(domain, sett
     data = {
         **source("events", [story["chapter_id"]]),
         "events": [event(story["chapter_id"], "pseudonym-test-only", 1)],
+        "reader_access": [access(story["chapter_id"], "eligibility-key-only", None)],
     }
     with TestClient(create_app(settings)) as client:
         session = client.get("/api/session").json()
@@ -275,12 +419,14 @@ def test_file_route_saves_only_summary_and_checks_publication_scope(domain, sett
         assert response.status_code == 201, response.text
         imported = response.json()
         assert "pseudonym-test-only" not in response.text and "events" not in imported["report"]
+        assert "eligibility-key-only" not in response.text and "reader_access" not in imported["report"]
         assert client.get(route).json() == {"latest": imported}
         assert client.get(route + "/history").json()[0]["id"] == imported["id"]
         assert client.get(route + "/history/" + imported["id"]).json() == imported
         artifact = domain.artifact(imported["id"])
         assert artifact["status"] == "accepted"
         assert "pseudonym-test-only" not in json.dumps(artifact)
+        assert "eligibility-key-only" not in json.dumps(artifact)
         assert len(artifact["basis"]["source_sha256"]) == 64
         other = domain.create_novel("另一部测试作品")
         foreign_route = f"/api/branches/{other['branch_id']}/reading-metrics"

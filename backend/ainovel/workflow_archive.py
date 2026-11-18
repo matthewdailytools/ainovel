@@ -11,7 +11,17 @@ from .db import DomainError
 from .domain import utf16_slice
 from .models import Input
 from .project_portability import Identifier
-from .workflow_inspection import AuthorReview, CheckId, KIND as INSPECTION, LengthTargets, Scope, _item, _sha
+from .workflow_inspection import (
+    AuthorReview,
+    CheckId,
+    KIND as INSPECTION,
+    LengthTargets,
+    SOFT_DEVIATION_POLICY,
+    Scope,
+    _item,
+    _sha,
+    validate_soft_deviation_review,
+)
 from .workflow_privacy import has_reference_selection
 
 MATERIAL_FILES = frozenset({"正文.md", "设定册.md", "简介.md", "试读.md"})
@@ -314,6 +324,19 @@ def _validate_inspection(archived, revision_for):
             _bad("稿件包体检单的检查依据或作者裁定不一致。")
         if review:
             _sources(review.evidence, chapters)
+        soft_policy = item.basis.get("soft_deviation_policy")
+        if soft_policy is not None and (item.check_id != "05" or soft_policy != SOFT_DEVIATION_POLICY):
+            _bad("稿件包体检单的软设定裁定口径无效。")
+        if not (soft_policy and item.status == "green"):
+            if review and review.soft_deviation_report_ids:
+                _bad("稿件包体检单的软设定裁定与原检查项不一致。")
+            continue
+        if not review or review.status != "green":
+            _bad("稿件包体检单缺少软设定偏离的作者通过裁定。")
+        try:
+            validate_soft_deviation_review(item.basis, review)
+        except DomainError as error:
+            _bad(f"稿件包体检单的软设定裁定无效。{error.message}")
     if report.basis_sha256 != _sha(
         [report.scope, report.scope_id, [item.basis_sha256 for item in report.items]]
     ):

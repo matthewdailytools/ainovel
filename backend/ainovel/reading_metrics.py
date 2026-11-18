@@ -20,11 +20,24 @@ MAX_BYTES = 8 * 1024 * 1024
 Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 Definition = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
 Count = Annotated[int, Field(strict=True, ge=0, le=1_000_000_000_000)]
+AccessMode = Literal["shared_opening", "reader_eligibility", "unknown"]
+ReportedAccessMode = Literal["shared_opening", "shared_opening_assumed", "reader_eligibility", "unknown"]
 
 
 class PublishedChapter(Input):
     chapter_id: Label
     published_at: AwareDatetime
+    opens_at: AwareDatetime | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def validate_opening(self):
+        if self.opens_at is not None and self.opens_at < self.published_at:
+            raise ValueError("章节可读时间不能早于发布时间。")
+        return self
+
+    @property
+    def opening(self):
+        return self.opens_at if self.opens_at is not None else self.published_at
 
 
 class PublicationChange(Input):
@@ -69,6 +82,12 @@ class ReaderEvent(Input):
     kind: Literal["read", "start", "finish"]
 
 
+class ReaderAccess(Input):
+    chapter_id: Label
+    reader_key: Label
+    available_from: AwareDatetime | None
+
+
 class Cohort(Input):
     started_from: AwareDatetime
     started_before: AwareDatetime
@@ -81,6 +100,8 @@ class EventsImport(ReadingImport):
     read_definition: Definition
     completion_definition: Definition | None = None
     cohort: Cohort | None = None
+    access_mode: AccessMode | None = None
+    reader_access: list[ReaderAccess] | None = Field(default=None, max_length=50_000)
     events: list[ReaderEvent] = Field(max_length=50_000)
 
     @model_validator(mode="after")
@@ -89,15 +110,28 @@ class EventsImport(ReadingImport):
             self.observed_from <= self.cohort.started_from < self.cohort.started_before <= self.observed_until
         ):
             raise ValueError("首读批次必须落在导入观察范围内。")
-        published = {chapter.chapter_id: chapter.published_at for chapter in self.chapters}
+        if self.reader_access is not None and self.access_mode not in {None, "reader_eligibility"}:
+            raise ValueError("提供读者资格时须使用 reader_eligibility 口径。")
+        opened = {chapter.chapter_id: chapter.opening for chapter in self.chapters}
+        access = {}
+        for row in self.reader_access or []:
+            key = (row.chapter_id, row.reader_key)
+            if row.chapter_id not in opened or key in access:
+                raise ValueError("同一章节与读者只能记录一条资格，章节须在发布清单中。")
+            if row.available_from is not None and row.available_from > self.extracted_at:
+                raise ValueError("读者有权时间不能晚于数据提取时间。")
+            access[key] = row.available_from
         for event in self.events:
-            if event.chapter_id not in published:
+            if event.chapter_id not in opened:
                 raise ValueError("阅读事件包含未列在发布清单的章节。")
             if (
                 not self.observed_from <= event.at <= self.observed_until
-                or event.at < published[event.chapter_id]
+                or event.at < opened[event.chapter_id]
             ):
-                raise ValueError("阅读事件时间超出观察范围或早于该章发布时间。")
+                raise ValueError("阅读事件时间超出观察范围或早于该章可读时间。")
+            key = (event.chapter_id, event.reader_key)
+            if key in access and (access[key] is None or event.at < access[key]):
+                raise ValueError("阅读事件与对应读者的目标章资格记录矛盾。")
         return self
 
 
@@ -122,16 +156,15 @@ class AggregateImport(ReadingImport):
 
     @model_validator(mode="after")
     def validate_counts(self):
-        published = {chapter.chapter_id: chapter.published_at for chapter in self.chapters}
+        opened = {chapter.chapter_id: chapter.opening for chapter in self.chapters}
         count_ids = {entry.chapter_id for entry in self.counts}
-        if len(count_ids) != len(self.counts) or not count_ids <= published.keys():
+        if len(count_ids) != len(self.counts) or not count_ids <= opened.keys():
             raise ValueError("汇总记录须使用已列出的章节标识，每章至多一条。")
         if any(
-            entry.unique_readers and published[entry.chapter_id] > self.observed_until
-            for entry in self.counts
+            entry.unique_readers and opened[entry.chapter_id] > self.observed_until for entry in self.counts
         ):
-            raise ValueError("观察期内尚未发布的章节不能有正数读者。")
-        if any(metric.chapter_id and metric.chapter_id not in published for metric in self.native_metrics):
+            raise ValueError("观察期内尚未开放的章节不能有正数读者。")
+        if any(metric.chapter_id and metric.chapter_id not in opened for metric in self.native_metrics):
             raise ValueError("平台原生指标引用了未列在发布清单的章节。")
         return self
 
@@ -139,7 +172,21 @@ class AggregateImport(ReadingImport):
 IMPORT = TypeAdapter(Annotated[EventsImport | AggregateImport, Field(discriminator="mode")])
 
 
-class Metric(Input):
+class AccessExclusions(Input):
+    excluded_ineligible: int | None = Field(default=None, exclude_if=lambda value: value is None)
+    excluded_access_unknown: int | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class ChannelFollow(AccessExclusions):
+    channel: str | None
+    numerator: int
+    denominator: int
+    rate: float | None
+    excluded_incomplete: int
+    excluded_prior_or_tied: int
+
+
+class Metric(AccessExclusions):
     kind: Literal["adjacent_follow", "first_chapter_retention", "chapter_completion", "aggregate_ratio"]
     chapter_id: str
     target_chapter_id: str | None = None
@@ -148,15 +195,9 @@ class Metric(Input):
     rate: float | None
     excluded_incomplete: int = 0
     excluded_prior_or_tied: int = 0
-
-
-class ChannelFollow(Input):
-    channel: str | None
-    numerator: int
-    denominator: int
-    rate: float | None
-    excluded_incomplete: int
-    excluded_prior_or_tied: int
+    channel_breakdown: list[ChannelFollow] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class ReadingDiagnosis(Input):
@@ -187,6 +228,7 @@ class ReadingReport(Input):
     read_definition: str
     completion_definition: str | None = None
     cohort: Cohort | None = None
+    access_mode: ReportedAccessMode | None = Field(default=None, exclude_if=lambda value: value is None)
     window_hours: int | None = None
     event_rows: int | None = None
     distinct_readers: int | None = None
@@ -214,7 +256,7 @@ class ReadingHistoryEntry(Input):
     extracted_at: AwareDatetime
 
 
-def _metric(kind, chapter_id, numerator, denominator, *, target=None, incomplete=0, prior=0):
+def _metric(kind, chapter_id, numerator, denominator, *, target=None, incomplete=0, prior=0, **coverage):
     return Metric(
         kind=kind,
         chapter_id=chapter_id,
@@ -224,6 +266,7 @@ def _metric(kind, chapter_id, numerator, denominator, *, target=None, incomplete
         rate=numerator / denominator if numerator is not None and denominator else None,
         excluded_incomplete=incomplete,
         excluded_prior_or_tied=prior,
+        **coverage,
     )
 
 
@@ -255,22 +298,41 @@ def _eligible(data, earliest):
     )
 
 
-def _transition(data, reads, source, target, kind, window, by_channel=None):
+def _access_counts(outcomes, has_coverage):
+    return (
+        {
+            "excluded_ineligible": outcomes["ineligible"],
+            "excluded_access_unknown": outcomes["unknown"],
+        }
+        if has_coverage
+        else {}
+    )
+
+
+def _transition(data, reads, source, target, kind, window, access, by_channel=None):
     source_id, target_id = source.chapter_id, target.chapter_id
     totals = Counter()
     for reader, first in reads[source_id].items():
         if not _eligible(data, first):
             continue
         destination = reads[target_id].get(reader)
-        start = max(first[0], target.published_at)
+        start = max(first[0], target.opening)
+        key = (target_id, reader)
         if destination and destination[0] <= first[0]:
             outcome = "prior"
-        elif data.observed_until - start < window:
-            outcome = "incomplete"
-        elif destination and destination[0] - start <= window:
-            outcome = "followed"
+        elif access is not None and key not in access:
+            outcome = "unknown"
+        elif access is not None and access[key] is None:
+            outcome = "ineligible"
         else:
-            outcome = "did_not_follow"
+            if access is not None:
+                start = max(start, access[key])
+            if data.observed_until - start < window:
+                outcome = "incomplete"
+            elif destination and destination[0] - start <= window:
+                outcome = "followed"
+            else:
+                outcome = "did_not_follow"
         totals[outcome] += 1
         if by_channel is not None:
             channels = first[1]
@@ -284,6 +346,12 @@ def _transition(data, reads, source, target, kind, window, by_channel=None):
         target=target_id,
         incomplete=totals["incomplete"],
         prior=totals["prior"],
+        channel_breakdown=(
+            _channel_breakdown(by_channel, has_coverage=True)
+            if access is not None and by_channel is not None
+            else None
+        ),
+        **_access_counts(totals, access is not None),
     )
 
 
@@ -304,7 +372,7 @@ def _completion(data, starts, finishes, chapter_id, window, covered):
     )
 
 
-def _channel_breakdown(counts):
+def _channel_breakdown(counts, *, has_coverage=False):
     rows = []
     for channel in sorted(counts, key=lambda name: (name is None, name or "")):
         outcomes = counts[channel]
@@ -318,13 +386,14 @@ def _channel_breakdown(counts):
                 rate=numerator / denominator if denominator else None,
                 excluded_incomplete=outcomes["incomplete"],
                 excluded_prior_or_tied=outcomes["prior"],
+                **_access_counts(outcomes, has_coverage),
             )
         )
     return rows
 
 
 def _diagnose(data, transitions, channel_counts):
-    measured = [row for row in transitions if row.rate is not None]
+    measured = [row for row in transitions if row.rate is not None and not row.excluded_access_unknown]
     if len(measured) < 2:
         return []
     times = {chapter.chapter_id: chapter.published_at for chapter in data.chapters}
@@ -355,7 +424,11 @@ def _diagnose(data, transitions, channel_counts):
             changes=sorted(
                 [*changes[row.chapter_id], *changes[row.target_chapter_id]], key=lambda change: change.at
             ),
-            channel_breakdown=_channel_breakdown(channel_counts[row.chapter_id, row.target_chapter_id]),
+            channel_breakdown=(
+                row.channel_breakdown
+                if row.channel_breakdown is not None
+                else _channel_breakdown(channel_counts[row.chapter_id, row.target_chapter_id])
+            ),
         )
         for row in sorted(measured, key=lambda row: row.rate)
         if row.rate < baseline
@@ -365,15 +438,31 @@ def _diagnose(data, transitions, channel_counts):
 def _event_report(data):
     reads, starts, finishes = _walk(data)
     window = timedelta(hours=data.window_hours)
+    mode = data.access_mode
+    if mode is None:
+        if data.reader_access is not None:
+            mode = "reader_eligibility"
+        elif any(
+            change.kind == "access" and change.at <= data.observed_until
+            for change in data.publication_changes
+        ):
+            mode = "unknown"
+        else:
+            mode = "shared_opening_assumed"
+    access = (
+        {(row.chapter_id, row.reader_key): row.available_from for row in data.reader_access or []}
+        if mode in {"reader_eligibility", "unknown"}
+        else None
+    )
     first = data.chapters[0]
     adjacent = []
     channel_counts = {}
     for left, right in zip(data.chapters, data.chapters[1:]):
         counts = defaultdict(Counter)
         channel_counts[left.chapter_id, right.chapter_id] = counts
-        adjacent.append(_transition(data, reads, left, right, "adjacent_follow", window, counts))
+        adjacent.append(_transition(data, reads, left, right, "adjacent_follow", window, access, counts))
     metrics = adjacent + [
-        _transition(data, reads, first, target, "first_chapter_retention", window)
+        _transition(data, reads, first, target, "first_chapter_retention", window, access)
         for target in data.chapters[1:]
     ]
     metrics += [
@@ -388,17 +477,26 @@ def _event_report(data):
         for chapter in data.chapters
     ]
     notes = [
-        "追读和留存以发行清单中的章节顺序计算。窗口从源章首个有效阅读与目标章发布时间较晚者起算。",
+        "追读和留存按发布清单的章节顺序计算。窗口从源章首读、目标章开放与读者获得资格三者较晚时点起算。",
         "按匿名读者键在同一发布版本去重。来源章首读时已有目标章阅读或两者时间相同的读者单列排除。",
-        "区分完整和未到期的观察窗口。发布时间代表导入数据中的共同可读时点，按读者限制访问时应先划分可访问样本。",
         "渠道按来源章首次有效阅读划分。限定单一渠道的样本排除同时来自多个渠道的首读。",
         "率为空表示无可计算数据。观察差异只能作为待验证的原因线索，须结合渠道、发布时间、收费或修订等变化判断。",
     ]
+    access_notes = {
+        "reader_eligibility": "由导入的读者资格确定观察机会。明确无权、资格未知与窗口未满分别计数，均不进入分母。",
+        "shared_opening": "数据源声明发布批次共同开放。所有读者的可读时间使用章节开放时间。",
+        "shared_opening_assumed": "源文件未提供读者资格且未记录可读范围变化，暂按章节共同开放假设统计。数据无法验证个别读者可读性。",
+        "unknown": "读者资格覆盖未知，源文件不足以建立完整观察机会。章间追读和留存的分母暂不可用。",
+    }
+    notes.insert(2, access_notes[mode])
+    if mode == "reader_eligibility" and any(row.excluded_access_unknown for row in adjacent):
+        notes.append("存在资格未知读者的章对保留可核对样本及渠道分解，暂不用于掉点基线。")
     if min(chapter.published_at for chapter in data.chapters) < data.observed_from:
         notes.append("观察期晚于部分章节发布，首读和既往阅读仅依据本次可见历史。")
     if data.completion_definition is None:
         notes.append("导入源未说明完读事件或阈值的定义。未提供完读事件的章节显示无可计算数据。")
     return {
+        "access_mode": mode,
         "event_rows": len(data.events),
         "distinct_readers": len({event.reader_key for event in data.events}),
         "event_channels": sorted({event.channel for event in data.events}),
@@ -432,7 +530,7 @@ def _aggregate_report(data):
 
 def calculate_report(data):
     derived = _event_report(data) if isinstance(data, EventsImport) else _aggregate_report(data)
-    return ReadingReport(**data.model_dump(exclude={"events"}), **derived)
+    return ReadingReport(**data.model_dump(exclude={"events", "reader_access", "access_mode"}), **derived)
 
 
 def parse_import(blob):

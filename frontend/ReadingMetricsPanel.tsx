@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { api, type Chapter } from './api'
 import type { components } from './api-schema'
 
-type PublishedChapter = { chapter_id: string; published_at: string }
+type PublishedChapter = { chapter_id: string; published_at: string; opens_at?: string | null }
 type Diagnosis = components['schemas']['ReadingDiagnosis']
-type ChannelFollow = components['schemas']['ChannelFollow']
+type AccessExclusions = { excluded_ineligible?: number | null; excluded_access_unknown?: number | null }
+type ChannelFollow = components['schemas']['ChannelFollow'] & AccessExclusions
 type MetricKind = 'adjacent_follow' | 'first_chapter_retention' | 'chapter_completion' | 'aggregate_ratio'
-type Metric = {
+type AccessMode = 'shared_opening' | 'shared_opening_assumed' | 'reader_eligibility' | 'unknown'
+type Metric = AccessExclusions & {
   kind: MetricKind
   chapter_id: string
   target_chapter_id: string | null
@@ -15,6 +17,7 @@ type Metric = {
   rate: number | null
   excluded_incomplete: number
   excluded_prior_or_tied: number
+  channel_breakdown?: ChannelFollow[] | null
 }
 type ReadingReport = {
   mode: 'events' | 'aggregate'
@@ -28,6 +31,7 @@ type ReadingReport = {
   completion_definition: string | null
   cohort: { started_from: string; started_before: string; channel: string | null } | null
   window_hours: number | null
+  access_mode?: AccessMode | null
   event_rows: number | null
   distinct_readers: number | null
   event_channels: string[]
@@ -59,9 +63,25 @@ const percent = new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFracti
 const number = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 6 })
 const missing = '无可计算数据'
 const changeName = { access: '可读范围', recommendation: '推荐', revision: '发布稿修订' }
+const accessLabel: Record<AccessMode, string> = {
+  shared_opening: '来源声明共同开放',
+  shared_opening_assumed: '按共同开放假设统计，读者资格未观测',
+  reader_eligibility: '按读者资格统计，资格未知和明确无权分别排除',
+  unknown: '读者资格覆盖未知，章间追读与留存无可计算数据',
+}
 
-function DiagnosisChannels({ title, rows }: { title: string; rows?: ChannelFollow[] | null }) {
+function eligibilityCells(row: AccessExclusions) {
+  return (
+    <>
+      <td>{row.excluded_ineligible == null ? '未记录' : number.format(row.excluded_ineligible)}</td>
+      <td>{row.excluded_access_unknown == null ? '未记录' : number.format(row.excluded_access_unknown)}</td>
+    </>
+  )
+}
+
+function ChannelBreakdown({ title, rows }: { title: string; rows?: ChannelFollow[] | null }) {
   if (!rows) return <p>该报告未保存渠道细分。</p>
+  const showEligibility = rows.some((row) => row.excluded_access_unknown != null)
   return (
     <>
       <p>按来源章首次有效阅读的渠道归属。同一首读时刻出现多个渠道的读者合计一次。</p>
@@ -76,6 +96,8 @@ function DiagnosisChannels({ title, rows }: { title: string; rows?: ChannelFollo
               <th scope="col">追读率</th>
               <th scope="col">观察窗口未满</th>
               <th scope="col">已先读或同时读到目标章</th>
+              {showEligibility && <th scope="col">明确无权</th>}
+              {showEligibility && <th scope="col">资格未知</th>}
             </tr>
           </thead>
           <tbody>
@@ -87,6 +109,7 @@ function DiagnosisChannels({ title, rows }: { title: string; rows?: ChannelFollo
                 <td>{row.rate === null ? missing : percent.format(row.rate)}</td>
                 <td>{number.format(row.excluded_incomplete)}</td>
                 <td>{number.format(row.excluded_prior_or_tied)}</td>
+                {showEligibility && eligibilityCells(row)}
               </tr>
             ))}
           </tbody>
@@ -107,11 +130,17 @@ function downloadTemplate(mode: ReadingReport['mode'], chapters: ChapterOption[]
     observed_from: '',
     observed_until: '',
     extracted_at: '',
-    chapters: ordered.map(({ id }) => ({ chapter_id: id, published_at: '' })),
+    chapters: ordered.map(({ id }) => ({ chapter_id: id, published_at: '', opens_at: null })),
     publication_changes: [],
     read_definition: '',
     ...(mode === 'events'
-      ? { window_hours: 168, completion_definition: null, events: [] }
+      ? {
+          window_hours: 168,
+          completion_definition: null,
+          access_mode: 'unknown',
+          reader_access: null,
+          events: [],
+        }
       : { counts: ordered.map(({ id }) => ({ chapter_id: id, unique_readers: null })), native_metrics: [] }),
   }
   const url = URL.createObjectURL(new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' }))
@@ -131,6 +160,12 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
   const chapterTitle = (id: string) => titleById.get(id) ?? id
   const rows = report.metrics.filter((metric) => metric.kind === kind)
   const showCoverage = report.mode === 'events'
+  const showEligibility = rows.some((row) => row.excluded_access_unknown != null)
+  const channelRows = rows.flatMap(({ chapter_id, target_chapter_id, channel_breakdown }) =>
+    target_chapter_id && channel_breakdown?.length
+      ? [{ from: chapter_id, to: target_chapter_id, channels: channel_breakdown }]
+      : [],
+  )
   return (
     <section aria-label="追读报告">
       <h3>
@@ -146,11 +181,14 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
         {report.window_hours !== null && ` · 跟踪窗口 ${report.window_hours} 小时`}
       </p>
       {showCoverage && (
-        <p>
-          {number.format(report.event_rows ?? 0)} 条事件 · {number.format(report.distinct_readers ?? 0)}{' '}
-          个读者键
-          {report.event_channels.length > 0 && ` · 渠道 ${report.event_channels.join('、')}`}
-        </p>
+        <>
+          <p>
+            {number.format(report.event_rows ?? 0)} 条事件 · {number.format(report.distinct_readers ?? 0)}{' '}
+            个读者键
+            {report.event_channels.length > 0 && ` · 渠道 ${report.event_channels.join('、')}`}
+          </p>
+          <p>{report.access_mode ? accessLabel[report.access_mode] : '此历史报告未记录读者资格口径。'}</p>
+        </>
       )}
       {report.cohort && (
         <p>
@@ -172,6 +210,12 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
             <li key={chapter.chapter_id}>
               {chapterTitle(chapter.chapter_id)} ·{' '}
               <time dateTime={chapter.published_at}>{chapter.published_at}</time>
+              {chapter.opens_at && (
+                <>
+                  {' · 开放于 '}
+                  <time dateTime={chapter.opens_at}>{chapter.opens_at}</time>
+                </>
+              )}
               {report.mode === 'aggregate' && ` · 独立读人数 ${counts.get(chapter.chapter_id) ?? '未提供'}`}
             </li>
           ))}
@@ -201,6 +245,8 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
                 <th scope="col">结果</th>
                 {showCoverage && <th scope="col">观察窗口未满</th>}
                 {showCoverage && kind !== 'chapter_completion' && <th scope="col">已先读或同时读到目标章</th>}
+                {showEligibility && <th scope="col">明确无权</th>}
+                {showEligibility && <th scope="col">资格未知</th>}
               </tr>
             </thead>
             <tbody>
@@ -223,6 +269,7 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
                   {showCoverage && kind !== 'chapter_completion' && (
                     <td>{number.format(row.excluded_prior_or_tied)}</td>
                   )}
+                  {showEligibility && eligibilityCells(row)}
                 </tr>
               ))}
             </tbody>
@@ -230,6 +277,18 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
         </div>
       ) : (
         <p role="status">{missing}</p>
+      )}
+      {!!channelRows.length && (
+        <details>
+          <summary>按章对查看首读渠道</summary>
+          {channelRows.map(({ from, to, channels }) => (
+            <ChannelBreakdown
+              key={from + '/' + to}
+              title={`${chapterTitle(from)} → ${chapterTitle(to)} · 渠道资格`}
+              rows={channels}
+            />
+          ))}
+        </details>
       )}
       {report.native_metrics.length > 0 && (
         <details>
@@ -266,7 +325,7 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
                   两章发布相隔 {number.format(item.publication_gap_hours)} 小时，本次可计算章对的中位间隔为{' '}
                   {number.format(item.median_publication_gap_hours)} 小时。
                 </p>
-                <DiagnosisChannels
+                <ChannelBreakdown
                   title={`${chapterTitle(item.chapter_id)} → ${chapterTitle(item.target_chapter_id)} · 首读渠道分解`}
                   rows={item.channel_breakdown}
                 />
@@ -386,6 +445,15 @@ export function ReadingMetricsPanel({ branchId, chapters }: { branchId: string; 
           <li>
             事件窗口默认 168 小时，可改 window_hours。限定首读批次时，填写 cohort 的 started_from 和
             started_before，也可填写 channel。若导出包含完读事件，请填写 completion_definition。
+          </li>
+          <li>
+            章节开放晚于发布时，填写 opens_at。按读者限制访问时，使用 reader_eligibility 作为 access_mode， 在
+            reader_access 中逐条填写 chapter_id、匿名 reader_key 和带时区的 available_from。值为 null 表示
+            观察期内明确无权，缺少该读者和章节的记录表示资格未知。时间值表示从该时点起在本次观察期内持续可读。
+          </li>
+          <li>
+            数据源能确认共同开放时，可使用 shared_opening 并将 reader_access 留空。资料不足时保留模板的
+            unknown 口径。访问变化说明不能用于推断逐个读者的资格。
           </li>
           <li>
             汇总文件的 counts 每条包含 chapter_id 和 unique_readers。空缺使用 null。原生指标可填

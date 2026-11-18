@@ -222,6 +222,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/workflow-inspections/{inspection_id}/source-context/{check_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Inspection Sources */
+    get: operations['inspection_sources_api_branches__branch_id__workflow_inspections__inspection_id__source_context__check_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/manuscript-package': {
     parameters: {
       query?: never
@@ -2876,6 +2893,8 @@ export interface components {
        * @default false
        */
       author_overrides_candidate: boolean
+      /** Soft Deviation Report Ids */
+      soft_deviation_report_ids?: string[]
       /** Candidate Result */
       candidate_result?: ('pass' | 'fail' | 'unknown') | null
     }
@@ -3037,6 +3056,8 @@ export interface components {
        * @default false
        */
       author_overrides_candidate: boolean
+      /** Soft Deviation Report Ids */
+      soft_deviation_report_ids?: string[]
     }
     /** BasisExcerpt */
     BasisExcerpt: {
@@ -3162,6 +3183,10 @@ export interface components {
     }
     /** ChannelFollow */
     ChannelFollow: {
+      /** Excluded Ineligible */
+      excluded_ineligible?: number | null
+      /** Excluded Access Unknown */
+      excluded_access_unknown?: number | null
       /** Channel */
       channel: string | null
       /** Numerator */
@@ -4057,6 +4082,45 @@ export interface components {
       /** Stale */
       stale: boolean
     }
+    /** InspectionEvidenceAddress */
+    InspectionEvidenceAddress: {
+      /** Index */
+      index: number
+      /** Label */
+      label: string
+      /** Chapter Id */
+      chapter_id: string
+      /** Chapter Title */
+      chapter_title: string
+      /** Revision */
+      revision: number
+      /** Start */
+      start: number
+      /** End */
+      end: number
+    }
+    /** InspectionEvidenceContext */
+    InspectionEvidenceContext: {
+      address: components['schemas']['InspectionEvidenceAddress']
+      /** Revision Id */
+      revision_id: string
+      /** Before */
+      before: string
+      /** Quote */
+      quote: string
+      /** After */
+      after: string
+    }
+    /** InspectionEvidencePage */
+    InspectionEvidencePage: {
+      /** Entries */
+      entries: components['schemas']['InspectionEvidenceAddress'][]
+      /** Total */
+      total: number
+      /** Previous Offset */
+      previous_offset?: number | null
+      context?: components['schemas']['InspectionEvidenceContext'] | null
+    }
     /** InspectionInput */
     InspectionInput: {
       /**
@@ -4199,6 +4263,10 @@ export interface components {
     }
     /** Metric */
     Metric: {
+      /** Excluded Ineligible */
+      excluded_ineligible?: number | null
+      /** Excluded Access Unknown */
+      excluded_access_unknown?: number | null
       /**
        * Kind
        * @enum {string}
@@ -4224,6 +4292,8 @@ export interface components {
        * @default 0
        */
       excluded_prior_or_tied: number
+      /** Channel Breakdown */
+      channel_breakdown?: components['schemas']['ChannelFollow'][] | null
     }
     /** ModuleInput */
     ModuleInput: {
@@ -4829,6 +4899,8 @@ export interface components {
        * Format: date-time
        */
       published_at: string
+      /** Opens At */
+      opens_at?: string | null
     }
     /** ReadingDiagnosis */
     ReadingDiagnosis: {
@@ -4932,6 +5004,8 @@ export interface components {
       /** Completion Definition */
       completion_definition?: string | null
       cohort?: components['schemas']['Cohort'] | null
+      /** Access Mode */
+      access_mode?: ('shared_opening' | 'shared_opening_assumed' | 'reader_eligibility' | 'unknown') | null
       /** Window Hours */
       window_hours?: number | null
       /** Event Rows */
@@ -6513,6 +6587,42 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  inspection_sources_api_branches__branch_id__workflow_inspections__inspection_id__source_context__check_id__get: {
+    parameters: {
+      query?: {
+        offset?: number
+        source_index?: number | null
+      }
+      header?: never
+      path: {
+        branch_id: string
+        inspection_id: string
+        check_id: '01' | '02' | '03' | '04' | '05' | '06' | '07' | '08' | '09' | '10'
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InspectionEvidencePage']
         }
       }
       /** @description Validation Error */

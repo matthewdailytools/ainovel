@@ -135,10 +135,12 @@ def create_app(settings=None, schema_only=False):
 
     register_reading_metrics_routes(app, domain)
     from .book_completion import register_routes as register_book_completion_routes
+    from .inspection_sources import register_routes as register_inspection_source_routes
     from .workflow_inspection import register_routes as register_workflow_inspection_routes
 
     register_book_completion_routes(app, domain)
     register_workflow_inspection_routes(app, domain)
+    register_inspection_source_routes(app, domain)
     from .chapter_restore import register_routes as register_chapter_restore_routes
     from .manuscript_backup import BACKUP_IMPORT_PATH, MAX_BACKUP_BYTES, size_error as backup_size_error
     from .manuscript_backup import register_routes as register_manuscript_backup_routes
