@@ -205,6 +205,106 @@ def drain(settings, model):
     asyncio.run(all_steps())
 
 
+@pytest.mark.parametrize("origin", ["manual", "idea", "settings", "outline"])
+def test_same_two_chapter_fixture_reaches_the_author_delivery_gate(client, domain, settings, origin):
+    work = domain.create_novel("遗铃 · 同一两章验收")
+    branch = work["branch_id"]
+    prefix = f"/api/branches/{branch}"
+    outline_route = prefix + "/outline-workspace"
+    model = Model(settings=settings)
+    source = {"idea": IDEA}
+
+    if origin != "idea":
+        save_project(client, branch, 0, BRIEF["ending"])
+        setting_id = setting_confirmation(client, branch)
+        chapters = [domain.create_chapter(branch, title) for title in ("试铃", "回铃")]
+        source = {"source_id": setting_id}
+        if origin != "settings":
+            outline = put_and_confirm(
+                client,
+                outline_route,
+                {"base_revision": 0, "confirmation_id": setting_id, "plan": plan(chapters, ["bell"])},
+            )
+            source = {"source_id": outline["confirmed"]["id"]}
+
+    if origin == "manual":
+        for chapter in chapters:
+            verify(
+                client.put(
+                    f"/api/chapters/{chapter['id']}",
+                    json={"base_revision": 0, "content": BODY},
+                )
+            )
+    else:
+        started = client.post(
+            prefix + "/seven-stage-runs",
+            json={
+                **source,
+                "start_from": origin,
+                "chapter_count": 2,
+                "account": "deepseek",
+                "budget_limit": 1,
+                "client_request_id": uid(),
+                "auto_confirm_planning": True,
+                "auto_adopt_body": True,
+            },
+        )
+        assert started.status_code == 202, started.text
+        run_id = started.json()["id"]
+        drain(settings, model)
+        run = domain.task(run_id)
+        assert run["status"] == "needs_review", run["error"]
+        assert run["result"]["seven_stage_run"]["stage"] == "inspection"
+
+    assert model.calls.count("writing.expand_plot") == (0 if origin == "manual" else 2)
+    assert ("conception.generate.project" in model.calls) is (origin == "idea")
+    assert ("生成四级大纲候选" in model.calls) is (origin in {"idea", "settings"})
+    assert verify(client.get(prefix + "/conception/project-brief"))["brief"]["ending"] == BRIEF["ending"]
+    confirmed = verify(client.get(outline_route))["confirmed"]
+    chapters = verify(client.get(prefix + "/chapters"))
+    assert len(chapters) == 2
+    assert [row["chapter_id"] for row in confirmed["plan"]["volumes"][0]["units"][0]["chapters"]] == [
+        row["id"] for row in chapters
+    ]
+    chapter = domain.chapter(chapters[0]["id"])
+    assert all(domain.chapter(row["id"])["content"] == BODY for row in chapters)
+
+    completion = prefix + "/book-completion"
+    decision = {
+        "basis_sha256": verify(client.get(completion))["basis_sha256"],
+        "read_note": "按同一两章工程样本逐项核对。",
+        "ending": {"note": BRIEF["ending"]},
+        "characters": {"note": "学徒完成两轮核对。"},
+        "promises": {"note": "核对两章样本记录。"},
+        "intro": "学徒凭铜铃寻找失散的师姐。",
+        "spoiler_scope": "opening",
+        "sample_chapter_ids": [chapter["id"]],
+        "materials_reviewed": True,
+    }
+    blocked = client.post(completion + "/confirm", json=decision)
+    assert blocked.status_code == 409 and blocked.json()["code"] == "completion_blocked"
+    inspection = prefix + "/workflow-inspections"
+    preview = verify(client.get(inspection))["preview"]
+    signed = client.post(
+        inspection,
+        json={
+            "basis_sha256": preview["basis_sha256"],
+            "author_reviews": [
+                author(row["check_id"], chapter) for row in preview["items"] if row["status"] == "pending"
+            ],
+            "length_targets": {"expected_chapters": 2},
+        },
+    )
+    assert signed.status_code == 201, signed.text
+    decision["basis_sha256"] = verify(client.get(completion))["basis_sha256"]
+    delivered = client.post(completion + "/confirm", json=decision)
+    assert delivered.status_code == 201, delivered.text
+    manifest = delivered.json()["manifest"]
+    assert manifest["inspection_id"] == signed.json()["id"]
+    assert len(manifest["chapters"]) == 2
+    assert set(manifest["files"]) == {"正文.md", "设定册.md", "简介.md", "试读.md"}
+
+
 def start(client, domain, story, origin, **extra):
     if origin == "idea":
         branch = domain.create_novel("遗铃自动试跑")["branch_id"]

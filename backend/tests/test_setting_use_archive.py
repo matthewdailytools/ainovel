@@ -11,6 +11,7 @@ from ainovel.manuscript_exchange import ManuscriptPackage
 from ainovel.setting_use_portability import slot_id, version_id
 from test_setting_use import QUOTE, TEXT, author_plan as author_plan_fixture, select, verified
 from test_story_sync import choose_current, linked_cloud, paired
+from test_work_snapshot import request_restore, route as snapshot_route
 
 author_plan = author_plan_fixture
 
@@ -384,3 +385,54 @@ def test_readopting_a_cloud_source_already_in_native_history_preserves_proof(
             target.save(chapter, current["chapter_revision"], "作者另起同一段的稿。")
             target.save(chapter, current["chapter_revision"] + 1, TEXT)
             assert verified(desktop.get(proof_url))["status"] == "outdated"
+
+
+def test_volume_restore_keeps_source_proofs_historical_and_fork_requires_own_confirmation(
+    client, domain, author_plan
+):
+    branch_id = author_plan["branch_id"]
+    first, second = author_plan["first"], author_plan["second"]
+    first_route, second_route = author_plan["route"], author_plan["other"]
+    first_proof = record(client, first_route, "first-volume-proof")
+    second_proof = record(client, second_route, "second-volume-proof", item_id="guard")
+    first_proof_id, second_proof_id = first_proof["version"]["id"], second_proof["version"]["id"]
+    assert first_proof["status"] == second_proof["status"] == "current"
+    snapshot = verified(
+        client.post(
+            snapshot_route(branch_id), json={"label": "卷一校对完成", "scope": "volume", "scope_id": "v1"}
+        ),
+        201,
+    )
+
+    fork = request_restore(client, branch_id, snapshot["id"], "new_branch", branch_name="卷一恢复副本")
+    fork_chapter = fork["chapters"][first["id"]]["id"]
+    assert fork_chapter != first["id"]
+    assert domain.chapter(fork_chapter)["content"] == TEXT
+    fork_route = f"/api/chapters/{fork_chapter}/setting-uses"
+    fork_view = verified(client.get(fork_route))
+    assert [item["item_id"] for item in fork_view["options"]] == ["pilot"]
+    assert fork_view["records"] == []
+    assert client.get(f"{fork_route}/{first_proof_id}").status_code == 404
+    assert verified(client.get(f"{first_route}/{first_proof_id}")) == first_proof
+    fork_proof = record(client, fork_route, "confirm-proof-new-branch")
+    assert fork_proof["status"] == "current"
+    assert fork_proof["version"]["id"] != first_proof_id
+    assert fork_proof["version"]["evidence"]["chapter_id"] == fork_chapter
+
+    changed = domain.save(first["id"], first["revision"], "他们打开木门，却没有见到渡船。")
+    returned = request_restore(client, branch_id, snapshot["id"])
+    restored_chapter = domain.chapter(first["id"])
+    assert restored_chapter["content"] == TEXT
+    assert restored_chapter["revision"] > changed["revision"]
+    assert returned["outline_id"] != author_plan["outline"]["id"]
+    assert domain.chapter(second["id"])["revision"] == second["revision"]
+    for endpoint, original in ((first_route, first_proof), (second_route, second_proof)):
+        history = verified(client.get(f"{endpoint}/{original['version']['id']}"))
+        assert history == {**original, "status": "outdated"}
+        assert history["quote"] == QUOTE
+    assert verified(client.get(f"{fork_route}/{fork_proof['version']['id']}")) == fork_proof
+    package = download(client, author_plan)
+    assert {row["version"]["id"] for row in package["setting_use_history"]["versions"]} == {
+        first_proof_id,
+        second_proof_id,
+    }

@@ -374,8 +374,8 @@ def _transition(data, reads, source, target, kind, window, access, by_channel=No
         incomplete=totals["incomplete"],
         prior=totals["prior"],
         channel_breakdown=(
-            _channel_breakdown(by_channel, has_coverage=True)
-            if access is not None and by_channel is not None
+            _channel_breakdown(by_channel, has_coverage=access is not None)
+            if by_channel is not None
             else None
         ),
         **_access_counts(totals, access is not None),
@@ -423,7 +423,7 @@ def _channel_breakdown(counts, *, has_coverage=False):
     return rows
 
 
-def _diagnose(data, transitions, channel_counts):
+def _diagnose(data, transitions):
     measured = [row for row in transitions if row.rate is not None and not row.excluded_access_unknown]
     if len(measured) < 2:
         return []
@@ -455,11 +455,7 @@ def _diagnose(data, transitions, channel_counts):
             changes=sorted(
                 [*changes[row.chapter_id], *changes[row.target_chapter_id]], key=lambda change: change.at
             ),
-            channel_breakdown=(
-                row.channel_breakdown
-                if row.channel_breakdown is not None
-                else _channel_breakdown(channel_counts[row.chapter_id, row.target_chapter_id])
-            ),
+            channel_breakdown=row.channel_breakdown,
         )
         for row in sorted(measured, key=lambda row: row.rate)
         if row.rate < baseline
@@ -486,12 +482,10 @@ def _event_report(data):
         else None
     )
     first = data.chapters[0]
-    adjacent = []
-    channel_counts = {}
-    for left, right in zip(data.chapters, data.chapters[1:]):
-        counts = defaultdict(Counter)
-        channel_counts[left.chapter_id, right.chapter_id] = counts
-        adjacent.append(_transition(data, reads, left, right, "adjacent_follow", window, access, counts))
+    adjacent = [
+        _transition(data, reads, left, right, "adjacent_follow", window, access, defaultdict(Counter))
+        for left, right in zip(data.chapters, data.chapters[1:])
+    ]
     metrics = adjacent + [
         _transition(data, reads, first, target, "first_chapter_retention", window, access)
         for target in data.chapters[1:]
@@ -543,7 +537,7 @@ def _event_report(data):
         "event_channels": sorted({event.channel for event in data.events}),
         "completion_coverage": completion_coverage,
         "metrics": metrics,
-        "diagnostics": _diagnose(data, adjacent, channel_counts),
+        "diagnostics": _diagnose(data, adjacent),
         "notes": notes,
     }
 

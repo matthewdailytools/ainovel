@@ -108,7 +108,28 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
   await expect(sample.locator('pre')).toContainText('学徒捡起铜铃')
   await expect(sample.locator('pre')).not.toContainText('师姐归来')
   await expect(confirmButton).toBeDisabled()
+  const proposed = panel.getByRole('list', { name: '本次交付预览的六项判定', exact: true })
+  await expect(proposed.getByText('待核对', { exact: true })).toHaveCount(1)
+  let releaseReview = () => {}
+  const reviewGate = new Promise<void>((resolve) => {
+    releaseReview = resolve
+  })
+  await page.route(
+    `**${branch}/book-completion/preview`,
+    async (route) => {
+      expect(route.request().postDataJSON().materials_reviewed).toBe(true)
+      await reviewGate
+      await route.continue()
+    },
+    { times: 1 },
+  )
   await review.check()
+  await expect(materials.getByRole('status')).toContainText('正在核对六项完本判定')
+  await expect(confirmButton).toBeDisabled()
+  await expect(proposed.getByText('待核对', { exact: true })).toHaveCount(1)
+  releaseReview()
+  await expect(proposed.getByText('绿 · 通过', { exact: true })).toHaveCount(6)
+  await expect(confirmButton).toBeEnabled()
   const confirmed = page.waitForResponse((response) => response.url().endsWith('/book-completion/confirm'))
   await confirmButton.click()
   const response = await confirmed
@@ -117,6 +138,10 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
     { chapter_id: chapter.id, revision: chapter.revision, start: 0, end: text.length, quote: text },
   ])
   await expect(panel.getByRole('heading', { name: '当前版本已完结' })).toBeVisible()
+  await panel.getByRole('button', { name: '核对最新完本依据' }).click()
+  const official = panel.getByRole('list', { name: '当前六项完本判定', exact: true })
+  await expect(official.getByText('绿 · 通过', { exact: true })).toHaveCount(6)
+  await expect(panel.getByRole('list', { name: '本次拟确认的六项完本判定', exact: true })).toHaveCount(0)
   const download = panel.getByRole('link', { name: '下载交付包', exact: true })
   const url = (await download.getAttribute('href'))!
   const packageResponse = await page.request.get(url)
@@ -132,6 +157,11 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
   expect(changed.ok(), await changed.text()).toBe(true)
   await panel.getByRole('button', { name: '核对最新完本依据' }).click()
   await expect(panel.getByRole('heading', { name: '历史完结记录 · 当前依据已变化' })).toBeVisible()
+  await expect(official).toHaveCount(0)
+  await expect(panel.getByRole('list', { name: '本次拟确认的六项完本判定', exact: true })).toBeVisible()
+  await panel.getByText('完结判定与文件校验值', { exact: true }).click()
+  const historical = panel.getByRole('list', { name: '历史六项完本判定', exact: true })
+  await expect(historical.getByText('绿 · 通过', { exact: true })).toHaveCount(6)
   await expect(panel.getByRole('link', { name: '下载历史交付包' })).toHaveAttribute('href', url)
   expect((await page.request.get(url)).ok()).toBe(true)
 
@@ -198,7 +228,7 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
 
   if (process.env.AINOVEL_SYNC_E2E === '1') {
     await context.setOffline(false)
-    const cloud = 'http://127.0.0.1:8888'
+    const cloud = process.env.AINOVEL_TEST_SYNC_URL ?? 'http://127.0.0.1:8888'
     async function grant(device_id: string) {
       const response = await page.request.post(`${cloud}/api/sync/works/${novel.branch_id}/devices`, {
         headers: { Authorization: 'Bearer e2e-test-only-provisioning-token' },
@@ -219,7 +249,7 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
     const fresh = await browser.newContext()
     try {
       const web = await fresh.newPage()
-      await web.goto('http://127.0.0.1:8877/offline/')
+      await web.goto(new URL('/offline/', page.url()).href)
       const initial = structuredClone(pack)
       delete initial.workflow_history
       delete initial.evidence

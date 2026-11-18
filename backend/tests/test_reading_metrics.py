@@ -258,6 +258,29 @@ def test_diagnosis_attributes_each_reader_to_one_source_channel_and_keeps_exclus
     assert report == calculate_report(parse({**data, "events": list(reversed(data["events"]))}))
 
 
+@pytest.mark.parametrize("access_mode", [None, "shared_opening"])
+def test_single_shared_opening_pair_shows_channels_without_a_drop_off_baseline(access_mode):
+    data = {
+        **source("events", ("one", "two")),
+        "window_hours": 24,
+        "access_mode": access_mode,
+        "events": [
+            event("one", "a", 1, channel="direct"),
+            event("one", "b", 1, channel="search"),
+            event("two", "a", 5, channel="search"),
+        ],
+    }
+    report = calculate_report(parse(data))
+    assert report.access_mode == (access_mode or "shared_opening_assumed")
+    assert report.diagnostics == []
+    pair = select(report, "adjacent_follow", "one", "two")
+    assert (pair.numerator, pair.denominator) == (1, 2)
+    assert [
+        (row.channel, row.numerator, row.denominator, row.excluded_access_unknown)
+        for row in pair.channel_breakdown
+    ] == [("direct", 1, 1, None), ("search", 0, 1, None)]
+
+
 def test_saved_diagnosis_can_distinguish_preexisting_reports_without_channel_breakdown(client, domain, story):
     branch = story["branch_id"]
     first = story["chapter_id"]

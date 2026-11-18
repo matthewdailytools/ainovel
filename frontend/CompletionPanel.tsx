@@ -55,9 +55,9 @@ const freshClosures = (): Record<ClosureKey, Closure> => ({
   promises: { note: '', sources: [] },
 })
 
-function CheckList({ checks }: { checks: Check[] }) {
+function CheckList({ checks, label }: { checks: Check[]; label: string }) {
   return (
-    <ol className="fact-grid" aria-label="六项完本判定">
+    <ol className="fact-grid" aria-label={label}>
       {checks.map((check) => (
         <li className="fact" key={check.id}>
           <div className="section-title">
@@ -204,10 +204,10 @@ export function CompletionPanel({
   const [intro, setIntro] = useState('')
   const [spoilerScope, setSpoilerScope] = useState<'opening' | 'whole'>('opening')
   const [openingLength, setOpeningLength] = useState(1)
-  const [preview, setPreview] = useState<{ signature: string; result: Preview }>()
+  const [preview, setPreview] = useState<{ signature: string; result: Preview; reviewedChecks?: Check[] }>()
   const [reviewed, setReviewed] = useState(false)
   const [reload, setReload] = useState(0)
-  const [busy, setBusy] = useState<'preview' | 'confirm'>()
+  const [busy, setBusy] = useState<'preview' | 'review' | 'confirm'>()
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [preparation, setPreparation] = useState<Preparation | null>(null)
@@ -280,13 +280,16 @@ export function CompletionPanel({
     ...(preparationId ? { preparation_id: preparationId } : {}),
   }
   const signature = JSON.stringify(body)
-  const readyPreview = preview?.signature === signature ? preview.result : undefined
-  const checks = readyPreview?.checks ?? current?.checks ?? []
+  const matchingPreview = preview?.signature === signature ? preview : undefined
+  const readyPreview = matchingPreview?.result
+  const reviewedChecks = reviewed && busy !== 'review' ? matchingPreview?.reviewedChecks : undefined
+  const checks = reviewedChecks ?? readyPreview?.checks ?? current?.checks ?? []
+  const draftLabel = readyPreview ? '本次交付预览的六项判定' : '本次拟确认的六项完本判定'
   const history = current?.history?.filter((entry) => entry.id !== current.latest?.id) ?? []
   const canConfirm = !!(
     readyPreview?.materials &&
-    reviewed &&
-    readyPreview.checks.every((check) => check.id === 'delivery' || check.status === 'green')
+    reviewedChecks?.length === 6 &&
+    reviewedChecks.every((check) => check.status === 'green')
   )
 
   function editClosure(id: ClosureKey, transform: (closure: Closure) => Closure) {
@@ -341,26 +344,32 @@ export function CompletionPanel({
     setMessage('已将 AI 建议载入空白项。请按原文核对并记录通读。')
   }
 
-  async function submit(action: 'preview' | 'confirm') {
+  async function submit(action: 'preview' | 'review' | 'confirm') {
     if (!current || !chapters || busy || (action === 'confirm' && !canConfirm)) return
     setBusy(action)
     setError('')
     setMessage('')
     try {
-      if (action === 'preview') {
-        setReviewed(false)
+      if (action !== 'confirm') {
+        setReviewed(action === 'review')
         const result = await api<Preview>(`${endpoint}/preview`, 'POST', {
           ...body,
-          materials_reviewed: false,
+          materials_reviewed: action === 'review',
         })
-        if (alive.current) setPreview({ signature, result })
+        if (!alive.current) return
+        if (action === 'review' && matchingPreview && result.materials) {
+          setPreview({ ...matchingPreview, reviewedChecks: result.checks })
+        } else {
+          setPreview({ signature, result })
+          setReviewed(false)
+        }
       } else {
         const result = await api<Completion>(`${endpoint}/confirm`, 'POST', {
           ...body,
           materials_reviewed: true,
         })
         if (!alive.current) return
-        setCurrent({ ...current, latest: result, checks: result.checks })
+        setCurrent({ ...current, latest: result })
         setReload((count) => count + 1)
         setPreview(undefined)
         setReviewed(false)
@@ -376,6 +385,7 @@ export function CompletionPanel({
       if (!alive.current) return
       setError(failure instanceof Error ? failure.message : '完本操作失败，请重试。')
       notify(failure)
+      if (action === 'review') setReviewed(false)
       if (failure instanceof ApiError && failure.status === 409) {
         setReviewed(false)
         setReload((count) => count + 1)
@@ -408,9 +418,10 @@ export function CompletionPanel({
           <a className="button" href={`/api${endpoint}/${encodeURIComponent(current.latest.id)}/export`}>
             下载{current.latest.current ? '' : '历史'}交付包
           </a>
+          {current.latest.current && <CheckList checks={current.latest.checks} label="当前六项完本判定" />}
           <details>
             <summary>完结判定与文件校验值</summary>
-            <CheckList checks={current.latest.checks} />
+            {!current.latest.current && <CheckList checks={current.latest.checks} label="历史六项完本判定" />}
             <ManifestList manifest={current.latest.manifest} />
           </details>
         </section>
@@ -437,7 +448,12 @@ export function CompletionPanel({
           </ul>
         </details>
       )}
-      {!!checks.length && <CheckList checks={checks} />}
+      {(readyPreview || !current?.latest?.current) && !!checks.length && (
+        <>
+          <h3>{draftLabel}</h3>
+          <CheckList checks={checks} label={draftLabel} />
+        </>
+      )}
       <details>
         <summary>AI 准备完本建议</summary>
         <p>所选试读范围用于起草简介。收束核对会读取当前正文或体检已有的选区。</p>
@@ -610,10 +626,14 @@ export function CompletionPanel({
               type="checkbox"
               checked={reviewed}
               disabled={!!busy}
-              onChange={(event) => setReviewed(event.target.checked)}
+              onChange={(event) => {
+                if (event.target.checked) void submit('review')
+                else setReviewed(false)
+              }}
             />
             已核对这次交付材料与剧透范围
           </label>
+          {busy === 'review' && <p role="status">正在核对六项完本判定…</p>}
           <button
             className="primary"
             type="button"

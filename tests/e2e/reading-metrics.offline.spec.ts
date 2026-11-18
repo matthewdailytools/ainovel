@@ -56,7 +56,12 @@ test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范�
       JSON.stringify({
         ...common,
         mode: 'events',
-        events: [event(0, '甲', '01'), event(0, '甲', '02'), event(0, '乙', '01'), event(1, '甲', '11')],
+        events: [
+          { ...event(0, '甲', '01'), channel: '推荐' },
+          event(0, '甲', '02'),
+          { ...event(0, '乙', '01'), channel: '搜索' },
+          event(1, '甲', '11'),
+        ],
       }),
     ),
   })
@@ -69,6 +74,24 @@ test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范�
     followTable.getByRole('row', { name: /拾铃 → 入门/ }).getByRole('cell', { name: '50%' }),
   ).toBeVisible()
   await expect(followTable.getByRole('row', { name: /入门 → 回声/ }).getByText('无可计算数据')).toBeVisible()
+  await expect(panel.getByRole('region', { name: '追读待验证线索' })).toHaveCount(0)
+  await panel.getByText('按章对查看首读渠道', { exact: true }).press('Enter')
+  const sourceChannels = panel.getByRole('table', { name: '拾铃 → 入门 · 渠道资格', exact: true })
+  await expect(sourceChannels.getByRole('row', { name: /^推荐/ }).getByRole('cell')).toHaveText([
+    '1',
+    '1',
+    '100%',
+    '0',
+    '0',
+  ])
+  await expect(sourceChannels.getByRole('row', { name: /^搜索/ }).getByRole('cell')).toHaveText([
+    '0',
+    '1',
+    '0%',
+    '0',
+    '0',
+  ])
+  await expect(sourceChannels.getByRole('columnheader', { name: '资格未知' })).toHaveCount(0)
   await panel.getByRole('combobox', { name: '查看指标' }).selectOption('chapter_completion')
   await expect(panel.getByRole('table', { name: '单章完读率' })).toBeVisible()
 
