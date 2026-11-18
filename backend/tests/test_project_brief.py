@@ -146,6 +146,12 @@ def test_project_revision_preview_tracks_actual_downstream_records_and_rechecks_
             json={
                 "basis_sha256": verify(client.get(completion_path))["basis_sha256"],
                 "read_note": "已通读当前稿。",
+                "author_decisions": {
+                    "reading": "verified",
+                    "ending": "verified",
+                    "characters": "verified",
+                    "promises": "verified",
+                },
                 "ending": {"note": "归还铜铃。"},
                 "characters": {"note": "学徒和师姐重逢。"},
                 "promises": {"note": "信物有交代。"},

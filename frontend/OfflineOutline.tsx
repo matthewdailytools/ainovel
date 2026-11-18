@@ -418,7 +418,7 @@ export function OfflineOutline({
             ' · 采用依据已有变化'}
         </p>
       )}
-      {current && <OfflineOutlineSettingLedger projectId={projectId} refreshToken={refreshToken} />}
+      {data && <OfflineOutlineSettingLedger projectId={projectId} data={data} refreshToken={refreshToken} />}
       {data && local.loaded && !local.recovery && !draft && (
         <button type="button" disabled={disabled || busy || !chapters.length} onClick={start}>
           {current ? '编辑当前大纲' : '新建大纲'}

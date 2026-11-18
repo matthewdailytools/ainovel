@@ -144,6 +144,137 @@ async function openOfflineEvidence(page: Page, novelId: string, chapterTitle: st
   return evidence
 }
 
+test('大纲台账区分已采用的各类设定、章纲计划、正文证据及断网可读的历史', async ({ page, browser }) => {
+  const { novel, branch, chapter, original, headers, readPlan } = await authorSettingPlan(
+    page,
+    '设定台账进度',
+    true,
+  )
+  const openOutline = () => page.getByRole('button', { name: '大纲与台账', exact: true }).press('Enter')
+  const world = page.getByRole('region', { name: '赤钥交接规则 · 世界设定', exact: true })
+  const keeper = page.getByRole('region', { name: '守铃人阿陶 · 人物', exact: true })
+  const pending = (target: Page) => target.getByRole('region', { name: '未采用规则 · 世界设定', exact: true })
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+  await openOutline()
+  await expect(world.getByText('未安排', { exact: true })).toBeVisible()
+  await expect(keeper.getByRole('listitem')).toContainText('已计划 · 待正文证据')
+  await expect(pending(page)).toHaveCount(0)
+
+  await page.getByRole('button', { name: '写作', exact: true }).press('Enter')
+  const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
+  await expect(editor).toHaveText(original)
+  const details = page.getByText('设定的正文使用证据', { exact: true })
+  await details.press('Enter')
+  const panel = details.locator('..')
+  await panel.getByRole('combobox', { name: '本章引用的设定', exact: true }).selectOption('keeper')
+  await editor.press('Control+End')
+  await editor.press('Control+Shift+Home')
+  await panel.getByRole('button', { name: '确认该选区为正文证据', exact: true }).press('Enter')
+  await expect(panel.getByRole('status')).toContainText('已确认当前正文使用该设定。')
+  await openOutline()
+  await expect(keeper.getByRole('listitem')).toContainText('已计划 · 作者已确认正文使用')
+
+  const route = branch + '/outline-workspace'
+  const old = await readPlan()
+  const plan = old.confirmed.plan
+  plan.volumes[0].units[0].chapters[0].setting_ids = ['key-rule']
+  const updated = await accepted(
+    await page.request.put(route, {
+      headers,
+      data: {
+        base_revision: old.draft.revision,
+        confirmation_id: old.confirmed.setting_basis.confirmation_id,
+        plan,
+      },
+    }),
+  )
+  await accepted(
+    await page.request.post(route + '/confirm', { headers, data: { base_revision: updated.draft.revision } }),
+  )
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+  await openOutline()
+  await expect(world.getByRole('listitem')).toContainText('已计划 · 待正文证据')
+  await expect(keeper.getByText('未安排', { exact: true })).toBeVisible()
+  await expect(keeper.getByRole('listitem')).toContainText('旧章引用 · 历史正文证据 · 待复核')
+  await keeper.getByText('查看正文证据', { exact: true }).press('Enter')
+  await expect(keeper.locator('blockquote')).toHaveText(original)
+
+  async function verifyIndependent(archive: unknown, worldEvidence: boolean) {
+    const independent = await browser.newContext({ viewport: { width: 320, height: 790 } })
+    try {
+      const web = await independent.newPage()
+      await web.goto(new URL('/offline/', page.url()).href)
+      await expect(web.getByText('离线页面就绪', { exact: true })).toBeVisible()
+      await expect.poll(() => web.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+      await independent.setOffline(true)
+      await web.reload()
+      await web.getByLabel('导入新离线作品').setInputFiles({
+        name: '设定台账备份.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(JSON.stringify(archive)),
+      })
+      await web.getByRole('combobox', { name: '离线作品', exact: true }).selectOption(novel.id)
+      const board = web.getByLabel('离线大纲台')
+      await board.getByText('大纲台', { exact: true }).press('Enter')
+      await board.getByText('设定台账', { exact: true }).press('Enter')
+      const restoredKeeper = board.getByRole('region', { name: '守铃人阿陶 · 人物', exact: true })
+      const restoredWorld = board.getByRole('region', { name: '赤钥交接规则 · 世界设定', exact: true })
+      await expect(restoredWorld.getByRole('listitem')).toContainText(
+        worldEvidence ? '已计划 · 已有正文对账证据' : '已计划 · 对账报告未在此端取得',
+      )
+      if (worldEvidence) {
+        await restoredWorld.getByText('查看正文证据', { exact: true }).press('Enter')
+        await expect(restoredWorld.locator('blockquote')).toBeVisible()
+        await expect(restoredWorld.locator('blockquote')).toHaveText(original)
+      }
+      await expect(pending(web)).toHaveCount(0)
+      await expect(restoredKeeper.getByText('未安排', { exact: true })).toBeVisible()
+      await expect(restoredKeeper.getByRole('listitem')).toContainText('旧章引用 · 历史正文证据 · 待复核')
+      await restoredKeeper.getByText('查看正文证据', { exact: true }).press('Enter')
+      await expect(restoredKeeper.locator('blockquote')).toBeVisible()
+      await expect(restoredKeeper.locator('blockquote')).toHaveText(original)
+    } finally {
+      await independent.close()
+    }
+  }
+
+  const backup = () => page.request.get(branch + '/manuscript-package').then(accepted)
+  await verifyIndependent(await backup(), false)
+  const savedChapter = await accepted(await page.request.get(`/api/chapters/${chapter.id}`))
+  const module = await accepted(
+    await page.request.post('/api/modules', {
+      headers,
+      data: {
+        account: 'offline',
+        action: 'review.chapter',
+        novel_id: novel.id,
+        branch_id: novel.branch_id,
+        chapter_id: chapter.id,
+        base_revision: savedChapter.revision,
+        conception_snapshot_id: old.confirmed.setting_basis.confirmation_id,
+        setting_item_id: 'key-rule',
+        instruction: '核对赤钥是否由两人当面交接。',
+      },
+    }),
+  )
+  await expect
+    .poll(() =>
+      page.request
+        .get(`/api/tasks/${module.id}`)
+        .then(accepted)
+        .then((task) => task.status),
+    )
+    .toBe('succeeded')
+  const inspection = branch + '/workflow-inspections'
+  const { preview } = await accepted(await page.request.get(inspection))
+  await accepted(
+    await page.request.post(inspection, { headers, data: { basis_sha256: preview.basis_sha256 } }),
+  )
+  await verifyIndependent(await backup(), true)
+})
+
 test('桌面与独立 Web 双向同步设定使用证据，断网可从备份恢复撤回和原句', async ({ page, browser }) => {
   test.skip(process.env.AINOVEL_SYNC_E2E !== '1', '使用隔离云账本检验双向正式采用')
   const { novel, chapter, original, headers, branch, readPlan } = await authorSettingPlan(
@@ -218,8 +349,9 @@ test('桌面与独立 Web 双向同步设定使用证据，断网可从备份恢
     const board = await openOfflineEvidence(web, novel.id, chapter.title)
     const outline = web.getByLabel('离线大纲台')
     await outline.getByText('大纲台', { exact: true }).press('Enter')
-    await outline.getByText('非世界设定使用台账', { exact: true }).press('Enter')
-    await expect(outline.getByText('归还赤钥 · 守铃人阿陶 · 仅计划采用', { exact: true })).toBeVisible()
+    await outline.getByText('设定台账', { exact: true }).press('Enter')
+    const ledger = outline.getByRole('region', { name: '守铃人阿陶 · 人物', exact: true })
+    await expect(ledger.getByRole('listitem')).toContainText('已计划 · 待正文证据')
 
     await web.getByText('作品云同步', { exact: true }).click()
     await web.getByLabel('同步服务地址').fill(cloud)
@@ -231,9 +363,9 @@ test('桌面与独立 Web 双向同步设定使用证据，断网可从备份恢
     const fromDesktop = board.getByText('守铃人阿陶 · 当前正文证据', { exact: true })
     await fromDesktop.press('Enter')
     await expect(fromDesktop.locator('..').locator('blockquote')).toHaveText(original)
-    const ledger = outline.getByText('归还赤钥 · 守铃人阿陶 · 当前正文证据', { exact: true })
-    await ledger.press('Enter')
-    await expect(ledger.locator('..').locator('blockquote')).toHaveText(original)
+    await expect(ledger.getByRole('listitem')).toContainText('已计划 · 作者已确认正文使用')
+    await ledger.getByText('查看正文证据', { exact: true }).press('Enter')
+    await expect(ledger.locator('blockquote')).toHaveText(original)
     await expect(sync).toBeEnabled()
     await context.setOffline(true)
 

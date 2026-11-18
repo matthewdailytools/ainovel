@@ -340,6 +340,49 @@ export function createSettingUseOfflineStore(access: Access) {
     )
   }
 
+  async function readLocalOutlineSettingEvidence(projectId: string) {
+    const snapshot = await transact([...settingUseReadStores], 'readonly', async (tx) => {
+      const branch = (await access.readProject(tx, projectId)).branch.id
+      const [context, heads, versions] = await Promise.all([
+        activeContext(tx, branch),
+        byBranch<Head>(tx, 'settingUseHeads', branch),
+        byBranch<Stored>(tx, 'settingUseVersions', branch),
+      ])
+      const selected = new Set(heads.map(({ versionId }) => versionId))
+      const located = new Map<string, { historical: Stored; selected?: Stored }>()
+      for (const row of versions.sort((a, b) => b.entry.created - a.entry.created)) {
+        const { version } = row.entry
+        if (version.action !== 'confirmed') continue
+        const key = compactJSON([row.chapterId, version.item_id])
+        const existing = located.get(key) ?? { historical: row }
+        if (
+          selected.has(version.id) &&
+          version.settings_version_id === context?.settings.id &&
+          version.outline_version_id === context.outline.id
+        )
+          existing.selected = row
+        located.set(key, existing)
+      }
+      return Promise.all(
+        [...located.values()].map(async ({ selected, historical }) => {
+          const row = selected ?? historical
+          const [proof, live, location] = await Promise.all([
+            readPresentation(tx, branch, row),
+            currentRevision(tx, branch, row.chapterId),
+            chapter(tx, row.chapterId),
+          ])
+          return { proof, live, location, context, isHead: !!selected }
+        }),
+      )
+    })
+    return Promise.all(
+      snapshot.map(async ({ proof, live, location, context, isHead }) => ({
+        chapterTitle: location?.title ?? proof.entry.version.evidence.chapter_id,
+        ...(await present(proof, isHead ? proof.entry.version.id : undefined, context, live)),
+      })),
+    )
+  }
+
   async function gather(tx: Tx, branch: string, version: SettingUseVersion) {
     const [parent, revision, settings, outline] = await Promise.all([
       version.parent_id ? entry(tx, branch, version.parent_id) : undefined,
@@ -582,6 +625,7 @@ export function createSettingUseOfflineStore(access: Access) {
   return {
     readLocalSettingUse,
     readLocalOutlineSettingUse,
+    readLocalOutlineSettingEvidence,
     confirmLocalSettingUse,
     withdrawLocalSettingUse,
     readCurrentChapterUsesTx,

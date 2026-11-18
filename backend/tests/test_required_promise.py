@@ -120,6 +120,12 @@ def test_author_required_promise_controls_inspection_completion_and_portable_his
     data = {
         "basis_sha256": read(client, completion)["basis_sha256"],
         "read_note": "作者通读两个保存章节。",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "verified",
+        },
         "ending": {"note": "铜铃已归还。", "sources": [source(last)]},
         "characters": {"note": "学徒与师姐重逢。", "sources": [source(last)]},
         "promises": {"note": "按窗口兑现了铜铃承诺。", "sources": [source(last)]},

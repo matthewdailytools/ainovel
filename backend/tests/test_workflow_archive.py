@@ -72,6 +72,12 @@ def test_restored_workflow_proofs_remain_historical_until_native_author_confirma
     decision = {
         "basis_sha256": client.get(completion).json()["basis_sha256"],
         "read_note": "作者已通读保存稿。",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "verified",
+        },
         "ending": {"note": "归还铜铃解决主冲突。", "sources": [source(chapter)]},
         "characters": {"note": "师姐与学徒重逢。"},
         "promises": {"note": "疑问都在末章交待。"},

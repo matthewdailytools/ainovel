@@ -3,7 +3,7 @@ import { api, ApiError, type Chapter } from './api'
 import type { components } from './api-schema'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { InspectionSemanticPanel, type InspectionSuggestion } from './InspectionSemanticPanel'
-import { InspectionSources, InspectionStateConflicts } from './InspectionSources'
+import { InspectionPacingEvidence, InspectionSources, InspectionStateConflicts } from './InspectionSources'
 import {
   coversInspectionExcerpt,
   maxAuthorEvidence,
@@ -345,6 +345,7 @@ function CheckList({
             <CheckCardReferences basis={item.basis} chapters={chapters} branchId={branchId} />
           )}
           {item.check_id === '03' && <InspectionStateConflicts basis={item.basis} />}
+          {item.check_id === '10' && <InspectionPacingEvidence basis={item.basis} />}
           {reportId && canOpenSources(item) && (
             <InspectionSources
               route={`/branches/${encodeURIComponent(branchId)}/workflow-inspections/${encodeURIComponent(reportId)}/source-context/${item.check_id}`}

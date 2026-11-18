@@ -1,14 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError, type Chapter } from './api'
 import type { Notify } from './App'
+import {
+  closureFields,
+  CompletionReviewEvidence,
+  type AuthorDecisions,
+  type Closure,
+  type ClosureDecision,
+  type ClosureKey,
+  type CompletionReview,
+} from './CompletionReviewEvidence'
 import { useLeaveGuard } from './leaveGuard'
 
 type ChapterOption = Pick<Chapter, 'id' | 'title' | 'position'>
 type Source = { chapter_id: string; revision: number; start: number; end: number; quote: string }
-type Closure = { note: string; sources: Source[] }
 type Check = { id: string; title: string; status: 'green' | 'pending' | 'red'; detail: string }
-type Manifest = { files?: Record<string, string> }
-type Completion = { id: string; current: boolean; checks: Check[]; manifest: Manifest }
+type Manifest = { files?: Record<string, string>; chapters?: { id: string; title: string }[] }
+type Completion = {
+  id: string
+  current: boolean
+  checks: Check[]
+  manifest: Manifest
+  review?: CompletionReview
+}
 type Current = {
   basis_sha256: string
   latest: Completion | null
@@ -42,12 +56,12 @@ type PreparedIntroduction = Pick<
   'intro' | 'spoiler_scope' | 'sample_chapter_ids'
 > & { id: string }
 
-const closureFields = [
-  ['ending', '主冲突与终局'],
-  ['characters', '关键人物与关系'],
-  ['promises', '伏笔与读者承诺'],
-] as const
-type ClosureKey = (typeof closureFields)[number][0]
+const pendingDecisions: AuthorDecisions = {
+  reading: 'pending',
+  ending: 'pending',
+  characters: 'pending',
+  promises: 'pending',
+}
 const checksText: Record<Check['status'], string> = {
   green: '绿 · 通过',
   pending: '待核对',
@@ -85,6 +99,49 @@ function ManifestList({ manifest }: { manifest: Manifest }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+function frozenTitles(manifest: Manifest) {
+  return new Map(manifest.chapters?.map(({ id, title }) => [id, title]))
+}
+
+function CompletionHistoryReview({ route }: { route: string }) {
+  const [open, setOpen] = useState(false)
+  const [history, setHistory] = useState<{ review: CompletionReview; manifest: Manifest }>()
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (!open || history) return
+    let active = true
+    void api<{ review: CompletionReview; manifest: Manifest }>(route).then(
+      (data) => {
+        if (active) {
+          setHistory(data)
+          setError('')
+        }
+      },
+      (failure: unknown) => {
+        if (active) setError(failure instanceof Error ? failure.message : '无法读取原裁定。')
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [open, route, history])
+  return (
+    <details
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open)
+        setError('')
+      }}
+    >
+      <summary>查看这次原裁定</summary>
+      {error && <p role="alert">{error} 可合上后重新打开。</p>}
+      {open && !history && !error && <p role="status">正在读取原裁定…</p>}
+      {history && (
+        <CompletionReviewEvidence review={history.review} titles={frozenTitles(history.manifest)} />
+      )}
+    </details>
   )
 }
 
@@ -205,6 +262,7 @@ export function CompletionPanel({
   const [current, setCurrent] = useState<Current>()
   const [form, setForm] = useState(freshClosures)
   const [readNote, setReadNote] = useState('')
+  const [draftDecisions, setDraftDecisions] = useState<{ basis: string; decisions: AuthorDecisions }>()
   const [intro, setIntro] = useState('')
   const [spoilerScope, setSpoilerScope] = useState<'opening' | 'whole'>('opening')
   const [openingLength, setOpeningLength] = useState(1)
@@ -220,12 +278,17 @@ export function CompletionPanel({
   const [preparing, setPreparing] = useState(false)
   const pendingPreparation = useRef<{ key: string; requestId: string } | undefined>(undefined)
   const alive = useRef(true)
+  const decisions =
+    draftDecisions?.basis === current?.basis_sha256
+      ? (draftDecisions?.decisions ?? pendingDecisions)
+      : pendingDecisions
   useLeaveGuard(
     !!(
       readNote ||
       intro ||
       spoilerScope !== 'opening' ||
       openingLength !== 1 ||
+      Object.values(decisions).some((value) => value !== 'pending') ||
       Object.values(form).some((entry) => entry.note || entry.sources.length)
     ),
     '未确认的完本说明与交付设置',
@@ -289,6 +352,7 @@ export function CompletionPanel({
   const body = {
     basis_sha256: current?.basis_sha256,
     read_note: readNote.trim(),
+    author_decisions: decisions,
     ...form,
     intro: intro.trim(),
     spoiler_scope: spoilerScope,
@@ -311,6 +375,16 @@ export function CompletionPanel({
 
   function editClosure(id: ClosureKey, transform: (closure: Closure) => Closure) {
     setForm((before) => ({ ...before, [id]: transform(before[id]) }))
+    changeDecisions({ [id]: 'pending' })
+  }
+
+  function changeDecisions(change: Partial<AuthorDecisions>) {
+    const basis = current?.basis_sha256
+    if (basis)
+      setDraftDecisions((before) => ({
+        basis,
+        decisions: { ...(before?.basis === basis ? before.decisions : pendingDecisions), ...change },
+      }))
     setReviewed(false)
   }
 
@@ -348,6 +422,7 @@ export function CompletionPanel({
     for (const [key] of closureFields) {
       if (!form[key].note && !form[key].sources.length && candidate.closures[key].note) {
         updated[key] = candidate.closures[key]
+        changeDecisions({ [key]: 'pending' })
         loadedClosure = true
       }
     }
@@ -368,7 +443,7 @@ export function CompletionPanel({
     }
     setReviewed(false)
     setPreview(undefined)
-    setMessage('已将 AI 建议载入空白项。请按原文核对并记录通读。')
+    setMessage('已将 AI 建议载入空白项。请按原文核对，逐项记录决定和通读。')
   }
 
   async function submit(action: 'preview' | 'review' | 'confirm') {
@@ -402,6 +477,7 @@ export function CompletionPanel({
         setReviewed(false)
         setForm(freshClosures())
         setReadNote('')
+        setDraftDecisions(undefined)
         setIntro('')
         setSpoilerScope('opening')
         setOpeningLength(1)
@@ -450,6 +526,12 @@ export function CompletionPanel({
           <details>
             <summary>完结判定与文件校验值</summary>
             {!current.latest.current && <CheckList checks={current.latest.checks} label="历史六项完本判定" />}
+            {current.latest.review && (
+              <CompletionReviewEvidence
+                review={current.latest.review}
+                titles={frozenTitles(current.latest.manifest)}
+              />
+            )}
             <ManifestList manifest={current.latest.manifest} />
           </details>
         </section>
@@ -471,6 +553,7 @@ export function CompletionPanel({
                     : stillCurrent
                       ? '依据仍有效'
                       : '旧依据'}
+                <CompletionHistoryReview route={`${endpoint}/history/${encodeURIComponent(id)}`} />
               </li>
             ))}
           </ul>
@@ -531,11 +614,19 @@ export function CompletionPanel({
             value={readNote}
             onChange={(event) => {
               setReadNote(event.target.value)
-              setReviewed(false)
+              changeDecisions({ reading: 'pending' })
             }}
             rows={3}
             maxLength={4000}
           />
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={decisions.reading === 'verified'}
+            onChange={(event) => changeDecisions({ reading: event.target.checked ? 'verified' : 'pending' })}
+          />
+          已通读本次稿件
         </label>
         {closureFields.map(([id, title]) => (
           <section aria-label={title} key={id}>
@@ -567,6 +658,17 @@ export function CompletionPanel({
                 </button>
               </blockquote>
             ))}
+            <label>
+              {title}判定
+              <select
+                value={decisions[id]}
+                onChange={(event) => changeDecisions({ [id]: event.target.value as ClosureDecision })}
+              >
+                <option value="pending">待核对</option>
+                <option value="verified">已核对正文与依据</option>
+                <option value="author_decision">作者已裁定</option>
+              </select>
+            </label>
           </section>
         ))}
         <EvidencePicker

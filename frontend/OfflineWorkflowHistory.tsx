@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createDeliveryZip } from './deliveryArchive'
+import { CompletionReviewEvidence } from './CompletionReviewEvidence'
 import { scopedInspectionFindings, type InspectionExcerpt } from './inspectionEvidence'
-import { InspectionStateConflicts } from './InspectionSources'
+import { InspectionPacingEvidence, InspectionStateConflicts } from './InspectionSources'
 import {
   manuscriptHash,
   readLocalSourceRevision,
@@ -155,6 +156,7 @@ export function OfflineWorkflowHistory({
                   {item.title} · {inspectionLabels[item.status]}
                 </summary>
                 <p>{item.summary}</p>
+                {item.check_id === '10' && <InspectionPacingEvidence basis={item.basis} />}
                 {item.check_id === '03' && (
                   <InspectionStateConflicts
                     basis={item.basis}
@@ -268,6 +270,25 @@ export function OfflineWorkflowHistory({
             来源体检 {completion.manifest.inspection_id.slice(0, 8)} ·{' '}
             {completion.manifest.spoiler_scope === 'opening' ? '简介仅含开篇' : '简介涉及全书'}
           </p>
+          <details>
+            <summary>查看这次原裁定</summary>
+            <CompletionReviewEvidence
+              review={completion.review}
+              titles={new Map(completion.manifest.chapters.map(({ id, title }) => [id, title]))}
+              openOriginal={(evidence, description) => {
+                const binding = completion.chapter_bindings.find(
+                  (row) => row.id === evidence.chapter_id && row.revision === evidence.revision,
+                )
+                return (
+                  binding && (
+                    <button type="button" onClick={() => void showOriginal(binding, { evidence })}>
+                      查看{description}
+                    </button>
+                  )
+                )
+              }}
+            />
+          </details>
           <button
             type="button"
             onClick={() => download('ainovel-delivery.zip', createDeliveryZip(completion))}

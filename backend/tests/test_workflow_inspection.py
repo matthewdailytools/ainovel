@@ -538,6 +538,12 @@ def test_scoped_red_reviews_block_book_completion_until_explicitly_rechecked(cli
     completion = f"/api/branches/{branch}/book-completion"
     decision = {
         "read_note": "已通读当前稿件。",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "verified",
+        },
         "ending": {"note": "铜铃已归还。"},
         "characters": {"note": "两人找到并交接铜铃。"},
         "promises": {"note": "本稿没有单列承诺。"},
@@ -698,6 +704,12 @@ def test_same_check_keeps_independent_volume_red_when_chapter_findings_change(cl
             json={
                 "basis_sha256": read(client, completion)["basis_sha256"],
                 "read_note": "两章已通读。",
+                "author_decisions": {
+                    "reading": "verified",
+                    "ending": "verified",
+                    "characters": "verified",
+                    "promises": "verified",
+                },
                 "ending": {"note": "铃已交还。"},
                 "characters": {"note": "学徒与师姐完成交接。"},
                 "promises": {"note": "没有单列伏笔。"},
@@ -844,6 +856,12 @@ def test_known_character_conflicts_freeze_both_sources_and_block_completion(
     completion = branch + "/book-completion"
     publication = {
         "read_note": "作者已经通读。",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "verified",
+        },
         "ending": {"note": "故事以船离开渡口结束。"},
         "characters": {"note": "沈砚已完成交接。"},
         "promises": {"note": "这里没有另设伏笔。"},

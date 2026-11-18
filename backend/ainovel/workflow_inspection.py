@@ -248,6 +248,22 @@ def _item(check_id, summary, basis, status="pending", *, manifest, scope, can_ma
     }
 
 
+def _pacing_plan(volumes, chapter_ids):
+    """Freeze each applicable outline summary once, in outline order."""
+    arrangements = []
+    for volume in volumes:
+        units = []
+        for unit in volume["units"]:
+            selected = [row["chapter_id"] for row in unit["chapters"] if row["chapter_id"] in chapter_ids]
+            if selected:
+                units.append(
+                    {**{key: unit[key] for key in ("id", "title", "summary")}, "chapter_ids": selected}
+                )
+        if units:
+            arrangements.append({**{key: volume[key] for key in ("id", "title", "summary")}, "units": units})
+    return arrangements
+
+
 def _scope_promise_windows(outline, ids, scope):
     if scope == "book":
         return outline["promises"], set()
@@ -525,6 +541,7 @@ def _evaluate(tx, branch_id, scope, scope_id, *, roll_up=True):
         "stale": outline["stale"],
         "plans": plans,
     }
+    pacing_plan = _pacing_plan(confirmed["plan"]["volumes"] if confirmed else [], ids)
     world = confirmed_world_basis(tx, branch_id)
     world_needs_confirmation = not world["confirmation_id"] and _world_needs_confirmation(tx, branch_id)
     reviews = _rule_reports(tx, branch_id, chapters, world["confirmation_id"])
@@ -698,8 +715,8 @@ def _evaluate(tx, branch_id, scope, scope_id, *, roll_up=True):
         ),
         item(
             "10",
-            "逐章或逐单元核对转折、推进、回报和连续低推进段。",
-            {"outline": plan_basis, "scenes": scenes, "events": events},
+            "对照适用卷纲和单元安排，核对转折、推进、回报和连续低推进段。",
+            {"outline": plan_basis, "pacing_plan": pacing_plan, "scenes": scenes, "events": events},
         ),
     ]
     findings = _scoped_red_findings(tx, branch_id, scope, ids) if roll_up else {}

@@ -140,6 +140,12 @@ test('确认新大纲前分别显示实际章纲变化与旧稿候选，并对�
       data: {
         basis_sha256,
         read_note: '已通读保存稿。',
+        author_decisions: {
+          reading: 'verified',
+          ending: 'verified',
+          characters: 'verified',
+          promises: 'verified',
+        },
         ending: { note: '登记编号已核实，两章的主要目标兑现。' },
         characters: { note: '学徒与守闸人完成交接。' },
         promises: { note: '此稿未采用单列的伏笔承诺。' },
@@ -240,4 +246,14 @@ test('确认新大纲前分别显示实际章纲变化与旧稿候选，并对�
     'green',
   )
   expect((await checked(await page.request.get(completion))).latest.current).toBe(false)
+
+  await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  const panel = page.getByRole('region', { name: '十处对账体检', exact: true })
+  const result = panel.getByRole('region', { name: '体检单结果', exact: true })
+  const pacing = result.getByRole('listitem').filter({ hasText: /10 节奏、回报与章节衔接/ })
+  await expect(pacing.getByText('过期', { exact: true })).toBeVisible()
+  await pacing.getByText('卷纲与单元节奏安排', { exact: true }).press('Enter')
+  await expect(pacing.getByRole('region', { name: '登记卷', exact: true })).toContainText(
+    '从账页找到签字的人。',
+  )
 })

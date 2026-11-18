@@ -11,6 +11,7 @@ from pydantic import Field, model_validator
 from .budget import micro
 from .db import DomainError, dumps, uid
 from .models import Input, ModuleInput
+from .outline_directory import add_empty_chapters_tx
 from .outline_workspace import SelectedOutlineCardReference, freeze_selected_outline_cards
 from .project_brief import Identifier, IdeaText
 
@@ -706,19 +707,8 @@ def _ensure_chapters(worker, state):
         count = worker.task["payload"]["chapter_count"]
         if not count:
             raise DomainError("seven_stage_chapters", "本次接力缺少章节目录。", 409)
-        for position in range(1, count + 1):
-            identifier = uid()
-            title = f"第 {position} 章"
-            tx.execute(
-                "INSERT INTO chapters(id,branch_id,position,title) VALUES(?,?,?,?)",
-                (identifier, branch, position, title),
-            )
-            tx.execute(
-                "INSERT INTO revisions VALUES(?,?,?,?,?,?)", (uid(), identifier, 0, "", "新建空稿", time())
-            )
-        next_revision = state["story_revision"] + 1
-        tx.execute("UPDATE branches SET story_revision=? WHERE id=?", (next_revision, branch))
-        state["story_revision"] = next_revision
+        add_empty_chapters_tx(tx, branch, count)
+        state["story_revision"] += 1
         tx.execute(
             "UPDATE tasks SET result=?,updated=? WHERE id=? AND attempt=?",
             (dumps(worker.task["result"]), time(), worker.task["id"], worker.attempt),

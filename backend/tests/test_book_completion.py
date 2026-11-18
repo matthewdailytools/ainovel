@@ -30,8 +30,14 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
     data = {
         "basis_sha256": initial["basis_sha256"],
         "read_note": "作者已通读保存稿。",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "verified",
+        },
         "ending": {"note": "主冲突以归还铜铃解决。"},
-        "characters": {"note": "师姐与学徒重逢。"},
+        "characters": {"note": "师姐与学徒重逢。作者裁定其后去向留白。"},
         "promises": {"note": "铃和师姐的线索均在末章兑现。"},
         "intro": "学徒循着一枚旧铃寻找师姐。",
         "spoiler_scope": "opening",
@@ -56,6 +62,25 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
     assert all(row["current_status"] == "green" for row in created.json()["items"]), created.json()
     assert client.post(endpoint + "/confirm", json=data).json()["code"] == "completion_changed"
     data["basis_sha256"] = client.get(endpoint).json()["basis_sha256"]
+    without_decisions = {key: value for key, value in data.items() if key != "author_decisions"}
+    preview = client.post(endpoint + "/preview", json=without_decisions).json()
+    assert [row["id"] for row in preview["checks"] if row["status"] == "pending"] == [
+        "manuscript",
+        "ending",
+        "characters",
+        "promises",
+    ]
+    assert client.post(endpoint + "/confirm", json=without_decisions).json()["code"] == "completion_blocked"
+    for field, gate in (
+        ("reading", "manuscript"),
+        ("ending", "ending"),
+        ("characters", "characters"),
+        ("promises", "promises"),
+    ):
+        waiting = {**data, "author_decisions": {**data["author_decisions"], field: "pending"}}
+        current = client.post(endpoint + "/preview", json=waiting).json()["checks"]
+        assert [row["id"] for row in current if row["status"] != "green"] == [gate]
+        assert client.post(endpoint + "/confirm", json=waiting).json()["code"] == "completion_blocked"
     for field, value, gate in [
         ("read_note", "", "manuscript"),
         ("ending", {"note": ""}, "ending"),
@@ -67,9 +92,22 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
         check = client.post(endpoint + "/preview", json=incomplete).json()
         assert [row["id"] for row in check["checks"] if row["status"] != "green"] == [gate]
         assert client.post(endpoint + "/confirm", json=incomplete).status_code == 409
+    data["author_decisions"]["characters"] = "author_decision"
+    quote = "归还了铜铃。"
+    data["ending"]["sources"] = [
+        {
+            "chapter_id": chapter["id"],
+            "revision": chapter["revision"],
+            "start": len(chapter["content"]) - len(quote),
+            "end": len(chapter["content"]),
+            "quote": quote,
+        }
+    ]
     confirmed = client.post(endpoint + "/confirm", json=data)
     assert confirmed.status_code == 201, confirmed.text
     record = confirmed.json()
+    assert record["review"]["author_decisions"] == data["author_decisions"]
+    assert "作者裁定" in record["checks"][2]["detail"]
     assert client.post(endpoint + "/confirm", json=data).json()["id"] == record["id"]
     export = f"{endpoint}/{record['id']}/export"
     zip_now = 1_789_000_000
@@ -108,7 +146,15 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
         == 409
     )
     domain.save(chapter["id"], chapter["revision"], "学徒仍在找铃。")
-    assert not client.get(endpoint).json()["latest"]["current"]
+    current = client.get(endpoint).json()
+    assert not current["latest"]["current"]
+    stale_evidence = client.post(
+        endpoint + "/preview", json={**data, "basis_sha256": current["basis_sha256"]}
+    )
+    assert stale_evidence.status_code == 409 and stale_evidence.json()["code"] == "completion_evidence"
+    recorded = client.get(f"{endpoint}/history/{record['id']}").json()
+    assert recorded["review"]["author_decisions"] == data["author_decisions"]
+    assert recorded["review"]["ending"]["sources"] == data["ending"]["sources"]
     zip_now += 4
     historical = client.get(export)
     assert historical.status_code == 200
@@ -124,6 +170,12 @@ def test_m7_rejects_chapter_with_only_formatting_without_a_length_target(client,
     data = {
         "basis_sha256": state["basis_sha256"],
         "read_note": "作者通读。",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "verified",
+        },
         "ending": {"note": "核对终局。"},
         "characters": {"note": "核对人物去向。"},
         "promises": {"note": "核对伏笔。"},
@@ -253,6 +305,12 @@ def test_completion_preparation_uses_exact_sources_and_keeps_author_gate(client,
         "preparation_id": state["artifact_id"],
         **state["candidate"]["closures"],
         "read_note": "",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "verified",
+        },
         "intro": state["candidate"]["intro"],
         "spoiler_scope": "opening",
         "sample_chapter_ids": [opening["id"]],
@@ -315,6 +373,12 @@ def test_prepared_introduction_cannot_be_relabelled_with_a_different_delivery_sc
         "basis_sha256": basis,
         "preparation_id": prepared["artifact_id"],
         "read_note": "作者已通读。",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "verified",
+        },
         "ending": candidate["closures"]["ending"],
         "characters": {"note": "师姐与学徒重逢。"},
         "promises": {"note": "铃匠身份已揭晓。"},

@@ -310,9 +310,10 @@ def _required_promises_changed(before, after):
     )
 
 
-def save_outline(domain, branch_id, data, *, before_write=None):
+def save_outline(domain, branch_id, data, *, before_write=None, include_setting_ledger=False):
     with domain.db.connect(True) as tx:
-        return save_outline_tx(tx, branch_id, data, before_write=before_write)
+        view = save_outline_tx(tx, branch_id, data, before_write=before_write)
+        return _with_setting_ledger(tx, branch_id, view) if include_setting_ledger else view
 
 
 def save_outline_tx(
@@ -365,9 +366,10 @@ def save_outline_tx(
     return _view(tx, branch_id)
 
 
-def confirm_outline(domain, branch_id, data, *, before_write=None):
+def confirm_outline(domain, branch_id, data, *, before_write=None, include_setting_ledger=False):
     with domain.db.connect(True) as tx:
-        return confirm_outline_tx(tx, branch_id, data, before_write=before_write)
+        view = confirm_outline_tx(tx, branch_id, data, before_write=before_write)
+        return _with_setting_ledger(tx, branch_id, view) if include_setting_ledger else view
 
 
 def confirm_outline_tx(tx, branch_id, data, *, before_write=None, source_confirmed=False):
@@ -598,10 +600,116 @@ def _ledgers(tx, graph, plan, basis, current):
     return {"settings": settings, "promises": promises}
 
 
-def read_outline(domain, branch_id):
+def _with_setting_ledger(tx, branch_id, view):
+    from .domain import utf16_slice
+    from .setting_use import _verified_quote
+    from .setting_use_portability import SettingUseVersion
+
+    adopted = confirmed_outline_settings(tx, branch_id)["items"]
+    entries = {setting["id"]: {"setting": setting, "chapters": {}} for setting in adopted}
+    if not entries:
+        return {**view, "setting_ledger": []}
+    chapter_titles = {row["id"]: row["title"] for row in view["chapters"]}
+    planned = {}
+    for plan in view["settings"]:
+        setting_id, chapter_id = plan["setting"]["id"], plan["chapter_id"]
+        if setting_id not in entries:
+            continue
+        planned[chapter_id, setting_id] = plan
+        entries[setting_id]["chapters"][chapter_id] = {
+            "chapter_id": chapter_id,
+            "chapter_title": chapter_titles.get(chapter_id, chapter_id),
+            "planned": "outdated" if view["stale"] else "current",
+            "evidence": None,
+        }
+    witnesses = tx.execute(
+        """
+        WITH candidates AS (
+          SELECT a.id,a.chapter_id,a.kind,a.payload,a.base_revision,c.title AS chapter_title,
+            CASE a.kind WHEN 'setting_use' THEN json_extract(a.payload,'$.item_id')
+              ELSE json_extract(a.basis,'$.rule.id') END AS setting_id,
+            a.rowid AS sequence
+          FROM artifacts a JOIN chapters c ON c.id=a.chapter_id AND c.branch_id=a.branch_id
+          WHERE a.branch_id=? AND a.status='accepted' AND (
+            (a.kind='setting_use' AND json_extract(a.payload,'$.action')='confirmed') OR
+            (a.kind='setting_review' AND json_extract(a.payload,'$.result')='pass'
+              AND json_type(a.payload,'$.evidence')='object')
+          )
+        ), latest AS (
+          SELECT *,ROW_NUMBER() OVER(PARTITION BY chapter_id,setting_id,kind ORDER BY sequence DESC) AS rank
+          FROM candidates
+        )
+        SELECT * FROM latest WHERE rank=1 ORDER BY sequence DESC
+        """,
+        (branch_id,),
+    )
+    for witness in witnesses:
+        chapter_id, setting_id = witness["chapter_id"], witness["setting_id"]
+        entry = entries.get(setting_id)
+        method = "author" if witness["kind"] == "setting_use" else "rule"
+        if not entry or (method == "author") != ("category_id" in entry["setting"]):
+            continue
+        plan = planned.get((chapter_id, setting_id)) or {}
+        quote, revision_id = None, None
+        artifact_id = witness["id"]
+        if method == "author":
+            current = plan.get("author_evidence")
+            version = (
+                SettingUseVersion.model_validate(current["version"])
+                if current
+                else SettingUseVersion.model_validate_json(witness["payload"])
+            )
+            artifact_id = version.id
+            revision_id = version.evidence.revision_id
+            try:
+                quote = current["quote"] if current else _verified_quote(tx, branch_id, version)
+            except DomainError as error:
+                if error.code != "setting_use_evidence":
+                    raise
+        else:
+            current = plan.get("evidence")
+            if current:
+                artifact_id = current["report_id"]
+            source = tx.execute(
+                "SELECT r.id,r.content,a.payload FROM artifacts a "
+                "JOIN revisions r ON r.chapter_id=a.chapter_id AND r.revision=a.base_revision "
+                "WHERE a.id=? AND a.branch_id=?",
+                (artifact_id, branch_id),
+            ).fetchone()
+            if source:
+                revision_id = source["id"]
+                selected = json.loads(source["payload"])["evidence"]
+                if type(selected.get("start")) is int and type(selected.get("end")) is int:
+                    try:
+                        _, original, _ = utf16_slice(source["content"], selected["start"], selected["end"])
+                        if original.strip() and original == selected.get("text"):
+                            quote = original
+                    except DomainError:
+                        pass
+        location = entry["chapters"].setdefault(
+            chapter_id,
+            {"chapter_id": chapter_id, "chapter_title": witness["chapter_title"], "planned": None},
+        )
+        location["evidence"] = {
+            "method": method,
+            "status": ("current" if current else "outdated") if quote else "unavailable",
+            "quote": quote,
+            "revision_id": revision_id,
+            "report_id": artifact_id if method == "rule" else None,
+        }
+    return {
+        **view,
+        "setting_ledger": [
+            {**entry, "chapters": list(entry["chapters"].values())} for entry in entries.values()
+        ],
+    }
+
+
+def read_outline(domain, branch_id, *, include_setting_ledger=False):
     with domain.db.connect() as tx:
         tx.execute("BEGIN")
-        return _view(tx, branch_id)
+        view = _view(tx, branch_id)
+        return _with_setting_ledger(tx, branch_id, view) if include_setting_ledger else view
 
 
 def chapter_basis(tx, branch_id, chapter_id, outline_id):
@@ -640,15 +748,15 @@ def register_routes(app, domain):
 
     @app.get(endpoint)
     def outline_workspace(branch_id: str):
-        return read_outline(domain, branch_id)
+        return read_outline(domain, branch_id, include_setting_ledger=True)
 
     @app.put(endpoint)
     def save_workspace(branch_id: str, data: SaveOutline):
-        return save_outline(domain, branch_id, data)
+        return save_outline(domain, branch_id, data, include_setting_ledger=True)
 
     @app.post(endpoint + "/confirm")
     def confirm_workspace(branch_id: str, data: ConfirmOutline):
-        return confirm_outline(domain, branch_id, data)
+        return confirm_outline(domain, branch_id, data, include_setting_ledger=True)
 
     @app.get(endpoint + "/confirmation-impact")
     def confirm_impact(

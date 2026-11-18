@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test'
 
-export async function authorSettingPlan(page: Page, title: string) {
+export async function authorSettingPlan(page: Page, title: string, includeWorldRules = false) {
   await page.goto('/')
   const { csrf } = await (await page.request.get('/api/session')).json()
   const headers = { 'X-Ainovel-CSRF': csrf }
@@ -22,6 +22,12 @@ export async function authorSettingPlan(page: Page, title: string) {
   state.categories.find(({ id }: { id: string }) => id === 'characters').items = [
     { id: 'keeper', title: '守铃人阿陶', detail: '阿陶负责收存归还的钥匙。' },
   ]
+  if (includeWorldRules) {
+    state.categories.find(({ id }: { id: string }) => id === 'world').items = [
+      { id: 'key-rule', title: '赤钥交接规则', detail: '交接只能当面完成。' },
+      { id: 'pending-rule', title: '未采用规则', detail: '钥匙不能染色。', adoption_state: 'pending' },
+    ]
+  }
   const draft = await page.request.put(conception, {
     headers,
     data: {

@@ -1,8 +1,130 @@
 from io import BytesIO
 from zipfile import ZipFile
 
+import pytest
+
 from test_outline_workspace import chapter_plan, put_and_confirm
 from test_workflow_inspection import author, item, read, report
+
+
+@pytest.mark.parametrize("level", ["unit", "volume"])
+def test_pacing_confirmation_only_reopens_the_scopes_that_use_the_changed_arrangement(
+    client, domain, story, level
+):
+    branch = story["branch_id"]
+    outline = f"/api/branches/{branch}/outline-workspace"
+    inspection = f"/api/branches/{branch}/workflow-inspections"
+    first = domain.save(story["chapter_id"], 0, "守夜人发现一截失去记号的铜尺。")
+    second = domain.save(domain.create_chapter(branch, "复查旧尺")["id"], 0, "守夜人查到铜尺记号的来历。")
+    third = domain.save(domain.create_chapter(branch, "归还铜尺")["id"], 0, "守夜人把铜尺归还给学徒。")
+
+    def unit(identifier, summary, chapter):
+        return {
+            "id": identifier,
+            "title": chapter["title"],
+            "summary": summary,
+            "chapters": [{**chapter_plan(chapter["id"], "按本章线索推进"), "setting_ids": []}],
+        }
+
+    plan = {
+        "summary": "查清铜尺来历。",
+        "volumes": [
+            {
+                "id": "v1",
+                "title": "找尺卷",
+                "summary": "到卷末才兑现来历之谜。",
+                "units": [
+                    unit("u1", "保留疑问，等复查再兑现。", first),
+                    unit("u2", "核清疑问并交代来历。", second),
+                ],
+            },
+            {
+                "id": "v2",
+                "title": "归还卷",
+                "summary": "完成铜尺归还。",
+                "units": [unit("u3", "当面交付铜尺。", third)],
+            },
+        ],
+    }
+    confirmed = put_and_confirm(client, outline, {"base_revision": 0, "plan": plan})["confirmed"]
+    scopes = {
+        "first": ({"scope": "chapter", "scope_id": first["id"]}, first),
+        "second": ({"scope": "chapter", "scope_id": second["id"]}, second),
+        "volume": ({"scope": "volume", "scope_id": "v1"}, first),
+        "other": ({"scope": "volume", "scope_id": "v2"}, third),
+        "book": ({"scope": "book"}, first),
+    }
+    signed = {}
+    for key, (scope, chapter) in scopes.items():
+        preview = read(client, inspection, **scope)["preview"]
+        signed[key] = report(
+            client,
+            inspection,
+            preview,
+            author_reviews=[author("10", chapter)],
+            length_targets={"min_chars": 1, "expected_chapters": len(preview["chapters"])},
+        )
+        assert all(item(signed[key], identifier)["current_status"] == "green" for identifier in ("09", "10"))
+
+    volume = plan["volumes"][0]
+    arrangement = volume["units"][0] if level == "unit" else volume
+    old_summary = arrangement["summary"]
+    arrangement["summary"] = "在本阶段第一章交代铜尺来历并兑现疑问。"
+    affected = {"first", "volume", "book"} | ({"second"} if level == "volume" else set())
+    draft = client.put(outline, json={"base_revision": confirmed["revision"], "plan": plan})
+    assert draft.status_code == 200, draft.text
+    params = {"base_revision": draft.json()["draft"]["revision"]}
+    effect = read(client, outline + "/confirmation-impact", **params)
+    assert effect["outline_fields"] == ["organization"]
+    assert effect["chapter_changes"] == []
+    affected_reports = {row["id"]: set(row["check_ids"]) for row in effect["affected_reports"]}
+    assert set(affected_reports) == {signed[key]["id"] for key in affected}
+    for key in affected:
+        checks = affected_reports[signed[key]["id"]]
+        assert "10" in checks and "09" not in checks
+        if key != "book":
+            assert checks == {"10"}
+    still_confirmed = read(client, inspection, **scopes["first"][0])["latest"]
+    assert still_confirmed["current"]
+    assert item(still_confirmed, "10")["basis"] == item(signed["first"], "10")["basis"]
+    adopted = client.post(outline + "/confirm", json={**params, "impact_sha256": effect["basis_sha256"]})
+    assert adopted.status_code == 200, adopted.text
+
+    for key, (scope, _) in scopes.items():
+        old = signed[key]
+        history = read(client, f"{inspection}/{old['id']}")
+        preview = read(client, inspection, **scope)["preview"]
+        assert item(history, "09")["current_status"] == "green"
+        assert item(preview, "09")["basis_sha256"] == item(old, "09")["basis_sha256"]
+        assert item(history, "10")["status"] == "green"
+        assert item(history, "10")["basis"] == item(old, "10")["basis"]
+        changed = key in affected
+        assert item(history, "10")["current_status"] == ("outdated" if changed else "green")
+        assert (item(preview, "10")["basis_sha256"] != item(old, "10")["basis_sha256"]) == changed
+        if key != "book":
+            assert all(
+                item(preview, row["check_id"])["basis_sha256"] == row["basis_sha256"]
+                for row in old["items"]
+                if row["check_id"] != "10"
+            )
+
+    def chapter_arrangement(check):
+        (frozen_volume,) = check["basis"]["pacing_plan"]
+        (frozen_unit,) = frozen_volume["units"]
+        assert frozen_volume["id"] == "v1" and frozen_unit["id"] == "u1"
+        assert frozen_unit["chapter_ids"] == [first["id"]]
+        return frozen_unit if level == "unit" else frozen_volume
+
+    first_scope, _ = scopes["first"]
+    first_history = read(client, f"{inspection}/{signed['first']['id']}")
+    assert chapter_arrangement(item(first_history, "10"))["summary"] == old_summary
+    first_preview = read(client, inspection, **first_scope)["preview"]
+    assert chapter_arrangement(item(first_preview, "10"))["summary"] == arrangement["summary"]
+    rejected = client.post(inspection, json={**first_scope, "basis_sha256": signed["first"]["basis_sha256"]})
+    assert rejected.status_code == 409 and rejected.json()["code"] == "inspection_changed"
+    rechecked = report(client, inspection, first_preview, author_reviews=[author("10", first)])
+    assert item(rechecked, "10")["current_status"] == "green"
+    assert item(read(client, f"{inspection}/{signed['first']['id']}"), "10") == item(first_history, "10")
 
 
 def test_outline_confirmation_forecasts_real_volume_book_and_delivery_impacts_without_writes(
@@ -62,6 +184,12 @@ def test_outline_confirmation_forecasts_real_volume_book_and_delivery_impacts_wi
         json={
             "basis_sha256": read(client, completion)["basis_sha256"],
             "read_note": "作者通读两个保存章节。",
+            "author_decisions": {
+                "reading": "verified",
+                "ending": "verified",
+                "characters": "verified",
+                "promises": "verified",
+            },
             "ending": {"note": "旧尺已经归还。"},
             "characters": {"note": "学徒与守夜人当面交接。"},
             "promises": {"note": "本版本未声明其他承诺。"},

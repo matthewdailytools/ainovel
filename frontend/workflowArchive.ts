@@ -589,6 +589,7 @@ function parseCompletionReview(value: unknown, chapters: ReadonlyMap<string, Fro
   const row = record(value, [
     'basis_sha256',
     'read_note',
+    'author_decisions',
     'ending',
     'characters',
     'promises',
@@ -603,9 +604,22 @@ function parseCompletionReview(value: unknown, chapters: ReadonlyMap<string, Fro
     const source = verifySources(note.sources ?? [], chapters)
     return { note: text(note.note, 4000, 1), sources: source }
   }
+  const decisions =
+    row.author_decisions == null
+      ? undefined
+      : record(row.author_decisions, ['reading', 'ending', 'characters', 'promises'])
+  const decision = (value: unknown) => choice(value, ['pending', 'verified', 'author_decision'])
   return {
     basis_sha256: hash(row.basis_sha256),
     read_note: text(row.read_note, 4000, 1),
+    ...(decisions && {
+      author_decisions: {
+        reading: choice(decisions.reading, ['pending', 'verified']),
+        ending: decision(decisions.ending),
+        characters: decision(decisions.characters),
+        promises: decision(decisions.promises),
+      },
+    }),
     ending: closure(row.ending),
     characters: closure(row.characters),
     promises: closure(row.promises),
@@ -640,6 +654,8 @@ async function parseCompletion(
   const manifest = parseDeliveryManifest(entry.manifest)
   const chapters = verifyChapters(manifest.chapters, chapter_bindings, revisions)
   const review = parseCompletionReview(entry.review, chapters)
+  if (review.author_decisions && Object.values(review.author_decisions).includes('pending'))
+    invalid('历史完本的作者裁定尚未完成。')
   const checks = list(entry.checks, 6, 6).map((value, index) => {
     const check = record(value, ['id', 'title', 'status', 'detail'])
     if (check.id !== completionChecks[index] || check.status !== 'green')

@@ -3,7 +3,12 @@ from dataclasses import replace
 import json
 from uuid import uuid4
 
+import httpx
+import pytest
+
+from ainovel.budget import Budget
 from ainovel.db import dumps
+from ainovel.providers import ModelClient
 from ainovel.worker import Worker
 from test_outline_generation import prepare
 from test_outline_workspace import chapter_plan, put_and_confirm
@@ -12,8 +17,11 @@ from test_workflow_inspection import author, endpoint, read
 
 def setup_scope(client, domain, story):
     outline, options, _, second = prepare(client, domain, story)
+    branch = story["branch_id"]
     chapter = domain.save(story["chapter_id"], 0, "学徒入门。😀铜铃仍旧沉默。")
     domain.save(second["id"], second["revision"], "不应出现在本次送审的第二章。")
+    third = domain.create_chapter(branch, "第三章")
+    domain.save(third["id"], 0, "不应出现在本次送审的第三章。")
     put_and_confirm(
         client,
         outline,
@@ -33,9 +41,28 @@ def setup_scope(client, domain, story):
                                 "title": "验证",
                                 "summary": "第一次进门时听见响铃。",
                                 "chapters": [chapter_plan(chapter["id"], "进门后听见铜铃")],
+                            },
+                            {
+                                "id": "sibling",
+                                "title": "再查",
+                                "summary": "不应出现在本次送审的同卷另一单元摘要。",
+                                "chapters": [chapter_plan(second["id"], "跟随门痕到石井")],
+                            },
+                        ],
+                    },
+                    {
+                        "id": "other-volume",
+                        "title": "回响",
+                        "summary": "不应出现在本次送审的另一卷摘要。",
+                        "units": [
+                            {
+                                "id": "other-unit",
+                                "title": "回家",
+                                "summary": "不应出现在本次送审的另一卷单元摘要。",
+                                "chapters": [chapter_plan(third["id"], "将铜铃放回门前")],
                             }
                         ],
-                    }
+                    },
                 ],
             },
         },
@@ -52,6 +79,22 @@ def setup_scope(client, domain, story):
     return route, scope, request, chapter
 
 
+def confirm_unit_summary(client, story, summary):
+    outline = f"/api/branches/{story['branch_id']}/outline-workspace"
+    confirmed = read(client, outline)["confirmed"]
+    revised = confirmed["plan"]
+    revised["volumes"][0]["units"][0]["summary"] = summary
+    put_and_confirm(
+        client,
+        outline,
+        {
+            "base_revision": confirmed["revision"],
+            "confirmation_id": confirmed["setting_basis"]["confirmation_id"],
+            "plan": revised,
+        },
+    )
+
+
 class SemanticModel:
     def __init__(self, changed=None):
         self.calls = []
@@ -66,15 +109,24 @@ class SemanticModel:
         assert len(instruction["送审目录"]) == 1
         if self.changed:
             self.changed()
+        basis = instruction["对照依据"]
+        pacing_refs = [
+            row["id"] for row in basis["10"] if row["text"] in {"沿着门痕寻人。", "第一次进门时听见响铃。"}
+        ]
+        results = (
+            ("01", "pass", "本次仅给出证据位置。", [basis["01"][0]["id"]]),
+            ("02", "fail", "入门后正文明确写出铃声仍未出现。", [basis["02"][0]["id"]]),
+            ("10", "fail", "单元安排要求入门时听见铃声，正文却说明铃声仍未响起。", pacing_refs),
+        )
         result = [
             {
                 "check_id": check_id,
                 "result": status,
-                "reason": "入门后正文明确写出铃声仍未出现。" if status == "fail" else "本次仅给出证据位置。",
-                "paragraph_refs": [paragraph] if status != "unknown" else [],
-                "basis_refs": ([instruction["对照依据"][check_id][0]["id"]] if status != "unknown" else []),
+                "reason": reason,
+                "paragraph_refs": [paragraph],
+                "basis_refs": references,
             }
-            for check_id, status in (("01", "pass"), ("02", "fail"), ("10", "unknown"))
+            for check_id, status, reason, references in results
         ]
         return {
             "text": dumps({"items": result}),
@@ -105,6 +157,18 @@ def test_frozen_candidate_keeps_proof_separate_from_author_signature(client, dom
         }
     ]
     assert candidate["items"][1]["basis_excerpts"][0]["text"] == "进门后听见铜铃"
+    pacing = candidate["items"][2]
+    assert pacing["result"] == "fail" and pacing["evidence"] == candidate["items"][1]["evidence"]
+    excerpts = pacing["basis_excerpts"]
+    assert [(row["label"].split(" · ")[0], row["text"]) for row in excerpts] == [
+        ("卷纲", "沿着门痕寻人。"),
+        ("单元纲", "第一次进门时听见响铃。"),
+    ]
+    sent = model.calls[0]["对照依据"]
+    assert all(
+        not any(row["text"] in {"沿着门痕寻人。", "第一次进门时听见响铃。"} for row in sent[key])
+        for key in ("01", "02")
+    )
     assert read(client, route, **scope)["latest"] is None
     body = {**scope, "basis_sha256": request["basis_sha256"]}
     verdict = {**author("02", chapter), "source_candidate_id": candidate["id"]}
@@ -162,17 +226,28 @@ def test_frozen_candidate_keeps_proof_separate_from_author_signature(client, dom
     assert rejected.json()["code"] == "inspection_candidate_stale"
 
 
-def test_candidate_preserves_in_flight_changed_scope_without_auto_signing(client, domain, settings, story):
+@pytest.mark.parametrize("changed", ["manuscript", "pacing"])
+def test_candidate_preserves_in_flight_changed_scope_without_auto_signing(
+    client, domain, settings, story, changed
+):
     route, scope, request, chapter = setup_scope(client, domain, story)
     task = client.post(route + "/semantic", json=request)
     assert task.status_code == 202, task.text
-    provider = SemanticModel(lambda: domain.save(chapter["id"], chapter["revision"], "最新章稿。"))
+
+    def edit():
+        if changed == "pacing":
+            confirm_unit_summary(client, story, "保留悬念，到第二次进门才响铃。")
+        else:
+            domain.save(chapter["id"], chapter["revision"], "最新章稿。")
+
+    provider = SemanticModel(edit)
     assert asyncio.run(Worker(settings, provider).run_once())
     logged = read(client, route + "/semantic/tasks", **scope)[0]
     assert logged["status"] == "succeeded", logged
     candidate = read(client, route + "/semantic/" + logged["artifact_id"])
     assert not candidate["current"]
     assert candidate["items"][1]["evidence"][0]["quote"] == chapter["content"]
+    assert candidate["items"][2]["basis_excerpts"][1]["text"] == "第一次进门时听见响铃。"
     assert read(client, route, **scope)["latest"] is None
 
 
@@ -187,3 +262,40 @@ def test_semantic_candidate_does_not_truncate_scope_or_dispatch_over_limit(clien
     assert logged["status"] == "blocked_runtime", logged
     assert "改按章或卷送审" in logged["error"]
     assert not model.calls and logged["artifact_id"] is None
+
+
+def test_frozen_pacing_context_counts_toward_the_complete_request_limit(
+    client, domain, settings, story, monkeypatch
+):
+    route, scope, request, chapter = setup_scope(client, domain, story)
+    budget = Budget(settings)
+    recorded = []
+
+    def measure(message):
+        recorded.append(len(message.content))
+        return httpx.Response(400)
+
+    assert client.post(route + "/semantic", json=request).status_code == 202
+    baseline = ModelClient(settings, budget, httpx.MockTransport(measure))
+    assert asyncio.run(Worker(settings, baseline).run_once())
+    (sent_bytes,) = recorded
+    limit = sent_bytes + 32
+    assert len(chapter["content"].encode()) < limit
+    settings.providers["deepseek"] = replace(settings.providers["deepseek"], max_input_bytes=limit)
+
+    confirm_unit_summary(client, story, "在入门前用三次阻碍积累悬念，等初次展示铜铃后回报疑问。" * 120)
+    request.update(
+        basis_sha256=read(client, route, **scope)["preview"]["basis_sha256"],
+        client_request_id=uuid4().hex,
+    )
+    assert client.post(route + "/semantic", json=request).status_code == 202
+    before = budget.report()
+    monkeypatch.setattr(budget, "reserve", lambda *_args: pytest.fail("request reserved budget"))
+    model = ModelClient(
+        settings, budget, httpx.MockTransport(lambda _: pytest.fail("request reached the network transport"))
+    )
+    assert asyncio.run(Worker(settings, model).run_once())
+    logged = read(client, route + "/semantic/tasks", **scope)[0]
+    assert logged["status"] == "blocked_runtime", logged
+    assert "改按章或卷送审" in logged["error"]
+    assert logged["artifact_id"] is None and budget.report() == before

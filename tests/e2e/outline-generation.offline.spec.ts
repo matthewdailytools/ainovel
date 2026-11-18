@@ -1,33 +1,108 @@
 import { expect, test } from '@playwright/test'
 import type { components } from '../../frontend/api-schema'
 
-test('AI 大纲由作者载入修改、保存，再确认', async ({ page }) => {
+test('在大纲台建立零章作品目录，丢响应重试后生成、修改和确认', async ({ page }) => {
   await page.goto('/')
   const { csrf } = await (await page.request.get('/api/session')).json()
   const headers = { 'X-Ainovel-CSRF': csrf }
   const novel = await page.request.post('/api/novels', { headers, data: { title: '遗铃 · AI 大纲验收' } })
   expect(novel.ok(), await novel.text()).toBe(true)
   const { id, branch_id } = await novel.json()
-  for (const title of ['门外寻铃', '门内验证']) {
-    const chapter = await page.request.post(`/api/branches/${branch_id}/chapters`, {
-      headers,
-      data: { title },
-    })
-    expect(chapter.ok(), await chapter.text()).toBe(true)
-  }
-  const endpoint = `/api/branches/${branch_id}/outline-workspace`
+  const root = `/api/branches/${branch_id}`
+  const endpoint = root + '/outline-workspace'
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(id)
+  await page.getByRole('button', { name: '小说构思', exact: true }).click()
+  await page
+    .getByRole('navigation', { name: '构思类别' })
+    .getByRole('button', { name: /世界设定/ })
+    .click()
+  await page.getByRole('button', { name: '添加构思项目', exact: true }).click()
+  await page.getByRole('textbox', { name: '项目名称', exact: true }).fill('铃声规则')
+  await page.getByRole('textbox', { name: '设定内容', exact: true }).fill('铜铃只在门内响。')
+  await page.getByRole('button', { name: '保存构思设定', exact: true }).click()
+  await expect(page.getByText('构思设定已保存。', { exact: true })).toBeVisible()
+  await page.getByRole('textbox', { name: '保留事项说明', exact: true }).fill('先验证铃声。')
+  await page.getByRole('button', { name: '确认当前构思', exact: true }).click()
+  await expect(page.getByText(/当前构思已确认 · 构思修订/)).toBeVisible()
+  expect(await (await page.request.get(root + '/chapters')).json()).toEqual([])
+
   await page.getByRole('button', { name: '大纲与台账', exact: true }).click()
-  await page.getByLabel('本次规划要求').fill('先写门外找铃，再在门内揭示规则。')
-  await page.getByRole('button', { name: '生成四级大纲候选', exact: true }).click()
+  const panel = page.getByRole('region', { name: '大纲生成', exact: true })
+  const generate = panel.getByRole('button', { name: '生成四级大纲候选', exact: true })
+  await expect(generate).toBeDisabled()
+  const attempts: unknown[] = []
+  await page.route(`**${endpoint}/chapter-directory`, async (route) => {
+    attempts.push(route.request().postDataJSON())
+    if (attempts.length === 1) {
+      const actual = await route.fetch()
+      expect(actual.status()).toBe(201)
+      await route.abort('failed')
+    } else {
+      await route.continue()
+    }
+  })
+  const count = panel.getByLabel('新建规划章数', { exact: true })
+  await count.fill('2')
+  await count.press('Enter')
+  expect(attempts).toHaveLength(0)
+  const initialize = panel.getByRole('button', { name: '建立章节目录', exact: true })
+  await expect(initialize).toBeEnabled()
+  await initialize.press('Enter')
+  await expect(panel.getByRole('alert')).toContainText('暂未确认章节目录的写入结果')
+  const chapters = await (await page.request.get(root + '/chapters')).json()
+  expect(chapters).toHaveLength(2)
+  expect(
+    chapters.map(({ revision, chars }: { revision: number; chars: number }) => [revision, chars]),
+  ).toEqual([
+    [0, 0],
+    [0, 0],
+  ])
+  expect(await (await page.request.get(endpoint + '/generation')).json()).toEqual([])
+
+  const retry = panel.getByRole('button', { name: '重试建立章节目录', exact: true })
+  await expect(retry).toBeEnabled()
+  await retry.press('Enter')
+  await expect(panel.getByText('章节目录已建立。', { exact: true })).toBeVisible()
+  expect(attempts).toHaveLength(2)
+  expect(attempts[1]).toEqual(attempts[0])
+  expect(await (await page.request.get(root + '/chapters')).json()).toEqual(chapters)
+  expect(await (await page.request.get(endpoint + '/generation')).json()).toEqual([])
+  await expect(panel.getByText(/按当前 2 章的目录规划/)).toBeVisible()
+  const instruction = panel.getByLabel('本次规划要求')
+  await instruction.fill('先写门外找铃，再在门内揭示规则。')
+  await instruction.dispatchEvent('keydown', {
+    key: 'Enter',
+    code: 'Enter',
+    isComposing: true,
+    bubbles: true,
+  })
+  expect(await (await page.request.get(endpoint + '/generation')).json()).toEqual([])
+
+  const added = await page.request.post(root + '/chapters', {
+    headers,
+    data: { title: '另一窗口安排的收束章' },
+  })
+  expect(added.status(), await added.text()).toBe(201)
+  const addedChapter = await added.json()
+  const denied = page.waitForResponse(
+    (response) => response.request().method() === 'POST' && response.url().endsWith(endpoint + '/generation'),
+  )
+  await generate.click()
+  const conflict = await denied
+  expect(conflict.status(), await conflict.text()).toBe(409)
+  expect((await conflict.json()).code).toBe('outline_directory_changed')
+  await expect(panel.getByText(/按当前 3 章的目录规划/)).toBeVisible()
+  expect(await (await page.request.get(endpoint + '/generation')).json()).toEqual([])
+
+  await generate.click()
   const load = page.getByRole('button', { name: '载入候选供编辑', exact: true })
   await expect(load).toBeEnabled()
   expect((await (await page.request.get(endpoint)).json()).draft).toBeNull()
   await load.click()
   const summary = page.getByRole('textbox', { name: '总纲', exact: true })
   await expect(summary).toHaveValue('沿铃声寻找师姐。')
-  await expect(page.getByText('门内验证 · 章纲')).toBeVisible()
+  await expect(page.getByText('第 2 章 · 章纲')).toBeVisible()
   await summary.fill('确认铜铃来历，最终把铃还给师姐。')
   await page.getByRole('button', { name: '保存大纲草稿' }).click()
   const confirm = page.getByRole('button', { name: '确认已保存大纲' })
@@ -37,6 +112,13 @@ test('AI 大纲由作者载入修改、保存，再确认', async ({ page }) => 
   await expect(page.getByText('已确认大纲修订 2', { exact: true })).toBeVisible()
   const final = await (await page.request.get(endpoint)).json()
   expect(final.confirmed.plan.summary).toBe('确认铜铃来历，最终把铃还给师姐。')
+  expect(
+    final.confirmed.plan.volumes[0].units[0].chapters.map(
+      ({ chapter_id }: { chapter_id: string }) => chapter_id,
+    ),
+  ).toEqual([...chapters, addedChapter].map(({ id }: { id: string }) => id))
+  await page.getByRole('button', { name: '写作', exact: true }).click()
+  await expect(page.getByText('本章章纲 · 修订 2', { exact: true })).toBeVisible()
 })
 
 test('大纲生成可显式选用已保存手法卡，过期修订须重新核对', async ({ page }) => {

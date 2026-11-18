@@ -94,6 +94,12 @@ test('长篇交付与分类设定册以冻结清单同步，从独立 Web 备份
     data: {
       basis_sha256,
       read_note: '已校对两章原稿。',
+      author_decisions: {
+        reading: 'verified',
+        ending: 'verified',
+        characters: 'verified',
+        promises: 'verified',
+      },
       ending: { note: '铜铃归还。' },
       characters: { note: '师姐与主角离开渡口。' },
       promises: { note: '原有承诺均处理。' },

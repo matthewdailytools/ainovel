@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react'
 import {
   confirmLocalSettingUse,
-  readLocalOutlineSettingUse,
+  readLocalBoundChapterSource,
+  readLocalOutlineSettingEvidence,
   readLocalSettingUse,
+  readLocalWorkflowHistory,
   withdrawLocalSettingUse,
   type LocalRevision,
 } from './offlineStore'
 import { captureStoryEvidence } from './storySyncModel'
 import type { SettingUseRecord, SettingUseStatus } from './settingUseSyncModel'
+import { eligibleOutlineSettings, outlineChapterPlans } from './outlineSyncModel'
+import {
+  OutlineSettingLedger,
+  type SettingLedgerItem,
+  type SettingLedgerLocation,
+} from './OutlineSettingLedger'
+import type { OfflineOutlineData } from './OfflineOutline'
 
 export type SavedSelection = { revisionId: string; start: number; end: number; text: string }
 const labels: Record<SettingUseStatus, string> = {
@@ -181,18 +190,20 @@ export function OfflineSettingUse({
 
 export function OfflineOutlineSettingLedger({
   projectId,
+  data,
   refreshToken,
 }: {
   projectId: string
+  data: OfflineOutlineData
   refreshToken: number
 }) {
   const [open, setOpen] = useState(false)
-  const [rows, setRows] = useState<Awaited<ReturnType<typeof readLocalOutlineSettingUse>>>()
+  const [rows, setRows] = useState<SettingLedgerItem[]>()
   const [error, setError] = useState('')
   useEffect(() => {
     if (!open) return
     let active = true
-    void readLocalOutlineSettingUse(projectId).then(
+    void readSettingLedger(projectId, data).then(
       (value) => {
         if (active) {
           setRows(value)
@@ -206,33 +217,164 @@ export function OfflineOutlineSettingLedger({
     return () => {
       active = false
     }
-  }, [open, projectId, refreshToken])
+  }, [open, projectId, data, refreshToken])
   return (
     <details onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary>非世界设定使用台账</summary>
+      <summary>设定台账</summary>
       {error && <p role="alert">{error}</p>}
       {open && !rows && !error && <p role="status">正在读取当前大纲和正文证据…</p>}
-      {rows?.length === 0 && <p>当前大纲暂无正式的非世界设定引用。</p>}
-      {!!rows?.length && (
-        <ul>
-          {rows.map(({ chapterId, chapterTitle, itemId, title, proof }) => (
-            <li key={`${chapterId}/${itemId}`}>
-              {proof ? (
-                <details>
-                  <summary>
-                    {chapterTitle} · {title} · {labels[proof.status]}
-                  </summary>
-                  <Proof proof={proof} />
-                </details>
-              ) : (
-                <p>
-                  {chapterTitle} · {title} · 仅计划采用
-                </p>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      {rows && <OutlineSettingLedger items={rows} />}
     </details>
   )
+}
+
+type FrozenRuleReview = {
+  report_id: string
+  chapter_id: string
+  revision: number
+  result: 'pass' | 'fail' | 'unknown'
+  rule: { id: string; confirmation_id: string }
+  evidence: { start: number; end: number; text: string } | null
+}
+
+function ruleReviews(basis: Record<string, unknown>): FrozenRuleReview[] {
+  if (!Array.isArray(basis.reports)) return []
+  return basis.reports.filter(
+    (review): review is FrozenRuleReview =>
+      review &&
+      typeof review.report_id === 'string' &&
+      typeof review.chapter_id === 'string' &&
+      Number.isSafeInteger(review.revision) &&
+      typeof review.rule?.id === 'string' &&
+      typeof review.rule?.confirmation_id === 'string' &&
+      ['pass', 'fail', 'unknown'].includes(review.result) &&
+      (review.evidence == null ||
+        (Number.isSafeInteger(review.evidence.start) &&
+          Number.isSafeInteger(review.evidence.end) &&
+          typeof review.evidence.text === 'string')),
+  )
+}
+
+async function readSettingLedger(projectId: string, data: OfflineOutlineData): Promise<SettingLedgerItem[]> {
+  const active = data.settings?.project_version_id === data.projectVersionId ? data.settings : null
+  const entries = new Map(
+    eligibleOutlineSettings(active).map((setting) => [
+      setting.id,
+      { setting, chapters: new Map<string, SettingLedgerLocation>() },
+    ]),
+  )
+  if (!entries.size) return []
+  const chapterTitles = new Map(data.chapters.map(({ id, title }) => [id, title]))
+  const outline = data.current?.version
+  const current =
+    outline?.project_version_id === data.projectVersionId && outline?.settings_version_id === active?.id
+  function location(
+    settingId: string,
+    chapterId: string,
+    chapterTitle = chapterTitles.get(chapterId) ?? chapterId,
+  ) {
+    const chapters = entries.get(settingId)?.chapters
+    if (!chapters) return undefined
+    const row: SettingLedgerLocation = chapters.get(chapterId) ?? {
+      chapter_id: chapterId,
+      chapter_title: chapterTitle,
+      planned: null,
+      evidence: null,
+    }
+    chapters.set(chapterId, row)
+    return row
+  }
+  for (const plan of outline ? outlineChapterPlans(outline.plan) : []) {
+    for (const id of plan.setting_ids) {
+      const row = location(id, plan.chapter_id)
+      if (row) {
+        row.planned = current ? 'current' : 'outdated'
+        row.source_unavailable = !entries.get(id)?.setting.category_title
+      }
+    }
+  }
+  const [authorEvidence, history] = await Promise.all([
+    readLocalOutlineSettingEvidence(projectId),
+    readLocalWorkflowHistory(projectId),
+  ])
+  for (const proof of authorEvidence) {
+    const { item_id, evidence, outline_version_id, settings_version_id } = proof.entry.version
+    if (!entries.get(item_id)?.setting.category_title) continue
+    const row = location(item_id, evidence.chapter_id, proof.chapterTitle)
+    if (!row) continue
+    const currentProof =
+      row.planned === 'current' &&
+      proof.status === 'current' &&
+      outline?.id === outline_version_id &&
+      active?.id === settings_version_id
+    row.evidence = {
+      method: 'author',
+      status: proof.quote ? (currentProof ? 'current' : 'outdated') : 'unavailable',
+      quote: proof.quote,
+      revision_id: evidence.revision_id,
+    }
+  }
+  const known = new Set<string>()
+  const passages = new Map<
+    string,
+    {
+      review: FrozenRuleReview
+      first: boolean
+      binding: (typeof history.inspections)[number]['chapter_bindings'][number] | undefined
+      chapterTitle: string | undefined
+    }
+  >()
+  for (const { report, chapter_bindings } of history.inspections.sort(
+    (a, b) => b.created - a.created || a.id.localeCompare(b.id),
+  )) {
+    const rules = report.items.find((item) => item.check_id === '05')
+    if (!rules) continue
+    for (const review of ruleReviews(rules.basis)) {
+      const setup = entries.get(review.rule.id)?.setting
+      if (!setup || setup.category_title) continue
+      const key = JSON.stringify([review.rule.id, review.chapter_id])
+      const first = !known.has(key)
+      known.add(key)
+      const planned = entries.get(review.rule.id)?.chapters.get(review.chapter_id)
+      if (planned) delete planned.source_unavailable
+      if (review.result !== 'pass' || !review.evidence || passages.has(key)) continue
+      passages.set(key, {
+        review,
+        first,
+        binding: chapter_bindings.find(
+          ({ id, revision }) => id === review.chapter_id && revision === review.revision,
+        ),
+        chapterTitle: report.chapters.find(({ id }) => id === review.chapter_id)?.title,
+      })
+    }
+  }
+  await Promise.all(
+    [...passages.values()].map(async ({ review, first, binding, chapterTitle }) => {
+      const row = location(review.rule.id, review.chapter_id, chapterTitle)!
+      const evidence = review.evidence!
+      const bound = binding ? await readLocalBoundChapterSource(projectId, binding) : undefined
+      const quote =
+        bound &&
+        evidence.start >= 0 &&
+        evidence.end > evidence.start &&
+        evidence.end <= bound.source.content.length &&
+        bound.source.content.slice(evidence.start, evidence.end) === evidence.text &&
+        evidence.text.trim() &&
+        !/\p{Surrogate}/u.test(evidence.text)
+          ? evidence.text
+          : null
+      row.evidence = {
+        method: 'rule',
+        status: quote
+          ? first && row.planned === 'current' && active?.id === review.rule.confirmation_id && bound?.current
+            ? 'current'
+            : 'outdated'
+          : 'unavailable',
+        quote,
+        revision_id: binding?.revision_id ?? null,
+        report_id: review.report_id,
+      }
+    }),
+  )
+  return [...entries.values()].map(({ setting, chapters }) => ({ setting, chapters: [...chapters.values()] }))
 }

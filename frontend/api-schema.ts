@@ -2674,6 +2674,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/outline-workspace/chapter-directory': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Create Directory */
+    post: operations['create_directory_api_branches__branch_id__outline_workspace_chapter_directory_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/outline-workspace/generation': {
     parameters: {
       query?: never
@@ -3407,6 +3424,29 @@ export interface components {
       /** Channel */
       channel?: string | null
     }
+    /** CompletionAuthorDecisions */
+    CompletionAuthorDecisions: {
+      /**
+       * Reading
+       * @enum {string}
+       */
+      reading: 'pending' | 'verified'
+      /**
+       * Ending
+       * @enum {string}
+       */
+      ending: 'pending' | 'verified' | 'author_decision'
+      /**
+       * Characters
+       * @enum {string}
+       */
+      characters: 'pending' | 'verified' | 'author_decision'
+      /**
+       * Promises
+       * @enum {string}
+       */
+      promises: 'pending' | 'verified' | 'author_decision'
+    }
     /** CompletionCheck */
     CompletionCheck: {
       /**
@@ -3430,6 +3470,7 @@ export interface components {
       basis_sha256: string
       /** Read Note */
       read_note: string
+      author_decisions?: components['schemas']['CompletionAuthorDecisions'] | null
       ending: components['schemas']['ClosureReview']
       characters: components['schemas']['ClosureReview']
       promises: components['schemas']['ClosureReview']
@@ -4072,6 +4113,8 @@ export interface components {
     GenerateOutline: {
       /** Base Revision */
       base_revision: number
+      /** Base Story Revision */
+      base_story_revision?: number | null
       /** Confirmation Id */
       confirmation_id?: string | null
       /** Account */
@@ -4123,6 +4166,17 @@ export interface components {
       /** Id */
       id: string
       report: components['schemas']['ReadingReport']
+    }
+    /** InitializeOutlineDirectory */
+    InitializeOutlineDirectory: {
+      /** Base Revision */
+      base_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Chapter Count */
+      chapter_count: number
+      /** Client Request Id */
+      client_request_id: string
     }
     /** InspectedChapter */
     InspectedChapter: {
@@ -4655,6 +4709,13 @@ export interface components {
       frozen_candidates: components['schemas']['OutlineFrozenCandidate'][]
       /** Affected Reports */
       affected_reports: components['schemas']['AffectedReport'][]
+    }
+    /** OutlineDirectoryResult */
+    OutlineDirectoryResult: {
+      /** Story Revision */
+      story_revision: number
+      /** Chapter Ids */
+      chapter_ids: string[]
     }
     /** OutlineFrozenCandidate */
     OutlineFrozenCandidate: {
@@ -12263,6 +12324,41 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_directory_api_branches__branch_id__outline_workspace_chapter_directory_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['InitializeOutlineDirectory']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OutlineDirectoryResult']
         }
       }
       /** @description Validation Error */

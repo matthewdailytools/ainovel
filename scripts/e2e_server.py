@@ -157,12 +157,15 @@ class Model(ReferenceModel):
                 "call_id": "offline-inspection-semantic",
             }
         if instruction.get("动作") == "对照单条已确认设定与保存稿":
-            assert instruction["设定"] == "铜铃只在门内响。"
-            unit = next(unit for unit in instruction["可引用原文"] if "门外响了" in unit["text"])
+            if instruction["设定"] == "交接只能当面完成。":
+                unit = next(unit for unit in instruction["可引用原文"] if "守铃人阿陶接过" in unit["text"])
+                result, reason = "pass", "学徒在阿陶面前交出赤钥。"
+            else:
+                assert instruction["设定"] == "铜铃只在门内响。"
+                unit = next(unit for unit in instruction["可引用原文"] if "门外响了" in unit["text"])
+                result, reason = "fail", "门外响铃违背设定。"
             return {
-                "text": json.dumps(
-                    {"result": "fail", "evidence": unit["source_id"], "reason": "门外响铃违背设定。"}
-                ),
+                "text": json.dumps({"result": result, "evidence": unit["source_id"], "reason": reason}),
                 "usage": {"input": 1, "output": 1},
                 "call_id": "offline-setting-review",
             }

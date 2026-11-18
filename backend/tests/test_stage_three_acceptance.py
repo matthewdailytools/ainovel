@@ -560,6 +560,12 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(
     data = {
         "basis_sha256": client.get(completion).json()["basis_sha256"],
         "read_note": "作者按目录通读两卷四章。",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "verified",
+        },
         "ending": {"note": "铜铃归还兑现终局。", "sources": [source(fourth)]},
         "characters": {"note": "阿芹找到师姐并作出归还选择。", "sources": [source(third), source(fourth)]},
         "promises": {"note": "两道刻痕的信物来历已回收。", "sources": [source(first), source(fourth)]},

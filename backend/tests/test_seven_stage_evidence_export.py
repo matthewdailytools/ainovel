@@ -70,6 +70,12 @@ def test_seven_stage_evidence_pins_original_reviews_and_delivery_after_new_save(
         json={
             "basis_sha256": client.get(completion_url).json()["basis_sha256"],
             "read_note": "在合成样本中确认保留通读记录。",
+            "author_decisions": {
+                "reading": "verified",
+                "ending": "verified",
+                "characters": "verified",
+                "promises": "verified",
+            },
             "ending": {"note": "核对本篇回收了寻找失主的承诺。"},
             "characters": {"note": "检查学徒的选择。"},
             "promises": {"note": "检查铃的去向。"},

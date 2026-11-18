@@ -7,6 +7,7 @@ import { OutlineGenerationPanel } from './OutlineGenerationPanel'
 import type { SelectedOutlineCard } from './SelectedOutlineCards'
 import { OutlinePromiseProgress, type OutlinePromise } from './OutlinePromiseProgress'
 import { OutlineImpactDetails, type OutlineConfirmationImpact } from './OutlineConfirmationImpact'
+import { OutlineSettingLedger, type SettingLedgerItem } from './OutlineSettingLedger'
 
 type OutlinePlan = components['schemas']['OutlinePlan']
 type ChapterPlan = components['schemas']['ChapterPlan']
@@ -30,6 +31,7 @@ export type OutlineView = {
   confirmed: OutlineRevision | null
   requires_promise_confirmation?: boolean
   stale: string[]
+  story_revision: number
   chapters: { id: string; title: string; position: number }[]
   promise_options: { id: string; title: string }[]
   settings: {
@@ -38,6 +40,7 @@ export type OutlineView = {
     evidence: { report_id: string; source: { text: string } } | null
     author_evidence?: { version: { id: string }; quote: string }
   }[]
+  setting_ledger?: SettingLedgerItem[]
   promises: OutlinePromise[]
 }
 
@@ -324,7 +327,14 @@ export function OutlineWorkspace({
           modelReady={modelReady}
           baseRevision={view.draft?.revision ?? 0}
           confirmationId={settingId ?? settings.confirmation_id}
-          hasChapters={!!view.chapters.length}
+          directoryChapterCount={view.chapters.length}
+          storyRevision={view.story_revision}
+          onDirectoryReady={async () => {
+            const next = await api<OutlineView>(root)
+            setView((current) =>
+              current ? { ...current, chapters: next.chapters, story_revision: next.story_revision } : next,
+            )
+          }}
           dirty={dirty || busy}
           existingReferenceCount={view.draft?.setting_basis.reference_cards?.length}
           referenceOptions={cards}
@@ -1003,35 +1013,23 @@ export function OutlineWorkspace({
           </details>
         )}
       </section>
-      {view.confirmed && (
-        <section className="card">
-          <h3>设定台账</h3>
-          {!view.settings.length && <p>当前大纲尚未安排设定引用。</p>}
-          <ul>
-            {view.settings.map(({ chapter_id, setting, evidence, author_evidence }) => (
-              <li key={`${chapter_id}/${setting.id}`}>
-                <button type="button" onClick={() => onWriting(chapter_id, evidence?.report_id)}>
-                  {chapterName(chapter_id)}
-                </button>{' '}
-                {setting.title}
-                {setting.category_title && ` · ${setting.category_title}`} ·{' '}
-                {author_evidence ? '作者已确认正文使用' : evidence ? '已有正文对账证据' : '计划'}
-                {evidence && <blockquote>{evidence.source.text}</blockquote>}
-                {author_evidence && <blockquote>{author_evidence.quote}</blockquote>}
-              </li>
-            ))}
-          </ul>
-          <h3>伏笔台账</h3>
-          {!view.promises.length && <p>当前大纲尚未安排伏笔窗口。</p>}
-          <ul>
-            {view.promises.map((entry) => (
-              <li key={entry.promise_id}>
-                <OutlinePromiseProgress promise={entry} chapterName={chapterName} onChapter={onWriting} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <section className="card">
+        <h3>设定台账</h3>
+        <OutlineSettingLedger items={view.setting_ledger ?? []} onChapter={onWriting} />
+        {view.confirmed && (
+          <>
+            <h3>伏笔台账</h3>
+            {!view.promises.length && <p>当前大纲尚未安排伏笔窗口。</p>}
+            <ul>
+              {view.promises.map((entry) => (
+                <li key={entry.promise_id}>
+                  <OutlinePromiseProgress promise={entry} chapterName={chapterName} onChapter={onWriting} />
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
     </div>
   )
 }

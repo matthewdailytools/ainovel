@@ -661,6 +661,12 @@ def test_rollback_keeps_numeric_review_but_blocks_completion_until_dependent_che
     decision = {
         "basis_sha256": verify(client.get(completion))["basis_sha256"],
         "read_note": "已通读合成故事的两个章节。",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "verified",
+        },
         "ending": {"note": "铜铃归还原主。"},
         "characters": {"note": "学徒和师姐重逢。"},
         "promises": {"note": "归铃的承诺已经兑现。"},

@@ -575,6 +575,8 @@ def _validate_completion(record, branch_id, report, revision_for, *, hydrate=Fal
     ):
         _bad("稿件包的完本清单与原体检单或冻结完本依据不一致。")
     review = record.review
+    if review.author_decisions is not None and not review.author_decisions.cleared():
+        _bad("历史完本的作者裁定尚未完成。")
     closures = (review.ending, review.characters, review.promises)
     evidence = [source for closure in closures for source in closure.sources]
     chapters = _chapters(

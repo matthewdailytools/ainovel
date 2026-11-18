@@ -5421,6 +5421,40 @@
         }
       }
     },
+    "/api/branches/{branch_id}/outline-workspace/chapter-directory": {
+      "post": {
+        "summary": "Create Directory",
+        "operationId": "create_directory_api_branches__branch_id__outline_workspace_chapter_directory_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/InitializeOutlineDirectory" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OutlineDirectoryResult" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/outline-workspace/generation": {
       "post": {
         "summary": "Start",
@@ -6727,6 +6761,30 @@
         "required": ["started_from", "started_before"],
         "title": "Cohort"
       },
+      "CompletionAuthorDecisions": {
+        "properties": {
+          "reading": { "type": "string", "enum": ["pending", "verified"], "title": "Reading" },
+          "ending": {
+            "type": "string",
+            "enum": ["pending", "verified", "author_decision"],
+            "title": "Ending"
+          },
+          "characters": {
+            "type": "string",
+            "enum": ["pending", "verified", "author_decision"],
+            "title": "Characters"
+          },
+          "promises": {
+            "type": "string",
+            "enum": ["pending", "verified", "author_decision"],
+            "title": "Promises"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["reading", "ending", "characters", "promises"],
+        "title": "CompletionAuthorDecisions"
+      },
       "CompletionCheck": {
         "properties": {
           "id": {
@@ -6747,6 +6805,9 @@
         "properties": {
           "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" },
           "read_note": { "type": "string", "maxLength": 4000, "title": "Read Note" },
+          "author_decisions": {
+            "anyOf": [{ "$ref": "#/components/schemas/CompletionAuthorDecisions" }, { "type": "null" }]
+          },
           "ending": { "$ref": "#/components/schemas/ClosureReview" },
           "characters": { "$ref": "#/components/schemas/ClosureReview" },
           "promises": { "$ref": "#/components/schemas/ClosureReview" },
@@ -7766,6 +7827,10 @@
       "GenerateOutline": {
         "properties": {
           "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "base_story_revision": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Base Story Revision"
+          },
           "confirmation_id": {
             "anyOf": [
               { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
@@ -7868,6 +7933,23 @@
         "type": "object",
         "required": ["id", "report"],
         "title": "ImportedReport"
+      },
+      "InitializeOutlineDirectory": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "chapter_count": { "type": "integer", "maximum": 100, "minimum": 1, "title": "Chapter Count" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "base_story_revision", "chapter_count", "client_request_id"],
+        "title": "InitializeOutlineDirectory"
       },
       "InspectedChapter": {
         "properties": {
@@ -8670,6 +8752,20 @@
           "affected_reports"
         ],
         "title": "OutlineConfirmationImpact"
+      },
+      "OutlineDirectoryResult": {
+        "properties": {
+          "story_revision": { "type": "integer", "title": "Story Revision" },
+          "chapter_ids": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+            "type": "array",
+            "title": "Chapter Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["story_revision", "chapter_ids"],
+        "title": "OutlineDirectoryResult"
       },
       "OutlineFrozenCandidate": {
         "properties": {

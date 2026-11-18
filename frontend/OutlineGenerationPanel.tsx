@@ -31,12 +31,14 @@ export function OutlineGenerationPanel({
   account,
   modelReady,
   baseRevision,
+  storyRevision,
   confirmationId,
-  hasChapters,
+  directoryChapterCount,
   dirty,
   existingReferenceCount = 0,
   referenceOptions,
   onRefreshReferences,
+  onDirectoryReady,
   onLoad,
   notify,
 }: {
@@ -44,22 +46,29 @@ export function OutlineGenerationPanel({
   account: string
   modelReady: boolean
   baseRevision: number
+  storyRevision: number
   confirmationId: string | null
-  hasChapters: boolean
+  directoryChapterCount: number
   dirty: boolean
   existingReferenceCount?: number
   referenceOptions: SelectedOutlineCard[]
   onRefreshReferences: () => Promise<void>
+  onDirectoryReady: () => Promise<void>
   onLoad: (plan: Plan, confirmationId: string | null, candidateId: string) => void
   notify: Notify
 }) {
-  const endpoint = `/branches/${branchId}/outline-workspace/generation`
+  const workspace = `/branches/${branchId}/outline-workspace`
+  const endpoint = workspace + '/generation'
   const [instruction, setInstruction] = useState('')
   const [tasks, setTasks] = useState<GenerationTask[]>([])
   const [selected, setSelected] = useState('')
   const [proposal, setProposal] = useState<Proposal>()
   const [selectedVersions, setSelectedVersions] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  const [directoryBusy, setDirectoryBusy] = useState(false)
+  const [chapterCount, setChapterCount] = useState('2')
+  const [directoryNotice, setDirectoryNotice] = useState<{ role: 'status' | 'alert'; text: string }>()
+  const directoryPending = useRef<{ signature: string; key: string } | null>(null)
   const pending = useRef<{ signature: string; key: string } | null>(null)
   const pollEpoch = useRef(0)
   const running = tasks.some((task) => task.status === 'queued' || task.status === 'running')
@@ -67,13 +76,18 @@ export function OutlineGenerationPanel({
   const candidateId = selectedTask?.artifact_id
   const current = proposal?.id === candidateId ? proposal : undefined
   const canLoad = current?.current && current.base_revision === baseRevision && !dirty
+  const hasChapters = directoryChapterCount > 0
+  const directorySize = Number(chapterCount)
+  const validDirectorySize = Number.isInteger(directorySize) && directorySize >= 1 && directorySize <= 100
+  const working = busy || directoryBusy
   const chosenCards = selectedVersions.flatMap((id) => {
     const card = referenceOptions.find((option) => selectedOutlineCardKey(option) === id)
     return card ? [card] : []
   })
   const staleCards = chosenCards.length !== selectedVersions.length
-  const latestInputs = useRef({ candidateId, dirty, baseRevision })
-  latestInputs.current = { candidateId, dirty, baseRevision }
+  const canGenerate = !working && !running && !dirty && !staleCards && hasChapters && modelReady
+  const latestInputs = useRef({ candidateId, dirty, baseRevision, storyRevision })
+  latestInputs.current = { candidateId, dirty, baseRevision, storyRevision }
   useEffect(() => {
     let active = true
     async function poll() {
@@ -111,15 +125,55 @@ export function OutlineGenerationPanel({
     return () => {
       active = false
     }
-  }, [candidateId, endpoint, baseRevision, notify])
+  }, [candidateId, endpoint, baseRevision, storyRevision, notify])
+
+  async function createDirectory() {
+    if (working || running || dirty || hasChapters || !validDirectorySize) return
+    setDirectoryBusy(true)
+    const values = {
+      base_revision: baseRevision,
+      base_story_revision: storyRevision,
+      chapter_count: directorySize,
+    }
+    const signature = JSON.stringify(values)
+    if (directoryPending.current?.signature !== signature)
+      directoryPending.current = { signature, key: crypto.randomUUID() }
+    let committed = false
+    try {
+      await api(workspace + '/chapter-directory', 'POST', {
+        ...values,
+        client_request_id: directoryPending.current.key,
+      })
+      committed = true
+      await onDirectoryReady()
+      directoryPending.current = null
+      setDirectoryNotice({ role: 'status', text: '章节目录已建立。' })
+    } catch (error) {
+      const text = committed
+        ? '章节目录已建立，请按原章数重试读取。'
+        : error instanceof ApiError && error.status < 500
+          ? error.message
+          : '暂未确认章节目录的写入结果，请按原章数重试。'
+      setDirectoryNotice({ role: 'alert', text })
+      if (
+        error instanceof ApiError &&
+        ['outline_directory_changed', 'outline_conflict'].includes(error.code)
+      ) {
+        await onDirectoryReady().catch(notify)
+      }
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
 
   async function generate() {
-    if (staleCards) return
+    if (!canGenerate) return
     setBusy(true)
     const values = {
       account,
       instruction,
       base_revision: baseRevision,
+      base_story_revision: storyRevision,
       confirmation_id: confirmationId,
       ...(chosenCards.length > 0 && { reference_cards: chosenCards.map(selectedOutlineCardReference) }),
     }
@@ -142,6 +196,8 @@ export function OutlineGenerationPanel({
         } catch (refreshError) {
           notify(refreshError)
         }
+      } else if (error instanceof ApiError && error.code === 'outline_directory_changed') {
+        await onDirectoryReady().catch(notify)
       }
     } finally {
       setBusy(false)
@@ -170,6 +226,7 @@ export function OutlineGenerationPanel({
         fresh.current &&
         fresh.id === latest.candidateId &&
         fresh.base_revision === latest.baseRevision &&
+        latest.storyRevision === storyRevision &&
         !latest.dirty
       )
         onLoad(fresh.plan, fresh.confirmation_id, fresh.id)
@@ -183,6 +240,30 @@ export function OutlineGenerationPanel({
   return (
     <section className="card" aria-label="大纲生成">
       <h3>生成大纲候选</h3>
+      {!hasChapters && (
+        <fieldset disabled={working || running || dirty}>
+          <legend>首次规划的章节目录</legend>
+          <label>
+            新建规划章数
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={chapterCount}
+              onChange={(event) => setChapterCount(event.target.value)}
+            />
+          </label>
+          <p className="small">先按章数建立空章目录，再生成四级大纲候选。</p>
+          <button type="button" disabled={!validDirectorySize} onClick={() => void createDirectory()}>
+            {directoryBusy
+              ? '正在建立章节目录…'
+              : directoryNotice?.role === 'alert'
+                ? '重试建立章节目录'
+                : '建立章节目录'}
+          </button>
+        </fieldset>
+      )}
+      {directoryNotice && <p role={directoryNotice.role}>{directoryNotice.text}</p>}
       <label>
         本次规划要求
         <textarea
@@ -202,26 +283,21 @@ export function OutlineGenerationPanel({
         selected={selectedVersions}
         onChange={setSelectedVersions}
         onRefresh={() => void refreshReferences()}
-        disabled={busy || running}
+        disabled={working || running}
       />
       <p className="small">
-        {hasChapters
-          ? '按已有章节目录规划，发送当前确认立项及所选设定中已采用的条目。'
-          : '请先在写作页建立章节目录。'}
+        {hasChapters &&
+          `按当前 ${directoryChapterCount} 章的目录规划，发送当前确认立项及所选设定中已采用的条目。`}
         {dirty ? '保存当前编辑后可生成或载入。' : ''}
         {!modelReady ? '配置模型账户后可生成。' : ''}
       </p>
-      <button
-        type="button"
-        disabled={busy || running || dirty || staleCards || !hasChapters || !modelReady}
-        onClick={() => void generate()}
-      >
+      <button type="button" disabled={!canGenerate} onClick={() => void generate()}>
         生成四级大纲候选
       </button>
       {!!tasks.length && (
         <label>
           大纲生成记录
-          <select disabled={busy} value={selected} onChange={(event) => setSelected(event.target.value)}>
+          <select disabled={working} value={selected} onChange={(event) => setSelected(event.target.value)}>
             {tasks.map((task) => (
               <option value={task.id} key={task.id}>
                 {label(task.status)} · {new Date(task.created * 1000).toLocaleString()}
@@ -242,7 +318,7 @@ export function OutlineGenerationPanel({
           <p>
             {current.plan.volumes?.length ?? 0} 卷 · {current.plan.promises?.length ?? 0} 个计划伏笔窗口
           </p>
-          <button type="button" disabled={!canLoad || busy} onClick={() => void load()}>
+          <button type="button" disabled={!canLoad || working} onClick={() => void load()}>
             载入候选供编辑
           </button>
         </>

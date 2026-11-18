@@ -31,9 +31,25 @@ class ClosureReview(Input):
     sources: list[Source] = Field(default_factory=list, max_length=30)
 
 
+ClosureDecision = Literal["pending", "verified", "author_decision"]
+
+
+class CompletionAuthorDecisions(Input):
+    reading: Literal["pending", "verified"]
+    ending: ClosureDecision
+    characters: ClosureDecision
+    promises: ClosureDecision
+
+    def cleared(self):
+        return self.reading == "verified" and "pending" not in (self.ending, self.characters, self.promises)
+
+
 class CompletionRequest(Input):
     basis_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     read_note: str = Field(max_length=4000)
+    author_decisions: CompletionAuthorDecisions | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     ending: ClosureReview
     characters: ClosureReview
     promises: ClosureReview
@@ -126,6 +142,20 @@ def _evidence(review, chapters):
         ):
             raise DomainError("completion_evidence", "完本判断的引文须对应当前正文修订和原文范围。", 409)
     return bool(review.note.strip())
+
+
+def _closure_check(identifier, title, detail, data, chapters, blockers=()):
+    decision = getattr(data.author_decisions, identifier) if data and data.author_decisions else "pending"
+    evidence = _evidence(getattr(data, identifier) if data else None, chapters)
+    if decision == "verified":
+        detail += "作者已核对本项正文和依据。"
+    elif decision == "author_decision":
+        detail += "已记录作者裁定。"
+    else:
+        detail += "等待作者核对或裁定。"
+    return _check(
+        identifier, title, detail, evidence and decision != "pending" and not blockers, bool(blockers)
+    )
 
 
 def _check(identifier, title, detail, passed=False, blocked=False):
@@ -251,32 +281,36 @@ def _evaluate(tx, branch_id, data=None):
     if current_red:
         inspection_detail += "请在校验台核对本轮红项及对应的章、卷报告。"
     materials = _materials(manifest, chapters, settings, data)
+    reading_verified = bool(data and data.author_decisions and data.author_decisions.reading == "verified")
     checks = [
         _check(
             "manuscript",
             "稿件齐全与通读",
             manuscript_detail,
-            bool(manuscript and data and data.read_note.strip()),
+            bool(manuscript and reading_verified and data.read_note.strip()),
             not manuscript,
         ),
-        _check(
+        _closure_check(
             "ending",
             "主冲突与终局",
             "记录正文中的处理或作者确认的安排。",
-            _evidence(data.ending if data else None, by_id),
+            data,
+            by_id,
         ),
-        _check(
+        _closure_check(
             "characters",
             "关键人物与关系",
             "记录人物与关系的去向或作者确认的留白。",
-            _evidence(data.characters if data else None, by_id),
+            data,
+            by_id,
         ),
-        _check(
+        _closure_check(
             "promises",
             "伏笔与读者承诺",
             "".join(promise_details) or "核对已处理的承诺并记录依据。",
-            _evidence(data.promises if data else None, by_id) and not open_promises and not required_open,
-            bool(open_promises or required_open),
+            data,
+            by_id,
+            blockers=promise_details,
         ),
         _check(
             "inspection",
@@ -308,9 +342,11 @@ def _latest(tx, branch_id, basis):
     if not row:
         return None
     value = json.loads(row["payload"])
+    stored = json.loads(row["basis"])
     return {
         "id": row["id"],
-        "current": json.loads(row["basis"])["basis_sha256"] == basis,
+        "current": stored["basis_sha256"] == basis and bool(stored["review"].get("author_decisions")),
+        "review": stored["review"],
         "checks": value["checks"],
         "manifest": value["manifest"],
     }
@@ -330,10 +366,11 @@ def register_routes(app, domain):
                 {
                     "id": row["id"],
                     "created": row["created"],
-                    "current": row["basis"] == value["basis_sha256"],
+                    "current": row["basis"] == value["basis_sha256"] and row["explicit_review"] is not None,
                 }
                 for row in tx.execute(
-                    "SELECT id,created,json_extract(basis,'$.basis_sha256') AS basis FROM artifacts "
+                    "SELECT id,created,json_extract(basis,'$.basis_sha256') AS basis,"
+                    "json_extract(basis,'$.review.author_decisions') AS explicit_review FROM artifacts "
                     "WHERE branch_id=? AND kind=? AND status='accepted' ORDER BY rowid DESC LIMIT 25",
                     (branch_id, KIND),
                 )
@@ -379,6 +416,7 @@ def register_routes(app, domain):
             return {
                 "id": identifier,
                 "current": True,
+                "review": basis["review"],
                 "checks": value["checks"],
                 "manifest": value["manifest"],
             }
@@ -420,7 +458,7 @@ def register_routes(app, domain):
                 "checks": data["checks"],
                 "review": data["review"],
                 **(source or {"origin": "local"}),
-                "current": reconciles and not source,
+                "current": reconciles and not source and bool(data["review"].get("author_decisions")),
                 "basis_reconciles": reconciles,
                 **(
                     {

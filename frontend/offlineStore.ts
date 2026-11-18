@@ -1243,6 +1243,40 @@ export function readLocalSourceRevision(projectId: string, revisionId: string) {
   })
 }
 
+export function readLocalBoundChapterSource(
+  projectId: string,
+  binding: ArchivedInspection['chapter_bindings'][number],
+) {
+  return transact(
+    ['projects', 'chapters', 'revisions', 'sourceRevisions', 'storyChapterAliases'],
+    'readonly',
+    async (tx) => {
+      const { branch } = await readProject(tx, projectId)
+      const source = await sourceRevision(tx, branch.id, binding.revision_id)
+      if (
+        source?.chapter_id !== binding.id ||
+        source.revision !== binding.revision ||
+        source.sha256 !== binding.sha256
+      )
+        return undefined
+      const chapter = await result<LocalChapter | undefined>(tx.objectStore('chapters').get(binding.id))
+      const head =
+        chapter?.branch_id === branch.id && !chapter.archived && !chapter.stale
+          ? await chapterHead(tx, chapter)
+          : undefined
+      const current =
+        head?.sha256 === binding.sha256 &&
+        (head.id === binding.revision_id ||
+          Boolean(
+            await result(
+              tx.objectStore('storyChapterAliases').getKey([branch.id, binding.revision_id, head.id]),
+            ),
+          ))
+      return { source, current }
+    },
+  )
+}
+
 function getProjectHead(tx: IDBTransaction, branchId: string) {
   return result<LocalProjectHead | undefined>(tx.objectStore('projectHeads').get(branchId))
 }
@@ -1645,6 +1679,7 @@ const settingUseStore = createSettingUseOfflineStore({
 export const {
   readLocalSettingUse,
   readLocalOutlineSettingUse,
+  readLocalOutlineSettingEvidence,
   confirmLocalSettingUse,
   withdrawLocalSettingUse,
 } = settingUseStore

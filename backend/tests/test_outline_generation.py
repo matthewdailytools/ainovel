@@ -1,5 +1,8 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
+from sqlite3 import IntegrityError
+from threading import Barrier
 from uuid import uuid4
 
 import pytest
@@ -151,6 +154,96 @@ def test_outline_ai_candidate_is_reviewable_and_author_save_is_separate(client, 
         "bell"
     ]
     assert result.json()["promises"][0]["state"] == "planned"
+
+
+def test_outline_directory_bootstrap_replays_and_freezes_existing_ids(client, domain):
+    branch = domain.create_novel("遗铃 · 零章大纲")["branch_id"]
+    root = f"/api/branches/{branch}"
+    endpoint = root + "/outline-workspace"
+    setting = setting_confirmation(client, branch)
+    version = client.get(endpoint).json()["story_revision"]
+    args = {
+        "base_revision": 0,
+        "base_story_revision": version,
+        "chapter_count": 2,
+        "client_request_id": uuid4().hex,
+    }
+    directory = endpoint + "/chapter-directory"
+    created = client.post(directory, json=args)
+    assert created.status_code == 201, created.text
+    result = created.json()
+    assert result["story_revision"] == version + 1
+    assert client.post(directory, json=args).json() == result
+    assert client.post(directory, json={**args, "chapter_count": 1}).json()["code"] == "idempotency"
+
+    chapters = client.get(root + "/chapters").json()
+    assert [(row["id"], row["title"], row["revision"], row["chars"]) for row in chapters] == [
+        (key, f"第 {index} 章", 0, 0) for index, key in enumerate(result["chapter_ids"], 1)
+    ]
+    assert client.get(endpoint + "/generation").json() == []
+    base = {
+        "base_revision": 0,
+        "confirmation_id": setting,
+        "account": "deepseek",
+        "client_request_id": uuid4().hex,
+    }
+    accepted = client.post(
+        endpoint + "/generation", json={**base, "base_story_revision": result["story_revision"]}
+    )
+    assert accepted.status_code == 202, accepted.text
+    assert (
+        client.post(
+            endpoint + "/generation", json={**base, "base_story_revision": result["story_revision"]}
+        ).json()
+        == accepted.json()
+    )
+    frozen = domain.task(accepted.json()["id"])["result"]["outline_generation"]
+    assert [row["id"] for row in frozen["chapters"]] == result["chapter_ids"]
+
+    domain.create_chapter(branch, "另一窗口增加一章")
+    outdated = client.post(
+        endpoint + "/generation",
+        json={**base, "client_request_id": uuid4().hex, "base_story_revision": result["story_revision"]},
+    )
+    assert outdated.status_code == 409 and outdated.json()["code"] == "outline_directory_changed", (
+        outdated.text
+    )
+    assert len(client.get(endpoint + "/generation").json()) == 1
+
+
+def test_outline_directory_is_atomic_before_retry_and_during_race(client, domain):
+    branch = domain.create_novel("遗铃 · 建章竞争")["branch_id"]
+    root = f"/api/branches/{branch}"
+    endpoint = root + "/outline-workspace/chapter-directory"
+    nonce = uuid4().hex
+    args = {"base_revision": 0, "base_story_revision": 0, "chapter_count": 2, "client_request_id": nonce}
+    with domain.db.connect(True) as tx:
+        tx.execute(
+            "CREATE TRIGGER fail_directory_insert BEFORE INSERT ON chapters WHEN NEW.position=2 "
+            "BEGIN SELECT RAISE(ABORT,'fixture directory aborted'); END"
+        )
+    with pytest.raises(IntegrityError, match="fixture directory aborted"):
+        client.post(endpoint, json=args)
+    assert client.get(root + "/chapters").json() == []
+    assert domain.branch(branch)["story_revision"] == 0
+    assert domain.db.all("SELECT key FROM receipts WHERE key=?", (nonce,)) == []
+    with domain.db.connect(True) as tx:
+        tx.execute("DROP TRIGGER fail_directory_insert")
+
+    gate = Barrier(2)
+
+    def create(key):
+        gate.wait(timeout=5)
+        return client.post(endpoint, json={**args, "client_request_id": key})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        replies = list(pool.map(create, [nonce, uuid4().hex]))
+    assert sorted(reply.status_code for reply in replies) == [201, 409]
+    winner = next(reply.json() for reply in replies if reply.status_code == 201)
+    rejected = next(reply.json() for reply in replies if reply.status_code == 409)
+    assert rejected["code"] == "outline_directory_changed"
+    assert [row["id"] for row in client.get(root + "/chapters").json()] == winner["chapter_ids"]
+    assert domain.branch(branch)["story_revision"] == 1
 
 
 def test_live_directory_change_preserves_stale_candidate_but_blocks_use(client, domain, settings, story):

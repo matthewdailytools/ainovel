@@ -7,6 +7,7 @@ from pydantic import Field, StringConstraints, ValidationError
 
 from .db import DomainError
 from .models import Input, ModuleInput
+from .outline_directory import InitializeOutlineDirectory, OutlineDirectoryResult, initialize_directory
 from .outline_workspace import (
     Identifier,
     OutlinePlan,
@@ -31,6 +32,7 @@ ACTION = "生成四级大纲候选"
 
 class GenerateOutline(Input):
     base_revision: int = Field(ge=0, strict=True)
+    base_story_revision: int | None = Field(default=None, ge=0, strict=True)
     confirmation_id: Identifier | None = None
     account: Identifier
     instruction: Annotated[str, StringConstraints(strip_whitespace=True, max_length=6000)] = ""
@@ -62,13 +64,15 @@ def freeze_tx(tx, branch_id, request):
     latest = _latest(tx, branch_id)
     _check_base(latest, request["base_revision"])
     graph = graph_snapshot(tx, branch_id)
+    if (expected := request.get("base_story_revision")) is not None and expected != graph["story_revision"]:
+        raise DomainError("outline_directory_changed", "章节目录依据已变化，请重新核对。", 409)
     chapters = [
         {key: chapter[key] for key in ("id", "title", "position")}
         for chapter in sorted(graph["chapters"], key=lambda row: row["position"])
         if not chapter["archived"]
     ]
     if not chapters:
-        raise DomainError("outline_chapters", "请先在写作页建立章节目录，再生成章纲。")
+        raise DomainError("outline_chapters", "请先建立章节目录，再生成章纲。")
     records = [
         {
             "id": row["id"],
@@ -165,7 +169,12 @@ def _task_view(task):
 
 
 def register_routes(app, domain, provider_ready):
-    endpoint = "/api/branches/{branch_id}/outline-workspace/generation"
+    workspace = "/api/branches/{branch_id}/outline-workspace"
+    endpoint = workspace + "/generation"
+
+    @app.post(workspace + "/chapter-directory", status_code=201)
+    def create_directory(branch_id: str, data: InitializeOutlineDirectory) -> OutlineDirectoryResult:
+        return initialize_directory(domain, branch_id, data)
 
     @app.post(endpoint, status_code=202)
     def start(branch_id: str, data: GenerateOutline) -> OutlineGenerationTask:
@@ -183,6 +192,11 @@ def register_routes(app, domain, provider_ready):
         request["outline_generation"] = {
             "base_revision": data.base_revision,
             "confirmation_id": data.confirmation_id,
+            **(
+                {"base_story_revision": data.base_story_revision}
+                if data.base_story_revision is not None
+                else {}
+            ),
             **({"reference_cards": data.model_dump()["reference_cards"]} if data.reference_cards else {}),
         }
         return _task_view(domain.queue("module", request))

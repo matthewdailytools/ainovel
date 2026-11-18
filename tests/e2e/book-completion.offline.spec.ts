@@ -101,6 +101,17 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
   await panel.getByRole('button', { name: '核对最新完本依据' }).click()
   expect((await reloaded).ok()).toBe(true)
   await previewButton.click()
+  await review.check()
+  const proposed = panel.getByRole('list', { name: '本次交付预览的六项判定', exact: true })
+  await expect(proposed.getByText('待核对', { exact: true })).toHaveCount(4)
+  await expect(confirmButton).toBeDisabled()
+  await panel.getByRole('checkbox', { name: '已通读本次稿件', exact: true }).check()
+  await panel.getByRole('combobox', { name: '主冲突与终局判定', exact: true }).selectOption('verified')
+  await panel
+    .getByRole('combobox', { name: '关键人物与关系判定', exact: true })
+    .selectOption('author_decision')
+  await panel.getByRole('combobox', { name: '伏笔与读者承诺判定', exact: true }).selectOption('verified')
+  await previewButton.click()
   const materials = panel.getByRole('region', { name: '交付预览', exact: true })
   const sampleLabel = materials.locator('summary').filter({ hasText: /^试读\.md$/ })
   const sample = sampleLabel.locator('..')
@@ -108,7 +119,6 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
   await expect(sample.locator('pre')).toContainText('学徒捡起铜铃')
   await expect(sample.locator('pre')).not.toContainText('师姐归来')
   await expect(confirmButton).toBeDisabled()
-  const proposed = panel.getByRole('list', { name: '本次交付预览的六项判定', exact: true })
   await expect(proposed.getByText('待核对', { exact: true })).toHaveCount(1)
   let releaseReview = () => {}
   const reviewGate = new Promise<void>((resolve) => {
@@ -137,6 +147,12 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
   expect(response.request().postDataJSON().ending.sources).toEqual([
     { chapter_id: chapter.id, revision: chapter.revision, start: 0, end: text.length, quote: text },
   ])
+  expect(response.request().postDataJSON().author_decisions).toEqual({
+    reading: 'verified',
+    ending: 'verified',
+    characters: 'author_decision',
+    promises: 'verified',
+  })
   await expect(panel.getByRole('heading', { name: '当前版本已完结' })).toBeVisible()
   await panel.getByRole('button', { name: '核对最新完本依据' }).click()
   const official = panel.getByRole('list', { name: '当前六项完本判定', exact: true })
@@ -162,6 +178,7 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
   await panel.getByText('完结判定与文件校验值', { exact: true }).click()
   const historical = panel.getByRole('list', { name: '历史六项完本判定', exact: true })
   await expect(historical.getByText('绿 · 通过', { exact: true })).toHaveCount(6)
+  await expect(panel.getByRole('heading', { name: '关键人物与关系 · 作者已裁定', exact: true })).toBeVisible()
   await expect(panel.getByRole('link', { name: '下载历史交付包' })).toHaveAttribute('href', url)
   expect((await page.request.get(url)).ok()).toBe(true)
 
@@ -185,6 +202,14 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
     buffer: Buffer.from(JSON.stringify(corrupted)),
   })
   await expect(page.getByRole('alert').filter({ hasText: '历史交付材料' })).toBeVisible()
+  const waiting = structuredClone(pack)
+  waiting.workflow_history.completions[0].review.author_decisions.ending = 'pending'
+  await sourceFile.setInputFiles({
+    name: '作者仍待核对.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(waiting)),
+  })
+  await expect(page.getByRole('alert').filter({ hasText: '历史完本的作者裁定尚未完成' })).toBeVisible()
   await sourceFile.setInputFiles({
     name: '完整作品.json',
     mimeType: 'application/json',
@@ -207,6 +232,14 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
   await expect(archive.getByRole('region', { name: '历史报告引用正文' })).toContainText('他看见铃身的旧痕。')
   await historyPicker.selectOption(history.completions[0].id)
   await expect(archive.getByRole('region', { name: '历史完本清单' }).getByRole('listitem')).toHaveCount(6)
+  await archive.getByText('查看这次原裁定', { exact: true }).press('Enter')
+  await expect(
+    archive.getByRole('heading', { name: '关键人物与关系 · 作者已裁定', exact: true }),
+  ).toBeVisible()
+  await archive.getByRole('button', { name: '查看主冲突与终局原文 1', exact: true }).press('Enter')
+  await expect(archive.getByRole('region', { name: '历史报告引用正文' }).locator('mark')).toContainText(
+    '他看见铃身的旧痕。',
+  )
   const output = page.waitForEvent('download')
   await archive.getByRole('button', { name: '下载历史交付 ZIP' }).click()
   const browserZip = testInfo.outputPath('browser-delivery.zip')
@@ -271,6 +304,10 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
       await expect(
         remoteArchive.getByText('源自同步设备 desktop-workflow-history', { exact: false }),
       ).toBeVisible()
+      await remoteArchive.getByText('查看这次原裁定', { exact: true }).press('Enter')
+      await expect(
+        remoteArchive.getByRole('heading', { name: '关键人物与关系 · 作者已裁定', exact: true }),
+      ).toBeVisible()
       await remoteArchive
         .getByRole('button', { name: /查看来源修订/ })
         .first()
@@ -334,6 +371,8 @@ test('AI 完本建议载入空白项，作者通读仍待确认', async ({ page 
     '保留这项作者已有的看法。',
   )
   await expect(panel.getByRole('textbox', { name: '通读记录', exact: true })).toHaveValue('')
+  await expect(panel.getByRole('checkbox', { name: '已通读本次稿件', exact: true })).not.toBeChecked()
+  await expect(panel.getByRole('combobox', { name: '主冲突与终局判定', exact: true })).toHaveValue('pending')
   await expect(panel.getByText(ending, { exact: false }).first()).toBeVisible()
   const preview = panel.getByRole('button', { name: '预览交付材料' })
   await spoiler.selectOption('opening')

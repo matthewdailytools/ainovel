@@ -89,6 +89,35 @@ def test_outline_versions_and_graph_ledger_track_saved_proof(client, domain, sto
     }
     view = put_and_confirm(client, endpoint, data)
     assert view["settings"][0]["evidence"] is None
+    ledger = view["setting_ledger"][0]
+    assert ledger["setting"]["id"] == "bell"
+    assert {row["chapter_id"] for row in ledger["chapters"]} == {first["id"], second["id"]}
+    assert all(row["planned"] == "current" and row["evidence"] is None for row in ledger["chapters"])
+    report = domain.stage(
+        {
+            "novel_id": story["id"],
+            "branch_id": branch,
+            "chapter_id": first["id"],
+            "base_revision": first["revision"],
+        },
+        "setting_review",
+        {
+            "result": "pass",
+            "evidence": {"start": 0, "end": len(first["content"]), "text": first["content"]},
+        },
+        {"rule": {"confirmation_id": setting_id, "id": "bell"}},
+        on_stage=lambda tx, identifier: tx.execute(
+            "UPDATE artifacts SET status='accepted' WHERE id=?", (identifier,)
+        ),
+    )
+    proof = client.get(endpoint).json()["setting_ledger"][0]["chapters"][0]["evidence"]
+    assert proof == {
+        "method": "rule",
+        "status": "current",
+        "quote": first["content"],
+        "revision_id": client.get(f"/api/chapters/{first['id']}/history").json()[0]["id"],
+        "report_id": report["id"],
+    }
     assert view["promises"][0]["state"] == "planned"
     assert view["promises"][0]["due"] is None
     assert client.put(endpoint, json=data).status_code == 409
@@ -128,6 +157,10 @@ def test_outline_versions_and_graph_ledger_track_saved_proof(client, domain, sto
     assert new["draft"]["plan"]["summary"] != old["plan"]["summary"]
     assert new["confirmed"] == old
     assert client.get(f"{endpoint}/revisions/{old['revision']}").json() == old
+    domain.save(first["id"], first["revision"], "学徒捡起铜铃。")
+    chapter = client.get(endpoint).json()["setting_ledger"][0]["chapters"][0]
+    assert chapter["planned"] == "current"
+    assert chapter["evidence"] == {**proof, "status": "outdated"}
 
 
 def test_new_promise_plans_confirm_atomically_without_evidence(client, domain, story, monkeypatch):
