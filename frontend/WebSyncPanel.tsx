@@ -54,6 +54,16 @@ function excerpt(value: SyncPayload | null, comparison: Comparison) {
     )
     return source ? describeReferenceVersion(source) : '尚未取得该手法卡的源修订。'
   }
+  if (value.kind === 'setting-use-head') {
+    const source = comparison.settingUse?.versions.find(({ version }) => version.id === value.revision_id)
+    if (!source) return '尚未取得该证据的原始修订。'
+    const { version } = source
+    return [
+      version.action === 'withdrawn' ? '撤回正文使用证据' : '确认正文使用证据',
+      `设定 ${version.item_id} · 采用版 ${version.settings_version_id}`,
+      `正文 ${version.evidence.revision_id} · ${version.evidence.start}–${version.evidence.end}`,
+    ].join('\n')
+  }
   const part = value.head ?? value.novel
   if (part && typeof part === 'object' && !Array.isArray(part)) {
     if (typeof part.content === 'string') return part.content
@@ -437,7 +447,9 @@ export function WebSyncPanel({
                         ? '设定版本'
                         : kind === 'project-head'
                           ? '立项版本'
-                          : '原稿修订'
+                          : kind === 'setting-use-head'
+                            ? '设定使用证据历史'
+                            : '原稿修订'
                 if (window.confirm(`${label}并结束冲突？${history}保留。`)) void run('choose', choice)
               }}
             >

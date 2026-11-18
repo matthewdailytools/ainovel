@@ -9,7 +9,8 @@ from ainovel.api import create_app
 from ainovel.manuscript_backup import BACKUP_IMPORT_PATH, _backup_chunks
 from ainovel.manuscript_exchange import ManuscriptPackage
 from ainovel.setting_use_portability import slot_id, version_id
-from test_setting_use import QUOTE, author_plan as author_plan_fixture, select, verified
+from test_setting_use import QUOTE, TEXT, author_plan as author_plan_fixture, select, verified
+from test_story_sync import choose_current, linked_cloud, paired
 
 author_plan = author_plan_fixture
 
@@ -192,3 +193,194 @@ def test_withdraw_history_cannot_rewrite_the_parent_selection(client, settings, 
         assert denied.status_code == 409 and denied.json()["code"] == "manuscript_setting_use"
         assert "原始依据" in denied.json()["message"]
         assert verified(target.get("/api/novels")) == []
+
+
+def test_explicit_chapter_adoption_survives_both_backups_and_story_aliases_cannot_promote_proof(
+    client, domain, settings, tmp_path, author_plan
+):
+    setup = author_plan
+    branch, chapter = setup["branch_id"], setup["first"]["id"]
+    route = setup["route"]
+    target = paired(domain, branch, tmp_path / "proven-adoption" / "manuscripts.sqlite")
+    with linked_cloud(domain, target, branch, tmp_path) as linked:
+        left, right, origin, left_token, right_token, *_ = linked
+        body = TEXT + "一同离岸。"
+        source_chapter = domain.save(chapter, setup["first"]["revision"], body)
+        target.save(chapter, setup["first"]["revision"], "本机把铜牌交给守门人。")
+        confirmed = record(client, route, "with-exact-chapter-source")
+        proof = confirmed["version"]
+        identifier = proof["id"]
+        source_id = proof["evidence"]["revision_id"]
+        left.run(branch, origin, left_token)
+        pending = right.run(branch, origin, right_token)
+        conflict = next(row for row in pending["conflicts"] if row["object_id"] == f"chapter:{chapter}")
+        compared = right.compare(branch, origin, right_token, conflict["id"])
+        result = choose_current(
+            right, branch, origin, right_token, conflict, compared, "pick-exact-proof-source"
+        )
+        assert not result["conflicts"] and not result["deferred"], result
+
+        with receiver(settings, "proven-adoption") as desktop:
+            setup_receiver(desktop)
+            local_id = verified(desktop.get(route))["basis"]["chapter_revision_id"]
+            assert local_id != source_id
+            active = verified(desktop.get(route + "/" + identifier))
+            assert active["status"] == "current" and active["quote"] == QUOTE
+            package = download(desktop, setup)
+            assert "story_history" not in package
+            assert package["setting_use_history"]["native_bindings"] == {source_id: local_id}
+            backup = desktop.get(setup["request"] + "/manuscript-backup")
+            assert backup.status_code == 200, backup.text
+            assert b'"setting_use_history.native_bindings","value"' in backup.content
+            for form in ("json", "framed"):
+                with receiver(settings, "alias-" + form) as restored:
+                    setup_receiver(restored)
+                    response = (
+                        restored.post("/api/manuscript-packages/import", json=package)
+                        if form == "json"
+                        else restored.post(
+                            BACKUP_IMPORT_PATH,
+                            content=backup.content,
+                            headers={"Content-Type": "application/octet-stream"},
+                        )
+                    )
+                    verified(response, 201)
+                    assert verified(restored.get(route + "/" + identifier)) == active
+                    assert verified(restored.get(route))["options"][0]["head_id"] == identifier
+                    assert download(restored, setup)["setting_use_history"] == package["setting_use_history"]
+
+            with receiver(settings, "damaged-adoption") as restored:
+                setup_receiver(restored)
+                unrelated = verified(restored.post("/api/novels", json={"title": "原稿保持"}), 201)
+                foreign_chapter = next(
+                    row["id"] for row in package["revisions"] if row["chapter_id"] == setup["second"]["id"]
+                )
+                incompatible = next(
+                    row["id"]
+                    for row in package["revisions"]
+                    if row["chapter_id"] == chapter and row["content"] != body
+                )
+                broken = []
+                for invalid_target in ("missing-native", foreign_chapter, incompatible):
+                    invalid = deepcopy(package)
+                    invalid["setting_use_history"]["native_bindings"][source_id] = invalid_target
+                    broken.append(invalid)
+                missing_source = deepcopy(package)
+                missing_source["source_revisions"] = [
+                    row for row in missing_source["source_revisions"] if row["id"] != source_id
+                ]
+                broken.append(missing_source)
+                for invalid in broken:
+                    refused = restored.post("/api/manuscript-packages/import", json=invalid)
+                    assert refused.status_code == 409 and refused.json()["code"] == "manuscript_setting_use"
+                    assert [row["id"] for row in verified(restored.get("/api/novels"))] == [unrelated["id"]]
+
+            graph = verified(client.get(setup["request"] + "/story-graph"))
+            story = verified(
+                client.post(
+                    setup["request"] + "/story-records",
+                    json={
+                        "base_story_revision": graph["story_revision"],
+                        "record": {
+                            "kind": "character",
+                            "title": "另有证据的领航人",
+                            "sources": [
+                                {
+                                    "chapter_id": chapter,
+                                    "revision": source_chapter["revision"],
+                                    "start": 1,
+                                    "end": 1 + len(QUOTE.encode("utf-16-le")) // 2,
+                                    "quote": QUOTE,
+                                }
+                            ],
+                        },
+                    },
+                ),
+                201,
+            )["records"][0]["id"]
+            left.run(branch, origin, left_token)
+            state = right.run(branch, origin, right_token)
+            assert not state["conflicts"] and not state["deferred"], state
+            base_revision = target.chapter(chapter)["revision"]
+            target.save(chapter, base_revision, "分别记录试写和恢复。")
+            target.save(chapter, base_revision + 1, body)
+            live = verified(desktop.get(route))["basis"]["chapter_revision_id"]
+            assert live != local_id
+            assert verified(desktop.get(route + "/" + identifier))["status"] == "outdated"
+            story_pack = download(desktop, setup)
+            addresses = story_pack["story_history"]["native_history"][story][0]["evidence"]["record"]
+            assert addresses == [local_id]
+            addresses[0] = live
+            for include_binding in (True, False):
+                isolated = deepcopy(story_pack)
+                if not include_binding:
+                    isolated["setting_use_history"].pop("native_bindings")
+                with receiver(settings, f"story-metadata-{include_binding}") as restored:
+                    setup_receiver(restored)
+                    verified(restored.post("/api/manuscript-packages/import", json=isolated), 201)
+                    old = verified(restored.get(route + "/" + identifier))
+                    assert old["status"] == "outdated" and old["quote"] == QUOTE
+
+
+def test_readopting_a_cloud_source_already_in_native_history_preserves_proof(
+    client, domain, settings, tmp_path, author_plan
+):
+    setup = author_plan
+    branch, chapter = setup["branch_id"], setup["first"]["id"]
+    route = setup["route"]
+    confirmed = record(client, route, "proof-of-shared-original")
+    source_id = confirmed["version"]["evidence"]["revision_id"]
+    proof_url = route + "/" + confirmed["version"]["id"]
+    target = paired(domain, branch, tmp_path / "known-source-workspace" / "manuscripts.sqlite")
+    with linked_cloud(domain, target, branch, tmp_path) as linked:
+        left, right, origin, left_token, right_token, *_ = linked
+        with receiver(settings, "known-source-workspace") as desktop:
+            setup_receiver(desktop)
+            assert verified(desktop.get(proof_url))["status"] == "current"
+            target.save(chapter, setup["first"]["revision"], "本机把铜牌交给看门人。")
+            assert verified(desktop.get(proof_url))["status"] == "outdated"
+            # A cloud title edit advances the competing chapter's head while retaining its saved source.
+            verified(client.patch(f"/api/chapters/{chapter}", json={"title": "云端为原章换标题"}))
+            left.run(branch, origin, left_token)
+            pending = right.run(branch, origin, right_token)
+            conflict = next(row for row in pending["conflicts"] if row["object_id"] == f"chapter:{chapter}")
+            compared = right.compare(branch, origin, right_token, conflict["id"])
+            assert compared["remote"]["current"]["payload"]["head"]["id"] == source_id
+            chosen = choose_current(
+                right, branch, origin, right_token, conflict, compared, "choose-old-source"
+            )
+            assert not chosen["conflicts"] and not chosen["deferred"], chosen
+            current = verified(desktop.get(route))["basis"]
+            native_id = current["chapter_revision_id"]
+            assert current["chapter_revision"] == setup["first"]["revision"] + 2
+            assert native_id != source_id and target.chapter(chapter)["content"] == TEXT
+            assert verified(desktop.get(proof_url))["status"] == "current"
+
+            package = download(desktop, setup)
+            assert package["setting_use_history"]["native_bindings"] == {source_id: native_id}
+            assert {source_id, native_id} <= {row["id"] for row in package["revisions"]}
+            backup = desktop.get(setup["request"] + "/manuscript-backup")
+            assert backup.status_code == 200, backup.text
+            for form in ("native-source-json", "native-source-backup", "no-declared-adoption"):
+                with receiver(settings, form) as restored:
+                    setup_receiver(restored)
+                    isolated = deepcopy(package)
+                    if form == "no-declared-adoption":
+                        isolated["setting_use_history"].pop("native_bindings")
+                    response = (
+                        restored.post(
+                            BACKUP_IMPORT_PATH,
+                            content=backup.content,
+                            headers={"Content-Type": "application/octet-stream"},
+                        )
+                        if form == "native-source-backup"
+                        else restored.post("/api/manuscript-packages/import", json=isolated)
+                    )
+                    verified(response, 201)
+                    result = verified(restored.get(proof_url))
+                    assert result["status"] == ("outdated" if form == "no-declared-adoption" else "current")
+                    assert result["quote"] == QUOTE
+
+            target.save(chapter, current["chapter_revision"], "作者另起同一段的稿。")
+            target.save(chapter, current["chapter_revision"] + 1, TEXT)
+            assert verified(desktop.get(proof_url))["status"] == "outdated"

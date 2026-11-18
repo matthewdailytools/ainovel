@@ -13,6 +13,7 @@ import {
   type LocalProject,
   type SyncedObject,
 } from './offlineStore'
+import { settingUseVersionSlot, type SettingUseSyncObject } from './settingUseSyncModel'
 import {
   outlineChapterPlans,
   requiredOutlineStoryRecord,
@@ -158,6 +159,7 @@ async function localObjects(project: LocalProject) {
     story,
     workflow,
     reference,
+    settingUse,
     publications,
   } = await readLocalSyncSnapshot(project.novel.id)
   const objects = syncManuscriptObjects(manuscript)
@@ -220,6 +222,23 @@ async function localObjects(project: LocalProject) {
       branch_id,
       revision_id: outline.current.version.id,
     })
+  if (settingUse) {
+    for (const { version } of orderVersions(settingUse.versions))
+      objects.set(`setting-use-version:${version.id}`, {
+        format,
+        kind: 'setting-use-version',
+        branch_id,
+        version,
+      })
+    for (const [slot_id, revision_id] of Object.entries(settingUse.adopted_heads))
+      objects.set(`setting-use:${slot_id}`, {
+        format,
+        kind: 'setting-use-head',
+        branch_id,
+        slot_id,
+        revision_id,
+      })
+  }
   for (const [id, object] of workflow) objects.set(id, object)
   return {
     objects,
@@ -228,6 +247,7 @@ async function localObjects(project: LocalProject) {
     outline,
     story,
     reference,
+    settingUse,
     publications: new Map(publications.map((record) => [record.objectId, record])),
   }
 }
@@ -267,6 +287,8 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
     if (id.startsWith('evidence:')) return 8
     if (id.startsWith('workflow-inspection:')) return 9
     if (id.startsWith('workflow-completion:')) return 10
+    if (id.startsWith('setting-use-version:')) return 8
+    if (id.startsWith('setting-use:')) return 9
     return 1
   }
   const depth = (payload: SyncPayload | null | undefined) => {
@@ -300,6 +322,7 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         object?.kind === 'settings-version' ||
         object?.kind === 'outline-version' ||
         object?.kind === 'story-version' ||
+        object?.kind === 'setting-use-version' ||
         object?.kind === 'reference-card-version' ||
         object?.kind === 'workflow-inspection' ||
         object?.kind === 'workflow-completion'
@@ -329,6 +352,7 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         head.id.startsWith('settings:') ||
         head.id.startsWith('outline:') ||
         head.id.startsWith('story:') ||
+        head.id.startsWith('setting-use:') ||
         head.id.startsWith('reference-card:')
       if (
         resolution &&
@@ -433,6 +457,17 @@ function workflowPublicationSources(id: string, object: SyncedObject | null): st
   return [
     ...revisionIds.map((revisionId) => `revision:${revisionId}`),
     ...(report ? [`workflow-inspection:${report}`] : []),
+  ]
+}
+
+function settingUsePublicationSources(object: SettingUseSyncObject): string[] {
+  if (object.kind === 'setting-use-head') return [`setting-use-version:${object.revision_id}`]
+  const version = object.version
+  return [
+    ...(version.parent_id ? [`setting-use-version:${version.parent_id}`] : []),
+    `revision:${version.evidence.revision_id}`,
+    `settings-version:${version.settings_version_id}`,
+    `outline-version:${version.outline_version_id}`,
   ]
 }
 
@@ -544,6 +579,13 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
       unsent.set(id, '历史报告引用的准确章稿或全书体检尚未排到云端。')
       continue
     }
+    if (
+      (object?.kind === 'setting-use-head' || object?.kind === 'setting-use-version') &&
+      settingUsePublicationSources(object).some((source) => !heads.has(source) && !pending.has(source))
+    ) {
+      unsent.set(id, '设定证据仍等待准确章稿、确认设定、大纲或父修订。')
+      continue
+    }
     const cardSource = referencePublicationSource(object)
     if (cardSource && !heads.has(cardSource) && !pending.has(cardSource)) {
       unsent.set(id, '手法卡的确切源修订尚未排到云端。')
@@ -606,7 +648,8 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
 export async function prepareWebResolution(project: LocalProject, scope: SyncScope, id: string) {
   const compared = await readSyncConflict(scope, id)
   if (!compared?.current || compared.resolvedBy) throw new Error('冲突已变化，请再次同步。')
-  const { objects, publications, versions, settings, outline, story, reference } = await localObjects(project)
+  const { objects, publications, versions, settings, outline, story, reference, settingUse } =
+    await localObjects(project)
   const object = objects.get(compared.incoming.object_id) ?? null
   const publicationId = publications.get(compared.incoming.object_id)?.id ?? null
   return {
@@ -618,6 +661,7 @@ export async function prepareWebResolution(project: LocalProject, scope: SyncSco
     outline,
     story,
     reference,
+    settingUse,
     signature: syncObjectSignature(object),
     publicationId,
   }
@@ -818,6 +862,25 @@ export async function resolveWebManuscript(
       !(await listSyncHeads(scope)).some(({ id }) => id === `reference-card-version:${source.id}`)
     )
       throw new Error('尚未取得该手法卡与云端对应的源修订，请先同步再比较。')
+  }
+  if (fresh.incoming.object_id.startsWith('setting-use:')) {
+    const chosen =
+      choice === 'local'
+        ? fresh.object
+        : choice === 'current'
+          ? fresh.current.payload
+          : fresh.incoming.payload
+    const selected = await validateSyncedObject(project, fresh.incoming.object_id, chosen)
+    const source =
+      selected?.kind === 'setting-use-head' &&
+      fresh.settingUse?.versions.find(({ version }) => version.id === selected.revision_id)
+    if (
+      !source ||
+      selected?.kind !== 'setting-use-head' ||
+      selected.slot_id !== (await settingUseVersionSlot(project.branch.id, source.version, manuscriptHash)) ||
+      !(await listSyncHeads(scope)).some(({ id }) => id === `setting-use-version:${source.version.id}`)
+    )
+      throw new Error('尚未取得该证据对应的源修订，请先同步后再比较。')
   }
   if (
     typeof choice === 'object' &&

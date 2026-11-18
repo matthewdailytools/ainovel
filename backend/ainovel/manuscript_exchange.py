@@ -272,6 +272,7 @@ def _validate_setting_uses(package, revisions):
             revisions,
             package.settings_history,
             package.outline_history,
+            native_revisions={row.id: row for row in package.revisions},
         )
 
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
+import type { components } from './api-schema'
 import type { Notify } from './App'
 import { CloudAttachments } from './CloudAttachments'
 import { SyncScopePreview } from './SyncScopePreview'
@@ -67,6 +68,7 @@ type Comparison = {
   >
   story_versions?: Record<string, StoryVersion>
   reference_versions?: Record<string, ArchivedReferenceCard>
+  setting_use_versions?: Record<string, components['schemas']['SettingUseVersion']>
   remote: {
     head_revision: string
     parent_revision: string | null
@@ -106,6 +108,20 @@ function readable(side: Side, comparison: Comparison) {
     if (!version) return '尚未取得该版本的设定来源。'
     const summary = describeSettingsVersion(version)
     return version.note ? `${summary}\n作者确认说明 ${version.note}` : summary
+  }
+  if (side.kind === 'setting-use-head' && side.revision_id) {
+    const version = comparison.setting_use_versions?.[side.revision_id]
+    if (!version) return `尚未取得该修订的设定正文证据。\n使用证明修订 ${side.revision_id}`
+    const { evidence } = version
+    return [
+      version.action === 'withdrawn' ? '已撤回正文使用证据' : '作者已确认正文使用',
+      `章节 ${evidence.chapter_id} · 设定条目 ${version.item_id}`,
+      `章稿修订 ${evidence.revision_id}`,
+      `原文选区 UTF-16 ${evidence.start}–${evidence.end}`,
+      `选句校验 SHA-256 ${evidence.quote_sha256}`,
+      `设定修订 ${version.settings_version_id} · 大纲修订 ${version.outline_version_id}`,
+      `使用证明修订 ${version.id}`,
+    ].join('\n')
   }
   if (side.kind === 'reference-card-head' && side.revision_id) {
     const version = comparison.reference_versions?.[side.revision_id]
@@ -448,7 +464,9 @@ export function DesktopSyncPanel({
                 })
               }
             >
-              比较 {row.object_id}
+              <span style={{ overflowWrap: 'anywhere' }}>
+                {row.object_id.startsWith('setting-use:') ? '比较设定正文证据' : '比较'} {row.object_id}
+              </span>
             </button>
           ))}
         </>

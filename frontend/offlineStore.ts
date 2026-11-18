@@ -73,6 +73,15 @@ import {
   type StoryVersionObject,
 } from './storySyncModel'
 import { decodeWebManuscriptBackup, encodeWebManuscriptBackup } from './webManuscriptBackup'
+import { createSettingUseOfflineStore, settingUseStores } from './settingUseOfflineStore'
+import {
+  settingUseObjectSignature,
+  settingUseVersionSlot,
+  validateSettingUseHistory,
+  validateSettingUseSyncObject,
+  type SettingUseHistory,
+  type SettingUseSyncObject,
+} from './settingUseSyncModel'
 
 const DATABASE = 'ainovel-offline-workspace'
 const FORMAT = 'ainovel-manuscript/1'
@@ -127,6 +136,7 @@ export type ManuscriptPack = LocalProject & {
   outline_history?: OutlineHistory
   workflow_history?: WorkflowHistory
   story_history?: StoryHistory
+  setting_use_history?: SettingUseHistory
   reference_history?: ReferenceHistory
 }
 const SYNC_FORMAT = 'ainovel-manuscript-sync/1'
@@ -145,6 +155,7 @@ export type SyncedObject =
   | StoryVersionObject
   | WorkflowSyncObject
   | ReferenceSyncObject
+  | SettingUseSyncObject
 
 function revisionSignature(row: LocalRevision) {
   return [row.id, row.chapter_id, row.revision, row.parent_id, row.sha256, row.cause, row.created]
@@ -187,6 +198,8 @@ export function syncObjectSignature(object: SyncedObject | null) {
   if (object?.kind === 'outline-head' || object?.kind === 'outline-version')
     return outlineObjectSignature(object)
   if (object?.kind === 'story-head' || object?.kind === 'story-version') return storyObjectSignature(object)
+  if (object?.kind === 'setting-use-head' || object?.kind === 'setting-use-version')
+    return settingUseObjectSignature(object)
   if (object?.kind === 'workflow-inspection' || object?.kind === 'workflow-completion')
     return workflowObjectSignature(object)
   if (object?.kind === 'reference-card-head' || object?.kind === 'reference-card-version')
@@ -245,6 +258,7 @@ type Store =
   | 'storyHistory'
   | 'storyChapterAliases'
   | 'referenceArchives'
+  | (typeof settingUseStores)[number]
 type LocalProjectVersion = ProjectVersionRecord & { branchId: string }
 type LocalProjectHead = { branchId: string; versionId: string }
 type LocalSettingsVersion = SettingsVersionRecord & { branchId: string }
@@ -286,7 +300,7 @@ function result<T>(request: IDBRequest<T>): Promise<T> {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 7)
+    const request = indexedDB.open(DATABASE, 8)
     let blocked = false
     request.onblocked = () => {
       blocked = true
@@ -340,24 +354,39 @@ function openDatabase(): Promise<IDBDatabase> {
           'branchId',
         )
       }
-      for (const name of workflowStores)
-        db.createObjectStore(name, { keyPath: ['branchId', 'entry.id'] }).createIndex('byBranch', 'branchId')
-      db.createObjectStore('storyVersions', { keyPath: ['branchId', 'version.id'] }).createIndex(
-        'byBranch',
-        'branchId',
-      )
-      db.createObjectStore('storyHeads', { keyPath: ['branchId', 'recordId'] }).createIndex(
-        'byBranch',
-        'branchId',
-      )
-      db.createObjectStore('storyHistory', { keyPath: ['branchId', 'recordId', 'revision'] }).createIndex(
-        'byBranch',
-        'branchId',
-      )
-      db.createObjectStore('storyChapterAliases', {
-        keyPath: ['branchId', 'sourceId', 'nativeId'],
-      }).createIndex('bySource', ['branchId', 'sourceId'])
-      db.createObjectStore('referenceArchives', { keyPath: 'branchId' })
+      if (event.oldVersion < 7) {
+        for (const name of workflowStores)
+          db.createObjectStore(name, { keyPath: ['branchId', 'entry.id'] }).createIndex(
+            'byBranch',
+            'branchId',
+          )
+        db.createObjectStore('storyVersions', { keyPath: ['branchId', 'version.id'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
+        db.createObjectStore('storyHeads', { keyPath: ['branchId', 'recordId'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
+        db.createObjectStore('storyHistory', { keyPath: ['branchId', 'recordId', 'revision'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
+        db.createObjectStore('storyChapterAliases', {
+          keyPath: ['branchId', 'sourceId', 'nativeId'],
+        }).createIndex('bySource', ['branchId', 'sourceId'])
+        db.createObjectStore('referenceArchives', { keyPath: 'branchId' })
+      }
+      if (event.oldVersion < 8) {
+        for (const [name, key] of [
+          ['settingUseHeads', 'slotId'],
+          ['settingUseVersions', 'entry.version.id'],
+        ]) {
+          const store = db.createObjectStore(name, { keyPath: ['branchId', key] })
+          store.createIndex('byBranch', 'branchId')
+          store.createIndex('byChapter', ['branchId', 'chapterId'])
+        }
+      }
     }
     request.onsuccess = () => {
       const db = request.result
@@ -908,21 +937,31 @@ function readManuscriptPackage(
       ...outlineReadStores,
       ...workflowStores,
       ...storyReadStores,
+      ...settingUseStores,
       'referenceArchives' as const,
     ]),
   ]
   return transact(stores, 'readonly', async (tx) => {
     const project = await readProject(tx, projectId)
-    const [manuscript, brief, settings, outlineHistory, workflowHistory, storyHistory, referenceHistory] =
-      await Promise.all([
-        readManuscript(tx, project),
-        readProjectBrief(tx, project.branch.id),
-        readSettings(tx, project.branch.id),
-        outlineStore.readOutlineHistoryTx(tx, project),
-        readWorkflowHistory(tx, project.branch.id),
-        storyStore.readStoryHistoryTx(tx, project),
-        readReferenceHistory(tx, project.branch.id),
-      ])
+    const [
+      manuscript,
+      brief,
+      settings,
+      outlineHistory,
+      workflowHistory,
+      storyHistory,
+      referenceHistory,
+      settingUseHistory,
+    ] = await Promise.all([
+      readManuscript(tx, project),
+      readProjectBrief(tx, project.branch.id),
+      readSettings(tx, project.branch.id),
+      outlineStore.readOutlineHistoryTx(tx, project),
+      readWorkflowHistory(tx, project.branch.id),
+      storyStore.readStoryHistoryTx(tx, project),
+      readReferenceHistory(tx, project.branch.id),
+      settingUseStore.readSettingUseHistoryTx(tx, project.branch.id),
+    ])
     const sourceDevices = settings.versions.flatMap(({ version, source, recordedDevice }) => {
       const device = source?.device_id ?? recordedDevice
       return device ? [[version.id, device] as const] : []
@@ -963,6 +1002,7 @@ function readManuscriptPackage(
           }
         : {}),
       ...(storyHistory ? { story_history: storyHistory } : {}),
+      ...(settingUseHistory ? { setting_use_history: settingUseHistory } : {}),
       ...(referenceHistory
         ? {
             reference_history: {
@@ -1247,6 +1287,7 @@ export function readLocalSyncSnapshot(projectId: string) {
       ...outlineReadStores,
       ...storyReadStores,
       ...workflowStores,
+      ...settingUseStores,
       'referenceArchives' as const,
       'publications' as const,
     ]),
@@ -1254,7 +1295,7 @@ export function readLocalSyncSnapshot(projectId: string) {
   return transact(stores, 'readonly', async (tx) => {
     const project = await readProject(tx, projectId)
     const branchId = project.branch.id
-    const [manuscript, brief, settings, outline, story, workflow, reference, publications] =
+    const [manuscript, brief, settings, outline, story, workflow, reference, publications, settingUse] =
       await Promise.all([
         readManuscript(tx, project),
         readProjectBrief(tx, branchId),
@@ -1264,8 +1305,9 @@ export function readLocalSyncSnapshot(projectId: string) {
         readWorkflowSyncObjects(tx, branchId),
         readReferenceHistory(tx, branchId),
         publicationRows(tx, branchId),
+        settingUseStore.readSettingUseHistoryTx(tx, branchId),
       ])
-    return { manuscript, brief, settings, outline, story, workflow, reference, publications }
+    return { manuscript, brief, settings, outline, story, workflow, reference, publications, settingUse }
   })
 }
 
@@ -1559,6 +1601,32 @@ const outlineStore = createOutlineOfflineStore({
 })
 export const { readLocalOutline, confirmLocalOutline } = outlineStore
 
+const settingUseStore = createSettingUseOfflineStore({
+  transact,
+  result,
+  readProject,
+  projectHead: getProjectHead,
+  settingsHead: getSettingsHead,
+  outlineHead: outlineStore.readOutlineHead,
+  settingsVersion: getSettingsVersion,
+  outlineVersion: outlineStore.readOutlineVersion,
+  sourceRevision,
+  adoptedRevision: (tx, branch, id) => storyStore.readNativeProof(tx, branch, id, true),
+  rememberAdoptedRevision: storyStore.rememberStoryChapterAlias,
+  readPublication,
+  markPublication,
+  hash: manuscriptHash,
+  fail: (code, message) => {
+    throw new OfflineStoreError(code, message)
+  },
+})
+export const {
+  readLocalSettingUse,
+  readLocalOutlineSettingUse,
+  confirmLocalSettingUse,
+  withdrawLocalSettingUse,
+} = settingUseStore
+
 function evidenceMatches(source: LocalEvidence['chapters'][number], target: LocalRevision | undefined) {
   return (
     target?.chapter_id === source.id && target.revision === source.revision && target.sha256 === source.sha256
@@ -1578,6 +1646,8 @@ export async function validateSyncedObject(
     return validateOutlineSyncObject(project.branch.id, objectId, value)
   if (objectId.startsWith('story:') || objectId.startsWith('story-version:'))
     return validateStorySyncObject(project.branch.id, objectId, value)
+  if (objectId.startsWith('setting-use:') || objectId.startsWith('setting-use-version:'))
+    return validateSettingUseSyncObject(project.branch.id, objectId, value, manuscriptHash)
   if (objectId.startsWith('reference-card:') || objectId.startsWith('reference-card-version:'))
     return validateReferenceSyncObject(project.branch.id, objectId, value, manuscriptHash)
   if (objectId.startsWith('workflow-inspection:') || objectId.startsWith('workflow-completion:'))
@@ -1665,6 +1735,8 @@ export function applySyncedObject(
     return outlineStore.applyOutlineObject(projectId, object, expected, options)
   if (object?.kind === 'story-head' || object?.kind === 'story-version')
     return storyStore.applyStoryObject(projectId, object, expected, options)
+  if (object?.kind === 'setting-use-head' || object?.kind === 'setting-use-version')
+    return settingUseStore.applySettingUseObject(projectId, object, expected, options)
   if (object?.kind === 'reference-card-head' || object?.kind === 'reference-card-version')
     return applyReferenceObject(projectId, objectId, object, expected, options)
   if (object?.kind === 'workflow-inspection' || object?.kind === 'workflow-completion')
@@ -1954,6 +2026,7 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     'outline_history',
     'workflow_history',
     'story_history',
+    'setting_use_history',
     'reference_history',
   ])
   if (pack.format !== FORMAT) invalid('稿件交换包格式无法读取，请使用兼容版本。')
@@ -2104,6 +2177,27 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
       invalid(error instanceof Error ? error.message : '故事档案无法读取。')
     }
   }
+  let setting_use_history: SettingUseHistory | undefined
+  if (pack.setting_use_history != null) {
+    try {
+      const settings = new Map(settings_history?.versions.map((version) => [version.id, version]))
+      const outlines = new Map(outline_history?.versions.map((version) => [version.id, version]))
+      const nativeRevisions = new Map(revisions.map((revision) => [revision.id, revision]))
+      setting_use_history = await validateSettingUseHistory(
+        branch.id,
+        pack.setting_use_history,
+        {
+          revision: (id) => byId.get(id),
+          nativeRevision: (id) => nativeRevisions.get(id),
+          settings: (id) => settings.get(id),
+          outline: (id) => outlines.get(id),
+        },
+        manuscriptHash,
+      )
+    } catch (error) {
+      invalid(error instanceof Error ? error.message : '设定使用证据无法读取。')
+    }
+  }
   return {
     format: FORMAT,
     novel,
@@ -2117,6 +2211,7 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     ...(outline_history ? { outline_history } : {}),
     ...(workflow_history ? { workflow_history } : {}),
     ...(story_history ? { story_history } : {}),
+    ...(setting_use_history ? { setting_use_history } : {}),
     ...(reference_history ? { reference_history } : {}),
   }
 }
@@ -2223,7 +2318,7 @@ export async function forkLocalManuscript(
   })
 }
 
-function writeLocalManuscript(
+async function writeLocalManuscript(
   pack: ManuscriptPack,
   verifySource?: (tx: IDBTransaction) => Promise<void>,
 ): Promise<LocalProject> {
@@ -2239,14 +2334,24 @@ function writeLocalManuscript(
     outline_history,
     workflow_history,
     story_history,
+    setting_use_history,
     reference_history,
   } = pack
+  const settingUseSlots = new Map(
+    await Promise.all(
+      (setting_use_history?.versions ?? []).map(
+        async ({ version }) =>
+          [version.id, await settingUseVersionSlot(branch.id, version, manuscriptHash)] as const,
+      ),
+    ),
+  )
   const stores = [
     ...new Set([
       ...settingsDependencyStores,
       ...outlineWriteStores,
       ...workflowStores,
       ...storyWriteStores,
+      ...settingUseStores,
       'referenceArchives' as const,
     ]),
   ]
@@ -2301,6 +2406,8 @@ function writeLocalManuscript(
         tx.objectStore('referenceArchives').add({ branchId: branch.id, archive: reference_history }),
       )
     if (outline_history) await outlineStore.restoreOutlineHistoryTx(tx, project, outline_history)
+    if (setting_use_history)
+      await settingUseStore.restoreSettingUseHistoryTx(tx, branch.id, setting_use_history, settingUseSlots)
     if (workflow_history) {
       for (const entry of workflow_history.inspections)
         await result(tx.objectStore('workflowInspections').add({ branchId: branch.id, entry }))

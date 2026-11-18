@@ -2,6 +2,7 @@
 
 from pydantic import ValidationError
 
+from .chapter_adoption import adopted_chapter_revision, restore_chapter_adoption, valid_chapter_adoption
 from .db import DomainError, dumps
 from .manuscript_exchange import source_revision
 from .setting_use import KIND
@@ -42,12 +43,21 @@ def export_setting_use_history(tx, branch_id):
                 if slot in heads:
                     raise DomainError("manuscript_setting_use", "同一章和设定条目存在多个采用头。", 409)
                 heads[slot] = version.id
-        return SettingUseHistory(adopted_heads=heads, versions=versions) if versions else None
+        if not versions:
+            return None
+        native_bindings = {}
+        for source_id in dict.fromkeys(entry.version.evidence.revision_id for entry in versions):
+            native = adopted_chapter_revision(tx, branch_id, source_id)
+            if native and native.id != source_id:
+                native_bindings[source_id] = native.id
+        return SettingUseHistory(adopted_heads=heads, versions=versions, native_bindings=native_bindings)
     except ValidationError as error:
         raise DomainError("manuscript_setting_use", "本机设定使用证明的父链或档案格式无效。", 409) from error
 
 
-def validate_setting_use_history(history, branch_id, chapters, revisions, settings_history, outline_history):
+def validate_setting_use_history(
+    history, branch_id, chapters, revisions, settings_history, outline_history, *, native_revisions
+):
     if not history:
         return
     versions = {entry.version.id: entry.version for entry in history.versions}
@@ -68,6 +78,15 @@ def validate_setting_use_history(history, branch_id, chapters, revisions, settin
             )
         for slot, identifier in history.adopted_heads.items():
             validate_head(branch_id, slot, identifier, versions.get)
+        for source_id, native_id in history.native_bindings.items():
+            if not valid_chapter_adoption(
+                revisions.get(source_id),
+                native_revisions.get(native_id),
+                source_is_native=source_id in native_revisions,
+            ):
+                raise DomainError(
+                    "setting_use_integrity", "章节采用关系须对应同章同全文的有效本机修订。", 409
+                )
     except DomainError as error:
         raise DomainError(
             "manuscript_setting_use", f"稿件包设定使用证明未通过校验。{error.message}", 409
@@ -77,6 +96,8 @@ def validate_setting_use_history(history, branch_id, chapters, revisions, settin
 def import_setting_use_history(tx, branch_id, history):
     novel_id = tx.execute("SELECT novel_id FROM branches WHERE id=?", (branch_id,)).fetchone()[0]
     adopted = set(history.adopted_heads.values())
+    for source_id, native_id in history.native_bindings.items():
+        restore_chapter_adoption(tx, branch_id, source_id, native_id)
     for entry in history.versions:
         version = entry.version
         if tx.execute("SELECT 1 FROM artifacts WHERE id=?", (version.id,)).fetchone():

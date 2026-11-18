@@ -10623,6 +10623,20 @@
             "maxItems": 20000,
             "minItems": 1,
             "title": "Versions"
+          },
+          "native_bindings": {
+            "patternProperties": {
+              "^[a-zA-Z0-9_-]+$": {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              }
+            },
+            "propertyNames": { "maxLength": 128, "minLength": 1 },
+            "type": "object",
+            "maxProperties": 20000,
+            "title": "Native Bindings"
           }
         },
         "additionalProperties": false,

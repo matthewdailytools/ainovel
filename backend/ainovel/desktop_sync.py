@@ -13,7 +13,8 @@ from fastapi import Body
 import httpx
 from pydantic import Field, SecretStr, StringConstraints, TypeAdapter, ValidationError, model_validator
 
-from . import outline_sync, reference_sync, settings_sync, story_sync, workflow_archive
+from . import outline_sync, reference_sync, setting_use_desktop, settings_sync, story_sync, workflow_archive
+from .chapter_adoption import remember_chapter_adoption
 from .chapter_conflicts import (
     ChapterObject,
     fork_chapter_tx,
@@ -50,6 +51,10 @@ from .project_sync import (
     read_project_version,
     version_object,
 )
+from .setting_use_portability import HEAD_PREFIX as SETTING_USE_HEAD
+from .setting_use_portability import VERSION_PREFIX as SETTING_USE_VERSION
+from .setting_use_portability import SettingUseVersionObject, parse_setting_use_object
+from .setting_use_portability import version_object as setting_use_version_object
 from .workflow_privacy import REFERENCE_SCOPE, sync_completion_report, sync_has_reference_selection
 
 FORMAT = "ainovel-manuscript-sync/1"
@@ -71,6 +76,11 @@ WORKFLOW_REJECTIONS = {
     "sync_workflow_dependency": "云端尚缺原章稿修订或通过的体检单，将继续等待来源。",
     "sync_parent_unknown": "云端无法核对父修订，原记录已保留本机。",
     "sync_object_size": "同步对象超过单次大小限制，原记录已保留本机。",
+}
+SETTING_USE_REJECTIONS = {
+    "setting_use_dependency": "云端尚缺设定使用证明依赖的正文、设定或大纲修订，已保留待同步记录。",
+    "setting_use_integrity": "云端未能核对设定使用证明，原记录已保留本机。",
+    "sync_setting_use": "云端未能核对设定使用证明的历史链，将等待原修订。",
 }
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS desktop_sync(
@@ -169,6 +179,16 @@ CREATE TRIGGER IF NOT EXISTS desktop_sync_story_history AFTER INSERT ON story_re
  INSERT OR IGNORE INTO desktop_sync_dirty
  SELECT r.branch_id,'story:'||r.id FROM story_records r JOIN desktop_sync s ON s.branch_id=r.branch_id
  WHERE r.id=NEW.record_id AND s.enabled=1;
+ END;
+INSERT OR IGNORE INTO desktop_sync_dirty
+ SELECT branch_id,'setting-use-bootstrap' FROM desktop_sync WHERE enabled=1
+ AND NOT EXISTS(SELECT 1 FROM extension_migrations WHERE name='desktop-sync-setting-use/1');
+INSERT OR IGNORE INTO extension_migrations VALUES('desktop-sync-setting-use/1',unixepoch());
+CREATE TRIGGER IF NOT EXISTS desktop_sync_setting_use_adopted AFTER UPDATE OF basis ON artifacts
+ WHEN NEW.kind='setting_use' AND NEW.status='accepted'
+ AND json_extract(NEW.basis,'$.head')=1 AND json_extract(OLD.basis,'$.head') IS NOT 1
+ AND EXISTS(SELECT 1 FROM desktop_sync WHERE branch_id=NEW.branch_id AND enabled=1) BEGIN
+ INSERT OR IGNORE INTO desktop_sync_dirty VALUES(NEW.branch_id,'setting-use-version:'||NEW.id);
  END;
 """
 
@@ -279,6 +299,12 @@ def _network(origin, token, method, path, payload=None, *, ledger_id=None):
                     code = result.get("code") if isinstance(result, dict) else None
                     if code == "sync_ledger_replaced" and response.status_code == 409:
                         raise DomainError(code, LEDGER_REPLACED, 409)
+                    if (
+                        isinstance(code, str)
+                        and code in SETTING_USE_REJECTIONS
+                        and response.status_code == 409
+                    ):
+                        raise DomainError(code, SETTING_USE_REJECTIONS[code], 409)
                     if isinstance(code, str) and code in WORKFLOW_REJECTIONS:
                         raise DomainError(code, WORKFLOW_REJECTIONS[code], response.status_code)
                     if isinstance(code, str) and (
@@ -323,6 +349,13 @@ def _parse(cls, value):
 
 
 def _local(tx, branch_id, object_id):
+    if object_id.startswith(SETTING_USE_VERSION):
+        identifier = object_id.removeprefix(SETTING_USE_VERSION)
+        version = setting_use_desktop.read_version(tx, branch_id, identifier)
+        return setting_use_version_object(branch_id, version).model_dump() if version else None
+    if object_id.startswith(SETTING_USE_HEAD):
+        head = setting_use_desktop.read_head(tx, branch_id, object_id.removeprefix(SETTING_USE_HEAD))
+        return head.model_dump() if head else None
     if object_id.startswith("reference-card-version:"):
         identifier = object_id.removeprefix("reference-card-version:")
         version = reference_sync.read_reference_version(tx, branch_id, identifier)
@@ -411,6 +444,11 @@ def _remember(tx, branch_id, event, local_digest):
         "WHERE excluded.sequence>=desktop_sync_objects.sequence",
         (branch_id, event.object_id, event.head_revision, event.sequence, local_digest),
     )
+    if event.object_id.startswith((SETTING_USE_HEAD, SETTING_USE_VERSION)):
+        tx.execute(
+            "DELETE FROM desktop_sync_workflow_pending WHERE branch_id=? AND object_id=?",
+            (branch_id, event.object_id),
+        )
 
 
 def _source_extension(tx, branch_id, head, local):
@@ -487,6 +525,7 @@ def _apply_chapter(tx, domain, branch_id, event, *, force_revision=False):
         )
         _remove_source_copies(tx, branch_id, history)
         story_sync.remember_adopted_chapter_source(tx, branch_id, head)
+        remember_chapter_adoption(tx, branch_id, head)
         tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
         return
     local = tx.execute(
@@ -515,10 +554,20 @@ def _apply_chapter(tx, domain, branch_id, event, *, force_revision=False):
         (info.position, info.title, chapter_id),
     )
     story_sync.remember_adopted_chapter_source(tx, branch_id, head)
+    remember_chapter_adoption(tx, branch_id, head)
     tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
 
 
 def _apply(tx, domain, branch_id, event, *, prose_merge=False):
+    if event.object_id.startswith(SETTING_USE_HEAD):
+        value = parse_setting_use_object(branch_id, event.object_id, event.payload, event.tombstone)
+        setting_use_desktop.apply_head(tx, branch_id, value)
+        # The remote adoption itself must not be requeued as a local edit.
+        tx.execute(
+            "DELETE FROM desktop_sync_dirty WHERE branch_id=? AND object_id=?",
+            (branch_id, SETTING_USE_VERSION + value.revision_id),
+        )
+        return
     if event.object_id.startswith("reference-card:"):
         value = reference_sync.parse_reference_object(
             branch_id, event.object_id, event.payload, event.tombstone
@@ -591,6 +640,10 @@ def _apply(tx, domain, branch_id, event, *, prose_merge=False):
 
 
 def _verified_digest(branch_id, event):
+    if event.object_id.startswith((SETTING_USE_HEAD, SETTING_USE_VERSION)):
+        return _digest(
+            parse_setting_use_object(branch_id, event.object_id, event.payload, event.tombstone).model_dump()
+        )
     if event.object_id.startswith(("reference-card:", "reference-card-version:")):
         return _digest(
             reference_sync.parse_reference_object(
@@ -912,13 +965,19 @@ class DesktopSync:
                 "outline-version:",
                 "story-version:",
                 "reference-card-version:",
+                SETTING_USE_VERSION,
             )
         )
         if known and known["sequence"] >= incoming.sequence and not immutable:
             return
         if immutable:
             try:
-                if object_id.startswith("reference-card-version:"):
+                if object_id.startswith(SETTING_USE_VERSION):
+                    wrapped = parse_setting_use_object(
+                        branch_id, object_id, incoming.payload, incoming.tombstone
+                    )
+                    setting_use_desktop.observe_version(tx, branch_id, wrapped.version, incoming)
+                elif object_id.startswith("reference-card-version:"):
                     wrapped = reference_sync.parse_reference_object(
                         branch_id, object_id, incoming.payload, incoming.tombstone
                     )
@@ -1108,7 +1167,13 @@ class DesktopSync:
                     key = reference_sync.reference_head_object_id(branch_id, value.session_id, value.card_id)
                 handcraft[key] = value.model_dump()
             workflows = self._prepare_workflow(tx, branch_id)
-            formal = {**projects, **handcraft, **settings, **stories, **outlines, **workflows}
+            setting_uses = {
+                (SETTING_USE_VERSION + value.version.id)
+                if isinstance(value, SettingUseVersionObject)
+                else (SETTING_USE_HEAD + value.slot_id): value.model_dump()
+                for value in setting_use_desktop.draft_objects(tx, branch_id)
+            }
+            formal = {**projects, **handcraft, **settings, **stories, **outlines, **setting_uses, **workflows}
             blocked = False
             for object_id in [f"branch:{branch_id}", *histories, *object_ids, *formal, *documents]:
                 if tx.execute(
@@ -1210,6 +1275,12 @@ class DesktopSync:
                     with self.domain.db.connect(True) as tx:
                         self._pending_story(tx, branch_id, row["object_id"], error.message)
                     continue
+                if row["object_id"].startswith((SETTING_USE_HEAD, SETTING_USE_VERSION)) and (
+                    error.code in SETTING_USE_REJECTIONS and error.status == 409
+                ):
+                    with self.domain.db.connect(True) as tx:
+                        self._pending_workflow(tx, branch_id, row["object_id"], error.message)
+                    continue
                 if error.code == "sync_workflow_reference_scope" or (
                     row["object_id"].startswith(workflow_archive.WORKFLOW_PREFIXES)
                     and error.code in WORKFLOW_REJECTIONS
@@ -1263,10 +1334,12 @@ class DesktopSync:
                 "outline": outline_sync.read_outline_version,
                 "story": story_sync.read_story_version,
                 "reference-card": reference_sync.read_reference_version,
+                "setting-use": setting_use_desktop.read_version,
             }
             family = remote.object_id.partition(":")[0]
             if family in readers and (
-                family in {"story", "reference-card"} or remote.object_id == f"{family}:{branch_id}"
+                family in {"story", "reference-card", "setting-use"}
+                or remote.object_id == f"{family}:{branch_id}"
             ):
                 read_version = readers[family]
                 versions = {}
@@ -1279,7 +1352,8 @@ class DesktopSync:
                     if payload and (identifier := payload.get("revision_id")):
                         if version := read_version(tx, branch_id, identifier):
                             versions[identifier] = version.model_dump()
-                result[f"{'reference' if family == 'reference-card' else family}_versions"] = versions
+                label = "reference" if family == "reference-card" else family.replace("-", "_")
+                result[f"{label}_versions"] = versions
             return result
 
     def resolve(self, branch_id, origin, token, identifier, data):
@@ -1371,6 +1445,17 @@ class DesktopSync:
                     ):
                         raise DomainError(
                             "sync_pending", "本机没有已同步的手法卡修订，请先同步源修订，再比较冲突。", 409
+                        )
+                    if (
+                        data.choice == "local"
+                        and remote.object_id.startswith(SETTING_USE_HEAD)
+                        and (
+                            not local
+                            or not _shadow(tx, branch_id, SETTING_USE_VERSION + local["revision_id"])
+                        )
+                    ):
+                        raise DomainError(
+                            "sync_pending", "本机没有已同步的设定使用修订，请先同步源修订，再比较冲突。", 409
                         )
                     request = {
                         "change_id": data.idempotency_key,

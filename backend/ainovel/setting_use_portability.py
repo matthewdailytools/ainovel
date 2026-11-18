@@ -54,12 +54,18 @@ class SettingUseArchiveEntry(Input):
 class SettingUseHistory(Input):
     adopted_heads: dict[Digest, Digest] = Field(max_length=MAX_VERSIONS)
     versions: list[SettingUseArchiveEntry] = Field(min_length=1, max_length=MAX_VERSIONS)
+    native_bindings: dict[Identifier, Identifier] = Field(
+        default_factory=dict, max_length=MAX_VERSIONS, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def check_links(self):
         versions = check_version_graph(None, [entry.version for entry in self.versions], "设定使用")
         if not set(self.adopted_heads.values()) <= versions.keys():
             raise ValueError("稿件包缺少采用的设定使用证据。")
+        origins = {version.evidence.revision_id for version in versions.values()}
+        if not self.native_bindings.keys() <= origins:
+            raise ValueError("稿件包的章节采用关系须指向设定使用历史所用的原始章稿。")
         return self
 
 

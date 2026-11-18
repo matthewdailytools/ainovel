@@ -288,6 +288,8 @@ function parseEvidence(value: unknown): SettingsEvidence {
   }
 }
 
+export { parseEvidence as parseSettingsEvidence }
+
 function parseOrigin(value: unknown): SettingsOrigin {
   const row = record(value, [
     'origin',

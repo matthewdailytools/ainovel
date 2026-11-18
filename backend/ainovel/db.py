@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS manuscript_revision_sources(
  branch_id TEXT NOT NULL REFERENCES branches(id),id TEXT NOT NULL,chapter_id TEXT NOT NULL,payload TEXT NOT NULL,
  PRIMARY KEY(branch_id,id));
 CREATE INDEX IF NOT EXISTS manuscript_sources_chapter ON manuscript_revision_sources(branch_id,chapter_id);
+CREATE TABLE IF NOT EXISTS manuscript_chapter_adoptions(
+ branch_id TEXT NOT NULL REFERENCES branches(id),source_id TEXT NOT NULL,
+ native_id TEXT NOT NULL REFERENCES revisions(id) ON DELETE CASCADE,
+ PRIMARY KEY(branch_id,source_id,native_id));
 CREATE TABLE IF NOT EXISTS manuscript_project_versions(
  branch_id TEXT NOT NULL REFERENCES branches(id),id TEXT NOT NULL,payload TEXT NOT NULL,
  PRIMARY KEY(branch_id,id));

@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from fastapi import Query
 from pydantic import Field
 
+from .chapter_adoption import adopted_chapter_revision
 from .db import DomainError, dumps
 from .manuscript_exchange import native_revision, source_revision
 from .models import Input
@@ -16,7 +17,6 @@ from .project_portability import Identifier
 from .setting_use_portability import Digest, SettingUseVersion, canonical_digest, version_id
 from .settings_portability import SettingsEvidence
 from .settings_sync import _evidence_quote, settings_source_id
-from .story_sync import _adopted_chapter_revision
 
 KIND = "setting_use"
 
@@ -172,7 +172,7 @@ def _present(tx, chapter, row, heads, context):
     ):
         status = "outdated"
     else:
-        native = _adopted_chapter_revision(tx, branch_id, version.evidence.revision_id)
+        native = adopted_chapter_revision(tx, branch_id, version.evidence.revision_id)
         status = "current" if native and native.id == basis["chapter_revision_id"] else "outdated"
     return {"version": version, "status": status, "created": row["created"], "quote": quote}
 
@@ -194,7 +194,7 @@ def current_outline_uses(tx, branch_id, outline_version_id, settings_version_id)
     result = {}
     for row in rows:
         version = SettingUseVersion.model_validate_json(row["payload"])
-        native = _adopted_chapter_revision(tx, branch_id, version.evidence.revision_id)
+        native = adopted_chapter_revision(tx, branch_id, version.evidence.revision_id)
         if not native or native.id != row["native_revision_id"]:
             continue
         try:

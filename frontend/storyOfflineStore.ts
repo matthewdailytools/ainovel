@@ -38,7 +38,7 @@ type Tx = IDBTransaction
 type StoredVersion = StoryVersionRecord & { branchId: string }
 type StoredHistory = StoryNativeRevision & { branchId: string; recordId: string }
 type Head = { branchId: string; recordId: string; versionId: string; revision: number }
-type Alias = { branchId: string; sourceId: string; nativeId: string }
+type Alias = { branchId: string; sourceId: string; nativeId: string; chapterAdopted?: true }
 type Options = { source?: ProjectSource; publicationId?: string | null; consumePublication?: boolean }
 type FailCode = 'format' | 'ownership' | 'conflict' | 'missing'
 type Access = {
@@ -143,20 +143,27 @@ export function createStoryOfflineStore({
         branchId: branch,
         sourceId: source.id,
         nativeId: native.id,
+        chapterAdopted: true,
       } satisfies Alias),
     )
   }
 
-  async function readNativeProof(tx: Tx, branch: string, sourceId: string): Promise<NativeProof | undefined> {
+  async function readNativeProof(
+    tx: Tx,
+    branch: string,
+    sourceId: string,
+    chapterOnly = false,
+  ): Promise<NativeProof | undefined> {
     const original = await sourceRevision(tx, branch, sourceId)
     if (!original) return
     const direct = await readNative(tx, branch, sourceId)
-    if (direct) return { original, native: direct.revision }
+    if (direct && !chapterOnly) return { original, native: direct.revision }
     const rows = await result<Alias[]>(
       tx.objectStore('storyChapterAliases').index('bySource').getAll([branch, sourceId]),
     )
-    let chosen: LocalRevision | undefined
+    let chosen = direct?.revision
     for (const row of rows) {
+      if (chapterOnly && !row.chapterAdopted) continue
       const native = (await readNative(tx, branch, row.nativeId))?.revision
       if (
         native?.chapter_id === original.chapter_id &&
@@ -616,10 +623,11 @@ export function createStoryOfflineStore({
           for (const [index, proof] of group.entries()) {
             const sourceId = proof.revision_id
             const nativeId = bindings[groupIndex][index]
-            if (sourceId !== nativeId)
-              await result(
-                tx.objectStore('storyChapterAliases').put({ branchId, sourceId, nativeId } satisfies Alias),
-              )
+            if (sourceId !== nativeId) {
+              const aliases = tx.objectStore('storyChapterAliases')
+              if (!(await result(aliases.getKey([branchId, sourceId, nativeId]))))
+                await result(aliases.add({ branchId, sourceId, nativeId } satisfies Alias))
+            }
           }
         }
         await result(
@@ -644,6 +652,7 @@ export function createStoryOfflineStore({
     applyStoryObject,
     confirmLocalStory,
     rememberStoryChapterAlias,
+    readNativeProof,
     readStoryOutlinePromisesTx,
     readStoryHistoryTx,
     restoreStoryHistoryTx,

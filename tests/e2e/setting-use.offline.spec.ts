@@ -1,90 +1,10 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type APIResponse, type Page } from '@playwright/test'
+import { createHash } from 'node:crypto'
+
+import { authorSettingPlan } from './fixtures/authorSettingPlan'
 
 test('章纲中的人物条目经作者选取正式原文后才成为实际使用证据', async ({ page }) => {
-  await page.goto('/')
-  const { csrf } = await (await page.request.get('/api/session')).json()
-  const headers = { 'X-Ainovel-CSRF': csrf }
-  const created = await page.request.post('/api/novels', { headers, data: { title: '检视设定正文证据' } })
-  expect(created.ok(), await created.text()).toBe(true)
-  const novel = await created.json()
-  const branch = `/api/branches/${novel.branch_id}`
-  const added = await page.request.post(branch + '/chapters', { headers, data: { title: '归还赤钥' } })
-  expect(added.ok(), await added.text()).toBe(true)
-  const chapter = await added.json()
-  const original = '😀学徒递上赤钥，守铃人阿陶接过。'
-  const saved = await page.request.put(`/api/chapters/${chapter.id}`, {
-    headers,
-    data: { base_revision: 0, content: original },
-  })
-  expect(saved.ok(), await saved.text()).toBe(true)
-  const conception = branch + '/conception'
-  const state = await (await page.request.get(conception)).json()
-  state.categories.find(({ id }: { id: string }) => id === 'characters').items = [
-    { id: 'keeper', title: '守铃人阿陶', detail: '阿陶负责收存归还的钥匙。' },
-  ]
-  const draft = await page.request.put(conception, {
-    headers,
-    data: {
-      base_revision: state.revision,
-      base_story_revision: state.story_revision,
-      categories: state.categories,
-    },
-  })
-  expect(draft.ok(), await draft.text()).toBe(true)
-  const savedSettings = await draft.json()
-  const adopted = await page.request.post(conception + '/confirm', {
-    headers,
-    data: {
-      base_revision: savedSettings.revision,
-      base_story_revision: savedSettings.story_revision,
-      idempotency_key: 'adopt-keeper-for-proof',
-      note: '采用人物身份。',
-    },
-  })
-  expect(adopted.ok(), await adopted.text()).toBe(true)
-  const { confirmation } = await adopted.json()
-  const outline = branch + '/outline-workspace'
-  const plan = await page.request.put(outline, {
-    headers,
-    data: {
-      base_revision: 0,
-      confirmation_id: confirmation.id,
-      plan: {
-        summary: '归还信物。',
-        volumes: [
-          {
-            id: 'first-volume',
-            title: '第一卷',
-            summary: '守铃人收存信物。',
-            units: [
-              {
-                id: 'first-unit',
-                title: '归还',
-                summary: '沿旧约交接。',
-                chapters: [
-                  {
-                    chapter_id: chapter.id,
-                    goal: '归还钥匙。',
-                    obstacle: '要查对来者身份。',
-                    turn: '阿陶发现钥齿的记号。',
-                    result: '钥匙交回。',
-                    setting_ids: ['keeper'],
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-    },
-  })
-  expect(plan.ok(), await plan.text()).toBe(true)
-  const confirmed = await page.request.post(outline + '/confirm', {
-    headers,
-    data: { base_revision: (await plan.json()).draft.revision },
-  })
-  expect(confirmed.ok(), await confirmed.text()).toBe(true)
-  const readPlan = async () => (await page.request.get(outline)).json()
+  const { novel, chapter, original, readPlan } = await authorSettingPlan(page, '检视设定正文证据')
   expect((await readPlan()).settings).toEqual([
     expect.objectContaining({ chapter_id: chapter.id, evidence: null }),
   ])
@@ -139,4 +59,207 @@ test('章纲中的人物条目经作者选取正式原文后才成为实际使�
   await withdrawn.press('Enter')
   await expect(withdrawn.locator('..').locator('blockquote')).toHaveText(original)
   expect((await readPlan()).settings[0]).not.toHaveProperty('author_evidence')
+})
+
+async function accepted(response: APIResponse) {
+  expect(response.ok(), await response.text()).toBe(true)
+  return response.json()
+}
+
+async function openOfflineEvidence(page: Page, novelId: string, chapterTitle: string) {
+  await page.getByRole('combobox', { name: '离线作品', exact: true }).selectOption(novelId)
+  await page
+    .getByRole('navigation', { name: '离线章节目录' })
+    .getByRole('button', { name: chapterTitle })
+    .press('Enter')
+  const evidence = page.getByLabel('离线设定正文证据')
+  await evidence.getByText('设定的正文使用证据', { exact: true }).press('Enter')
+  return evidence
+}
+
+test('桌面与独立 Web 双向同步设定使用证据，断网可从备份恢复撤回和原句', async ({ page, browser }) => {
+  test.skip(process.env.AINOVEL_SYNC_E2E !== '1', '使用隔离云账本检验双向正式采用')
+  const { novel, chapter, original, headers, branch, readPlan } = await authorSettingPlan(
+    page,
+    '跨端设定证据',
+  )
+  const source = await accepted(await page.request.get(branch + '/manuscript-package'))
+  expect(source.setting_use_history).toBeUndefined()
+  const endpoint = `/api/chapters/${chapter.id}/setting-uses`
+  const { basis } = await accepted(await page.request.get(endpoint))
+  const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+  const first = await accepted(
+    await page.request.post(endpoint, {
+      headers,
+      data: {
+        outline_version_id: basis.outline_version_id,
+        settings_version_id: basis.settings_version_id,
+        item_id: 'keeper',
+        parent_id: null,
+        chapter_sha256: basis.chapter_sha256,
+        evidence: {
+          chapter_id: chapter.id,
+          revision_id: basis.chapter_revision_id,
+          start: 0,
+          end: original.length,
+          quote_sha256: hash(original),
+        },
+        idempotency_key: `desktop-keeper-${chapter.id}`,
+      },
+    }),
+  )
+  expect(first.status).toBe('current')
+  const cloud = process.env.AINOVEL_TEST_SYNC_URL ?? 'http://127.0.0.1:8888'
+  const service = `${cloud}/api/sync/works/${novel.branch_id}`
+  async function grant(device_id: string) {
+    const { token } = await accepted(
+      await page.request.post(service + '/devices', {
+        headers: { Authorization: 'Bearer e2e-test-only-provisioning-token' },
+        data: { device_id },
+      }),
+    )
+    return token as string
+  }
+  const desktopToken = await grant('desktop-setting-use')
+  const webToken = await grant('web-setting-use')
+  async function syncDesktop(action: 'enable' | 'run') {
+    return accepted(
+      await page.request.post(`${branch}/desktop-sync/${action}`, {
+        headers,
+        data: { origin: cloud, token: desktopToken },
+      }),
+    )
+  }
+  await syncDesktop('enable')
+  expect((await syncDesktop('run')).conflicts).toHaveLength(0)
+
+  const context = await browser.newContext()
+  const fresh = await browser.newContext()
+  try {
+    const offlineURL = new URL('/offline/', page.url()).href
+    const web = await context.newPage()
+    await web.goto(offlineURL)
+    await expect(web.getByText('离线页面就绪', { exact: true })).toBeVisible()
+    await expect.poll(() => web.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+    await web.getByLabel('导入新离线作品').setInputFiles({
+      name: '无证据基线.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(source)),
+    })
+    const board = await openOfflineEvidence(web, novel.id, chapter.title)
+    const outline = web.getByLabel('离线大纲台')
+    await outline.getByText('大纲台', { exact: true }).press('Enter')
+    await outline.getByText('非世界设定使用台账', { exact: true }).press('Enter')
+    await expect(outline.getByText('归还赤钥 · 守铃人阿陶 · 仅计划采用', { exact: true })).toBeVisible()
+
+    await web.getByText('作品云同步', { exact: true }).click()
+    await web.getByLabel('同步服务地址').fill(cloud)
+    await web.getByLabel('设备编号').fill('web-setting-use')
+    await web.getByLabel('设备凭据').fill(webToken)
+    await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
+    const sync = web.getByRole('button', { name: '同步当前工作版本', exact: true })
+    await sync.click()
+    const fromDesktop = board.getByText('守铃人阿陶 · 当前正文证据', { exact: true })
+    await fromDesktop.press('Enter')
+    await expect(fromDesktop.locator('..').locator('blockquote')).toHaveText(original)
+    const ledger = outline.getByText('归还赤钥 · 守铃人阿陶 · 当前正文证据', { exact: true })
+    await ledger.press('Enter')
+    await expect(ledger.locator('..').locator('blockquote')).toHaveText(original)
+    await expect(sync).toBeEnabled()
+    await context.setOffline(true)
+
+    const editor = web.getByRole('textbox', { name: '章节正文', exact: true })
+    const choice = board.getByRole('combobox', { name: '本章引用的设定' })
+    const confirm = board.getByRole('button', { name: '确认该选区为正文证据', exact: true })
+    const quote = '守铃人阿陶接过。'
+    const unconfirmed = '以下是尚未保存也未签认的草稿。'
+    await choice.selectOption('keeper')
+    await editor.fill(unconfirmed)
+    await editor.press('Control+A')
+    await expect(confirm).toBeDisabled()
+    await editor.fill(original)
+    await editor.press('Control+End')
+    for (const character of quote) {
+      expect(character.length).toBe(1)
+      await editor.press('Shift+ArrowLeft')
+    }
+    await expect(
+      board.getByRole('group', { name: '确认保存稿中的设定使用' }).locator('blockquote'),
+    ).toHaveText(quote)
+    await confirm.press('Enter')
+    await expect(board.getByText('已确认当前正文使用该设定。', { exact: true })).toBeVisible()
+    const fromWeb = board.getByText('守铃人阿陶 · 当前正文证据', { exact: true })
+    await fromWeb.press('Enter')
+    await expect(fromWeb.locator('..').locator('blockquote')).toHaveText(quote)
+    await expect(board.getByText('守铃人阿陶 · 已由新证据接替', { exact: true })).toBeVisible()
+
+    await context.setOffline(false)
+    const outbound: string[] = []
+    web.on('request', (request) => {
+      if (request.method() === 'POST' && request.url() === service + '/push')
+        outbound.push(request.postData() ?? '')
+    })
+    await sync.click()
+    await expect.poll(() => outbound.some((body) => body.includes('"kind":"setting-use-head"'))).toBe(true)
+    await expect(sync).toBeEnabled()
+    expect(outbound.join('')).not.toContain(unconfirmed)
+    for (const body of outbound.filter((entry) => entry.includes('"kind":"setting-use-version"'))) {
+      expect(body).not.toContain(original)
+      expect(body).not.toContain(quote)
+    }
+    expect((await syncDesktop('run')).conflicts).toHaveLength(0)
+    const native = await accepted(await page.request.get(endpoint))
+    const second = native.records.find(({ status }: { status: string }) => status === 'current')
+    expect(second).toMatchObject({
+      quote,
+      version: {
+        parent_id: first.version.id,
+        evidence: {
+          revision_id: basis.chapter_revision_id,
+          start: original.length - quote.length,
+          end: original.length,
+          quote_sha256: hash(quote),
+        },
+      },
+    })
+    expect((await readPlan()).settings[0].author_evidence).toMatchObject({ quote })
+
+    const withdrawal = await accepted(
+      await page.request.post(`${endpoint}/${second.version.id}/withdraw`, {
+        headers,
+        data: { idempotency_key: `withdraw-web-proof-${chapter.id}` },
+      }),
+    )
+    expect(withdrawal.version).toMatchObject({
+      action: 'withdrawn',
+      parent_id: second.version.id,
+      evidence: second.version.evidence,
+    })
+    expect((await syncDesktop('run')).conflicts).toHaveLength(0)
+    await sync.click()
+    await expect(board.getByText('守铃人阿陶 · 已撤回', { exact: true })).toBeVisible()
+    const backedUp = web.waitForEvent('download')
+    await web.getByRole('button', { name: '下载独立作品备份', exact: true }).press('Enter')
+    const path = await (await backedUp).path()
+    if (!path) throw new Error('缺少独立作品备份文件。')
+
+    const restored = await fresh.newPage()
+    await restored.goto(offlineURL)
+    await expect(restored.getByText('离线页面就绪', { exact: true })).toBeVisible()
+    await expect.poll(() => restored.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+    await fresh.setOffline(true)
+    await restored.getByLabel('从独立备份恢复作品').setInputFiles(path)
+    const restoredEvidence = await openOfflineEvidence(restored, novel.id, chapter.title)
+    const withdrawn = restoredEvidence.getByText('守铃人阿陶 · 已撤回', { exact: true })
+    await withdrawn.press('Enter')
+    await expect(withdrawn.locator('..')).toContainText(basis.chapter_revision_id)
+    await expect(withdrawn.locator('..').locator('blockquote')).toHaveText(quote)
+    const historic = restoredEvidence.getByText('守铃人阿陶 · 已由新证据接替', { exact: true })
+    await expect(historic).toHaveCount(2)
+    for (const record of await historic.all()) await record.press('Enter')
+    await expect(restoredEvidence.locator('blockquote').filter({ hasText: original })).toHaveCount(1)
+  } finally {
+    await context.close()
+    await fresh.close()
+  }
 })

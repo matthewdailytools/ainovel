@@ -5931,6 +5931,10 @@ export interface components {
       }
       /** Versions */
       versions: components['schemas']['SettingUseArchiveEntry'][]
+      /** Native Bindings */
+      native_bindings?: {
+        [key: string]: string
+      }
     }
     /** SettingUseOption */
     SettingUseOption: {

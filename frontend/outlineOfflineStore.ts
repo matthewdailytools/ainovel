@@ -402,6 +402,8 @@ export function createOutlineOfflineStore({
     readLocalOutline,
     confirmLocalOutline,
     readOutlineTx,
+    readOutlineHead: getHead,
+    readOutlineVersion: getVersion,
     applyOutlineObject,
     readOutlineHistoryTx,
     restoreOutlineHistoryTx,

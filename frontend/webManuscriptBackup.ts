@@ -14,6 +14,7 @@ const histories = {
   outline_history: ['adopted_revision_id', 'versions', 'source_devices', 'required_story_records'],
   workflow_history: ['inspections', 'completions'],
   story_history: ['adopted_heads', 'versions', 'source_devices', 'native_history'],
+  setting_use_history: ['adopted_heads', 'versions', 'native_bindings'],
   reference_history: ['adopted_heads', 'versions', 'source_devices', 'excerpts'],
 }
 

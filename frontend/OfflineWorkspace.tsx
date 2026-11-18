@@ -32,6 +32,7 @@ import { PortableEvidence } from './PortableEvidence'
 import { LocalProjectBrief } from './OfflineProjectBrief'
 import { OfflineSettings, type OfflineSettingsHandle } from './OfflineSettings'
 import { OfflineOutline } from './OfflineOutline'
+import { OfflineSettingUse, type SavedSelection } from './OfflineSettingUse'
 import { OfflineWorkflowHistory } from './OfflineWorkflowHistory'
 import { OfflineReferenceHistory } from './OfflineReferenceHistory'
 import { OfflineStory } from './OfflineStory'
@@ -81,6 +82,7 @@ export function OfflineWorkspace() {
   const [selected, setSelected] = useState<LocalProject>()
   const [chapters, setChapters] = useState<LocalChapter[]>([])
   const [editor, setEditor] = useState<EditorState>()
+  const [selection, setSelection] = useState<SavedSelection>()
   const [historyTarget, setHistoryTarget] = useState('')
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof readLocalChapterRestore>>>()
   const [conflict, setConflict] = useState<LocalRevision[]>()
@@ -413,6 +415,7 @@ export function OfflineWorkspace() {
               <OfflineOutline
                 key={`outline-${selected.branch.id}`}
                 branchId={selected.branch.id}
+                projectId={selected.novel.id}
                 read={loadOutline}
                 refreshToken={workbenchRefresh}
                 disabled={busy}
@@ -576,6 +579,10 @@ export function OfflineWorkspace() {
                   rows={18}
                   value={editor.text}
                   readOnly={busy}
+                  onSelect={(event) => {
+                    const { selectionStart: start, selectionEnd: end, value } = event.currentTarget
+                    setSelection({ revisionId: editor.base.id, start, end, text: value.slice(start, end) })
+                  }}
                   onChange={(event) => {
                     const text = event.target.value
                     setEditor((value) => value && { ...value, text })
@@ -604,6 +611,18 @@ export function OfflineWorkspace() {
                   下载当前草稿
                 </button>
               </div>
+              {projectId && (
+                <OfflineSettingUse
+                  key={`${projectId}/${editor.chapter.id}`}
+                  projectId={projectId}
+                  saved={editor.base}
+                  selection={selection}
+                  dirty={dirty}
+                  disabled={busy || !!conflict}
+                  refreshToken={workbenchRefresh}
+                  onUpdated={refreshWorkbench}
+                />
+              )}
               {conflict && (
                 <section aria-label="并发稿件">
                   <h3>另一个窗口已有新保存稿</h3>

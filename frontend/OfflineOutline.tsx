@@ -27,6 +27,7 @@ import {
 } from './outlineSyncModel'
 import type { SettingsVersion } from './settingsSyncModel'
 import type { ArchivedReferenceCard } from './referenceArchive'
+import { OfflineOutlineSettingLedger } from './OfflineSettingUse'
 
 export type OfflineOutlineData = {
   current?: OutlineVersionRecord
@@ -130,6 +131,7 @@ const newChapterPlan = (id: string): OutlineChapterPlan => ({
 
 export function OfflineOutline({
   branchId,
+  projectId,
   read,
   onConfirm,
   refreshToken,
@@ -137,6 +139,7 @@ export function OfflineOutline({
   onDirty,
 }: {
   branchId: string
+  projectId: string
   read: () => Promise<OfflineOutlineData>
   onConfirm: (base: string | null, version: OutlineVersion) => Promise<void>
   refreshToken: number
@@ -415,6 +418,7 @@ export function OfflineOutline({
             ' · 采用依据已有变化'}
         </p>
       )}
+      {current && <OfflineOutlineSettingLedger projectId={projectId} refreshToken={refreshToken} />}
       {data && local.loaded && !local.recovery && !draft && (
         <button type="button" disabled={disabled || busy || !chapters.length} onClick={start}>
           {current ? '编辑当前大纲' : '新建大纲'}
