@@ -2,6 +2,9 @@ import asyncio
 from hashlib import sha256
 from io import BytesIO
 import json
+from time import gmtime
+from types import SimpleNamespace
+import zipfile
 from zipfile import ZipFile
 
 from ainovel.db import Database
@@ -14,7 +17,7 @@ from test_workflow_cloud import _complete
 from test_workflow_inspection import author
 
 
-def test_finish_requires_six_checks_and_exports_immutable_package(client, domain, story):
+def test_finish_requires_six_checks_and_exports_immutable_package(client, domain, story, monkeypatch):
     branch = story["branch_id"]
     chapter = domain.save(story["chapter_id"], 0, "学徒找到师姐，归还了铜铃。")
     endpoint = f"/api/branches/{branch}/book-completion"
@@ -65,6 +68,8 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
     record = confirmed.json()
     assert client.post(endpoint + "/confirm", json=data).json()["id"] == record["id"]
     export = f"{endpoint}/{record['id']}/export"
+    zip_now = 1_789_000_000
+    monkeypatch.setattr(zipfile, "time", SimpleNamespace(time=lambda: zip_now, localtime=gmtime))
     response = client.get(export)
     assert response.status_code == 200
     with ZipFile(BytesIO(response.content)) as archive:
@@ -92,8 +97,10 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
     )
     domain.save(chapter["id"], chapter["revision"], "学徒仍在找铃。")
     assert not client.get(endpoint).json()["latest"]["current"]
-    with ZipFile(BytesIO(client.get(export).content)) as archive:
-        assert chapter["content"] in archive.read("正文.md").decode()
+    zip_now += 4
+    historical = client.get(export)
+    assert historical.status_code == 200
+    assert historical.content == response.content
 
 
 def test_exported_catalogue_keeps_each_adopted_setting_on_its_frozen_revision(

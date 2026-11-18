@@ -6,7 +6,7 @@ from itertools import chain
 import json
 from time import time
 from typing import Literal
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from fastapi import Response
 from pydantic import Field
@@ -379,10 +379,10 @@ def register_routes(app, domain):
         manifest, materials = payload["manifest"], payload["materials"]
         checked_materials(manifest, materials)
         output = BytesIO()
-        with ZipFile(output, "w", ZIP_DEFLATED) as archive:
-            for name, text in materials.items():
-                archive.writestr(name, text)
-            archive.writestr("manifest.json", dumps(manifest))
+        with ZipFile(output, "w") as archive:
+            for name, text in [*sorted(materials.items()), ("manifest.json", dumps(manifest))]:
+                # ZipInfo uses the ZIP epoch by default, independent of the download time.
+                archive.writestr(ZipInfo(name), text, compress_type=ZIP_DEFLATED)
         return Response(
             output.getvalue(),
             media_type="application/zip",
