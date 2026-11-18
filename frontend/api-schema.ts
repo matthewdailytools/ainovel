@@ -1029,6 +1029,58 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/chapters/{chapter_id}/setting-uses': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Setting Uses */
+    get: operations['setting_uses_api_chapters__chapter_id__setting_uses_get']
+    put?: never
+    /** Confirm Setting Use */
+    post: operations['confirm_setting_use_api_chapters__chapter_id__setting_uses_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/chapters/{chapter_id}/setting-uses/{use_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Setting Use */
+    get: operations['get_setting_use_api_chapters__chapter_id__setting_uses__use_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/chapters/{chapter_id}/setting-uses/{use_id}/withdraw': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Withdraw Setting Use */
+    post: operations['withdraw_setting_use_api_chapters__chapter_id__setting_uses__use_id__withdraw_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/ideas/adopt': {
     parameters: {
       query?: never
@@ -5833,6 +5885,104 @@ export interface components {
       /** Affected Reports */
       affected_reports: components['schemas']['AffectedReport'][]
     }
+    /** SettingUseBasis */
+    SettingUseBasis: {
+      /** Outline Version Id */
+      outline_version_id: string
+      /** Settings Version Id */
+      settings_version_id: string
+      /** Chapter Revision Id */
+      chapter_revision_id: string
+      /** Chapter Revision */
+      chapter_revision: number
+      /** Chapter Sha256 */
+      chapter_sha256: string
+    }
+    /** SettingUseConfirm */
+    SettingUseConfirm: {
+      /** Outline Version Id */
+      outline_version_id: string
+      /** Settings Version Id */
+      settings_version_id: string
+      /** Item Id */
+      item_id: string
+      /** Parent Id */
+      parent_id: string | null
+      /** Chapter Sha256 */
+      chapter_sha256: string
+      evidence: components['schemas']['SettingsEvidence']
+      /** Idempotency Key */
+      idempotency_key: string
+    }
+    /** SettingUseOption */
+    SettingUseOption: {
+      /** Item Id */
+      item_id: string
+      /** Title */
+      title: string
+      /** Category Id */
+      category_id: string
+      /** Category Title */
+      category_title: string
+      /** Head Id */
+      head_id: string | null
+    }
+    /** SettingUseRecord */
+    SettingUseRecord: {
+      version: components['schemas']['SettingUseVersion']
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'current' | 'outdated' | 'superseded' | 'withdrawn' | 'missing'
+      /** Created */
+      created: number
+      /** Quote */
+      quote: string | null
+    }
+    /** SettingUseVersion */
+    SettingUseVersion: {
+      /** Id */
+      id: string
+      /** Parent Id */
+      parent_id: string | null
+      /** Outline Version Id */
+      outline_version_id: string
+      /** Settings Version Id */
+      settings_version_id: string
+      /** Item Id */
+      item_id: string
+      evidence: components['schemas']['SettingsEvidence']
+      /** Chapter Sha256 */
+      chapter_sha256: string
+      /**
+       * Action
+       * @enum {string}
+       */
+      action: 'confirmed' | 'withdrawn'
+      /**
+       * Actor
+       * @constant
+       */
+      actor: 'author'
+    }
+    /** SettingUseView */
+    SettingUseView: {
+      /** Chapter Id */
+      chapter_id: string
+      basis: components['schemas']['SettingUseBasis'] | null
+      /** Options */
+      options: components['schemas']['SettingUseOption'][]
+      /** Records */
+      records: components['schemas']['SettingUseRecord'][]
+      /** Next Before Id */
+      next_before_id: string | null
+    }
+    /** SettingUseWithdraw */
+    SettingUseWithdraw: {
+      /** Idempotency Key */
+      idempotency_key: string
+    }
     /** SettingsEvidence */
     SettingsEvidence: {
       /** Chapter Id */
@@ -8551,6 +8701,143 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['OutlineCard'][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  setting_uses_api_chapters__chapter_id__setting_uses_get: {
+    parameters: {
+      query?: {
+        before_id?: string | null
+        limit?: number
+      }
+      header?: never
+      path: {
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SettingUseView']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_setting_use_api_chapters__chapter_id__setting_uses_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SettingUseConfirm']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SettingUseRecord']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_setting_use_api_chapters__chapter_id__setting_uses__use_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        chapter_id: string
+        use_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SettingUseRecord']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  withdraw_setting_use_api_chapters__chapter_id__setting_uses__use_id__withdraw_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        chapter_id: string
+        use_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SettingUseWithdraw']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SettingUseRecord']
         }
       }
       /** @description Validation Error */

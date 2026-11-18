@@ -491,6 +491,7 @@ def _ledgers(tx, graph, plan, basis, current):
     records = {row["id"]: row for row in graph["records"] if row["kind"] == "promise"}
     settings_by_id = {item["id"]: item for item in basis["items"]}
     passes = {}
+    author_uses = {}
     if current and basis["confirmation_id"]:
         rows = tx.execute(
             "SELECT a.id,a.chapter_id,a.payload,a.basis FROM artifacts a JOIN chapters c ON c.id=a.chapter_id "
@@ -506,11 +507,27 @@ def _ledgers(tx, graph, plan, basis, current):
                 if payload["result"] == "pass" and payload["evidence"]
                 else None
             )
+        if any(item.get("category_id") for item in settings_by_id.values()):
+            from .outline_sync import read_outline_head
+            from .setting_use import current_outline_uses
+            from .settings_sync import settings_source_id
+
+            author_uses = current_outline_uses(
+                tx,
+                branch_id,
+                read_outline_head(tx, branch_id),
+                settings_source_id(tx, branch_id, basis["confirmation_id"]),
+            )
     settings = [
         {
             "chapter_id": chapter["chapter_id"],
             "setting": settings_by_id[identifier],
             "evidence": passes.get((chapter["chapter_id"], identifier)),
+            **(
+                {"author_evidence": proof}
+                if (proof := author_uses.get((chapter["chapter_id"], identifier)))
+                else {}
+            ),
         }
         for _, _, chapter in _chapter_plans(plan)
         for identifier in chapter["setting_ids"]

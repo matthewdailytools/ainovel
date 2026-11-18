@@ -433,8 +433,10 @@ def create_app(settings=None, schema_only=False):
 
     register_story_routes(app, domain)
     from .outline_workspace import register_routes as register_outline_routes
+    from .setting_use import register_routes as register_setting_use_routes
 
     register_outline_routes(app, domain)
+    register_setting_use_routes(app, domain)
     from .ideation import register_routes as register_ideation_routes
 
     register_ideation_routes(app, domain)

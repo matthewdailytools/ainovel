@@ -35,6 +35,7 @@ export type OutlineView = {
     chapter_id: string
     setting: Setting
     evidence: { report_id: string; source: { text: string } } | null
+    author_evidence?: { version: { id: string }; quote: string }
   }[]
   promises: OutlinePromise[]
 }
@@ -1001,15 +1002,16 @@ export function OutlineWorkspace({
           <h3>设定台账</h3>
           {!view.settings.length && <p>当前大纲尚未安排设定引用。</p>}
           <ul>
-            {view.settings.map(({ chapter_id, setting, evidence }) => (
+            {view.settings.map(({ chapter_id, setting, evidence, author_evidence }) => (
               <li key={`${chapter_id}/${setting.id}`}>
                 <button type="button" onClick={() => onWriting(chapter_id, evidence?.report_id)}>
                   {chapterName(chapter_id)}
                 </button>{' '}
                 {setting.title}
                 {setting.category_title && ` · ${setting.category_title}`} ·{' '}
-                {evidence ? '已有正文对账证据' : '计划'}
+                {author_evidence ? '作者已确认正文使用' : evidence ? '已有正文对账证据' : '计划'}
                 {evidence && <blockquote>{evidence.source.text}</blockquote>}
+                {author_evidence && <blockquote>{author_evidence.quote}</blockquote>}
               </li>
             ))}
           </ul>

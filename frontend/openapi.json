@@ -2176,6 +2176,153 @@
         }
       }
     },
+    "/api/chapters/{chapter_id}/setting-uses": {
+      "get": {
+        "summary": "Setting Uses",
+        "operationId": "setting_uses_api_chapters__chapter_id__setting_uses_get",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Chapter Id" }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }],
+              "title": "Before Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "maximum": 100, "minimum": 1, "default": 50, "title": "Limit" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SettingUseView" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Confirm Setting Use",
+        "operationId": "confirm_setting_use_api_chapters__chapter_id__setting_uses_post",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Chapter Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/SettingUseConfirm" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SettingUseRecord" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapters/{chapter_id}/setting-uses/{use_id}": {
+      "get": {
+        "summary": "Get Setting Use",
+        "operationId": "get_setting_use_api_chapters__chapter_id__setting_uses__use_id__get",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Chapter Id" }
+          },
+          {
+            "name": "use_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Use Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SettingUseRecord" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapters/{chapter_id}/setting-uses/{use_id}/withdraw": {
+      "post": {
+        "summary": "Withdraw Setting Use",
+        "operationId": "withdraw_setting_use_api_chapters__chapter_id__setting_uses__use_id__withdraw_post",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Chapter Id" }
+          },
+          {
+            "name": "use_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Use Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/SettingUseWithdraw" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SettingUseRecord" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/ideas/adopt": {
       "post": {
         "summary": "Adopt",
@@ -10334,6 +10481,184 @@
           "affected_reports"
         ],
         "title": "SettingRestorePreview"
+      },
+      "SettingUseBasis": {
+        "properties": {
+          "outline_version_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "title": "Outline Version Id"
+          },
+          "settings_version_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "title": "Settings Version Id"
+          },
+          "chapter_revision_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "title": "Chapter Revision Id"
+          },
+          "chapter_revision": { "type": "integer", "title": "Chapter Revision" },
+          "chapter_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Chapter Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "outline_version_id",
+          "settings_version_id",
+          "chapter_revision_id",
+          "chapter_revision",
+          "chapter_sha256"
+        ],
+        "title": "SettingUseBasis"
+      },
+      "SettingUseConfirm": {
+        "properties": {
+          "outline_version_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "title": "Outline Version Id"
+          },
+          "settings_version_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "title": "Settings Version Id"
+          },
+          "item_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Item Id" },
+          "parent_id": {
+            "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }],
+            "title": "Parent Id"
+          },
+          "chapter_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Chapter Sha256" },
+          "evidence": { "$ref": "#/components/schemas/SettingsEvidence" },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "outline_version_id",
+          "settings_version_id",
+          "item_id",
+          "parent_id",
+          "chapter_sha256",
+          "evidence",
+          "idempotency_key"
+        ],
+        "title": "SettingUseConfirm"
+      },
+      "SettingUseOption": {
+        "properties": {
+          "item_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Item Id" },
+          "title": { "type": "string", "title": "Title" },
+          "category_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Category Id" },
+          "category_title": { "type": "string", "title": "Category Title" },
+          "head_id": {
+            "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }],
+            "title": "Head Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["item_id", "title", "category_id", "category_title", "head_id"],
+        "title": "SettingUseOption"
+      },
+      "SettingUseRecord": {
+        "properties": {
+          "version": { "$ref": "#/components/schemas/SettingUseVersion" },
+          "status": {
+            "type": "string",
+            "enum": ["current", "outdated", "superseded", "withdrawn", "missing"],
+            "title": "Status"
+          },
+          "created": { "type": "number", "title": "Created" },
+          "quote": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Quote" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["version", "status", "created", "quote"],
+        "title": "SettingUseRecord"
+      },
+      "SettingUseVersion": {
+        "properties": {
+          "id": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Id" },
+          "parent_id": {
+            "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }],
+            "title": "Parent Id"
+          },
+          "outline_version_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "title": "Outline Version Id"
+          },
+          "settings_version_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "title": "Settings Version Id"
+          },
+          "item_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Item Id" },
+          "evidence": { "$ref": "#/components/schemas/SettingsEvidence" },
+          "chapter_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Chapter Sha256" },
+          "action": { "type": "string", "enum": ["confirmed", "withdrawn"], "title": "Action" },
+          "actor": { "type": "string", "const": "author", "title": "Actor" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "outline_version_id",
+          "settings_version_id",
+          "item_id",
+          "evidence",
+          "chapter_sha256",
+          "action",
+          "actor"
+        ],
+        "title": "SettingUseVersion"
+      },
+      "SettingUseView": {
+        "properties": {
+          "chapter_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Chapter Id" },
+          "basis": { "anyOf": [{ "$ref": "#/components/schemas/SettingUseBasis" }, { "type": "null" }] },
+          "options": {
+            "items": { "$ref": "#/components/schemas/SettingUseOption" },
+            "type": "array",
+            "title": "Options"
+          },
+          "records": {
+            "items": { "$ref": "#/components/schemas/SettingUseRecord" },
+            "type": "array",
+            "title": "Records"
+          },
+          "next_before_id": {
+            "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }],
+            "title": "Next Before Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "basis", "options", "records", "next_before_id"],
+        "title": "SettingUseView"
+      },
+      "SettingUseWithdraw": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["idempotency_key"],
+        "title": "SettingUseWithdraw"
       },
       "SettingsEvidence": {
         "properties": {

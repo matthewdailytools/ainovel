@@ -54,6 +54,7 @@ import { latestArtifact, refreshArtifactList } from './artifactRefresh'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
 import type { ConceptionHandoff } from './conception'
 import { SettingReviewReport } from './SettingReviewReport'
+import { SettingUsePanel } from './SettingUsePanel'
 import {
   chapterCards,
   findChapterPlan,
@@ -1307,6 +1308,16 @@ export function Writing({
                 </details>
               ))}
           </details>
+        )}
+        {chapter && outline?.confirmed && (
+          <SettingUsePanel
+            key={chapter.id}
+            chapterId={chapter.id}
+            revision={chapter.revision}
+            content={chapter.content}
+            selection={selection}
+            saved={text === chapter.content && !dirty}
+          />
         )}
         {!!cards.length && (
           <details className="notice">
