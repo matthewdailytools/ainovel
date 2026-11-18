@@ -22,6 +22,10 @@ from .workflow_privacy import REFERENCE_SCOPE, evidence_has_reference_selection
 FORMAT = "ainovel-manuscript/1"
 EVIDENCE = "portable_workbench_evidence"
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+ReferenceSelection = Annotated[
+    list[ReferenceVersionId] | None,
+    Query(max_length=100, description="明确选带原文证据的手法卡修订 ID。默认只导出手法卡来源地址。"),
+]
 
 
 class PortableWork(Input):
@@ -351,7 +355,7 @@ def store_portable_evidence(tx, branch_id, document):
     )
 
 
-def export_manuscript(domain, branch_id, *, include_reference_evidence_for=()):
+def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), before_read=None):
     from .outline_archive import export_outline_history, validate_outline_history
     from .reference_sync import export_reference_archive
     from .settings_archive import export_settings_history, validate_settings_history
@@ -367,6 +371,8 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=()):
         branch = tx.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
         if not branch:
             raise DomainError("not_found", "工作版本不存在。", 404)
+        if before_read:
+            before_read(tx, branch_id)
         workflow = export_workflow_history(tx, branch_id)
         evidence = _evidence(tx, branch_id)
         if (workflow and any(map(has_frozen_reference_selection, workflow.inspections))) or any(
@@ -526,10 +532,7 @@ def register_routes(app, domain):
     @app.get("/api/branches/{branch_id}/manuscript-package")
     def get_package(
         branch_id: str,
-        include_reference_evidence_for: Annotated[
-            list[ReferenceVersionId] | None,
-            Query(max_length=100, description="明确选带原文证据的手法卡修订 ID。默认只导出手法卡来源地址。"),
-        ] = None,
+        include_reference_evidence_for: ReferenceSelection = None,
     ) -> ManuscriptPackage:
         return export_manuscript(
             domain, branch_id, include_reference_evidence_for=include_reference_evidence_for or ()

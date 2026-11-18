@@ -2,7 +2,7 @@ import type { ManuscriptPack } from './offlineStore'
 
 const heading = 'ainovel-web-backup/1'
 const ending = 'sha256 '
-const fileType = 'application/x-ainovel-web-backup'
+export const manuscriptBackupMediaType = 'application/x-ainovel-web-backup'
 const maxFrameCharacters = 128 * 1024 * 1024
 const maxFrames = 250_000
 const digestPattern = /^[a-f0-9]{64}$/
@@ -60,7 +60,7 @@ export async function encodeWebManuscriptBackup(pack: ManuscriptPack, digest: Di
     records.push(`${hash} ${json}\n`)
   }
   records.push(`${ending}${await digest(hashes.join(''))}\n`)
-  return new Blob(records, { type: fileType })
+  return new Blob(records, { type: manuscriptBackupMediaType })
 }
 
 async function* lines(file: Blob) {

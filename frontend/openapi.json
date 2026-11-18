@@ -647,6 +647,65 @@
         }
       }
     },
+    "/api/branches/{branch_id}/manuscript-backup": {
+      "get": {
+        "summary": "Get Backup",
+        "operationId": "get_backup_api_branches__branch_id__manuscript_backup_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "include_reference_evidence_for",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                  "maxItems": 100
+                },
+                { "type": "null" }
+              ],
+              "description": "明确选带原文证据的手法卡修订 ID。默认只导出手法卡来源地址。",
+              "title": "Include Reference Evidence For"
+            },
+            "description": "明确选带原文证据的手法卡修订 ID。默认只导出手法卡来源地址。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/x-ainovel-web-backup": { "schema": { "type": "string", "format": "binary" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/manuscript-backups/import": {
+      "post": {
+        "summary": "Restore Backup",
+        "operationId": "restore_backup_api_manuscript_backups_import_post",
+        "requestBody": {
+          "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } },
+          "required": true
+        },
+        "responses": {
+          "201": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
     "/api/branches/{branch_id}/work-snapshots": {
       "get": {
         "summary": "List Work Snapshots",

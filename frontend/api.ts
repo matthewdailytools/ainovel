@@ -276,17 +276,22 @@ export class ApiError extends Error {
     super(message)
   }
 }
-export async function api<T = unknown>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function requestApi(path: string, method: string, body?: unknown) {
   const headers: Record<string, string> = {}
   if (method !== 'GET') headers['X-Ainovel-CSRF'] = token
   const form = body instanceof FormData
-  if (body !== undefined && !form) headers['Content-Type'] = 'application/json'
-  const response = await fetch('/api' + path, {
+  const binary = body instanceof Blob
+  if (body !== undefined && !form)
+    headers['Content-Type'] = binary ? 'application/octet-stream' : 'application/json'
+  return fetch('/api' + path, {
     method,
     headers,
     credentials: 'same-origin',
-    body: body === undefined ? undefined : form ? body : JSON.stringify(body),
+    body: body === undefined ? undefined : form || binary ? body : JSON.stringify(body),
   })
+}
+
+async function readApiJson<T>(response: Response): Promise<T> {
   let data: unknown
   try {
     data = await response.json()
@@ -307,6 +312,18 @@ export async function api<T = unknown>(path: string, method = 'GET', body?: unkn
       response.status,
     )
   return data as T
+}
+
+export async function api<T = unknown>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  return readApiJson(await requestApi(path, method, body))
+}
+
+export async function apiFile(path: string, mediaType: string): Promise<Blob> {
+  const response = await requestApi(path, 'GET')
+  if (!response.ok) await readApiJson(response)
+  if (response.headers.get('Content-Type')?.split(';')[0] !== mediaType)
+    throw new ApiError('invalid_response', '本机服务未返回预期的备份格式。', response.status)
+  return response.blob()
 }
 
 export const statuses: Record<string, string> = {

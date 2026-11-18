@@ -653,7 +653,7 @@ export function OfflineWorkspace() {
       </section>
       <section className="offline-transfer" aria-label="独立作品备份">
         <h2>独立作品备份</h2>
-        <p>备份此工作版本的已保存稿件、历史和依据。可在独立 Web 恢复，手法卡原句沿用上方的选择。</p>
+        <p>备份此工作版本的已保存稿件、历史和依据。可在独立 Web 或桌面恢复，手法卡原句沿用上方的选择。</p>
         <button
           type="button"
           disabled={!selected || busy}

@@ -1,6 +1,16 @@
 import { expect, test } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 
+async function backupExcerpts(file: string) {
+  const records = (await readFile(file, 'utf8'))
+    .trimEnd()
+    .split('\n')
+    .slice(1, -1)
+    .map((line) => JSON.parse(line.slice(65)))
+  return records.find(([name]) => name === 'reference_history.excerpts')?.[2] as
+    Record<string, string> | undefined
+}
+
 test('拆解台核对保存卡片，稿件包仅选带已预览的原句', async ({ page, browser }) => {
   await page.goto('/')
   const { csrf } = await (await page.request.get('/api/session')).json()
@@ -60,6 +70,9 @@ test('拆解台核对保存卡片，稿件包仅选带已预览的原句', async
   const defaultPackage = JSON.parse(await readFile((await (await defaultDownload).path())!, 'utf8'))
   expect(defaultPackage.reference_history.excerpts).toBeUndefined()
   expect(JSON.stringify(defaultPackage)).not.toContain(text)
+  const plainBackup = page.waitForEvent('download')
+  await page.getByRole('button', { name: '下载独立作品备份', exact: true }).press('Enter')
+  expect(await backupExcerpts((await (await plainBackup).path())!)).toBeUndefined()
 
   await page.getByText('选带指定手法卡原文', { exact: true }).click()
   const first = page.getByRole('checkbox', { name: /解析一层可信证据 · 修订 1/ })
@@ -76,6 +89,9 @@ test('拆解台核对保存卡片，稿件包仅选带已预览的原句', async
   const opted = JSON.parse(await readFile((await (await optedDownload).path())!, 'utf8'))
   expect(Object.values(opted.reference_history.excerpts)).toEqual(['😀渡口'])
   expect(JSON.stringify(opted)).not.toContain('半幅旧图')
+  const optedBackup = page.waitForEvent('download')
+  await preview.getByRole('button', { name: '下载含所选原文的独立备份', exact: true }).press('Enter')
+  expect(await backupExcerpts((await (await optedBackup).path())!)).toEqual(opted.reference_history.excerpts)
 
   if (process.env.AINOVEL_SYNC_E2E !== '1') return
   const branch = `/api/branches/${branch_id}`

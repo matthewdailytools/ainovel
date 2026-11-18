@@ -139,10 +139,13 @@ def create_app(settings=None, schema_only=False):
 
     register_book_completion_routes(app, domain)
     register_workflow_inspection_routes(app, domain)
+    from .manuscript_backup import BACKUP_IMPORT_PATH, MAX_BACKUP_BYTES, size_error as backup_size_error
+    from .manuscript_backup import register_routes as register_manuscript_backup_routes
     from .manuscript_exchange import register_routes as register_manuscript_package_routes
     from .work_snapshot import register_routes as register_work_snapshot_routes
 
     register_manuscript_package_routes(app, domain)
+    register_manuscript_backup_routes(app, domain)
     register_work_snapshot_routes(app, domain)
     from .desktop_sync import register_routes as register_desktop_sync_routes
     from .desktop_sync import _origin as normalize_sync_origin
@@ -169,7 +172,14 @@ def create_app(settings=None, schema_only=False):
         ):
             return JSONResponse({"code": "origin", "message": "仅允许本机工作台来源。"}, status_code=403)
         try:
-            if int(request.headers.get("content-length", "0")) > 24 * 1024 * 1024:
+            length = int(request.headers.get("content-length", "0"))
+            if request.method == "POST" and request.url.path == BACKUP_IMPORT_PATH:
+                if length > MAX_BACKUP_BYTES:
+                    error = backup_size_error()
+                    return JSONResponse(
+                        {"code": error.code, "message": error.message}, status_code=error.status
+                    )
+            elif length > 24 * 1024 * 1024:
                 return JSONResponse(
                     {"code": "file_limit", "message": "请求超过 24 MiB，未读取或保存。"}, status_code=413
                 )

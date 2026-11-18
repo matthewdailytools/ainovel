@@ -1,0 +1,247 @@
+import asyncio
+from dataclasses import replace
+from hashlib import sha256
+import json
+
+from fastapi.testclient import TestClient
+import httpx
+import pytest
+
+from ainovel import manuscript_backup
+from ainovel.api import create_app
+from ainovel.manuscript_backup import BACKUP_IMPORT_PATH, BACKUP_MEDIA_TYPE, BackupReader
+from ainovel.manuscript_exchange import export_manuscript
+from test_reference_flow import reference as reference_fixture, update
+from test_reference_sync import archive, card
+from test_workflow_archive import _members, _send_reports
+from test_workflow_cloud import _complete
+
+
+reference = reference_fixture
+BINARY = {"Content-Type": "application/octet-stream"}
+
+
+def framed(rows):
+    return raw_frames(
+        json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8") for row in rows
+    )
+
+
+def raw_frames(rows):
+    parts = [b"ainovel-web-backup/1\n"]
+    digests = []
+    for record in rows:
+        digest = sha256(record).hexdigest().encode("ascii")
+        parts.append(digest + b" " + record + b"\n")
+        digests.append(digest)
+    parts.append(b"sha256 " + sha256(b"".join(digests)).hexdigest().encode("ascii") + b"\n")
+    return b"".join(parts)
+
+
+def _identify(client):
+    client.headers["X-Ainovel-CSRF"] = client.get("/api/session").json()["csrf"]
+
+
+def test_large_backup_replaces_neither_existing_work_nor_the_ordinary_upload_limit(
+    client, settings, domain, story
+):
+    branch = f"/api/branches/{story['branch_id']}"
+    lead = "渡口敲过三巡更，学徒依次收好铜铃和写满行踪的纸。"
+    names = []
+    for number in range(1, 37):
+        chapter = (
+            domain.chapter(story["chapter_id"])
+            if number == 1
+            else domain.create_chapter(story["branch_id"], f"第{number}章")
+        )
+        body = f"序号{number}\n" + lead * 9900 + f"\n第{number}章底稿。"
+        names.append((chapter["id"], body))
+        assert domain.save(chapter["id"], 0, body)["revision"] == 1
+    downloaded = client.get(branch + "/manuscript-backup")
+    assert downloaded.status_code == 200
+    assert downloaded.headers["Content-Type"] == BACKUP_MEDIA_TYPE
+    assert downloaded.headers["Content-Disposition"].endswith('.ainovel-backup"')
+    assert downloaded.headers["Cache-Control"] == "no-store"
+    assert int(downloaded.headers["Content-Length"]) == len(downloaded.content) > 24 * 1024 * 1024
+    assert (
+        client.post(
+            "/api/manuscript-packages/import",
+            headers={"Content-Length": str(len(downloaded.content))},
+            json={},
+        ).status_code
+        == 413
+    )
+
+    with TestClient(create_app(replace(settings, data_dir=settings.data_dir / "independent"))) as receiver:
+        _identify(receiver)
+        unrelated = receiver.post("/api/novels", json={"title": "原有独立作品"}).json()
+        unrelated_chapter = receiver.post(
+            f"/api/branches/{unrelated['branch_id']}/chapters", json={"title": "保留章"}
+        ).json()
+        assert receiver.put(
+            f"/api/chapters/{unrelated_chapter['id']}", json={"base_revision": 0, "content": "原有稿需保留。"}
+        ).is_success
+
+        denied = receiver.post(
+            BACKUP_IMPORT_PATH, headers={**BINARY, "X-Ainovel-CSRF": "wrong"}, content=downloaded.content[:90]
+        )
+        assert denied.status_code == 403 and denied.json()["code"] == "csrf"
+        truncated = receiver.post(BACKUP_IMPORT_PATH, headers=BINARY, content=downloaded.content[:-11])
+        assert truncated.status_code == 400 and truncated.json()["code"] == "manuscript_backup"
+        assert [row["id"] for row in receiver.get("/api/novels").json()] == [unrelated["id"]]
+        restored = receiver.post(BACKUP_IMPORT_PATH, headers=BINARY, content=downloaded.content)
+        assert restored.status_code == 201, restored.text
+        assert restored.json() == {"id": story["id"], "branch_id": story["branch_id"]}
+        assert len(receiver.get(branch + "/chapters").json()) == 36
+        assert receiver.get(f"/api/chapters/{unrelated_chapter['id']}").json()["content"] == "原有稿需保留。"
+        for chapter, body in (names[0], names[-1]):
+            history = f"/api/chapters/{chapter}/history"
+            assert receiver.get(history).json() == client.get(history).json()
+            restored_body = receiver.get(f"/api/chapters/{chapter}").json()["content"]
+            assert sha256(restored_body.encode()).digest() == sha256(body.encode()).digest()
+        assert receiver.get(branch + "/manuscript-backup").content == downloaded.content
+
+
+def test_reader_accepts_split_utf8_and_rejects_a_verified_frame_after_the_seal(client, domain, story):
+    chapter = story["chapter_id"]
+    domain.save(chapter, 0, "铜铃😀\n仍在门口。")
+    package = export_manuscript(domain, story["branch_id"]).model_dump(mode="json")
+    entries = []
+    for name, value in package.items():
+        if isinstance(value, list):
+            entries.append([name, "list", None])
+            entries.extend([name, "item", item] for item in value)
+        else:
+            entries.append([name, "value", value])
+    accepted = framed(entries)
+    reader = BackupReader()
+    for index in range(0, len(accepted), 7):
+        reader.feed(accepted[index : index + 7])
+    assert reader.package().model_dump() == package
+    assert (
+        client.post(BACKUP_IMPORT_PATH, headers=BINARY, content=accepted).json()["code"]
+        == "manuscript_conflict"
+    )
+    frames_after_seal = client.post(
+        BACKUP_IMPORT_PATH, headers=BINARY, content=accepted + accepted.splitlines()[1] + b"\n"
+    )
+    assert frames_after_seal.json()["code"] == "manuscript_backup"
+    absent_list = next(index for index, entry in enumerate(entries) if entry[:2] == ["revisions", "list"])
+    rejected = client.post(
+        BACKUP_IMPORT_PATH, headers=BINARY, content=framed(entries[:absent_list] + entries[absent_list + 1 :])
+    )
+    assert rejected.json()["code"] == "manuscript_backup"
+    wrong_parent = next(
+        entry for entry in entries if entry[:2] == ["revisions", "item"] and entry[2]["revision"] == 1
+    )
+    wrong_parent[2]["parent_id"] = "forged-parent"
+    wrong_history = client.post(BACKUP_IMPORT_PATH, headers=BINARY, content=framed(entries))
+    assert wrong_history.json()["code"] == "manuscript_history"
+    assert domain.chapter(chapter)["content"] == "铜铃😀\n仍在门口。"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'["novel","value",{"title":"\xff"}]',
+        b'["novel","value",{"title":"private-deep-structure","extra":'
+        + b"[" * 2000
+        + b"0"
+        + b"]" * 2000
+        + b"}]",
+    ],
+)
+def test_invalid_utf8_and_excessive_json_depth_return_a_sanitized_error(client, raw):
+    result = client.post(BACKUP_IMPORT_PATH, headers=BINARY, content=raw_frames([raw]))
+    assert result.status_code == 400 and result.json()["code"] == "manuscript_backup"
+    assert "private-deep-structure" not in result.text
+    assert client.get("/api/novels").json() == []
+
+
+def test_escaped_lone_surrogate_is_rejected_before_import(client):
+    content = raw_frames(
+        [
+            b'["format","value","ainovel-manuscript/1"]',
+            b'["novel","value",{"id":"bad","title":"\\ud800","brief":"","created":1}]',
+            b'["branch","value",{"id":"bad-branch","novel_id":"bad","name":"draft","mode":"assisted","story_revision":0,"created":1}]',
+            b'["chapters","list",null]',
+            b'["revisions","list",null]',
+        ]
+    )
+    result = client.post(BACKUP_IMPORT_PATH, headers=BINARY, content=content)
+    assert result.status_code == 400 and result.json()["code"] == "manuscript_backup"
+    assert client.get("/api/novels").json() == []
+
+
+def test_stream_limit_applies_without_content_length_and_download_fails_before_sending(
+    client, settings, domain, story, monkeypatch
+):
+    monkeypatch.setattr(manuscript_backup, "MAX_BACKUP_BYTES", 512)
+
+    async def chunked():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=create_app(settings)), base_url="http://testserver"
+        ) as api:
+            session = (await api.get("/api/session")).json()
+            api.headers["X-Ainovel-CSRF"] = session["csrf"]
+
+            async def incomplete():
+                yield b"ainovel-web-backup/1\n"
+                yield b"a" * 250
+                yield b"b" * 260
+
+            result = await api.post(BACKUP_IMPORT_PATH, headers=BINARY, content=incomplete())
+            assert "Content-Length" not in result.request.headers
+            assert result.status_code == 413 and result.json()["code"] == "file_limit"
+
+    asyncio.run(chunked())
+    branch = story["branch_id"]
+    failure = client.get(f"/api/branches/{branch}/manuscript-backup")
+    assert failure.status_code == 413 and failure.json()["code"] == "file_limit"
+    assert "content-disposition" not in failure.headers
+    assert client.post(BACKUP_IMPORT_PATH, json={}).status_code == 415
+
+    domain.save(story["chapter_id"], 0, "铜铃带回渡口。" * 200)
+    monkeypatch.setattr(
+        manuscript_backup, "_prepare_download", lambda *_: pytest.fail("large source reached serialization")
+    )
+    failure = client.get(f"/api/branches/{branch}/manuscript-backup")
+    assert failure.status_code == 413 and failure.json()["code"] == "file_limit"
+
+
+def test_backup_restores_frozen_inspection_completion_and_only_explicit_reference_excerpt(
+    client, settings, domain, story, reference
+):
+    update(client, domain, reference, cards=[card("😀渡口")])
+    branch_id = story["branch_id"]
+    version = archive(domain, branch_id).versions[-1]
+    branch = f"/api/branches/{branch_id}"
+    saved = domain.save(story["chapter_id"], 0, "学徒把铜铃交给师姐。")
+    _, inspection = _send_reports(client, branch + "/workflow-inspections", saved)
+    completion = _complete(client, branch + "/book-completion", saved)
+    delivery = branch + f"/book-completion/{completion['id']}/export"
+    expected = _members(client.get(delivery))
+
+    default = client.get(branch + "/manuscript-backup")
+    assert default.status_code == 200
+    assert "😀渡口".encode() not in default.content
+    opted_in = client.get(
+        branch + "/manuscript-backup", params={"include_reference_evidence_for": version.id}
+    )
+    assert opted_in.status_code == 200 and "😀渡口".encode() in opted_in.content
+
+    with TestClient(
+        create_app(replace(settings, data_dir=settings.data_dir / "history-receiver"))
+    ) as restored:
+        _identify(restored)
+        result = restored.post(BACKUP_IMPORT_PATH, headers=BINARY, content=opted_in.content)
+        assert result.status_code == 201, result.text
+        evidence = restored.get(branch + f"/workflow-inspections/{inspection['id']}")
+        assert evidence.status_code == 200
+        assert evidence.json()["basis_sha256"] == inspection["basis_sha256"]
+        assert _members(restored.get(delivery)) == expected
+        assert "😀渡口".encode() not in restored.get(branch + "/manuscript-backup").content
+        selected = restored.get(
+            branch + "/manuscript-backup", params={"include_reference_evidence_for": version.id}
+        )
+        assert selected.status_code == 200 and "😀渡口".encode() in selected.content

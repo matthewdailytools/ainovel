@@ -122,10 +122,11 @@ def test_legacy_native_and_imported_reports_stay_readable_without_leaking_into_d
     legacy,
 ):
     def blocked(api):
-        rejected = api.get(legacy.api + "/manuscript-package")
-        assert rejected.status_code == 409, rejected.text
-        assert rejected.json()["code"] == "manuscript_reference_scope"
-        assert EXCERPT not in rejected.text
+        for suffix in ("/manuscript-package", "/manuscript-backup"):
+            rejected = api.get(legacy.api + suffix)
+            assert rejected.status_code == 409, rejected.text
+            assert rejected.json()["code"] == "manuscript_reference_scope"
+            assert EXCERPT not in rejected.text
 
     blocked(client)
     assert_local_history(client, legacy)
