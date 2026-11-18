@@ -15,6 +15,7 @@ import {
   type LocalRevision,
 } from './offlineStore'
 import './offlineWorkspace.css'
+import { WebSyncPanel } from './WebSyncPanel'
 
 type EditorState = {
   chapter: LocalChapter
@@ -62,7 +63,9 @@ export function OfflineWorkspace() {
   const [conflict, setConflict] = useState<LocalRevision[]>()
   const [projectTitle, setProjectTitle] = useState('')
   const [chapterTitle, setChapterTitle] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [localBusy, setBusy] = useState(false)
+  const [syncBusy, setSyncBusy] = useState(false)
+  const busy = localBusy || syncBusy
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const locked = useRef(false)
@@ -113,7 +116,7 @@ export function OfflineWorkspace() {
   }
 
   async function run(operation: () => Promise<void>) {
-    if (locked.current) return
+    if (locked.current || syncBusy) return
     locked.current = true
     setBusy(true)
     setError('')
@@ -232,6 +235,25 @@ export function OfflineWorkspace() {
           </label>
           {selected && (
             <>
+              <WebSyncPanel
+                key={selected.branch.id}
+                project={selected}
+                unsaved={dirty || localBusy}
+                onBusy={setSyncBusy}
+                onApplied={async () => {
+                  const saved = (await listLocalProjects()).find(
+                    (work) => work.branch.id === selected.branch.id,
+                  )
+                  if (!saved) return
+                  setProjects(await listLocalProjects())
+                  const latest = await listLocalChapters(saved.novel.id)
+                  setSelected(saved)
+                  setChapters(latest)
+                  const chapter = latest.find((entry) => entry.id === editor?.chapter.id)
+                  if (chapter) await openChapter(chapter)
+                  else setEditor(undefined)
+                }}
+              />
               <form
                 onSubmit={(event) => {
                   event.preventDefault()

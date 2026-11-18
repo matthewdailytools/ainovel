@@ -8,6 +8,7 @@ import { ReadingMetricsPanel } from './ReadingMetricsPanel'
 import { InspectionPanel } from './InspectionPanel'
 import { CompletionPanel } from './CompletionPanel'
 import { WorkSnapshotPanel } from './WorkSnapshotPanel'
+import { DesktopSyncPanel } from './DesktopSyncPanel'
 import { StoryGraph } from './StoryGraph'
 import { type FeedbackHandoff } from './feedbackRevision'
 
@@ -555,6 +556,7 @@ export function Records({
         />
       </div>
       <ReadingMetricsPanel key={`reading-${branch.id}`} branchId={branch.id} chapters={chapters} />
+      <DesktopSyncPanel key={`sync-${branch.id}`} branchId={branch.id} notify={notify} refresh={refresh} />
       <FinalizationPanel
         branchId={branch.id}
         refreshVersion={storyRevision}

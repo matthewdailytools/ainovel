@@ -36,6 +36,48 @@ export type ManuscriptPack = LocalProject & {
   chapters: LocalChapter[]
   revisions: LocalRevision[]
 }
+const SYNC_FORMAT = 'ainovel-manuscript-sync/1'
+export type SyncedObject =
+  | (LocalProject & { format: typeof SYNC_FORMAT; kind: 'branch' })
+  | { format: typeof SYNC_FORMAT; kind: 'chapter'; chapter: LocalChapter; head: LocalRevision }
+
+export function syncObjectSignature(object: SyncedObject | null) {
+  if (object?.kind === 'branch') {
+    const { novel, branch } = object
+    return JSON.stringify(['branch', novel.id, novel.title, novel.brief, branch.id, branch.name, branch.mode])
+  }
+  if (object?.kind === 'chapter') {
+    const { chapter, head } = object
+    return JSON.stringify([
+      'chapter',
+      chapter.id,
+      chapter.branch_id,
+      chapter.position,
+      chapter.title,
+      head.sha256,
+    ])
+  }
+  return 'null'
+}
+
+export function syncManuscriptObjects(pack: ManuscriptPack): Map<string, SyncedObject | null> {
+  const objects = new Map<string, SyncedObject | null>([
+    [
+      `branch:${pack.branch.id}`,
+      { format: SYNC_FORMAT, kind: 'branch', novel: pack.novel, branch: pack.branch },
+    ],
+  ])
+  const heads = new Map(pack.revisions.map((revision) => [revision.chapter_id, revision]))
+  for (const chapter of pack.chapters) {
+    const head = heads.get(chapter.id)
+    if (!head || head.revision !== chapter.revision) invalid('本机稿件缺少当前修订。')
+    objects.set(
+      `chapter:${chapter.id}`,
+      chapter.archived ? null : { format: SYNC_FORMAT, kind: 'chapter', chapter, head },
+    )
+  }
+  return objects
+}
 type Store = 'projects' | 'chapters' | 'revisions'
 
 export class OfflineStoreError extends Error {
@@ -338,6 +380,127 @@ export function exportLocalManuscript(projectId: string): Promise<ManuscriptPack
     const chapters = await listChaptersTx(tx, project.branch.id)
     const revisions = (await Promise.all(chapters.map((chapter) => historyTx(tx, chapter.id)))).flat()
     return { format: FORMAT, ...project, chapters, revisions }
+  })
+}
+
+export async function validateSyncedObject(
+  project: LocalProject,
+  objectId: string,
+  value: unknown,
+): Promise<SyncedObject | null> {
+  if (value === null && objectId.startsWith('chapter:')) {
+    identity(objectId.slice(8))
+    return null
+  }
+  const object = row(value)
+  if (object.format !== SYNC_FORMAT) invalid('云端对象格式不支持当前稿件。')
+  if (object.kind === 'branch') {
+    const normalized = await validateManuscript({
+      format: FORMAT,
+      novel: object.novel,
+      branch: object.branch,
+      chapters: [],
+      revisions: [],
+    })
+    if (
+      objectId !== `branch:${project.branch.id}` ||
+      normalized.branch.id !== project.branch.id ||
+      normalized.novel.id !== project.novel.id
+    )
+      invalid('云端工作版本归属无效。')
+    return { format: SYNC_FORMAT, kind: 'branch', novel: normalized.novel, branch: normalized.branch }
+  }
+  if (object.kind !== 'chapter') invalid('云端对象不属于可同步的稿件范围。')
+  const chapter = row(object.chapter)
+  const head = row(object.head)
+  const revision = number(chapter.revision)
+  if (
+    objectId !== `chapter:${chapter.id}` ||
+    chapter.archived !== 0 ||
+    head.revision !== revision ||
+    !(revision === 0 ? head.parent_id === null : typeof head.parent_id === 'string')
+  )
+    invalid('云端章稿修订无效。')
+  const parent = head.parent_id === null ? null : identity(head.parent_id)
+  const checked = await validateManuscript({
+    format: FORMAT,
+    ...project,
+    chapters: [{ ...chapter, revision: 0 }],
+    revisions: [{ ...head, revision: 0, parent_id: null }],
+  })
+  return {
+    format: SYNC_FORMAT,
+    kind: 'chapter',
+    chapter: { ...checked.chapters[0], revision },
+    head: { ...checked.revisions[0], revision, parent_id: parent },
+  }
+}
+
+export function applySyncedObject(
+  projectId: string,
+  objectId: string,
+  object: SyncedObject | null,
+  expected: string,
+) {
+  return transact(['projects', 'chapters', 'revisions'], 'readwrite', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const projectStore = tx.objectStore('projects')
+    if (object?.kind === 'branch') {
+      if (syncObjectSignature({ format: SYNC_FORMAT, kind: 'branch', ...project }) !== expected) return false
+      project.novel.title = object.novel.title
+      project.novel.brief = object.novel.brief
+      project.branch.name = object.branch.name
+      project.branch.mode = object.branch.mode
+      project.branch.story_revision++
+      await result(projectStore.put(project))
+      return true
+    }
+    const chapterId = objectId.slice(8)
+    const chapters = tx.objectStore('chapters')
+    const old = await result<LocalChapter | undefined>(chapters.get(chapterId))
+    if (old && old.branch_id !== project.branch.id) invalid('同步章节属于其他本机工作版本。')
+    const versions = tx.objectStore('revisions')
+    const head = old
+      ? await result<LocalRevision | undefined>(versions.index('byRevision').get([chapterId, old.revision]))
+      : undefined
+    if (old && !head) invalid('本机稿件缺少当前修订。')
+    const local =
+      old && !old.archived && head
+        ? ({ format: SYNC_FORMAT, kind: 'chapter', chapter: old, head } as const)
+        : null
+    if (syncObjectSignature(local) !== expected) return false
+    if (!object) {
+      if (old && !old.archived) await result(chapters.put({ ...old, archived: 1 }))
+    } else {
+      if (object.chapter.branch_id !== project.branch.id || object.chapter.id !== chapterId)
+        invalid('云端章节归属无效。')
+      if (
+        (await listChaptersTx(tx, project.branch.id)).some(
+          (chapter) =>
+            !chapter.archived && chapter.id !== chapterId && chapter.position === object.chapter.position,
+        )
+      )
+        invalid('云端章位与本机目录冲突。')
+      let revision = head?.revision ?? 0
+      if (!head || head.sha256 !== object.head.sha256) {
+        revision = head ? head.revision + 1 : 0
+        const remoteId = object.head.id
+        const idUsed = await result(versions.getKey(remoteId))
+        await result(
+          versions.add({
+            ...object.head,
+            id: idUsed ? newId() : remoteId,
+            revision,
+            parent_id: head?.id ?? null,
+            cause: `云同步，来源修订 ${remoteId}`,
+          }),
+        )
+      }
+      await result(chapters.put({ ...object.chapter, archived: 0, stale: 0, revision }))
+    }
+    project.branch.story_revision++
+    await result(projectStore.put(project))
+    return true
   })
 }
 

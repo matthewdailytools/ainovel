@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 import json
+import os
 from pathlib import Path
 import secrets
 from time import time
@@ -143,6 +144,15 @@ def create_app(settings=None, schema_only=False):
 
     register_manuscript_package_routes(app, domain)
     register_work_snapshot_routes(app, domain)
+    from .desktop_sync import register_routes as register_desktop_sync_routes
+    from .desktop_sync import _origin as normalize_sync_origin
+
+    register_desktop_sync_routes(app, domain)
+    offline_sync_origins = " ".join(
+        normalize_sync_origin(item.strip())
+        for item in os.environ.get("AINOVEL_OFFLINE_SYNC_ORIGINS", "").split(",")
+        if item.strip()
+    )
     csrf, cookie = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     jobs = set()
     origins = {
@@ -177,8 +187,14 @@ def create_app(settings=None, schema_only=False):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
+        sync_sources = (
+            f" {offline_sync_origins}"
+            if request.url.path.startswith("/offline/") and offline_sync_origins
+            else ""
+        )
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            f"connect-src 'self'{sync_sources}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         )
         return response
 

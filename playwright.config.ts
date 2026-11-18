@@ -3,6 +3,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 const live = process.env.AINOVEL_LIVE_URL
+const sync = process.env.AINOVEL_SYNC_E2E === '1'
+const python = process.platform === 'win32' ? '".venv\\Scripts\\python.exe"' : '.venv/bin/python'
 const liveEvidence = live
   ? join(homedir(), '.ainovel', 'acceptance', 'browser-live', new Date().toISOString().replace(/[:.]/g, '-'))
   : undefined
@@ -31,13 +33,23 @@ export default defineConfig({
   },
   webServer: live
     ? undefined
-    : {
-        command:
-          process.platform === 'win32'
-            ? '".venv\\Scripts\\python.exe" scripts/e2e_server.py'
-            : '.venv/bin/python scripts/e2e_server.py',
-        url: 'http://127.0.0.1:8877/api/session',
-        reuseExistingServer: false,
-        timeout: 30_000,
-      },
+    : [
+        {
+          command: `${python} scripts/e2e_server.py`,
+          url: 'http://127.0.0.1:8877/api/session',
+          ...(sync ? { env: { AINOVEL_OFFLINE_SYNC_ORIGINS: 'http://127.0.0.1:8888' } } : {}),
+          reuseExistingServer: false,
+          timeout: 30_000,
+        },
+        ...(sync
+          ? [
+              {
+                command: `${python} scripts/e2e_sync_server.py`,
+                url: 'http://127.0.0.1:8888/api/sync/health',
+                reuseExistingServer: false,
+                timeout: 30_000,
+              },
+            ]
+          : []),
+      ],
 })
