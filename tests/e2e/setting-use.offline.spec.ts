@@ -134,10 +134,11 @@ async function accepted(response: APIResponse) {
 
 async function openOfflineEvidence(page: Page, novelId: string, chapterTitle: string) {
   await page.getByRole('combobox', { name: '离线作品', exact: true }).selectOption(novelId)
-  await page
+  const chapter = page
     .getByRole('navigation', { name: '离线章节目录' })
     .getByRole('button', { name: chapterTitle })
-    .press('Enter')
+  await expect(chapter).toBeEnabled()
+  await chapter.press('Enter')
   const evidence = page.getByLabel('离线设定正文证据')
   await evidence.getByText('设定的正文使用证据', { exact: true }).press('Enter')
   return evidence
@@ -207,7 +208,9 @@ test('桌面与独立 Web 双向同步设定使用证据，断网可从备份恢
     await web.goto(offlineURL)
     await expect(web.getByText('离线页面就绪', { exact: true })).toBeVisible()
     await expect.poll(() => web.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
-    await web.getByLabel('导入新离线作品').setInputFiles({
+    const importManuscript = web.getByLabel('导入新离线作品')
+    await expect(importManuscript).toBeEnabled()
+    await importManuscript.setInputFiles({
       name: '无证据基线.json',
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(source)),
@@ -304,9 +307,13 @@ test('桌面与独立 Web 双向同步设定使用证据，断网可从备份恢
     expect((await syncDesktop('run')).conflicts).toHaveLength(0)
     await sync.click()
     await expect(board.getByText('守铃人阿陶 · 已撤回', { exact: true })).toBeVisible()
-    const backedUp = web.waitForEvent('download')
-    await web.getByRole('button', { name: '下载独立作品备份', exact: true }).press('Enter')
-    const path = await (await backedUp).path()
+    const downloadBackup = web.getByRole('button', { name: '下载独立作品备份', exact: true })
+    await expect(downloadBackup).toBeEnabled()
+    const [backedUp] = await Promise.all([
+      web.waitForEvent('download', { timeout: 10_000 }),
+      downloadBackup.press('Enter'),
+    ])
+    const path = await backedUp.path()
     if (!path) throw new Error('缺少独立作品备份文件。')
 
     const restored = await fresh.newPage()
@@ -314,7 +321,9 @@ test('桌面与独立 Web 双向同步设定使用证据，断网可从备份恢
     await expect(restored.getByText('离线页面就绪', { exact: true })).toBeVisible()
     await expect.poll(() => restored.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
     await fresh.setOffline(true)
-    await restored.getByLabel('从独立备份恢复作品').setInputFiles(path)
+    const importBackup = restored.getByLabel('从独立备份恢复作品')
+    await expect(importBackup).toBeEnabled()
+    await importBackup.setInputFiles(path)
     const restoredEvidence = await openOfflineEvidence(restored, novel.id, chapter.title)
     const withdrawn = restoredEvidence.getByText('守铃人阿陶 · 已撤回', { exact: true })
     await withdrawn.press('Enter')

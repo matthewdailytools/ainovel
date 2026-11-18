@@ -92,7 +92,9 @@ test('伏笔台账草稿保留实写选区和并发依据，只有正式确认�
     await openStory(tab, id)
   }
   await reopen(page)
-  await board.getByRole('button', { name: '继续编辑本机故事记录草稿' }).press('Enter')
+  const resumeDraft = board.getByRole('button', { name: '继续编辑本机故事记录草稿' })
+  await expect(resumeDraft).toBeEnabled()
+  await resumeDraft.press('Enter')
   await expect(board.getByLabel('记录名称', { exact: true })).toHaveValue('')
   await expect(board.getByRole('button', { name: confirmName })).toBeDisabled()
   await expect(resolved.getByLabel('阶段说明')).toHaveValue(privateA)
