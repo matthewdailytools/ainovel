@@ -12,7 +12,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .db import DomainError, dumps, uid
 from .evidence import resolve_field, source_schema, source_units
 from .project_portability import Identifier
-from .reference_portability import HashId, ReferenceCardEvidence, ReferenceCardHistoryEntry
+from .reference_portability import (
+    HashId,
+    ReferenceCardEvidence,
+    ReferenceCardHistoryEntry,
+    missing_card_fields,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS extension_migrations(name TEXT PRIMARY KEY,applied REAL NOT NULL);
@@ -147,12 +152,10 @@ def card_version(row, card_id, revision):
     card = next((item for item in version["cards"] if item["id"] == card_id), None) if version else None
     if not card:
         raise DomainError("reference_card", "找不到指定的手法卡修订。", 404)
-    if any(
-        not card[key].strip()
-        for key in ("observation", "interpretation", "technique", "conditions", "evidence")
-    ):
+    if missing_card_fields(card):
         raise DomainError(
-            "reference_card_incomplete", "引用手法卡前请填写观察、解释、写法、适用条件和原文依据。"
+            "reference_card_incomplete",
+            "引用手法卡前请填写观察、解释、可迁移写法、适用条件、须替换内容和原文依据。",
         )
     return {
         "session_id": row["id"],

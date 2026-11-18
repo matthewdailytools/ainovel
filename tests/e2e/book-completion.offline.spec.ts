@@ -34,9 +34,24 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
 
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+  let releaseDirectory = () => {}
+  const directoryGate = new Promise<void>((resolve) => {
+    releaseDirectory = resolve
+  })
+  await page.route(
+    `**${branch}/feedback`,
+    async (route) => {
+      await directoryGate
+      await route.continue()
+    },
+    { times: 1 },
+  )
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
   const panel = page.getByRole('region', { name: '完本与交付', exact: true })
   const previewButton = panel.getByRole('button', { name: '预览交付材料' })
+  await expect(panel.getByText('稿件齐全与通读', { exact: true })).toBeVisible()
+  await expect(previewButton).toBeDisabled()
+  releaseDirectory()
   await previewButton.click()
   await expect(panel.getByText('请填写简介并选择有保存稿的试读章，生成交付预览。')).toBeVisible()
   await panel.getByRole('textbox', { name: '通读记录', exact: true }).fill('已通读两章保存稿。')

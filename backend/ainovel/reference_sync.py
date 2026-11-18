@@ -9,6 +9,7 @@ from .db import DomainError
 from .domain import utf16_slice
 from .project_sync import FORMAT
 from .reference_portability import (
+    CARD_FIELDS,
     CardCitation,
     ReferenceCardHead,
     ReferenceCardHeadObject,
@@ -16,6 +17,7 @@ from .reference_portability import (
     ReferenceCardVersion,
     ReferenceCardVersionObject,
     ReferenceHistory,
+    missing_card_fields,
 )
 
 SCHEMA = """
@@ -32,7 +34,6 @@ CREATE TABLE IF NOT EXISTS portable_reference_excerpts(
  PRIMARY KEY(branch_id,version_id),
  FOREIGN KEY(branch_id,version_id) REFERENCES portable_reference_cards(branch_id,id));
 """
-CARD_FIELDS = ("observation", "interpretation", "technique", "conditions", "exceptions")
 
 
 def _digest(text):
@@ -151,7 +152,7 @@ def _native_version(branch_id, session_id, card_id, parent, revision, card, snap
         "assessment": "archived",
     }
     if card is not None:
-        missing = [key for key in (*CARD_FIELDS, "evidence") if not card[key].strip()]
+        missing = missing_card_fields(card)
         if missing:
             data.update(assessment="incomplete", missing_fields=missing)
         else:

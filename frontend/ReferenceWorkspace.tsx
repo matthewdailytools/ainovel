@@ -7,7 +7,7 @@ import { PlotAuditDetails } from './PlotAuditDetails'
 import { SourceIdentityOption } from './sourceIdentity'
 import { readComparisonTarget, usePlotAuditTarget } from './plotAuditTarget'
 import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from './MemorySelection'
-import { ReferenceCardHistory } from './ReferenceCardHistory'
+import { ReferenceCardHistory, referenceFieldLabels } from './ReferenceCardHistory'
 
 type Card = {
   id: string
@@ -18,6 +18,12 @@ type Card = {
   exceptions: string
   evidence: string
 }
+const requiredCardFields = Object.keys(referenceFieldLabels) as (keyof typeof referenceFieldLabels)[]
+
+function missingCardFields(card: Card) {
+  return requiredCardFields.filter((field) => !card[field].trim())
+}
+
 type AnalysisScope = { start: number; end: number; card_id?: string }
 type HistoricalCard = {
   revision: number
@@ -424,8 +430,8 @@ export function ReferenceWorkspace({
     const pinned = { ...draft.pinned_revisions }
     let selectedIds = draft.selected_ids
     if (selectedIds.includes(card.id) && pinned[card.id] === undefined) {
-      if (saved && JSON.stringify(saved) !== JSON.stringify(card)) pinned[card.id] = row.revision
-      if (!saved) selectedIds = selectedIds.filter((id) => id !== card.id)
+      if (!saved || missingCardFields(saved).length) selectedIds = selectedIds.filter((id) => id !== card.id)
+      else if (JSON.stringify(saved) !== JSON.stringify(card)) pinned[card.id] = row.revision
     }
     edit({
       cards: draft.cards.map((item) => (item.id === card.id ? card : item)),
@@ -702,44 +708,55 @@ export function ReferenceWorkspace({
           </>
         )}
         {!draft.cards.length && <p>尚无拆解卡。可先分析，也可手动整理。</p>}
-        {draft.cards.map((card, index) => (
-          <article className="fact" key={card.id}>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={draft.selected_ids.includes(card.id) && pinnedRevisions[card.id] === undefined}
-                onChange={(e) => selectCard(card.id, e.target.checked)}
-              />
-              <span>本次采用：{card.technique}</span>
-            </label>
-            {pinnedRevisions[card.id] !== undefined && (
-              <p>当前仍引用修订 {pinnedRevisions[card.id]}。勾选本卡可改用这次编辑的内容。</p>
-            )}
-            <details>
-              <summary>编辑卡片 {index + 1}：观察、解释、写法与证据</summary>
-              {(
-                Object.entries({
-                  observation: '原文观察',
-                  interpretation: '作用解释（分析判断）',
-                  technique: '可迁移写法',
-                  conditions: '适用条件',
-                  exceptions: '例外与须替换内容',
-                  evidence: '逐字原文证据',
-                }) as [keyof Card, string][]
-              ).map(([key, title]) => (
-                <label key={key}>
-                  {title}
-                  <textarea
-                    rows={2}
-                    maxLength={2000}
-                    value={card[key]}
-                    onChange={(e) => editCard({ ...card, [key]: e.target.value })}
-                  />
-                </label>
-              ))}
-            </details>
-          </article>
-        ))}
+        {draft.cards.map((card, index) => {
+          const missing = missingCardFields(card)
+          const selected = draft.selected_ids.includes(card.id) && pinnedRevisions[card.id] === undefined
+          return (
+            <article className="fact" key={card.id}>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={!selected && !!missing.length}
+                  onChange={(e) => selectCard(card.id, e.target.checked)}
+                />
+                <span>本次采用：{card.technique}</span>
+              </label>
+              {!!missing.length && (
+                <p>未完成 · 待补 {missing.map((field) => referenceFieldLabels[field]).join('、')}</p>
+              )}
+              {pinnedRevisions[card.id] !== undefined && (
+                <p>
+                  当前仍引用修订 {pinnedRevisions[card.id]}。
+                  {missing.length ? '补齐后可改用这次编辑的内容。' : '勾选本卡可改用这次编辑的内容。'}
+                </p>
+              )}
+              <details>
+                <summary>编辑卡片 {index + 1}：观察、解释、写法与证据</summary>
+                {(
+                  Object.entries({
+                    observation: '原文观察',
+                    interpretation: '作用解释（分析判断）',
+                    technique: '可迁移写法',
+                    conditions: '适用条件',
+                    exceptions: '例外与须替换内容',
+                    evidence: '逐字原文证据',
+                  }) as [keyof Card, string][]
+                ).map(([key, title]) => (
+                  <label key={key}>
+                    {title}
+                    <textarea
+                      rows={2}
+                      maxLength={2000}
+                      value={card[key]}
+                      onChange={(e) => editCard({ ...card, [key]: e.target.value })}
+                    />
+                  </label>
+                ))}
+              </details>
+            </article>
+          )
+        })}
         <button
           disabled={busy || running || draft.cards.length >= 8}
           onClick={() =>

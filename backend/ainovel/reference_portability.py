@@ -12,8 +12,13 @@ HashId = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 Assessment = Literal["ready", "incomplete", "archived"]
 EvidenceState = Literal["local", "included_excerpt", "metadata_only", "no_evidence"]
 CardField = Literal["observation", "interpretation", "technique", "conditions", "exceptions", "evidence"]
+CARD_FIELDS = ("observation", "interpretation", "technique", "conditions", "exceptions")
 CardText = Annotated[str, StringConstraints(min_length=1, max_length=2000)]
 Revision = Annotated[int, Field(ge=0, le=9_007_199_254_740_991, strict=True)]
+
+
+def missing_card_fields(card):
+    return [key for key in (*CARD_FIELDS, "evidence") if not card.get(key, "").strip()]
 
 
 class CardCitation(Input):

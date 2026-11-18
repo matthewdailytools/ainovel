@@ -89,16 +89,19 @@ def queue(client, path, state, category_id=None, *, key=None, instruction="根�
     return response.json(), data
 
 
-def test_world_generation_uses_frozen_mixed_setting_framework(client, domain, settings, story):
-    adopt_reader(domain, story, genres=["xianxia", "mystery"])
+@pytest.mark.parametrize("genres", [["xianxia"], ["mystery"], ["xianxia", "mystery"]])
+def test_world_generation_uses_frozen_setting_framework(client, domain, settings, story, genres):
+    adopt_reader(domain, story, genres=genres)
     endpoint, state = workspace(client, story)
     task, _ = queue(client, endpoint, state, "world")
     model = ProposalProvider()
     assert asyncio.run(Worker(settings, model).run_once())
     assert domain.task(task["id"])["status"] == "succeeded"
     framework = model.requests[0]["上下文"]["设定框架"]
-    assert framework["primary"]["id"] == "xianxia"
-    assert [entry["id"] for entry in framework["secondary"]] == ["mystery"]
+    assert framework["primary"]["id"] == genres[0]
+    assert framework["primary"]["topics"]
+    assert [entry["id"] for entry in framework["secondary"]] == genres[1:]
+    assert all(entry["topics"] for entry in framework["secondary"])
     assert framework["author_exceptions"]
 
 

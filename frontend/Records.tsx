@@ -35,6 +35,8 @@ type Feedback = {
   text: string
   source_quote: string
 }
+const emptyChapters: Chapter[] = []
+
 export function Records({
   branch,
   account,
@@ -51,7 +53,8 @@ export function Records({
   onSnapshotRestored: (branchId: string) => Promise<void>
 }) {
   const [facts, setFacts] = useState<Fact[]>([])
-  const [chapters, setChapters] = useState<Chapter[]>([])
+  const [chapterDirectory, setChapters] = useState<Chapter[]>()
+  const chapters = chapterDirectory ?? emptyChapters
   const [chapterId, setChapterId] = useState('')
   const [query, setQuery] = useState('')
   const [at, setAt] = useState(100)
@@ -558,7 +561,7 @@ export function Records({
         <CompletionPanel
           key={`completion-${branch.id}`}
           branchId={branch.id}
-          chapters={chapters}
+          chapters={chapterDirectory}
           account={account}
           modelReady={modelReady}
           notify={notify}

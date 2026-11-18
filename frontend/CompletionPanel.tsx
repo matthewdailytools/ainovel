@@ -192,7 +192,7 @@ export function CompletionPanel({
   modelReady,
 }: {
   branchId: string
-  chapters: ChapterOption[]
+  chapters: ChapterOption[] | undefined
   notify: Notify
   account: string
   modelReady: boolean
@@ -266,7 +266,8 @@ export function CompletionPanel({
     }
   }, [endpoint, reload, notify])
 
-  const ordered = [...chapters].sort((left, right) => left.position - right.position)
+  const basisReady = !!current && !!chapters
+  const ordered = [...(chapters ?? [])].sort((left, right) => left.position - right.position)
   const titles = new Map(ordered.map(({ id, title }) => [id, title]))
   const sampleIds = ordered.slice(0, openingLength).map(({ id }) => id)
   const body = {
@@ -294,7 +295,7 @@ export function CompletionPanel({
   }
 
   async function prepare() {
-    if (!current || preparing || !modelReady) return
+    if (!current || !chapters || preparing || !modelReady) return
     setPreparing(true)
     try {
       const input = {
@@ -341,7 +342,7 @@ export function CompletionPanel({
   }
 
   async function submit(action: 'preview' | 'confirm') {
-    if (!current || busy || (action === 'confirm' && !canConfirm)) return
+    if (!current || !chapters || busy || (action === 'confirm' && !canConfirm)) return
     setBusy(action)
     setError('')
     setMessage('')
@@ -400,7 +401,7 @@ export function CompletionPanel({
       </button>
       {error && <p role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}
-      {!current && !error && <p role="status">正在读取完本依据…</p>}
+      {!basisReady && !error && <p role="status">正在读取完本依据…</p>}
       {current?.latest && (
         <section className="notice">
           <h3>{current.latest.current ? '当前版本已完结' : '历史完结记录 · 当前依据已变化'}</h3>
@@ -443,7 +444,7 @@ export function CompletionPanel({
         <button
           type="button"
           disabled={
-            !current ||
+            !basisReady ||
             !modelReady ||
             preparing ||
             (!!preparation && ['queued', 'running'].includes(preparation.status))
@@ -462,7 +463,11 @@ export function CompletionPanel({
               收束依据 · {preparation.candidate.coverage}。简介依据 · {preparation.candidate.intro_coverage}。
             </p>
             <p>{preparation.candidate.intro}</p>
-            <button type="button" disabled={!preparation.candidate.current} onClick={loadPreparation}>
+            <button
+              type="button"
+              disabled={!basisReady || !preparation.candidate.current}
+              onClick={loadPreparation}
+            >
               载入 AI 建议到空白项
             </button>
             {!preparation.candidate.current && <p>依据已更新，请重新生成。</p>}
@@ -474,7 +479,7 @@ export function CompletionPanel({
           解除 AI 建议的版本关联
         </button>
       )}
-      <fieldset disabled={!current || !!busy}>
+      <fieldset disabled={!basisReady || !!busy}>
         <legend>作者通读与收束说明</legend>
         <label>
           通读记录
@@ -538,7 +543,7 @@ export function CompletionPanel({
           }
         />
       </fieldset>
-      <fieldset disabled={!current || !!busy}>
+      <fieldset disabled={!basisReady || !!busy}>
         <legend>交付材料</legend>
         <label>
           简介

@@ -94,10 +94,9 @@ class Model:
                 "summary": "原文用于写法比较，不作原创保证",
             }
         elif action == "审查正文":
+            source = task["可引用原文"][0]["source_id"]
             result = {
-                "checks": [
-                    {"condition": c, "result": "pass", "evidence": "C001P0001"} for c in task["固定条件"]
-                ],
+                "checks": [{"condition": c, "result": "pass", "evidence": source} for c in task["固定条件"]],
                 "findings": [],
                 "summary": "保留固定结果",
             }

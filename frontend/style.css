@@ -1217,7 +1217,7 @@ summary {
     margin-left: 0 !important;
   }
   .workspace-bar > label {
-    flex: 1;
+    flex: 1 1 auto;
   }
   .page-heading {
     flex-direction: column;

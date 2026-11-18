@@ -32,7 +32,26 @@ class Model:
             assert len(frame["任务"]["可选题材"]) == 36
             output = BRIEF
         else:
-            output = {"items": [{"title": "门铃规则", "detail": "铜铃只在山门内响。", "links": []}]}
+            output = {
+                "items": [
+                    {
+                        "title": "门铃规则",
+                        "detail": "铜铃只在山门内响。",
+                        "links": [],
+                        "setting_policy": {"strength": "hard", "scope": "山门", "exceptions": "维修时除外"},
+                    },
+                    {
+                        "title": "查铃次序",
+                        "detail": "通常先查账簿再去作坊。",
+                        "links": [],
+                        "setting_policy": {
+                            "strength": "soft",
+                            "scope": "初次访查",
+                            "exceptions": "遇失火可先验物",
+                        },
+                    },
+                ]
+            }
         return {
             "text": json.dumps(output, ensure_ascii=False),
             "usage": {"input": 1, "output": 1},
@@ -114,8 +133,9 @@ def test_project_brief_edits_confirmation_and_world_handoff(client, domain, sett
         },
     )
     assert adopted.status_code == 200, adopted.text
-    adopted_item = proposed["payload"]["categories"][0]["items"][0]["id"]
+    hard, soft = proposed["payload"]["categories"][0]["items"]
     assert adopted.json()["project_impacts"] == []
+    original = confirm(client, endpoint, adopted.json(), key=uid())
 
     updated = client.put(
         project_path,
@@ -135,14 +155,32 @@ def test_project_brief_edits_confirmation_and_world_handoff(client, domain, sett
     assert current["project"] == second
     assert current["project_impacts"] == [
         {
-            "item_id": adopted_item,
+            "item_id": item["id"],
             "category_id": "world",
-            "title": "门铃规则",
+            "title": item["title"],
             "source_project_id": first["id"],
             "source_project_revision": 1,
             "reconciled": False,
         }
+        for item in (hard, soft)
     ]
+    rewritten = {
+        **hard,
+        "detail": "铜铃只有挂回旧铺门内才会响。",
+        "setting_policy": {"strength": "hard", "scope": "旧铺门内", "exceptions": "维修中须将铜铃挂到木架"},
+    }
+    world = next(category for category in current["categories"] if category["id"] == "world")
+    world["items"] = [rewritten, soft]
+    edited = client.put(
+        endpoint,
+        json={
+            "base_revision": current["revision"],
+            "base_story_revision": current["story_revision"],
+            "categories": current["categories"],
+        },
+    )
+    assert edited.status_code == 200, edited.text
+    current = edited.json()
     decision = {
         "base_revision": current["revision"],
         "base_story_revision": current["story_revision"],
@@ -151,16 +189,34 @@ def test_project_brief_edits_confirmation_and_world_handoff(client, domain, sett
     missing_review = client.post(endpoint + "/confirm", json=decision)
     assert missing_review.status_code == 409, missing_review.text
     assert missing_review.json()["code"] == "conception_project_review"
+    partial = client.post(endpoint + "/confirm", json={**decision, "reconciled_project_items": [hard["id"]]})
+    assert partial.status_code == 409 and partial.json()["code"] == "conception_project_review"
+    author_note = "按新终局改写铜铃的硬限制和例外，查铃次序保留为可调整倾向。"
     retained = client.post(
-        endpoint + "/confirm", json={**decision, "reconciled_project_items": [adopted_item]}
+        endpoint + "/confirm",
+        json={**decision, "note": author_note, "reconciled_project_items": [hard["id"], soft["id"]]},
     )
     assert retained.status_code == 200, retained.text
     current = retained.json()
     assert current["confirmation"]["current"] is True
-    assert current["project_impacts"][0]["reconciled"] is True
+    assert all(item["reconciled"] for item in current["project_impacts"])
     frozen = domain.artifact(current["confirmation"]["id"])["payload"]
     assert frozen["project_confirmation_id"] == second["id"]
-    assert frozen["origins"][adopted_item]["project_confirmation_id"] == first["id"]
+    assert frozen["note"] == author_note
+    assert frozen["reconciled_project_items"] == [hard["id"], soft["id"]]
+    assert frozen["origins"][hard["id"]]["edited"] and not frozen["origins"][soft["id"]]["edited"]
+    assert all(
+        frozen["origins"][item["id"]]["project_confirmation_id"] == first["id"] for item in (hard, soft)
+    )
+    assert next(category["items"] for category in frozen["categories"] if category["id"] == "world") == [
+        rewritten,
+        soft,
+    ]
+    historical = domain.artifact(original["confirmation"]["id"])["payload"]
+    assert next(category["items"] for category in historical["categories"] if category["id"] == "world") == [
+        hard,
+        soft,
+    ]
     assert domain.artifact(first["id"])["payload"]["brief"]["ending"] == authored_ending
     stale = client.post(
         endpoint + "/generate",
