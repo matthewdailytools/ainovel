@@ -115,10 +115,14 @@ def _reference_basis(tx, branch_id, identifier, revision):
         "id": identifier,
         "revision": revision,
         "goal": goal,
-        "source": {
-            **{key: source[key] for key in ("title", "unit_id", "file_hash", "start", "end")},
-            "quote_sha256": sha256(source["quote"].encode()).hexdigest(),
-        },
+        "source": _reference_source(source),
+    }
+
+
+def _reference_source(source):
+    return {
+        **{key: source[key] for key in ("title", "unit_id", "file_hash", "start", "end")},
+        "quote_sha256": sha256(source["quote"].encode()).hexdigest(),
     }
 
 
@@ -444,30 +448,114 @@ def _project(worker, state):
     _transition(worker, state, "reference" if state.get("reference_basis") else "settings")
 
 
-def _reference_revisions(session, draft, captured_revision):
+def _analysis_quote(artifact, basis, branch_id, revision):
+    from .domain import utf16_slice
+
+    snapshot = artifact["basis"].get("reference_session") or {}
+    payload = snapshot.get("payload") or {}
+    source = payload.get("source")
+    if (
+        artifact["kind"] != "reference_analysis"
+        or artifact["branch_id"] != branch_id
+        or artifact["status"] == "rejected"
+        or (snapshot.get("id"), snapshot.get("revision")) != (basis["id"], revision)
+        or (payload.get("branch_id"), payload.get("goal")) != (branch_id, basis["goal"])
+        or not source
+        or _reference_source(source) != basis["source"]
+    ):
+        return None
+    scope = snapshot.get("analysis_scope")
+    if scope != artifact["payload"].get("analysis_scope"):
+        return None
+    if not scope:
+        return source["quote"]
+    try:
+        _, quote, _ = utf16_slice(source["quote"], scope["start"], scope["end"])
+    except DomainError:
+        return None
+    return quote if quote.strip() and quote == scope.get("quote") else None
+
+
+def _reference_reviews(domain, history, draft, basis, branch_id):
+    for version in history:
+        identifier = version["results"].get("analyze")
+        if not identifier or identifier == draft["id"]:
+            continue
+        try:
+            review = domain.artifact(identifier)
+        except DomainError as error:
+            if error.code != "not_found":
+                raise
+            continue
+        if quote := _analysis_quote(review, basis, branch_id, version["revision"]):
+            if not (cards := review["payload"]["cards"]):
+                continue
+            target = (review["payload"].get("analysis_scope") or {}).get("card_id")
+            yield {
+                "id": identifier,
+                "revision": version["revision"],
+                "quote": quote,
+                "cards": {card["id"] for card in cards},
+                "rewritten": next((card for card in version["cards"] if card["id"] == target), None),
+            }
+
+
+def _reference_revisions(domain, session, draft, basis, branch_id, original_quote):
     from .reference import card_version
 
     metadata = session["payload"]
+    if (metadata["branch_id"], metadata["goal"]) != (branch_id, basis["goal"]) or _reference_source(
+        metadata["source"]
+    ) != basis["source"]:
+        return [], []
     if adoption := metadata.get("analysis_adoption"):
         if adoption["artifact_id"] == draft["id"]:
             return [
                 {"session_id": session["id"], "card_id": key, "revision": adoption["revision"]}
                 for key in adoption["cards"]
-            ]
-    prior = next(
-        (version for version in metadata.get("history", []) if version["revision"] == captured_revision),
-        None,
-    )
-    if not prior or prior["results"].get("analyze") != draft["id"]:
-        return []
-    received = {card["id"] for card in draft["payload"]["cards"]}
+            ], []
+
+    history = [row for row in metadata.get("history", []) if row["revision"] >= basis["revision"]]
+    if (
+        not history
+        or [row["revision"] for row in history] != list(range(basis["revision"], session["revision"]))
+        or any((row.get("branch_id"), row.get("goal")) != (branch_id, basis["goal"]) for row in history)
+    ):
+        return [], []
+    reviews = list(_reference_reviews(domain, history, draft, basis, branch_id))
+    original_cards = {card["id"] for card in draft["payload"]["cards"]}
+
     refs = []
+    reviewed = []
     for key in metadata["selected_ids"]:
-        if key in received:
-            revision = metadata.get("pinned_revisions", {}).get(key, session["revision"])
-            if card_version(session, key, revision)["card"]["exceptions"].strip():
-                refs.append({"session_id": session["id"], "card_id": key, "revision": revision})
-    return refs
+        revision = metadata.get("pinned_revisions", {}).get(key, session["revision"])
+        if revision <= basis["revision"]:
+            continue
+        version = card_version(session, key, revision)
+        if version["goal"] != basis["goal"]:
+            continue
+        card = version["card"]
+        review = next(
+            (
+                item
+                for item in reversed(reviews)
+                if item["revision"] < revision
+                and (
+                    key in item["cards"]
+                    or ((before := item["rewritten"]) and key == before["id"] and card != before)
+                )
+            ),
+            None,
+        )
+        if review is not None:
+            if card["evidence"] not in review["quote"]:
+                continue
+            if review["id"] not in reviewed:
+                reviewed.append(review["id"])
+        elif key not in original_cards or card["evidence"] not in original_quote:
+            continue
+        refs.append({"session_id": session["id"], "card_id": key, "revision": revision})
+    return refs, reviewed
 
 
 def _save_reference_cards(worker, state, session, draft):
@@ -521,19 +609,15 @@ def _reference(worker, state):
     )
     if not (draft := _drive_child(worker, state, "reference", "module", request)):
         return
-    source = draft["basis"].get("reference_session", {})
-    if (
-        draft["kind"] != "reference_analysis"
-        or source.get("id") != basis["id"]
-        or source.get("revision") != basis["revision"]
-    ):
+    quote = _analysis_quote(draft, basis, branch, basis["revision"])
+    if quote is None:
         raise DomainError("reference_changed", "拆解产物未对应显式选择的会话修订。", 409)
     state["reference_analysis_id"] = draft["id"]
     if not draft["payload"]["cards"]:
         state["reference_references"] = []
     else:
         current = session(worker.domain, basis["id"])
-        refs = _reference_revisions(current, draft, basis["revision"])
+        refs, reviewed = _reference_revisions(worker.domain, current, draft, basis, branch, quote)
         if (
             not refs
             and worker.task["payload"].get("auto_adopt_reference")
@@ -546,6 +630,8 @@ def _reference(worker, state):
             )
             return
         state["reference_references"] = refs
+        if reviewed:
+            state["reference_review_analysis_ids"] = reviewed
     _transition(worker, state, "settings" if state["setting_id"] is None else "outline")
 
 

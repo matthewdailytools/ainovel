@@ -258,6 +258,89 @@ test('从创意启动但未授权确认规划时停在立项草案', async ({ pa
   await expect(project.getByRole('button', { name: '载入 AI 立项建议', exact: true })).toBeVisible()
 })
 
+test('接力停在拆解台时可采用局部重拆的正式卡并继续到大纲', async ({ page }) => {
+  const branch = await createEmptyWork(page, '后台验证 · 拆解重做后接力')
+  await authorProject(page, branch, '学徒核实门前刻度，将结果留入公开档册。')
+  const headers = await authorHeaders(page)
+  const quote = '😀渡口掌柜先问用途，又把水路图收回袖中。他只肯给半幅图，却记下了来客的目的地。'
+  const library = await page.request.post('/api/library/import', {
+    headers,
+    multipart: { file: { name: '局部拆解接力.txt', mimeType: 'text/plain', buffer: Buffer.from(quote) } },
+  })
+  expect(library.ok(), await library.text()).toBe(true)
+  const [unit] = await (
+    await page.request.get(`/api/library/books/${(await library.json()).id}/units`)
+  ).json()
+  const branchId = branch.split('/').at(-1)
+  const goal = '分析阶段性收获怎么引导下一次行动'
+  const created = await page.request.post('/api/reference-sessions', {
+    headers,
+    data: { unit_id: unit.id, start: 0, end: quote.length, quote, goal, branch_id: branchId },
+  })
+  expect(created.status(), await created.text()).toBe(201)
+  const session = await created.json()
+  const sessionPath = `/api/reference-sessions/${session.id}`
+
+  await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  const panel = page.getByRole('region', { name: '七台自动接力', exact: true })
+  await expect(panel.getByLabel('接力起点')).toHaveValue('project')
+  await panel.getByLabel('本次接力总预算（所选账户币种）').fill('1')
+  await panel.getByLabel('新建章节数').fill('1')
+  await panel.getByLabel('自动拆解的保存选段（可选）').selectOption(`${session.id}/${session.revision}`)
+  await panel.getByRole('checkbox', { name: '授权确认本次生成的规划产物' }).check()
+  const started = await startFromPanel(page, branch)
+  expect(started.status(), await started.text()).toBe(202)
+  const run = await started.json()
+  await expect(panel.getByRole('status')).toHaveText('拆解 · 等待处理检查点')
+  const first = (await taskRecord(page, run.id)).result.seven_stage_run
+
+  const redo = await page.request.post(`${sessionPath}/actions`, {
+    headers,
+    data: {
+      action: 'analyze',
+      base_revision: session.revision,
+      account: 'offline',
+      client_request_id: `manual-reference-redo-${run.id}`,
+      analysis_scope: { start: quote.indexOf('他只肯'), end: quote.length },
+    },
+  })
+  expect(redo.status(), await redo.text()).toBe(202)
+  const redoId = (await redo.json()).id
+  await expect.poll(async () => (await taskRecord(page, redoId)).status).toBe('succeeded')
+  const analysisId = (await taskRecord(page, redoId)).result.artifact_id
+  const analysis = await (await page.request.get(`/api/artifacts/${analysisId}`)).json()
+  const [card] = analysis.payload.cards
+  expect(card.evidence).toContain('他只肯')
+  const saved = await page.request.patch(sessionPath, {
+    headers,
+    data: {
+      base_revision: session.revision,
+      branch_id: branchId,
+      goal,
+      cards: [card],
+      selected_ids: [card.id],
+    },
+  })
+  expect(saved.ok(), await saved.text()).toBe(true)
+  const revision = (await saved.json()).revision
+
+  await panel.getByRole('button', { name: '继续接力', exact: true }).press('Enter')
+  await expect(panel.getByText(/已采用 1 张手法卡/)).toBeVisible()
+  await expect
+    .poll(async () => (await taskRecord(page, run.id)).result.seven_stage_run.outline_id, { timeout: 25_000 })
+    .toBeTruthy()
+  const final = (await taskRecord(page, run.id)).result.seven_stage_run
+  const selected = { session_id: session.id, card_id: card.id, revision }
+  expect(final.reference_analysis_id).toBe(first.reference_analysis_id)
+  expect(final.reference_review_analysis_ids).toContain(analysisId)
+  expect(final.reference_references).toEqual([expect.objectContaining(selected)])
+  expect(final.children).not.toContain(redoId)
+  const children = await Promise.all(final.children.map((id: string) => taskRecord(page, id)))
+  expect(children.filter(({ payload }) => payload.action === 'reference.analyze')).toHaveLength(1)
+  const preparation = children.find(({ payload }) => payload.outline_generation)
+  expect(preparation?.payload.outline_generation.reference_cards).toEqual([expect.objectContaining(selected)])
+})
+
 test('从页面提交已确认立项，拒绝旧修订后只执行设定及其后续任务', async ({ page }) => {
   const branch = await createEmptyWork(page, '后台验证 · 从已确认立项接力')
   const old = await authorProject(page, branch, '学徒把复测记录留在门房。')

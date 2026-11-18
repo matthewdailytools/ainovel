@@ -11,11 +11,13 @@ from ainovel.backups import create_backup, unpack_verified
 from ainovel.budget import Budget
 from ainovel.db import DomainError, dumps, uid
 from ainovel.domain import Domain
+from ainovel.evidence_export import export_evidence
 from ainovel.providers import RequestNotSent
 from ainovel.worker import Worker
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 from test_project_brief import BRIEF, IDEA
 from test_reference_flow import SOURCE, reference as reference_fixture, update as update_reference
+from test_reference_flow import run as run_reference
 from test_work_snapshot import request_restore, route, save_project, verify
 from test_workflow_inspection import author
 
@@ -900,6 +902,159 @@ def test_explicit_reference_scope_analysis_and_card_handoff(
     assert state["reference_basis"]["source"]["quote_sha256"]
     assert state["reference_basis"]["revision"] == reference["revision"]
     assert domain.branch(branch)["story_revision"] > 0
+
+
+@pytest.mark.parametrize(("rounds", "pin_first"), [(1, False), (2, False), (2, True)])
+def test_reference_rework_resumes_with_exact_author_selected_card(
+    client, domain, settings, story, reference, rounds, pin_first
+):
+    branch, endpoint, identifier = start(
+        client,
+        domain,
+        story,
+        "settings",
+        reference_session_id=reference["id"],
+        reference_revision=reference["revision"],
+    )
+    model = Model(settings=settings)
+    drain(settings, model)
+    waiting = domain.task(identifier)
+    initial = waiting["result"]["seven_stage_run"]
+    assert waiting["status"] == "needs_review" and initial["stage"] == "reference"
+
+    selected = None
+    scope = {"start": 0, "end": 10}
+    first_review = None
+    for ordinal in range(rounds):
+        if ordinal:
+            scope = {"start": 11, "end": 20, "card_id": selected}
+        review, _ = run_reference(client, settings, domain, reference["id"], "analyze", analysis_scope=scope)
+        first_review = first_review or review
+        card = review["payload"]["cards"][0]
+        selected = selected or card["id"]
+        saved = update_reference(
+            client,
+            domain,
+            reference,
+            cards=[
+                dict(
+                    card,
+                    id=selected,
+                    technique=f"作者定稿的第{ordinal + 1}轮拆解写法",
+                    conditions="新动作须依靠已收到的部分线索",
+                    exceptions="替换人物、物件与具体场景",
+                )
+            ],
+            selected_ids=[selected],
+        )
+        assert saved["revision"] == reference["revision"] + ordinal + 1
+        assert review["basis"]["reference_session"]["revision"] == saved["revision"] - 1
+
+    approved_review = review
+    approved_revision = saved["revision"]
+    approved_technique = saved["payload"]["cards"][0]["technique"]
+    if pin_first:
+        approved_review = first_review
+        approved_revision = reference["revision"] + 1
+        approved_technique = "作者定稿的第1轮拆解写法"
+        update_reference(client, domain, reference, pinned_revisions={selected: approved_revision})
+
+    ledger = Budget(settings)
+    manual_call = ledger.reserve(settings.providers["deepseek"], review["task_id"], 10, 5)
+    ledger.settle(manual_call, {"input": 10, "output": 5})
+    reply = client.post(f"{endpoint}/{identifier}/resume")
+    assert reply.status_code == 200, reply.text
+    drain(settings, model)
+    resumed = domain.task(identifier)
+    state = resumed["result"]["seven_stage_run"]
+    assert state["stage"] == "inspection", resumed["error"]
+    assert state["reference_analysis_id"] == initial["reference_analysis_id"]
+    assert state["reference_review_analysis_ids"] == [approved_review["id"]]
+    assert review["task_id"] not in state["children"]
+    assert model.calls.count("拆解所选原文写法") == 1
+    chosen = [{"session_id": reference["id"], "card_id": selected, "revision": approved_revision}]
+    assert state["reference_references"] == chosen
+    outline_task = next(
+        child
+        for task_id in state["children"]
+        if (child := domain.task(task_id))["payload"].get("outline_generation")
+    )
+    assert outline_task["payload"]["outline_generation"]["reference_cards"] == chosen
+    confirmed = client.get(f"/api/branches/{branch}/outline-workspace").json()["confirmed"]
+    assert confirmed["plan"]["volumes"][0]["units"][0]["chapters"][0]["reference_cards"] == chosen
+    assert confirmed["setting_basis"]["reference_cards"][0]["technique"] == approved_technique
+    bundle = export_evidence(settings, [identifier])
+    evidence = json.loads((Path(bundle["folder"]) / "evidence.json").read_text(encoding="utf-8"))["tasks"][0]
+    assert evidence["billing_evidence"]["row_count"] > 0
+    assert manual_call not in {row["id"] for row in evidence["calls"]}
+    assert evidence["task"]["result"]["seven_stage_run"]["reference_review_analysis_ids"] == [
+        approved_review["id"]
+    ]
+
+
+@pytest.mark.parametrize(
+    "issue", ["unselected", "outside_selection", "changed_goal", "goal_changed_back", "foreign"]
+)
+def test_reference_rework_cannot_cross_frozen_author_scope(client, domain, settings, story, reference, issue):
+    _, endpoint, identifier = start(
+        client,
+        domain,
+        story,
+        "settings",
+        reference_session_id=reference["id"],
+        reference_revision=reference["revision"],
+    )
+    model = Model(settings=settings)
+    drain(settings, model)
+    initial = domain.task(identifier)
+    assert initial["status"] == "needs_review", initial["error"]
+
+    selection = reference["id"]
+    goal = reference["payload"]["goal"]
+    if issue == "foreign":
+        source = reference["payload"]["source"]
+        created = client.post(
+            "/api/reference-sessions",
+            json={
+                **{key: source[key] for key in ("unit_id", "start", "end", "quote")},
+                "goal": goal,
+                "branch_id": story["branch_id"],
+                "chapter_id": story["chapter_id"],
+            },
+        )
+        assert created.status_code == 201, created.text
+        selection = created.json()["id"]
+    if issue == "goal_changed_back":
+        update_reference(client, domain, reference, goal="另一个未授权的学习目标")
+        update_reference(client, domain, reference, goal=goal)
+    review, _ = run_reference(
+        client, settings, domain, selection, "analyze", analysis_scope={"start": 0, "end": 10}
+    )
+    card = review["payload"]["cards"][0]
+    if issue == "outside_selection":
+        card["evidence"] = "来客的目的地"
+        assert (
+            card["evidence"] in SOURCE
+            and card["evidence"] not in review["payload"]["analysis_scope"]["quote"]
+        )
+    saved = update_reference(
+        client,
+        domain,
+        reference,
+        goal="另一个未授权的学习目标" if issue == "changed_goal" else goal,
+        cards=[card],
+        selected_ids=[] if issue == "unselected" else [card["id"]],
+    )
+    assert saved["payload"]["cards"] == [card]
+    reply = client.post(f"{endpoint}/{identifier}/resume")
+    assert reply.status_code == 200, reply.text
+    drain(settings, model)
+    waiting = domain.task(identifier)
+    state = waiting["result"]["seven_stage_run"]
+    assert waiting["status"] == "needs_review" and state["stage"] == "reference"
+    assert state["reference_analysis_id"] == initial["result"]["seven_stage_run"]["reference_analysis_id"]
+    assert not state.get("reference_review_analysis_ids") and not state.get("reference_references")
+    assert model.calls == ["拆解所选原文写法"]
 
 
 def test_auto_setting_conflicts_wait_for_author_confirmation(client, domain, settings, story):
