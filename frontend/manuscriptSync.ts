@@ -44,6 +44,7 @@ import {
   queueSyncResolution,
   readPublicationReceipts,
   readSyncConflict,
+  readSyncProgress,
   readSyncState,
   requireSyncLedger,
   SyncLedgerChanged,
@@ -613,7 +614,10 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
 }
 
 export async function readWebManuscriptSyncState(scope: SyncScope) {
-  const [state, publications] = await Promise.all([readSyncState(scope), readLocalPublications(scope.workId)])
+  const [state, publications] = await Promise.all([
+    readSyncProgress(scope),
+    readLocalPublications(scope.workId),
+  ])
   return { ...state, localPending: publications.length }
 }
 

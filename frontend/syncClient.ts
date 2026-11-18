@@ -454,24 +454,44 @@ async function record(tx: IDBTransaction, key: string, receipt: SyncReceipt, pen
   }
 }
 
-export async function readSyncState(scope: SyncScope) {
+async function readSyncStateTx(tx: IDBTransaction, key: string, scope: SyncScope) {
+  const [state, pending, conflicts, ledger] = await Promise.all([
+    replica(tx, key),
+    wait<Queued[]>(tx.objectStore('outbox').index('byReplica').getAll(key)),
+    wait<Conflict[]>(tx.objectStore('conflicts').index('byReplica').getAll(key)),
+    ledgerBinding(tx, scope.workId),
+  ])
+  const unresolved = conflicts.filter((entry) => entry.opened && !entry.resolvedBy)
+  return {
+    enabled: state.enabled,
+    cursor: state.cursor,
+    ledgerId: ledger?.service === scope.service ? ledger.ledgerId : null,
+    pending: pending.sort((left, right) => left.position - right.position).map((entry) => entry.pending),
+    conflicts: unresolved.map((entry) => entry.id),
+    blockedObjects: [...new Set(unresolved.map((entry) => entry.objectId))],
+  }
+}
+
+export function readSyncState(scope: SyncScope) {
+  const key = scopeKey(scope)
+  return transact('readonly', (tx) => readSyncStateTx(tx, key, scope))
+}
+
+export function readSyncProgress(scope: SyncScope) {
   const key = scopeKey(scope)
   return transact('readonly', async (tx) => {
-    const [state, pending, conflicts, ledger] = await Promise.all([
-      replica(tx, key),
-      wait<Queued[]>(tx.objectStore('outbox').index('byReplica').getAll(key)),
-      wait<Conflict[]>(tx.objectStore('conflicts').index('byReplica').getAll(key)),
-      ledgerBinding(tx, scope.workId),
+    const [state, heads] = await Promise.all([
+      readSyncStateTx(tx, key, scope),
+      wait<Head[]>(tx.objectStore('heads').index('byReplica').getAll(key)),
     ])
-    const unresolved = conflicts.filter((entry) => entry.opened && !entry.resolvedBy)
-    return {
-      enabled: state.enabled,
-      cursor: state.cursor,
-      ledgerId: ledger?.service === scope.service ? ledger.ledgerId : null,
-      pending: pending.sort((left, right) => left.position - right.position).map((entry) => entry.pending),
-      conflicts: unresolved.map((entry) => entry.id),
-      blockedObjects: [...new Set(unresolved.map((entry) => entry.objectId))],
-    }
+    const blocked = new Set(state.blockedObjects)
+    const receivedUnapplied = heads.filter(
+      (head) =>
+        head.revision !== head.baseline?.revision &&
+        head.revision !== head.lastPublication?.id &&
+        !blocked.has(head.id),
+    ).length
+    return { ...state, receivedUnapplied }
   })
 }
 

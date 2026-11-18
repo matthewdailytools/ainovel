@@ -2,7 +2,7 @@ import { expect, test, type APIResponse } from '@playwright/test'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 
-const cloud = 'http://127.0.0.1:8888'
+const cloud = process.env.AINOVEL_TEST_SYNC_URL ?? 'http://127.0.0.1:8888'
 const provisioning = { Authorization: 'Bearer e2e-test-only-provisioning-token' }
 const title = '整卷回滚跨端验收 · 铜铃'
 const idea = '根据旧宅门内的铃声确认归还。'
@@ -241,6 +241,7 @@ test('桌面原位回滚末卷，独立 Web 中断续传后恢复正式稿及台
   try {
     const web = await isolated.newPage()
     await web.goto('/offline/')
+    await expect.poll(() => web.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
     await web.getByLabel('导入新离线作品').setInputFiles({
       name: '仅作品标识.json',
       mimeType: 'application/json',
@@ -249,6 +250,7 @@ test('桌面原位回滚末卷，独立 Web 中断续传后恢复正式稿及台
     const webRun = web.getByRole('button', { name: '同步当前工作版本', exact: true })
     const syncStatus = (cursor: number) =>
       web.getByText(`已启用 · 游标 ${cursor} · 0 条待发送或确认`, { exact: true })
+    const waiting = web.getByText('已收到云端更新，1 项待应用到本机。当前正式稿可继续查看。', { exact: true })
     async function openConnection() {
       await web.getByRole('combobox', { name: '离线作品', exact: true }).selectOption(novel.id)
       await web.getByText('作品云同步', { exact: true }).click()
@@ -326,12 +328,19 @@ test('桌面原位回滚末卷，独立 Web 中断续传后恢复正式稿及台
     await expect(web.getByRole('alert')).toBeVisible()
     expect(durable).toBe(baseline.cursor + 1)
     expect(pulls).toEqual([baseline.cursor, durable])
+    await expect(waiting).toBeVisible()
     await expect(editor).toHaveValue(revisedText)
+    await isolated.setOffline(true)
     await web.reload()
     await openConnection()
     await expect(syncStatus(durable)).toBeVisible()
+    await expect(waiting).toBeVisible()
+    await secondChapter.click()
+    await expect(editor).toHaveValue(revisedText)
+    await isolated.setOffline(false)
     await webRun.press('Enter')
     await expect(syncStatus(published.cursor)).toBeVisible()
+    await expect(waiting).toHaveCount(0)
     expect(pulls[2]).toBe(durable)
     await secondChapter.click()
     await expect(editor).toHaveValue(originalText)

@@ -2,12 +2,14 @@ import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { beforeEach, expect, test, vi } from 'vitest'
 import {
   enableSyncLedger,
+  markSyncBaseline,
   pullSyncPage,
   pushSyncPending,
   queueSyncChange,
   queueSyncResolution,
   readSyncConflict,
   readSyncHead,
+  readSyncProgress,
   readSyncState,
   requireSyncLedger,
   setSyncEnabled,
@@ -267,7 +269,9 @@ test('two devices retain base/edit/delete and propagate explicit resolution with
   await setSyncEnabled(second, true)
   await queueSyncChange(first, write('依据稿'), 'base')
   await pushSyncPending(first, a)
+  await expect(readSyncProgress(first)).resolves.toMatchObject({ receivedUnapplied: 0 })
   await pullAll(second, b)
+  await expect(readSyncProgress(second)).resolves.toMatchObject({ receivedUnapplied: 1 })
   await queueSyncChange(first, write('设备甲改稿', 'base'), 'edited')
   await queueSyncChange(
     second,
@@ -277,6 +281,10 @@ test('two devices retain base/edit/delete and propagate explicit resolution with
   await pushSyncPending(first, a)
   await pushSyncPending(second, b)
   await pullAll(second, b)
+  await expect(readSyncProgress(second)).resolves.toMatchObject({
+    receivedUnapplied: 0,
+    conflicts: ['deleted'],
+  })
   expect(await readSyncConflict(second, 'deleted')).toMatchObject({
     incoming: { tombstone: true },
     current: { change_id: 'edited', payload: { text: '设备甲改稿' } },
@@ -292,7 +300,11 @@ test('two devices retain base/edit/delete and propagate explicit resolution with
   )
   await pushSyncPending(second, b)
   await pullAll(first, a)
-  expect(await readSyncState(first)).toMatchObject({ conflicts: [], cursor: 4 })
+  await expect(readSyncProgress(first)).resolves.toMatchObject({
+    conflicts: [],
+    cursor: 4,
+    receivedUnapplied: 1,
+  })
   expect(await readSyncHead(first, chapter)).toMatchObject({
     status: 'resolved',
     change_id: 'resolved',
@@ -321,11 +333,18 @@ test('failed local pull commit leaves both head and cursor unchanged until a suc
   })
   try {
     await expect(pullSyncPage(first, transport)).rejects.toMatchObject({ code: 'storage' })
-    expect(await readSyncState(first)).toMatchObject({ cursor: 0 })
+    await expect(readSyncProgress(first)).resolves.toMatchObject({ cursor: 0, receivedUnapplied: 0 })
     expect(await readSyncHead(first, chapter)).toBeNull()
   } finally {
     failure.mockRestore()
   }
   await expect(pullSyncPage(first, transport)).resolves.toMatchObject({ count: 1, hasMore: false })
   expect(await readSyncHead(first, chapter)).toMatchObject({ change_id: 'from-second' })
+  await expect(readSyncProgress(first)).resolves.toMatchObject({ cursor: 1, receivedUnapplied: 1 })
+  await cloud.transport(second).push({ ...write('新章稿', 'from-second'), change_id: 'from-second-again' })
+  await pullSyncPage(first, transport)
+  await markSyncBaseline(first, chapter, { revision: 'from-second', signature: 'earlier' })
+  await expect(readSyncProgress(first)).resolves.toMatchObject({ cursor: 2, receivedUnapplied: 1 })
+  await markSyncBaseline(first, chapter, { revision: 'from-second-again', signature: 'newer' })
+  await expect(readSyncProgress(first)).resolves.toMatchObject({ cursor: 2, receivedUnapplied: 0 })
 })

@@ -288,6 +288,9 @@ export function WebSyncPanel({
           {!!status.localPending && status.enabled && ` · ${status.localPending} 项正式保存仍待同步`}
         </p>
       )}
+      {!!status?.receivedUnapplied && (
+        <p role="status">已收到云端更新，{status.receivedUnapplied} 项待应用到本机。当前正式稿可继续查看。</p>
+      )}
       {!!status?.deferred?.length && (
         <ul>
           {status.deferred.map(({ object_id, reason }) => (
