@@ -105,6 +105,16 @@ uv run python -m ainovel.cloud_sync_server --host 0.0.0.0 --port 8443 --tls-cert
 
 生产部署使用静态加密存储。设置实际 `AINOVEL_SYNC_DB` 后，可用有系统状态查询权限的操作员运行 `uv run python -m ainovel.cloud_sync_storage --backup-dir <现有备份目录>`。预检读取数据库目录、现有数据库和 WAL／SHM，以及所指定的备份卷。附件跟随 SQLite 保存。支持 Windows 已完成且保护开启的本地 BitLocker 固定卷，以及 Linux 直接挂载在完整 AES-XTS dm-crypt 映射上的 ext4。无法验证的卷返回退出码 `2`。预检保持只读，密钥恢复、账户退出与数据保留还需针对实际部署验收。[七台云同步验收](docs/acceptance/七台云同步验收.md)
 
+同步账本可在线生成一致性快照。`create` 使用当前 `AINOVEL_SYNC_DB`，`verify` 返回或比对原备份文件的 SHA-256。恢复目标须为独立的新文件。以下路径及摘要按操作环境替换。
+
+```powershell
+uv run python -m ainovel.cloud_sync_backup create --file 'D:/sync-backups/ledger.sqlite' --require-encrypted-storage
+uv run python -m ainovel.cloud_sync_backup verify --file 'D:/sync-backups/ledger.sqlite' --sha256 '<原备份 SHA-256>'
+uv run python -m ainovel.cloud_sync_backup restore --file 'D:/sync-backups/ledger.sqlite' --target 'E:/sync-restore/ledger.sqlite' --sha256 '<原备份 SHA-256>' --require-encrypted-storage
+```
+
+备份与恢复副本中的旧设备凭据均失效。启用恢复库时，由管理员按原设备编号重新签发凭据。备份点已有的作品修订、附件、冲突和回执可继续核对。若设备游标晚于备份点，先核对本机副本与恢复点，再安排后续同步。[云账本恢复验收](docs/acceptance/七台云同步验收.md)
+
 ### 备份、恢复与付费验收
 
 ```powershell
