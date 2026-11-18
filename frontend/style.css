@@ -423,6 +423,105 @@ details > label {
 .ideation-page textarea {
   overflow-wrap: anywhere;
 }
+.conception-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px clamp(12px, 4vw, 36px) 0;
+}
+.conception-navigation + .page-pad {
+  padding-top: 20px;
+}
+.conception-navigation [aria-pressed='true'],
+.conception-steps [aria-current='step'] {
+  background: #e8efe8;
+  color: #214a3b;
+  border: 2px solid var(--green);
+}
+.conception-page {
+  max-width: 960px;
+}
+.conception-workspace {
+  display: grid;
+  gap: 16px;
+  overflow-wrap: anywhere;
+}
+.conception-workspace > details {
+  margin: 0;
+}
+.conception-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr));
+  gap: 8px;
+  margin: 12px 0 20px;
+}
+.conception-steps button {
+  flex-direction: column;
+  min-height: 52px;
+  min-width: 0;
+  padding: 4px 8px;
+  text-align: center;
+}
+.conception-steps small {
+  color: var(--muted);
+}
+.conception-workspace button,
+.conception-workspace label,
+.conception-workspace fieldset {
+  min-width: 0;
+  max-width: 100%;
+}
+.conception-workspace section[tabindex]:focus {
+  outline: 3px solid #a25b16;
+  outline-offset: 5px;
+}
+.conception-workspace fieldset {
+  min-inline-size: 0;
+}
+.conception-workspace .conception-item {
+  margin: 8px 0 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.conception-item legend {
+  max-width: 100%;
+}
+.conception-add-category {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+.conception-links,
+.conception-issues {
+  margin: 8px 0 16px;
+  padding-inline-start: 22px;
+}
+.conception-links li,
+.conception-issues li {
+  margin: 6px 0;
+}
+.conception-links button {
+  margin-inline-start: 8px;
+}
+.conception-review,
+.conception-task,
+.conception-world-extract {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+.conception-world-extract {
+  margin-bottom: 16px;
+}
+.conception-quote blockquote {
+  margin: 8px 0 12px;
+  padding: 6px 12px;
+  border-inline-start: 3px solid var(--control);
+  white-space: pre-wrap;
+}
 .page-heading {
   display: flex;
   justify-content: space-between;

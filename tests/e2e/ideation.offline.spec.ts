@@ -27,6 +27,7 @@ async function openIdea(page: Page, title: string, withContract = false) {
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   await page.getByRole('button', { name: '小说构思', exact: true }).click()
+  await page.getByRole('button', { name: '快速构思', exact: true }).click()
   await expect(page.getByRole('heading', { name: '小说构思', exact: true })).toBeVisible()
   await expect(page.getByRole('textbox', { name: '你的想法', exact: true })).toBeEnabled()
   return { novel, headers }
@@ -43,8 +44,10 @@ test('一句想法生成、编辑、刷新恢复、采用并去写作；保留�
   expect(
     await page.request.get(`/api/tasks?branch_id=${novel.branch_id}`).then((r) => r.json()),
   ).toHaveLength(0)
+  const generate = page.getByRole('button', { name: '帮我展开', exact: true })
+  await expect(generate).toBeEnabled()
   await page.keyboard.press('Tab')
-  await expect(page.getByRole('button', { name: '帮我展开', exact: true })).toBeFocused()
+  await expect(generate).toBeFocused()
   const request = page.waitForRequest((r) => r.url().endsWith('/api/modules') && r.method() === 'POST')
   await page.keyboard.press('Enter')
   const payload = (await request).postDataJSON()
@@ -75,6 +78,7 @@ test('一句想法生成、编辑、刷新恢复、采用并去写作；保留�
   page.once('dialog', (dialog) => void dialog.accept())
   await page.reload()
   await page.getByRole('button', { name: '小说构思', exact: true }).click()
+  await page.getByRole('button', { name: '快速构思', exact: true }).click()
   await expect(plan).toHaveValue(edited)
   await expect(input).toHaveValue(idea)
   await page.getByRole('button', { name: '采用构思', exact: true }).click()
@@ -93,6 +97,7 @@ test('一句想法生成、编辑、刷新恢复、采用并去写作；保留�
   const fresh = await page.context().newPage()
   await fresh.goto('/')
   await fresh.getByRole('button', { name: '小说构思', exact: true }).click()
+  await fresh.getByRole('button', { name: '快速构思', exact: true }).click()
   await expect(fresh.getByRole('textbox', { name: '修改构思方案', exact: true })).toHaveValue(edited)
   await expect(fresh.getByRole('button', { name: '已采用', exact: true })).toBeDisabled()
   await fresh.close()
@@ -216,6 +221,7 @@ test('生成中刷新后继续等待完整方案，新候选不会显示为已�
   await expect(page.getByRole('status')).toContainText('执行中')
   await page.reload()
   await page.getByRole('button', { name: '小说构思', exact: true }).click()
+  await page.getByRole('button', { name: '快速构思', exact: true }).click()
   const plan = page.getByRole('textbox', { name: '修改构思方案', exact: true })
   await expect(plan).toHaveValue(/结局与人物变化/, { timeout: 20000 })
   await expect(page.getByRole('button', { name: '采用构思', exact: true })).toBeEnabled()

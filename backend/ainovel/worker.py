@@ -43,6 +43,11 @@ PROMPT_VERSION = "0.13.0"
 STRUCTURE_REPAIR_VERSION = "3"
 REVIEW_CHECK_VERSION = "fixed-check-shape/2"
 REVISION_LENGTH_VERSION = "replacement-length-diagnostics/1"
+RETAIN_UNCERTAIN_STEPS = {
+    "source_interpretation_correction",
+    "source_corrected_candidate_recheck",
+    "conception_generate",
+}
 
 
 def structure_issues(error):
@@ -278,6 +283,12 @@ class Worker:
         max_output = provider.output_limit(max_output, structured=schema is not None)
         if self.cancelled():
             raise DomainError("cancelled", "已取消。", 409)
+        if self.task["kind"] == "conception_generate":
+            from .conception_generation import validate_basis_tx
+
+            with self.db.connect() as tx:
+                tx.execute("BEGIN")
+                validate_basis_tx(tx, self.task["branch_id"], payload)
         if self.task["kind"] == "candidate_recheck":
             from .candidate_recheck import validate
 
@@ -339,6 +350,7 @@ class Worker:
         ):
             context = self.whole_chapter_context(context)
         if action in {
+            "conception.extract.world",
             "仅依据作者原话整理本场景情节",
             "逐项对照作者情节解释与本次正文",
             "只从本次正文独立提取物品与信息流向",
@@ -472,7 +484,7 @@ class Worker:
         if previous:
             saved = json.loads(previous[0]["result"])
             return await validated(saved)
-        if self.task["kind"] in {"source_interpretation_correction", "source_corrected_candidate_recheck"}:
+        if self.task["kind"] in RETAIN_UNCERTAIN_STEPS:
             dispatched = self.db.all(
                 "SELECT id FROM task_events WHERE task_id=? AND kind='step_dispatched' "
                 "AND json_extract(payload,'$.fingerprint')=? ORDER BY id DESC LIMIT 1",
@@ -487,7 +499,9 @@ class Worker:
             if dispatched and not known_not_sent:
                 raise DomainError(
                     "unknown_result",
-                    "该来源核对步骤已派发但缺少完整回执，保留旧缓存与费用，未盲目重发。",
+                    "该构思步骤已派发但缺少完整回执，已保留缓存与费用；请先核对账本，再决定是否创建新任务。"
+                    if self.task["kind"] == "conception_generate"
+                    else "该来源核对步骤已派发但缺少完整回执，保留旧缓存与费用，未盲目重发。",
                     409,
                 )
         if replay_owner is not None:
@@ -718,8 +732,7 @@ class Worker:
             from .providers import RequestNotSent
 
             if (
-                self.task["kind"]
-                in {"source_interpretation_correction", "source_corrected_candidate_recheck"}
+                self.task["kind"] in RETAIN_UNCERTAIN_STEPS
                 and isinstance(error, RequestNotSent)
                 and error.task_id == self.task["id"]
                 and error.account == payload["account"]
@@ -826,6 +839,19 @@ class Worker:
         snapshot = self.genre_snapshot() if self.task else context["genre_profile"]
         context["genre_profile"] = snapshot
         context["author_contract"] = self.author_snapshot() if self.task else context["author_contract"]
+        conception = self.task["result"].get("conception_snapshot") if self.task else None
+        if conception:
+            context["conception_plan"] = {
+                **{key: value for key, value in conception.items() if key != "observed_reference"},
+                # Only author-level planning can see the full source version. Chapter
+                # actions use the existing position-scoped source/knowledge lookup.
+                **({"observed_reference": conception["observed_reference"]} if not chapter_id else {}),
+                "scope": (
+                    "categories 是作者确认的写作参考与未来安排。observed_reference 来自来源工作版本的保存稿，"
+                    "仅用于查阅；真实时点与可见信息仍以目标工作版本的有效正文、结构及当前视角为准。"
+                    "遵守当前作者明确约定和本章情节；不得将计划或来源工作版本的阅读参考当成当前事实。"
+                ),
+            }
         if not snapshot.get("legacy_unconfigured"):
             for definition in context["definitions"]:
                 if definition["kind"] != "reader":
@@ -1312,6 +1338,8 @@ class Worker:
 
     async def memory(self, text, context):
         context = text_context(context, text, "memory_extraction")
+        if "conception_plan" in context:
+            context = {key: value for key, value in context.items() if key != "conception_plan"}
         units = source_units(text, "MEM")
         sources = {unit["source_id"]: unit for unit in units}
 
@@ -1990,6 +2018,10 @@ class Worker:
         try:
             if task["kind"] == "module":
                 await self.module()
+            elif task["kind"] == "conception_generate":
+                from .conception_generation import run
+
+                await run(self)
             elif task["kind"] == "candidate_recheck":
                 from .candidate_recheck import run
 

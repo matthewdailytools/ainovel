@@ -5,6 +5,8 @@ import { LibraryPage } from './Library'
 import { WorkflowPage } from './Workflow'
 import { Records } from './Records'
 import { Ideation } from './Ideation'
+import { ConceptionWorkspace } from './ConceptionWorkspace'
+import type { ConceptionDestination, ConceptionHandoff } from './conception'
 import { confirmLeave } from './leaveGuard'
 import type { FeedbackHandoff } from './feedbackRevision'
 
@@ -22,6 +24,9 @@ export function App() {
     selection.current = { novelId, branchId, generation: selection.current.generation + 1 }
   const selectionGeneration = selection.current.generation
   const [page, setPage] = useState('writing')
+  const [quickConception, setQuickConception] = useState(false)
+  const [conceptionHandoff, setConceptionHandoff] = useState<ConceptionHandoff>()
+  const [workflowMode, setWorkflowMode] = useState<'assisted' | 'automatic'>('assisted')
   const [feedbackHandoff, setFeedbackHandoff] = useState<FeedbackHandoff>()
   const [account, setAccount] = useState('openai_1')
   const [title, setTitle] = useState('')
@@ -89,6 +94,22 @@ export function App() {
   function navigate(id: string) {
     if (id !== page && confirmLeave()) setPage(id)
   }
+  function openConceptionWorkspace() {
+    if (!confirmLeave()) return
+    setQuickConception(false)
+    setPage('ideation')
+  }
+  function openConceptionDestination(destination: ConceptionDestination, handoff?: ConceptionHandoff) {
+    if (!confirmLeave()) return
+    setConceptionHandoff(handoff)
+    if (destination === 'writing') {
+      setFeedbackHandoff(undefined)
+      setPage('writing')
+    } else {
+      setWorkflowMode(destination)
+      setPage('workflow')
+    }
+  }
   async function createNovel(event: React.FormEvent) {
     event.preventDefault()
     if (creating || !title.trim()) return
@@ -114,6 +135,7 @@ export function App() {
   const novel = novels.find((n) => n.id === novelId)
   const branch = branches.find((b) => b.id === branchId && b.novel_id === novelId)
   const selectedAccount = config?.accounts.find((a) => a.id === account)
+  const selectedConception = conceptionHandoff?.branchId === branch?.id ? conceptionHandoff : undefined
   return (
     <>
       <header className="topbar">
@@ -336,13 +358,52 @@ export function App() {
             ) : (
               <>
                 {page === 'ideation' && branch && (
-                  <Ideation
-                    key={branch.id}
-                    branch={branch}
-                    account={account}
-                    modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
-                    onWriting={() => navigate('writing')}
-                  />
+                  <>
+                    <nav className="conception-navigation" aria-label="构思方式">
+                      <button
+                        type="button"
+                        aria-pressed={!quickConception}
+                        onClick={() => quickConception && confirmLeave() && setQuickConception(false)}
+                      >
+                        按类别构思
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={quickConception}
+                        onClick={() => !quickConception && confirmLeave() && setQuickConception(true)}
+                      >
+                        快速构思
+                      </button>
+                    </nav>
+                    {quickConception ? (
+                      <Ideation
+                        key={branch.id}
+                        branch={branch}
+                        account={account}
+                        modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
+                        onWriting={() => openConceptionDestination('writing')}
+                      />
+                    ) : (
+                      <div className="page-pad conception-page">
+                        <div className="page-heading">
+                          <div>
+                            <h1>小说构思</h1>
+                            <p>
+                              {novel?.title} · {branch.name}
+                            </p>
+                          </div>
+                        </div>
+                        <ConceptionWorkspace
+                          key={branch.id}
+                          branch={branch}
+                          account={account}
+                          modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
+                          notify={notify}
+                          onHandoff={openConceptionDestination}
+                        />
+                      </div>
+                    )}
+                  </>
                 )}
                 {page === 'writing' && novel && branch && (
                   <Writing
@@ -355,6 +416,8 @@ export function App() {
                     onGenreSettings={() => navigate('records')}
                     feedbackHandoff={feedbackHandoff?.branch_id === branch.id ? feedbackHandoff : undefined}
                     onClearFeedback={() => setFeedbackHandoff(undefined)}
+                    conceptionHandoff={selectedConception}
+                    onConceptionSettings={openConceptionWorkspace}
                   />
                 )}
                 {page === 'library' && (
@@ -376,6 +439,9 @@ export function App() {
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
+                    initialMode={workflowMode}
+                    conceptionHandoff={selectedConception}
+                    onConceptionSettings={openConceptionWorkspace}
                     onStarted={async (id) => {
                       await refreshBranches(novel.id, id, selectionGeneration)
                     }}

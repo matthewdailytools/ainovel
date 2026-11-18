@@ -1399,6 +1399,194 @@
         }
       }
     },
+    "/api/branches/{branch_id}/conception": {
+      "get": {
+        "summary": "Get Workspace",
+        "operationId": "get_workspace_api_branches__branch_id__conception_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ConceptionWorkspace" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save Workspace",
+        "operationId": "save_workspace_api_branches__branch_id__conception_put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaveConception" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ConceptionWorkspace" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/conception/adopt": {
+      "post": {
+        "summary": "Adopt Candidate",
+        "operationId": "adopt_candidate_api_branches__branch_id__conception_adopt_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdoptConception" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ConceptionWorkspace" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/conception/confirm": {
+      "post": {
+        "summary": "Confirm Workspace",
+        "operationId": "confirm_workspace_api_branches__branch_id__conception_confirm_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ConfirmConception" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ConceptionWorkspace" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/conception/generate": {
+      "post": {
+        "summary": "Generate Conception",
+        "operationId": "generate_conception_api_branches__branch_id__conception_generate_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ConceptionGenerateInput" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/conception/extract-world": {
+      "post": {
+        "summary": "Extract Conception World",
+        "operationId": "extract_conception_world_api_branches__branch_id__conception_extract_world_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ConceptionWorldExtractInput" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/workflows": {
       "post": {
         "summary": "Start Workflow",
@@ -3215,6 +3403,36 @@
         "required": ["idempotency_key"],
         "title": "AcceptInput"
       },
+      "AdoptConception": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          },
+          "artifact_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Artifact Id"
+          },
+          "categories": {
+            "items": { "$ref": "#/components/schemas/CandidateSelection" },
+            "type": "array",
+            "maxItems": 24,
+            "minItems": 1,
+            "title": "Categories"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "base_story_revision", "idempotency_key", "artifact_id", "categories"],
+        "title": "AdoptConception"
+      },
       "AdoptExtraction": {
         "properties": {
           "selected_scene_ids": {
@@ -3470,6 +3688,28 @@
         "required": ["candidate_revision", "account", "client_request_id"],
         "title": "CandidateRecheckInput"
       },
+      "CandidateSelection": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "items": {
+            "items": { "$ref": "#/components/schemas/ConceptionItem" },
+            "type": "array",
+            "maxItems": 40,
+            "minItems": 1,
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "items"],
+        "title": "CandidateSelection"
+      },
       "CandidateVersionInput": {
         "properties": {
           "candidate_revision": {
@@ -3516,6 +3756,225 @@
         "required": ["title", "kind"],
         "title": "Character"
       },
+      "ConceptionCategory": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "items": {
+            "items": { "$ref": "#/components/schemas/ConceptionItem" },
+            "type": "array",
+            "maxItems": 40,
+            "title": "Items"
+          },
+          "skipped": { "type": "boolean", "title": "Skipped", "default": false }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title"],
+        "title": "ConceptionCategory"
+      },
+      "ConceptionConfirmation": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "revision": { "type": "integer", "title": "Revision" },
+          "current": { "type": "boolean", "title": "Current" },
+          "note": { "type": "string", "title": "Note" },
+          "planning_brief": { "type": "string", "title": "Planning Brief" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "revision", "current", "note", "planning_brief"],
+        "title": "ConceptionConfirmation"
+      },
+      "ConceptionGenerateInput": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "account": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          },
+          "category_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Category Id"
+          },
+          "instruction": { "type": "string", "maxLength": 6000, "title": "Instruction", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "base_story_revision", "account", "client_request_id"],
+        "title": "ConceptionGenerateInput"
+      },
+      "ConceptionIssue": {
+        "properties": {
+          "category_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Category Id"
+          },
+          "message": { "type": "string", "title": "Message" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["category_id", "message"],
+        "title": "ConceptionIssue"
+      },
+      "ConceptionItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "detail": { "type": "string", "maxLength": 4000, "title": "Detail", "default": "" },
+          "links": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Links"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title"],
+        "title": "ConceptionItem"
+      },
+      "ConceptionObserved": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "category_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Category Id"
+          },
+          "title": { "type": "string", "title": "Title" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "description": { "type": "string", "title": "Description" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "category_id", "title", "revision", "description"],
+        "title": "ConceptionObserved"
+      },
+      "ConceptionSource": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Item Id"
+          },
+          "evidence": { "$ref": "#/components/schemas/Source" },
+          "current": { "type": "boolean", "title": "Current" },
+          "author_edited": { "type": "boolean", "title": "Author Edited" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["item_id", "evidence", "current", "author_edited"],
+        "title": "ConceptionSource"
+      },
+      "ConceptionWorkspace": {
+        "properties": {
+          "revision": { "type": "integer", "title": "Revision" },
+          "story_revision": { "type": "integer", "title": "Story Revision" },
+          "categories": {
+            "items": { "$ref": "#/components/schemas/ConceptionCategory" },
+            "type": "array",
+            "title": "Categories"
+          },
+          "issues": {
+            "items": { "$ref": "#/components/schemas/ConceptionIssue" },
+            "type": "array",
+            "title": "Issues"
+          },
+          "confirmation": {
+            "anyOf": [{ "$ref": "#/components/schemas/ConceptionConfirmation" }, { "type": "null" }]
+          },
+          "observed": {
+            "items": { "$ref": "#/components/schemas/ConceptionObserved" },
+            "type": "array",
+            "title": "Observed"
+          },
+          "sources": {
+            "items": { "$ref": "#/components/schemas/ConceptionSource" },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision",
+          "story_revision",
+          "categories",
+          "issues",
+          "confirmation",
+          "observed",
+          "sources"
+        ],
+        "title": "ConceptionWorkspace"
+      },
+      "ConceptionWorldExtractInput": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "account": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          },
+          "chapter_ids": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1 },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Chapter Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "base_story_revision", "account", "client_request_id", "chapter_ids"],
+        "title": "ConceptionWorldExtractInput"
+      },
       "ConditionalContinuationInput": {
         "properties": {
           "client_request_id": {
@@ -3560,6 +4019,23 @@
         "type": "object",
         "required": ["client_request_id", "base_story_revision", "mappings"],
         "title": "Confirm"
+      },
+      "ConfirmConception": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          },
+          "note": { "type": "string", "maxLength": 4000, "title": "Note", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "base_story_revision", "idempotency_key"],
+        "title": "ConfirmConception"
       },
       "ContinuationInput": {
         "properties": {
@@ -4107,6 +4583,10 @@
           "author_contract_basis": {
             "anyOf": [{ "$ref": "#/components/schemas/AuthorContractBasis" }, { "type": "null" }]
           },
+          "conception_snapshot_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Conception Snapshot Id"
+          },
           "source_review_id": {
             "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
             "title": "Source Review Id"
@@ -4476,6 +4956,23 @@
         "type": "object",
         "title": "ResumeInput"
       },
+      "SaveConception": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "categories": {
+            "items": { "$ref": "#/components/schemas/ConceptionCategory" },
+            "type": "array",
+            "maxItems": 24,
+            "minItems": 8,
+            "title": "Categories"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "base_story_revision", "categories"],
+        "title": "SaveConception"
+      },
       "SaveInput": {
         "properties": {
           "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
@@ -4770,6 +5267,10 @@
           "source_branch_id": {
             "anyOf": [{ "type": "string" }, { "type": "null" }],
             "title": "Source Branch Id"
+          },
+          "conception_snapshot_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Conception Snapshot Id"
           },
           "mode": { "type": "string", "enum": ["assisted", "automatic"], "title": "Mode" },
           "brief": { "type": "string", "maxLength": 30000, "minLength": 1, "title": "Brief" },
