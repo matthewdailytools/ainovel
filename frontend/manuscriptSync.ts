@@ -29,6 +29,7 @@ import {
 } from './storySyncModel'
 import { workflowSyncEntry } from './workflowArchive'
 import { workflowTransferRestrictions } from './workflowPrivacy'
+import type { SettingsConflictMerge } from './settingsSyncModel'
 import { referenceCardKey, referenceHeadObjectId } from './referenceArchive'
 import {
   approveSyncResolution,
@@ -647,6 +648,37 @@ function checkWebComparison(compared: WebComparison, fresh: WebComparison) {
     fresh.publicationId !== compared.publicationId
   )
     throw new Error('本机或云端版本已变化，请重新比较。')
+}
+
+export async function prepareWebSettingsMerge(
+  project: LocalProject,
+  scope: SyncScope,
+  compared: WebComparison,
+): Promise<SettingsConflictMerge> {
+  const conflictId = compared.incoming.conflict_id
+  if (!conflictId || scope.workId !== project.branch.id) throw new Error('当前作品找不到这次设定冲突。')
+  const fresh = await prepareWebResolution(project, scope, conflictId)
+  checkWebComparison(compared, fresh)
+  const local = fresh.settings.current
+  const cloudCurrent = fresh.current.payload
+  const cloudIncoming = fresh.incoming.payload
+  if (
+    !local ||
+    fresh.object?.kind !== 'settings-head' ||
+    cloudCurrent?.kind !== 'settings-head' ||
+    cloudIncoming?.kind !== 'settings-head'
+  )
+    throw new Error('合写需要本机采用版和两份有效设定来源。')
+  const current = fresh.settings.versions.find(({ version }) => version.id === cloudCurrent.revision_id)
+  const incoming = fresh.settings.versions.find(({ version }) => version.id === cloudIncoming.revision_id)
+  if (!current?.source || !incoming?.source) throw new Error('还缺设定原修订，请同步后再合写。')
+  if (
+    [local, current, incoming].some(
+      (row) => row.version.project_version_id !== fresh.settings.projectVersionId,
+    )
+  )
+    throw new Error('各版设定使用的立项不同，请先核对并统一立项依据。')
+  return { conflictId, localRevisionId: local.version.id, current, incoming }
 }
 
 export async function forkWebConflict(

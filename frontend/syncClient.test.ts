@@ -94,6 +94,37 @@ async function pullAll(scope: SyncScope, transport: SyncTransport) {
   }
 }
 
+test('a withheld-only cloud page advances the Web cursor and the following chapter remains usable', async () => {
+  const cloud = isolatedCloud()
+  const virtual = 'withheld:event:legacy-selection'
+  cloud.changes.push({
+    sequence: 1,
+    status: 'applied',
+    change_id: virtual,
+    object_id: 'withheld:object:legacy-selection',
+    device_id: 'withheld:device:legacy-selection',
+    parent_revision: null,
+    head_revision: virtual,
+    conflict_id: null,
+    payload: { kind: 'withheld', reason: 'reference_scope' },
+    tombstone: false,
+  })
+  const readable = await cloud.transport(second).push({ ...write('下一条真实章稿'), change_id: 'readable' })
+  const transport: SyncTransport = {
+    ...cloud.transport(first),
+    async pull(after) {
+      const rows = cloud.changes.slice(after, after + 1)
+      const cursor = after + rows.length
+      return { changes: rows, cursor, has_more: cursor < cloud.changes.length }
+    },
+  }
+  await setSyncEnabled(first, true)
+  await expect(pullSyncPage(first, transport)).resolves.toMatchObject({ count: 1, hasMore: true })
+  await expect(readSyncState(first)).resolves.toMatchObject({ cursor: 1, pending: [], conflicts: [] })
+  await expect(pullSyncPage(first, transport)).resolves.toMatchObject({ count: 1, hasMore: false })
+  await expect(readSyncHead(first, chapter)).resolves.toEqual(readable)
+})
+
 test('outbox is opt-in, scoped to service/work/device, and retains an unknown receipt on retry', async () => {
   const cloud = isolatedCloud()
   await expect(queueSyncChange(first, write('未启用'))).rejects.toMatchObject({ code: 'disabled' })

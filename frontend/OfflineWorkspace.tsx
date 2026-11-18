@@ -26,7 +26,7 @@ import './offlineWorkspace.css'
 import { WebSyncPanel } from './WebSyncPanel'
 import { PortableEvidence } from './PortableEvidence'
 import { LocalProjectBrief } from './OfflineProjectBrief'
-import { OfflineSettings } from './OfflineSettings'
+import { OfflineSettings, type OfflineSettingsHandle } from './OfflineSettings'
 import { OfflineOutline } from './OfflineOutline'
 import { OfflineWorkflowHistory } from './OfflineWorkflowHistory'
 import { OfflineReferenceHistory } from './OfflineReferenceHistory'
@@ -96,6 +96,7 @@ export function OfflineWorkspace() {
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const locked = useRef(false)
+  const settingsEditor = useRef<OfflineSettingsHandle>(null)
   const dirty = !!editor && editor.text !== editor.base.content
   const draftId = selected && editor ? `offline/${selected.branch.id}/${editor.chapter.id}` : undefined
   const projectId = selected?.novel.id
@@ -340,6 +341,7 @@ export function OfflineWorkspace() {
               />
               <OfflineSettings
                 key={`settings-${selected.branch.id}`}
+                ref={settingsEditor}
                 read={loadSettings}
                 refreshToken={workbenchRefresh}
                 disabled={busy}
@@ -411,6 +413,10 @@ export function OfflineWorkspace() {
                 onBusy={setSyncBusy}
                 onConflictDraftDirty={setSyncConflictDirty}
                 onForkSaved={(copy) => setProjects((rows) => [...rows, copy])}
+                onSettingsMerge={(context) => {
+                  if (!settingsEditor.current) throw new Error('设定台正在加载，请稍候再试。')
+                  settingsEditor.current.beginConflictMerge(context)
+                }}
                 onApplied={async () => {
                   const saved = (await listLocalProjects()).find(
                     (work) => work.branch.id === selected.branch.id,

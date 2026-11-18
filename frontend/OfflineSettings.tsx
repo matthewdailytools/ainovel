@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import type { ConceptionItem } from './conception'
 import { ConceptionItemEditor } from './ConceptionItems'
 import { useLeaveGuard } from './leaveGuard'
 import {
   blockingSettingsFindings,
+  copyConflictSetting,
   createSettingsDraft,
   inspectSettingsDraft,
   prepareSettingsVersion,
+  type SettingsConflictMerge,
   type SettingsFinding,
   type SettingsItem,
   type SettingsVersion,
@@ -17,6 +19,10 @@ export type OfflineSettingsData = {
   current?: SettingsVersionRecord
   versions: SettingsVersionRecord[]
   projectVersionId: string | null
+}
+
+export type OfflineSettingsHandle = {
+  beginConflictMerge: (context: SettingsConflictMerge) => void
 }
 
 const findingLabels: Record<SettingsFinding['kind'], string> = {
@@ -42,9 +48,11 @@ function selectId(ids: string[], id: string, checked: boolean) {
 function SettingsRestorePreview({
   current,
   historical,
+  onPick,
 }: {
   current?: SettingsVersion
   historical: SettingsVersion
+  onPick?: (itemId: string, categoryId: string) => void
 }) {
   function entries(version?: SettingsVersion) {
     return new Map(
@@ -58,6 +66,9 @@ function SettingsRestorePreview({
   }
   const active = entries(current)
   const selected = entries(historical)
+  const verbs = onPick
+    ? { change: '修改', add: '新增', remove: '移除' }
+    : { change: '还原', add: '带回', remove: '移出' }
   const changes = [...new Set([...active.keys(), ...selected.keys()])].flatMap((id) => {
     const before = active.get(id)
     const after = selected.get(id)
@@ -65,29 +76,45 @@ function SettingsRestorePreview({
   })
   return (
     <details style={{ overflowWrap: 'anywhere' }}>
-      <summary>恢复差异（{changes.length} 项）</summary>
+      <summary>
+        {onPick ? '与本机底稿的差异' : '恢复差异'}（{changes.length} 项）
+      </summary>
       {!!changes.length && (
         <ul>
           {changes.map(({ id, before, after }) => (
             <li key={id}>
-              {before && after ? '还原' : after ? '带回' : '移出'} · {after?.item.title ?? before?.item.title}{' '}
-              · {id}
+              {before && after ? verbs.change : after ? verbs.add : verbs.remove} ·{' '}
+              {after?.item.title ?? before?.item.title} · {id}
               {before && (
                 <p>
                   当前 · {before.title} · {before.item.detail || '未填写'}
                 </p>
               )}
               {after && (
-                <p>
-                  所选 · {after.title} · {after.item.detail || '未填写'}
-                  {!!after.item.links.length && ` · 关联 ${after.item.links.join('、')}`}
-                </p>
+                <>
+                  <p>
+                    所选 · {after.title} · {after.item.detail || '未填写'}
+                    {!!after.item.links.length && ` · 关联 ${after.item.links.join('、')}`}
+                  </p>
+                  {onPick && after.item.setting_policy && (
+                    <p>
+                      {after.item.setting_policy.strength === 'hard' ? '硬规定' : '可调整设定'} · 适用范围{' '}
+                      {after.item.setting_policy.scope || '未填写'} · 例外{' '}
+                      {after.item.setting_policy.exceptions || '未填写'}
+                    </p>
+                  )}
+                  {onPick && (
+                    <button type="button" onClick={() => onPick(id, after.category)}>
+                      取用条目 {id}
+                    </button>
+                  )}
+                </>
               )}
             </li>
           ))}
         </ul>
       )}
-      <p className="small">恢复稿需按现行立项体检。确认后，采用旧设定修订的大纲需复核。</p>
+      {!onPick && <p className="small">恢复稿需按现行立项体检。确认后，采用旧设定修订的大纲需复核。</p>}
     </details>
   )
 }
@@ -161,16 +188,19 @@ export function OfflineSettings({
   refreshToken,
   disabled,
   onDirty,
+  ref,
 }: {
   read: () => Promise<OfflineSettingsData>
   onConfirm: (base: string | null, version: SettingsVersion) => Promise<void>
   refreshToken: number
   disabled: boolean
   onDirty: (dirty: boolean) => void
+  ref?: Ref<OfflineSettingsHandle>
 }) {
   const [data, setData] = useState<OfflineSettingsData>()
   const [draft, setDraft] = useState<SettingsVersion>()
   const [restoring, setRestoring] = useState<{ id: string; projectId: string | null }>()
+  const [merging, setMerging] = useState<{ context: SettingsConflictMerge; base: SettingsVersion }>()
   const [review, setReview] = useState<Review>()
   const [categoryId, setCategoryId] = useState('world')
   const [selectedRevision, setSelectedRevision] = useState('')
@@ -178,6 +208,7 @@ export function OfflineSettings({
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const recoveryFocus = useRef<HTMLSelectElement>(null)
+  const panel = useRef<HTMLDetailsElement>(null)
   const request = useRef(0)
   const current = data?.current?.version
   const projectChanged = current && current.project_version_id !== data?.projectVersionId
@@ -193,14 +224,28 @@ export function OfflineSettings({
   const parent = history.find((entry) => entry.version.id === record?.version.parent_id)
   const restoreSource = record && record.version.id !== current?.id ? record : undefined
   const restoreNote = restoring ? `从设定修订 ${restoring.id} 恢复。` : ''
+  const sourceNote = merging
+    ? `合写设定冲突 ${merging.context.conflictId}。本机底稿 ${merging.base.id}，云端当前版 ${merging.context.current.version.id}，另一提交版 ${merging.context.incoming.version.id}。`
+    : restoreNote
   useLeaveGuard(dirty, '离线设定')
   useEffect(() => {
     onDirty(dirty)
     return () => onDirty(false)
   }, [dirty, onDirty])
   useEffect(() => {
-    if (restoring) recoveryFocus.current?.focus()
-  }, [restoring])
+    if (!disabled && (restoring || merging)) recoveryFocus.current?.focus()
+  }, [restoring, merging, disabled])
+
+  useImperativeHandle(ref, () => ({
+    beginConflictMerge(context) {
+      if (!data?.current || !current || draft || busy) throw new Error('请先确认或放弃当前设定草稿。')
+      if (current.id !== context.localRevisionId || current.project_version_id !== data.projectVersionId)
+        throw new Error('本机设定或立项已变化，请重新读取并比较。')
+      startDraft(data.current)
+      setMerging({ context, base: current })
+      if (panel.current) panel.current.open = true
+    },
+  }))
 
   useEffect(() => {
     const attempt = ++request.current
@@ -220,6 +265,7 @@ export function OfflineSettings({
   function edit(next: SettingsVersion | undefined) {
     setDraft(next)
     if (!next) setRestoring(undefined)
+    if (!next) setMerging(undefined)
     setReview(undefined)
     setError('')
     setStatus('')
@@ -309,7 +355,7 @@ export function OfflineSettings({
 
   async function confirm() {
     if (!draft || !review || stale || !canConfirm) return
-    const note = [restoreNote, draft.note.trim()].filter(Boolean).join('\n')
+    const note = [sourceNote, draft.note.trim()].filter(Boolean).join('\n')
     const version = await prepareSettingsVersion({
       ...draft,
       note,
@@ -323,7 +369,13 @@ export function OfflineSettings({
       throw failure
     }
     edit(undefined)
-    setStatus(restoring ? '已确认历史内容为新的设定修订。' : '已确认并保存新的设定修订。')
+    setStatus(
+      merging
+        ? '已保存合写设定。同步后重新打开冲突比较，可采用本机版。'
+        : restoring
+          ? '已确认历史内容为新的设定修订。'
+          : '已确认并保存新的设定修订。',
+    )
     setData(await read())
   }
 
@@ -334,7 +386,7 @@ export function OfflineSettings({
     review.projectItems.length === review.result.projectImpacts.length
 
   return (
-    <details aria-label="离线设定台">
+    <details aria-label="离线设定台" ref={panel}>
       <summary>设定台</summary>
       {error && <p role="alert">{error}</p>}
       {status && <p role="status">{status}</p>}
@@ -369,6 +421,33 @@ export function OfflineSettings({
               {restoring.projectId !== draft.project_version_id &&
                 ` 原立项 ${restoring.projectId ?? '未采用'} · 现行立项 ${draft.project_version_id ?? '未采用'}。`}
             </p>
+          )}
+          {merging && (
+            <section aria-label="设定冲突合写依据">
+              <p className="small">以本机版为底稿。取用对照条目或手动编辑后，按现行立项重新体检并确认。</p>
+              {(
+                [
+                  ['云端当前版设定', merging.context.current],
+                  ['另一提交版设定', merging.context.incoming],
+                ] as const
+              ).map(([label, source]) => (
+                <details key={label}>
+                  <summary>{label}</summary>
+                  <SettingsRestorePreview
+                    current={merging.base}
+                    historical={source.version}
+                    onPick={(itemId, nextCategory) => {
+                      try {
+                        edit(copyConflictSetting(draft, source, itemId))
+                        setCategoryId(nextCategory)
+                      } catch (failure) {
+                        setError(failure instanceof Error ? failure.message : '暂时无法取用所选条目。')
+                      }
+                    }}
+                  />
+                </details>
+              ))}
+            </section>
           )}
           {stale && <p role="alert">当前设定或立项已更新。请先核对当前版本，未确认输入仍保留。</p>}
           <label>
@@ -425,7 +504,7 @@ export function OfflineSettings({
             确认说明
             <textarea
               value={draft.note}
-              maxLength={4000 - (restoreNote ? restoreNote.length + 1 : 0)}
+              maxLength={4000 - (sourceNote ? sourceNote.length + 1 : 0)}
               onChange={(event) => setDraft({ ...draft, note: event.target.value })}
             />
           </label>

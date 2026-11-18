@@ -64,10 +64,24 @@ export type SettingsVersionRecord = {
   fromPackage?: true
   recordedDevice?: string
 }
+export type SettingsConflictMerge = {
+  conflictId: string
+  localRevisionId: string
+  current: SettingsVersionRecord
+  incoming: SettingsVersionRecord
+}
 export type SettingsHistory = {
   adopted_revision_id: string | null
   versions: SettingsVersion[]
   source_devices?: Record<string, string>
+}
+
+function copyOrigin(origin: SettingsOrigin, source?: SettingsVersionRecord): SettingsOrigin {
+  return {
+    ...origin,
+    evidence: origin.evidence && { ...origin.evidence },
+    device_id: origin.device_id ?? source?.source?.device_id ?? source?.recordedDevice ?? null,
+  }
 }
 
 export function createSettingsDraft(
@@ -78,14 +92,7 @@ export function createSettingsDraft(
 ): SettingsVersion {
   const historical = source?.version
   const origins = Object.fromEntries(
-    Object.entries(historical?.origins ?? {}).map(([itemId, origin]) => [
-      itemId,
-      {
-        ...origin,
-        evidence: origin.evidence && { ...origin.evidence },
-        device_id: origin.device_id ?? source?.source?.device_id ?? source?.recordedDevice ?? null,
-      },
-    ]),
+    Object.entries(historical?.origins ?? {}).map(([itemId, origin]) => [itemId, copyOrigin(origin, source)]),
   )
   return {
     id,
@@ -104,6 +111,30 @@ export function createSettingsDraft(
     reviewed_setting_findings: [],
     reconciled_project_items: [],
   }
+}
+
+export function copyConflictSetting(draft: SettingsVersion, source: SettingsVersionRecord, itemId: string) {
+  const sourceCategory = source.version.categories.find(({ items }) => items.some(({ id }) => id === itemId))
+  const item = sourceCategory?.items.find(({ id }) => id === itemId)
+  const origin = source.version.origins[itemId]
+  if (!sourceCategory || !item || !origin || source.version.project_version_id !== draft.project_version_id)
+    throw new Error('该条目的确切设定来源或一致的立项不可用。')
+  const categories = draft.categories.some(({ id }) => id === sourceCategory.id)
+    ? draft.categories
+    : [...draft.categories, { ...sourceCategory, items: [] }]
+  const result = categories.map((category) => {
+    if (category.id !== sourceCategory.id)
+      return { ...category, items: category.items.filter(({ id }) => id !== itemId) }
+    const copy = structuredClone(item)
+    const items = category.items.some(({ id }) => id === itemId)
+      ? category.items.map((entry) => (entry.id === itemId ? copy : entry))
+      : [...category.items, copy]
+    if (items.length > 40) throw new Error('该类别已达 40 条，请先调整草稿条目。')
+    return { ...category, items }
+  })
+  if (result.length > 24 || result.reduce((total, category) => total + category.items.length, 0) > 240)
+    throw new Error('草稿已达类别或设定条目上限，请先调整后再取用。')
+  return { ...draft, categories: result, origins: { ...draft.origins, [itemId]: copyOrigin(origin, source) } }
 }
 
 type LinkFinding = 'missing_link' | 'self_link' | 'duplicate_link'

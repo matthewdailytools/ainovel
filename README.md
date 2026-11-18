@@ -129,11 +129,16 @@ uv run python -m ainovel.evaluate --execute --stage books --accounts openai_1,op
 
 # 不调用模型：从同一备份恢复后导出指定任务的正文、状态、修订与费用证据。
 uv run python -m ainovel.evidence_export --task '半自动任务标识' --task '全自动任务标识'
+
+# 七台接力结束或暂停后，导出已有任务和可选的独立共享费用账本证据。
+uv run python -m ainovel.evidence_export --task '七台父任务标识' --usage-ledger 'D:/approved-usage/usage.sqlite'
 ```
 
 评测输出位于实际数据目录的 `acceptance` 文件夹。三种账户的固定原创样例每项重复 3 次；两种整书模式共享原创简报但不共享生成正文。失败、干预和用量不删除。验收目标、完整 N/U/F 矩阵与模板见 [15 产品验收与技术实施路径](15-产品验收与技术实施路径.md)，本轮结果见 [实施验收记录](docs/acceptance/实施验收记录.md)。
 
 证据导出包含两份独立正文、采用规划、可阅读的修订报告、未采纳候选及完整 JSON 记录；历史报告标明来源版本是否仍有效。历史两种模式各保存过 36 章，有限返修后仍有待审问题；它们保留为历史回归，不代替当前新版本验收。当前加强验证的两版本各保存3章并暂停在第4章检查点，见[联合更正记录](docs/product-validation/2026-11-15-chapter3-joint-corrections.md)。新两种整书、作者文学判断和使用收益仍未验证。
+
+七台证据使用接力批次实际采用的章稿修订、M6 体检、M7 判定与冻结 ZIP，并标出它们是否仍适用于当前稿。指定 `--usage-ledger` 时，工具以只读快照核对本次父任务和稳定关联的子任务费用，保留待确认的费用预留。省略参数时报告注明用量来自验收数据目录的备份或尚无对应费用记录。
 
 ## 设计文档
 

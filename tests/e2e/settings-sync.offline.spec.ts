@@ -1,14 +1,14 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Browser, type Page } from '@playwright/test'
 import type { ConceptionState } from '../../frontend/conception'
 
 const cloud = 'http://127.0.0.1:8888'
 test.skip(process.env.AINOVEL_SYNC_E2E !== '1', '使用隔离云端进程运行双端验收')
 
-test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方历史', async ({ page, browser }) => {
+async function reviewSettingsConflict(page: Page, browser: Browser, mergeDirectly: boolean) {
   await page.goto('/')
   const { csrf } = await (await page.request.get('/api/session')).json()
   const headers = { 'X-Ainovel-CSRF': csrf }
-  const title = '双端设定 · 遗铃'
+  const title = mergeDirectly ? '双端合写设定 · 遗铃' : '双端设定 · 遗铃'
   const created = await page.request.post('/api/novels', {
     headers,
     data: { title, brief: '追查遗铃的两种来历。' },
@@ -21,7 +21,7 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
     headers,
     data: {
       base_revision: 0,
-      idempotency_key: 'common-setting-project',
+      idempotency_key: `${branch_id}-common-setting-project`,
       idea: '追查两座城里名称相同的遗铃。',
       brief: {
         position: '追查遗铃的两种来历',
@@ -40,6 +40,7 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
   const desktopText = '桌面确认：东城午夜过后才听见。'
   const webText = '浏览器确认：东城下雨以后才听见。'
   const otherText = '只有西城铸铃师能听见。'
+  const combinedText = '由作者重新核对：东城下雨且午夜之后才听得到。'
 
   async function desktopConfirm(detail: string, key: string) {
     const state: ConceptionState = await (await page.request.get(settings)).json()
@@ -80,7 +81,7 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
       data: {
         base_revision: saved.revision,
         base_story_revision: saved.story_revision,
-        idempotency_key: key,
+        idempotency_key: `${branch_id}-${key}`,
         reviewed_setting_findings: saved.setting_findings.map((finding) => finding.id),
       },
     })
@@ -111,7 +112,7 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
   const seeded = await desktopSync('run')
   expect(seeded.conflicts).toHaveLength(0)
   const pack = await (await page.request.get(branch + '/manuscript-package')).json()
-  const context = await browser.newContext()
+  const context = await browser.newContext(mergeDirectly ? { viewport: { width: 420, height: 800 } } : {})
   try {
     const web = await context.newPage()
     await web.goto('http://127.0.0.1:8877/offline/')
@@ -138,6 +139,15 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
     await web.getByLabel('设备凭据').fill(webToken)
     await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
     const run = web.getByRole('button', { name: '同步当前工作版本', exact: true })
+    const readCursor = async () =>
+      Number(
+        (
+          await web
+            .getByRole('status')
+            .filter({ hasText: /已启用 · 游标/ })
+            .innerText()
+        ).match(/游标 (\d+)/)?.[1],
+      )
     await run.click()
     await expect(panel.getByText(`当前确认修订 ${common.confirmation!.id}`)).toBeVisible()
 
@@ -182,8 +192,46 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
       await side.getByText(label, { exact: true }).click()
       await expect(side.locator('pre')).toContainText(text)
     }
-    web.once('dialog', (dialog) => dialog.accept())
-    await compare.getByRole('button', { name: '采用另一提交版' }).click()
+    let mergedRevisionId = ''
+    if (mergeDirectly) {
+      const previousCursor = await readCursor()
+      const adoptedSetting = panel.getByText(/^当前确认修订 /)
+      const priorAdoption = await adoptedSetting.innerText()
+      await context.setOffline(true)
+      await compare.getByRole('button', { name: '打开设定合写草稿' }).press('Enter')
+      await expect(panel.getByLabel('设定类别')).toBeFocused()
+      const source = panel.getByRole('region', { name: '设定冲突合写依据' })
+      const cloudSide = source
+        .locator('details')
+        .filter({ has: web.getByText('云端当前版设定', { exact: true }) })
+      await cloudSide.getByText('云端当前版设定', { exact: true }).click()
+      await cloudSide.getByText(/与本机底稿的差异/).click()
+      await expect(cloudSide.getByText(desktopText, { exact: false })).toBeVisible()
+      expect(await web.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(420)
+      await cloudSide.getByRole('button', { name: '取用条目 east-bell' }).click()
+      await expect(detail).toHaveValue(desktopText)
+      await detail.fill(combinedText)
+      await confirmSettingsDraft()
+      await expect(panel.getByRole('status').filter({ hasText: '已保存合写设定' })).toBeVisible()
+      await expect(adoptedSetting).not.toHaveText(priorAdoption)
+      mergedRevisionId = (await adoptedSetting.innerText()).trim().split(' ').at(-1)!
+      await expect(web.getByRole('button', { name: /^比较冲突/ })).toHaveCount(1)
+      const untouched: ConceptionState = await (await page.request.get(settings)).json()
+      expect(untouched.confirmation?.id).toBe(remote.confirmation!.id)
+
+      await context.setOffline(false)
+      await run.click()
+      await expect.poll(readCursor).toBeGreaterThan(previousCursor)
+      await web.getByRole('button', { name: /^比较冲突/ }).click()
+      const local = compare.locator('details').filter({ has: web.getByText('本机当前版', { exact: true }) })
+      await local.getByText('本机当前版', { exact: true }).click()
+      await expect(local.locator('pre')).toContainText(combinedText)
+      web.once('dialog', (dialog) => dialog.accept())
+      await compare.getByRole('button', { name: '采用本机版', exact: true }).click()
+    } else {
+      web.once('dialog', (dialog) => dialog.accept())
+      await compare.getByRole('button', { name: '采用另一提交版' }).click()
+    }
     await expect(web.getByRole('button', { name: /^比较冲突/ })).toHaveCount(0)
 
     const received = await desktopSync('run')
@@ -192,7 +240,7 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
     const adopted: ConceptionState = await (await page.request.get(settings)).json()
     const world = adopted.categories.find((category) => category.id === 'world')!
     expect(world.items.map(({ id, detail }) => [id, detail])).toEqual([
-      ['east-bell', webText],
+      ['east-bell', mergeDirectly ? combinedText : webText],
       ['west-bell', otherText],
     ])
     expect(adopted.project?.id).toBe(projectId)
@@ -207,17 +255,16 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
     await panel.getByRole('button', { name: '查看上一修订' }).click()
     await historical.getByText('世界设定', { exact: true }).click()
     await expect(historical.getByText(commonText, { exact: true })).toBeVisible()
-
-    const combinedText = '由作者重新核对：东城下雨且午夜之后才听得到。'
-    const readCursor = async () =>
-      Number(
-        (
-          await web
-            .getByRole('status')
-            .filter({ hasText: /已启用 · 游标/ })
-            .innerText()
-        ).match(/游标 (\d+)/)?.[1],
-      )
+    if (mergeDirectly) {
+      const transported = await (await page.request.get(branch + '/manuscript-package')).json()
+      expect(transported.settings_history.adopted_revision_id).toBe(mergedRevisionId)
+      await panel.getByRole('combobox', { name: '浏览正式设定修订' }).selectOption(mergedRevisionId)
+      await expect(historical.getByText(/作者确认说明 合写设定冲突/)).toContainText(remote.confirmation!.id)
+      await panel.getByRole('button', { name: '查看上一修订' }).click()
+      await historical.getByText('世界设定', { exact: true }).click()
+      await expect(historical.getByText(webText, { exact: true })).toBeVisible()
+      return
+    }
     const previousCursor = await readCursor()
     await context.setOffline(true)
     await panel.getByRole('button', { name: '编辑当前设定' }).click()
@@ -243,4 +290,12 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
   } finally {
     await context.close()
   }
+}
+
+test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方历史', async ({ page, browser }) => {
+  await reviewSettingsConflict(page, browser, false)
+})
+
+test('独立 Web 可断网合写正式设定，再用新修订解决云端分歧', async ({ page, browser }) => {
+  await reviewSettingsConflict(page, browser, true)
 })

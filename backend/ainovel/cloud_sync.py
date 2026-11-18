@@ -38,13 +38,14 @@ from .workflow_archive import (
     same_workflow_entry,
     validate_workflow_object,
 )
-from .workflow_privacy import REFERENCE_SCOPE, sync_has_reference_selection
+from .workflow_privacy import REFERENCE_SCOPE, sync_completion_report, sync_has_reference_selection
 
 MAX_OBJECT_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = MAX_OBJECT_BYTES * 2
 MAX_PULL_BYTES = MAX_OBJECT_BYTES * 4
 MAX_CURSOR = (1 << 53) - 1
 APP_ID = 0x414E5359
+WITHHELD_PREFIX = "withheld:"
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")]
 Authorization = Annotated[str, Header(max_length=512)]
 Payload = dict[str, JsonValue]
@@ -247,6 +248,59 @@ def _receipt(row):
     )
 
 
+def _check_reserved(*identifiers, payload=None):
+    if any(identifier.startswith(WITHHELD_PREFIX) for identifier in identifiers) or (
+        payload and payload.get("kind") == "withheld"
+    ):
+        raise DomainError("sync_reserved", "同步保留标记不能作为业务提交。", 409)
+
+
+def _inspection_dependency(payload):
+    if identifier := sync_completion_report(payload):
+        return identifier
+    if payload and payload.get("kind") == "evidence":
+        document = payload.get("document")
+        if isinstance(document, dict) and document.get("kind") == "completion":
+            try:
+                identifier = json.loads(document.get("body")).get("manifest", {}).get("inspection_id")
+                if isinstance(identifier, str):
+                    return identifier
+            except AttributeError, TypeError, ValueError, RecursionError:
+                pass
+    return None
+
+
+def _withheld(tx, work, sequence):
+    # Preserve contiguous slots without naming a real event, object or device.
+    salt = 0
+    while True:
+        marker = _digest(_encoded(["sync-withheld/1", work, sequence, salt]))
+        identifier = f"{WITHHELD_PREFIX}event:{marker}"
+        object_id = f"{WITHHELD_PREFIX}object:{marker}"
+        device_id = f"{WITHHELD_PREFIX}device:{marker}"
+        # The namespace was not reserved at the time legacy records were written.
+        if not tx.execute(
+            "SELECT 1 FROM sync_changes WHERE work_id=? AND change_id=? UNION ALL "
+            "SELECT 1 FROM sync_heads WHERE work_id=? AND object_id=? UNION ALL "
+            "SELECT 1 FROM sync_devices WHERE work_id=? AND id=? LIMIT 1",
+            (work, identifier, work, object_id, work, device_id),
+        ).fetchone():
+            break
+        salt += 1
+    return Receipt(
+        sequence=sequence,
+        status="applied",
+        change_id=identifier,
+        object_id=object_id,
+        device_id=device_id,
+        parent_revision=None,
+        head_revision=identifier,
+        conflict_id=None,
+        payload={"kind": "withheld", "reason": "reference_scope"},
+        tombstone=False,
+    )
+
+
 class SyncStore:
     def __init__(self, path):
         self.path = Path(path)
@@ -299,6 +353,7 @@ class SyncStore:
             tx.close()
 
     def grant(self, work, data):
+        _check_reserved(data.device_id)
         token = secrets.token_urlsafe(32)
         with self.transaction(write=True) as tx:
             tx.execute("INSERT OR IGNORE INTO sync_works(id) VALUES(?)", (work,))
@@ -354,7 +409,37 @@ class SyncStore:
         row = self._change(tx, work, identifier)
         if row and not secrets.compare_digest(row["request_sha256"], fingerprint):
             raise DomainError("sync_replay", "同一变更编号不能用于其他提交。", 409)
-        return _receipt(row) if row else None
+        return self._public_receipt(tx, work, row) if row else None
+
+    def _private_payload(self, tx, work, payload, reports):
+        if sync_has_reference_selection(payload):
+            return True
+        identifier = _inspection_dependency(payload)
+        if identifier is None:
+            return False
+        if identifier not in reports:
+            # A later document projection can have a newer head. The signed
+            # delivery still depends on the earlier verification record.
+            reports[identifier] = any(
+                sync_has_reference_selection(json.loads(row["payload"]))
+                for row in tx.execute(
+                    "SELECT payload FROM sync_changes WHERE work_id=? AND object_id IN (?,?) "
+                    "AND payload IS NOT NULL",
+                    (work, f"workflow-inspection:{identifier}", f"evidence:{identifier}"),
+                )
+            )
+        return reports[identifier]
+
+    def _public_receipt(self, tx, work, row):
+        entry = _receipt(row)
+        if self._private_event(tx, work, row, entry, {}):
+            raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
+        return entry
+
+    def _private_event(self, tx, work, row, entry, reports):
+        return self._private_payload(tx, work, entry.payload, reports) or (
+            entry.status == "conflict" and self._private_conflict(tx, work, row, reports)
+        )
 
     def _append(self, tx, work, device, data, fingerprint, payload, head, status, conflict_id=None):
         sequence = tx.execute("SELECT sequence FROM sync_works WHERE id=?", (work,)).fetchone()[0] + 1
@@ -390,7 +475,8 @@ class SyncStore:
     def push(self, work, digest, data):
         with self.transaction(write=True) as tx:
             device = self._authorize(tx, work, digest)
-            if sync_has_reference_selection(data.payload):
+            _check_reserved(data.object_id, data.change_id, payload=data.payload)
+            if self._private_payload(tx, work, data.payload, {}):
                 raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
             payload = _payload(data.payload)
             fingerprint = _digest(_encoded(["push", device, data.model_dump()]))
@@ -585,7 +671,7 @@ class SyncStore:
             row = self._change(tx, work, change_id)
             if not row or row["device_id"] != device:
                 raise DomainError("sync_receipt", "该设备没有对应回执。", 404)
-            return _receipt(row)
+            return self._public_receipt(tx, work, row)
 
     def change(self, work, digest, change_id):
         with self.transaction(snapshot=True) as tx:
@@ -593,7 +679,7 @@ class SyncStore:
             row = self._change(tx, work, change_id)
             if not row:
                 raise DomainError("sync_change", "找不到所选变更。", 404)
-            return _receipt(row)
+            return self._public_receipt(tx, work, row)
 
     def pull(self, work, digest, after, limit):
         with self.transaction(snapshot=True) as tx:
@@ -603,14 +689,19 @@ class SyncStore:
                 raise DomainError("sync_cursor", "拉取游标超出当前作品的变更记录。", 409)
             changes = []
             size = 0
+            reports = {}
             for row in tx.execute(
                 "SELECT * FROM sync_changes WHERE work_id=? AND sequence>? ORDER BY sequence LIMIT ?",
                 (work, after, limit),
             ):
-                size += len((row["payload"] or "").encode("utf-8"))
+                entry = _receipt(row)
+                withheld = self._private_event(tx, work, row, entry, reports)
+                if withheld:
+                    entry = _withheld(tx, work, row["sequence"])
+                size += len((_payload(entry.payload) if withheld else row["payload"] or "").encode("utf-8"))
                 if changes and size > MAX_PULL_BYTES:
                     break
-                changes.append(_receipt(row))
+                changes.append(entry)
             cursor = changes[-1].sequence if changes else after
             return Pulled(cursor=cursor, has_more=cursor < bound, changes=changes)
 
@@ -627,6 +718,22 @@ class SyncStore:
             resolved_by=row["resolved_by"],
         )
 
+    def _compared_rows(self, tx, work, summary):
+        head = self._change(tx, work, summary.head_revision)
+        base = self._change(tx, work, summary.parent_revision) if summary.parent_revision else None
+        return head, base
+
+    def _private_conflict(self, tx, work, row, reports, *, current=False):
+        head = self._head(tx, work, row["object_id"]) if current else row["head_revision"]
+        compared = [row, self._change(tx, work, head)]
+        if row["parent_revision"]:
+            compared.append(self._change(tx, work, row["parent_revision"]))
+        return any(
+            self._private_payload(tx, work, json.loads(event["payload"]), reports)
+            for event in compared
+            if event and event["payload"] is not None
+        )
+
     def conflicts(self, work, digest, after, limit):
         with self.transaction(snapshot=True) as tx:
             self._authorize(tx, work, digest)
@@ -637,8 +744,17 @@ class SyncStore:
                     (work, after, limit + 1),
                 )
             )
-            result = [self._conflict(tx, work, row) for row in rows[:limit]]
-            cursor = result[-1].opened_sequence if result else after
+            examined = rows[:limit]
+            reports = {}
+            result = [
+                self._conflict(tx, work, row)
+                for row in examined
+                if not (
+                    self._private_conflict(tx, work, row, reports)
+                    or self._private_conflict(tx, work, row, reports, current=True)
+                )
+            ]
+            cursor = examined[-1]["sequence"] if examined else after
             return Conflicts(conflicts=result, cursor=cursor, has_more=len(rows) > limit)
 
     def comparison(self, work, digest, identifier):
@@ -646,26 +762,25 @@ class SyncStore:
             self._authorize(tx, work, digest)
             row = self._change(tx, work, identifier)
             summary = self._conflict(tx, work, row)
-            head = self._change(tx, work, summary.head_revision)
-            base = self._change(tx, work, summary.parent_revision) if summary.parent_revision else None
+            head, base = self._compared_rows(tx, work, summary)
             return ComparedConflict(
                 **summary.model_dump(),
-                incoming=_receipt(row),
-                current=_receipt(head),
-                base=_receipt(base) if base else None,
+                incoming=self._public_receipt(tx, work, row),
+                current=self._public_receipt(tx, work, head),
+                base=self._public_receipt(tx, work, base) if base else None,
             )
 
     def resolve(self, work, digest, identifier, data):
         with self.transaction(write=True) as tx:
             device = self._authorize(tx, work, digest)
+            _check_reserved(data.change_id, payload=data.payload)
             request = data.model_dump(exclude={"content"} if data.choice != "merge_prose" else None)
             fingerprint = _digest(_encoded(["resolve", device, identifier, request]))
             if replay := self._replay(tx, work, data.change_id, fingerprint):
-                if sync_has_reference_selection(replay.payload):
-                    raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
                 return replay
             incoming = self._change(tx, work, identifier)
             conflict = self._conflict(tx, work, incoming)
+            _check_reserved(conflict.object_id)
             if conflict.object_id.startswith(WORKFLOW_PREFIXES):
                 raise DomainError("sync_workflow", "体检或交付历史记录不能通过冲突合并修改。", 409)
             if conflict.resolved_by:
@@ -684,7 +799,8 @@ class SyncStore:
                     incoming if data.choice == "incoming" else self._change(tx, work, conflict.head_revision)
                 )
                 payload, tombstone = _receipt(chosen).payload, bool(chosen["tombstone"])
-            if sync_has_reference_selection(payload):
+            _check_reserved(payload=payload)
+            if self._private_payload(tx, work, payload, {}):
                 raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
             change = Push(
                 change_id=data.change_id,

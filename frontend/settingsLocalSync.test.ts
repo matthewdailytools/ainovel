@@ -17,6 +17,7 @@ import {
   validateSyncedObject,
 } from './offlineStore'
 import {
+  copyConflictSetting,
   createSettingsDraft,
   inspectSettingsDraft,
   prepareSettingsVersion,
@@ -110,6 +111,30 @@ async function prepare() {
 
   return { work, project, branch_id, version, convention, item, store, adopt }
 }
+
+test('taking a conflicting setting retains stable identity and the exact source when its category moved', async () => {
+  const { version, item } = await prepare()
+  const draft = createSettingsDraft('merge-settings', version.id, version.project_version_id, { version })
+  const incoming = {
+    ...version,
+    id: 'remote-moved-setting',
+    categories: version.categories.map((category) => ({
+      ...category,
+      items: category.id === 'timeline' ? [{ ...item, detail: '铜铃刻痕出现于守夜后。' }] : [],
+    })),
+  }
+  const source = { version: incoming, source: { device_id: 'desktop', change_id: 'moved', sequence: 5 } }
+  const merged = copyConflictSetting(draft, source, item.id)
+  expect(merged.categories.find(({ id }) => id === 'world')!.items).toEqual([])
+  expect(merged.categories.find(({ id }) => id === 'timeline')!.items.map(({ id }) => id)).toEqual([item.id])
+  expect(draft.categories.find(({ id }) => id === 'world')!.items).toEqual([item])
+  expect(merged.origins[item.id]).toEqual({ ...version.origins[item.id], device_id: 'desktop' })
+  expect(merged.origins[item.id].evidence).not.toBe(incoming.origins[item.id].evidence)
+  await expect(prepareSettingsVersion(merged)).resolves.toMatchObject({ parent_id: version.id })
+  expect(() =>
+    copyConflictSetting(draft, { version: { ...incoming, project_version_id: 'other-project' } }, item.id),
+  ).toThrow('一致的立项')
+})
 
 test('M3 source prerequisites are checked per stable parent, M1 ID, and exact UTF-16 evidence SHA', async () => {
   const { version, convention, item, work, store, adopt } = await prepare()

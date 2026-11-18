@@ -5,7 +5,7 @@ import { useLeaveGuard } from './leaveGuard'
 import type { LocalProject } from './offlineStore'
 import { describeOutlineVersion } from './outlineSyncModel'
 import { describeProjectVersion } from './projectSyncModel'
-import { describeSettingsVersion } from './settingsSyncModel'
+import { describeSettingsVersion, type SettingsConflictMerge } from './settingsSyncModel'
 import { describeStoryVersion } from './storySyncModel'
 import { describeReferenceVersion } from './referenceArchive'
 import { readSyncState, setSyncEnabled, type SyncPayload } from './syncClient'
@@ -14,6 +14,7 @@ import {
   forkWebConflict,
   httpSyncTransport,
   prepareWebResolution,
+  prepareWebSettingsMerge,
   resolveWebManuscript,
   syncWebManuscript,
   webForkChoices,
@@ -68,6 +69,7 @@ export function WebSyncPanel({
   onBusy,
   onConflictDraftDirty,
   onForkSaved,
+  onSettingsMerge,
 }: {
   project: LocalProject
   unsaved: boolean
@@ -75,6 +77,7 @@ export function WebSyncPanel({
   onBusy: (busy: boolean) => void
   onConflictDraftDirty: (dirty: boolean) => void
   onForkSaved: (project: LocalProject) => void
+  onSettingsMerge: (merge: SettingsConflictMerge) => void
 }) {
   const [service, setService] = useState('')
   const [device, setDevice] = useState('')
@@ -117,7 +120,7 @@ export function WebSyncPanel({
   }, [project.branch.id, service, device, ready])
 
   async function run(
-    action: 'enable' | 'disable' | 'revoke' | 'sync' | 'compare' | 'choose' | 'merge' | 'fork',
+    action: 'enable' | 'disable' | 'revoke' | 'sync' | 'compare' | 'choose' | 'merge' | 'fork' | 'settings',
     value?: string,
   ) {
     if (busy || !ready) return
@@ -135,6 +138,11 @@ export function WebSyncPanel({
       }
       if (action === 'compare' && value) {
         setCompared(await prepareWebResolution(project, scope, value))
+        return
+      }
+      if (action === 'settings' && compared) {
+        if (unsaved) throw new Error('请先处理当前未确认的稿件或设定修改。')
+        onSettingsMerge(await prepareWebSettingsMerge(project, scope, compared))
         return
       }
       if (action === 'fork' && compared && fork) {
@@ -203,6 +211,10 @@ export function WebSyncPanel({
     compared?.object?.kind === 'chapter' &&
     compared.current.payload?.kind === 'chapter' &&
     compared.incoming.payload?.kind === 'chapter'
+  const canMergeSettings =
+    compared?.object?.kind === 'settings-head' &&
+    compared.current.payload?.kind === 'settings-head' &&
+    compared.incoming.payload?.kind === 'settings-head'
   const forkChoices = compared ? webForkChoices(compared) : []
   return (
     <details>
@@ -317,6 +329,11 @@ export function WebSyncPanel({
               }}
             >
               手动合并正文
+            </button>
+          )}
+          {canMergeSettings && !hasConflictDraft && (
+            <button type="button" disabled={busy || unsaved} onClick={() => void run('settings')}>
+              打开设定合写草稿
             </button>
           )}
           {!!forkChoices.length && !hasConflictDraft && (
