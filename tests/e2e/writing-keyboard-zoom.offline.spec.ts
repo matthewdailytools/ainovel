@@ -37,8 +37,9 @@ test('M5 正常写作可用键盘切章、编辑及保存，浏览器网页缩�
   browserName,
 }, testInfo) => {
   test.skip(browserName !== 'chromium', '使用 Chromium 自己的网页缩放设置。')
+  const channel = process.env.AINOVEL_BROWSER_CHANNEL || 'chromium'
   const context = await chromium.launchPersistentContext(testInfo.outputPath('zoom-profile'), {
-    channel: process.env.AINOVEL_BROWSER_CHANNEL || 'chromium',
+    channel,
     headless: true,
     viewport: null,
     args: ['--window-size=1440,1000'],
@@ -140,11 +141,24 @@ test('M5 正常写作可用键盘切章、编辑及保存，浏览器网页缩�
     await expect.poll(stored).toBe(body)
 
     const settings = await context.newPage()
-    await settings.goto('chrome://settings/appearance')
-    const browserZoom = settings.locator('settings-appearance-page #zoomLevel')
-    await expect(browserZoom).toHaveValue('1')
-    await browserZoom.selectOption({ label: '200%' })
-    await expect(browserZoom).toHaveValue('2')
+    await settings.goto(`${channel.startsWith('msedge') ? 'edge' : 'chrome'}://settings/appearance`)
+    const nativeZoom = await settings.evaluate(async () => {
+      const { settingsPrivate } = (
+        globalThis as typeof globalThis & {
+          chrome: {
+            settingsPrivate: {
+              getDefaultZoom: (callback: (factor: number) => void) => void
+              setDefaultZoom: (factor: number) => void
+            }
+          }
+        }
+      ).chrome
+      const readZoom = () => new Promise<number>((resolve) => settingsPrivate.getDefaultZoom(resolve))
+      const before = await readZoom()
+      settingsPrivate.setDefaultZoom(2)
+      return { before, after: await readZoom() }
+    })
+    expect(nativeZoom).toEqual({ before: 1, after: 2 })
     await settings.close()
     await page.bringToFront()
     await page.reload()
