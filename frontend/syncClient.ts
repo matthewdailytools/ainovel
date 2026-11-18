@@ -43,13 +43,15 @@ export class SyncResolutionChanged extends Error {}
 type Replica = { key: string; enabled: boolean; cursor: number; serial: number }
 type Queued = { key: string; id: string; position: number; pending: Pending }
 type Log = { key: string; id: string; receipt: SyncReceipt; pending?: Pending }
-type Baseline = { revision: string; signature: string }
-type Approval = { changeId: string; signature: string }
+type Baseline = { revision: string; signature: string; sequence?: number }
+type Approval = { changeId: string; signature: string; publicationId?: string | null }
 type Head = {
   key: string
   id: string
   revision: string
   sequence: number
+  firstRevision?: { id: string; sequence: number }
+  lastPublication?: { id: string; sequence: number }
   baseline?: Baseline
   approval?: Approval
 }
@@ -302,14 +304,26 @@ async function record(tx: IDBTransaction, key: string, receipt: SyncReceipt, pen
   if (receipt.status !== 'conflict') {
     const store = tx.objectStore('heads')
     const head = await wait<Head | undefined>(store.get([key, receipt.object_id]))
-    if (!head || head.sequence < receipt.sequence) {
+    const firstRevision =
+      receipt.object_id.startsWith('project-version:') &&
+      (!head?.firstRevision || head.firstRevision.sequence > receipt.sequence)
+        ? { id: receipt.change_id, sequence: receipt.sequence }
+        : head?.firstRevision
+    const latest = !head || head.sequence < receipt.sequence
+    const lastPublication =
+      pending?.kind === 'push' && (!head?.lastPublication || head.lastPublication.sequence < receipt.sequence)
+        ? { id: receipt.change_id, sequence: receipt.sequence }
+        : head?.lastPublication
+    if (latest || firstRevision !== head?.firstRevision || lastPublication !== head?.lastPublication) {
       await wait(
         store.put({
           ...head,
           key,
           id: receipt.object_id,
-          revision: receipt.change_id,
-          sequence: receipt.sequence,
+          revision: latest ? receipt.change_id : head.revision,
+          sequence: latest ? receipt.sequence : head.sequence,
+          ...(firstRevision ? { firstRevision } : {}),
+          ...(lastPublication ? { lastPublication } : {}),
         } satisfies Head),
       )
     }
@@ -369,8 +383,21 @@ export async function listSyncHeads(scope: SyncScope) {
   return transact('readonly', async (tx) => {
     const heads = await wait<Head[]>(tx.objectStore('heads').index('byReplica').getAll(key))
     return Promise.all(
-      heads.map(async (head) => ({ ...head, receipt: await receiptOf(tx, key, head.revision) })),
+      heads.map(async (head) => ({
+        ...head,
+        receipt: await receiptOf(tx, key, head.revision),
+        source: head.firstRevision ? await receiptOf(tx, key, head.firstRevision.id) : undefined,
+      })),
     )
+  })
+}
+
+export function readPublicationReceipts(scope: SyncScope, changeIds: string[]) {
+  const key = scopeKey(scope)
+  return transact('readonly', async (tx) => {
+    const store = tx.objectStore('receipts')
+    const entries = await Promise.all(changeIds.map((id) => wait<Log | undefined>(store.get([key, id]))))
+    return entries.flatMap((log) => (log?.pending?.kind === 'push' ? [log.receipt] : []))
   })
 }
 

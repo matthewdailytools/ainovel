@@ -1,6 +1,7 @@
 import asyncio
 import json
 
+from ainovel.db import DomainError
 from ainovel.worker import Worker
 from test_conception_workbench import confirm, path, save
 from test_reference_flow import SOURCE, reference as reference_fixture, update
@@ -126,6 +127,90 @@ def test_outline_versions_and_graph_ledger_track_saved_proof(client, domain, sto
     assert new["draft"]["plan"]["summary"] != old["plan"]["summary"]
     assert new["confirmed"] == old
     assert client.get(f"{endpoint}/revisions/{old['revision']}").json() == old
+
+
+def test_new_promise_plans_confirm_atomically_without_evidence(client, domain, story, monkeypatch):
+    branch = story["branch_id"]
+    first = story["chapter_id"]
+    second = domain.create_chapter(branch, "第二章")["id"]
+    base = domain.branch(branch)["story_revision"]
+    endpoint = f"/api/branches/{branch}/outline-workspace"
+    graph_route = f"/api/branches/{branch}/story-graph"
+    book_plan = {
+        "summary": "找师姐和铃声",
+        "volumes": [
+            {
+                "id": "v",
+                "title": "遗铃",
+                "summary": "追到门前",
+                "units": [
+                    {
+                        "id": "u",
+                        "title": "求证",
+                        "summary": "先查刻痕再归铃",
+                        "chapters": [
+                            {**chapter_plan(chapter, "核对线索"), "setting_ids": []}
+                            for chapter in (first, second)
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    pending = {
+        "title": "A 门内的铃声",
+        "notes": "到第二章再解释铃声从哪里传来。",
+        "plant_chapter_id": first,
+        "opens_chapter_id": second,
+        "closes_chapter_id": second,
+    }
+
+    def save_new(new_promises, revision=0):
+        return client.put(
+            endpoint, json={"base_revision": revision, "plan": {**book_plan, "new_promises": new_promises}}
+        )
+
+    wrong_order = save_new([{**pending, "plant_chapter_id": second, "opens_chapter_id": first}])
+    assert wrong_order.status_code == 400 and wrong_order.json()["code"] == "outline_window"
+    duplicate = {**pending, "title": "Ａ 门内的铃声"}
+    repeated = save_new([pending, duplicate])
+    assert repeated.status_code == 400 and repeated.json()["code"] == "outline_promise_duplicate"
+    other = {**pending, "title": "门环上的旧刻痕"}
+    response = save_new([pending, other])
+    assert response.status_code == 200, response.text
+    draft = response.json()["draft"]
+    assert draft["plan"]["new_promises"] == [pending, other]
+    assert client.get(graph_route).json()["records"] == []
+    assert domain.branch(branch)["story_revision"] == base
+
+    def fail_after_promise_writes(*args):
+        raise DomainError("checkpoint_failure", "模拟写入后检查点失败。", 409)
+
+    confirm_request = {"base_revision": draft["revision"]}
+    with monkeypatch.context() as scoped:
+        scoped.setattr("ainovel.work_snapshot.checkpoint_tx", fail_after_promise_writes)
+        failed = client.post(endpoint + "/confirm", json=confirm_request)
+        assert failed.status_code == 409 and failed.json()["code"] == "checkpoint_failure"
+    assert domain.branch(branch)["story_revision"] == base
+    assert client.get(graph_route).json()["records"] == []
+    assert client.get(endpoint).json()["draft"] == draft
+    saved = client.post(endpoint + "/confirm", json=confirm_request)
+    assert saved.status_code == 200, saved.text
+    official = saved.json()
+    assert "new_promises" not in official["confirmed"]["plan"]
+    ledger = official["promises"]
+    assert [row["title"] for row in ledger] == [pending["title"], other["title"]]
+    assert all(row["state"] == "planned" and row["stages"][0]["sources"] == [] for row in ledger)
+    records = client.get(graph_route).json()["records"]
+    assert {row["id"] for row in records} == {row["promise_id"] for row in ledger}
+    assert all(row["payload"]["sources"] == [] for row in records)
+    retry = client.post(endpoint + "/confirm", json=confirm_request)
+    assert retry.status_code == 200 and retry.json()["confirmed"] == official["confirmed"]
+    assert domain.branch(branch)["story_revision"] == base + 2
+    already_recorded = save_new([duplicate], official["confirmed"]["revision"])
+    assert (
+        already_recorded.status_code == 400 and already_recorded.json()["code"] == "outline_promise_duplicate"
+    )
 
 
 def test_writing_task_freezes_outline_and_rejects_adoption_after_new_confirmation(

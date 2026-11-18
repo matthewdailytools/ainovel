@@ -42,6 +42,19 @@
 
 .offline-workspace pre {
   white-space: pre-wrap;
+}
+
+.offline-workspace pre,
+.offline-workspace code {
+  overflow-wrap: anywhere;
+}
+
+.offline-workspace fieldset {
+  min-width: 0;
+}
+
+.offline-workspace button {
+  max-width: 100%;
   overflow-wrap: anywhere;
 }
 

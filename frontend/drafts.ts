@@ -1,6 +1,21 @@
-export type Draft = { id: string; base: number; text: string; updated: number; fromOtherWindow?: boolean }
-const windowId = sessionStorage.getItem('ainovel-draft-window') || crypto.randomUUID()
-sessionStorage.setItem('ainovel-draft-window', windowId)
+export type Draft = {
+  id: string
+  base: number
+  text: string
+  updated: number
+  revisionId?: string
+  fromOtherWindow?: boolean
+}
+const windowId = (() => {
+  const fallback = crypto.randomUUID()
+  try {
+    const id = sessionStorage.getItem('ainovel-draft-window') || fallback
+    sessionStorage.setItem('ainovel-draft-window', id)
+    return id
+  } catch {
+    return fallback
+  }
+})()
 type Stored = Draft & { chapter_id?: string; window_id?: string }
 let connection: Promise<IDBDatabase> | undefined
 function open() {
@@ -33,6 +48,16 @@ export async function writeDraft(draft: Draft): Promise<void> {
       .objectStore('drafts')
       .put({ ...draft, id: draft.id + '@' + windowId, chapter_id: draft.id, window_id: windowId })
     transaction.oncomplete = () => resolve()
-    transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error)
+  })
+}
+
+export async function discardOwnDraft(id: string): Promise<void> {
+  const db = await open()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('drafts', 'readwrite')
+    transaction.objectStore('drafts').delete(id + '@' + windowId)
+    transaction.oncomplete = () => resolve()
+    transaction.onabort = () => reject(transaction.error)
   })
 }

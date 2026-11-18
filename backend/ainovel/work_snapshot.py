@@ -21,7 +21,14 @@ from .conception import (
 )
 from .db import DomainError, dumps, uid
 from .models import Input
-from .outline_workspace import _card_key, _chapter_plans, _decode, _latest as latest_outline, _validate
+from .outline_workspace import (
+    WINDOW_CHAPTERS,
+    _card_key,
+    _chapter_plans,
+    _decode,
+    _latest as latest_outline,
+    _validate,
+)
 from .project_brief import KIND as PROJECT, confirmed_project_tx
 from .setting_review import confirmed_world_basis
 from .story_extraction import rewrite_references
@@ -670,7 +677,8 @@ def _rebase_outline(plan, chapters, records):
             chapter["chapter_id"] = target_chapter["id"]
     for promise in plan["promises"]:
         promise["promise_id"] = records.get(promise["promise_id"], promise["promise_id"])
-        for key in ("plant_chapter_id", "opens_chapter_id", "closes_chapter_id"):
+    for promise in [*plan["promises"], *plan.get("new_promises", [])]:
+        for key in WINDOW_CHAPTERS:
             if chapter := chapters.get(promise[key]):
                 promise[key] = chapter["id"]
 

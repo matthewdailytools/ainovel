@@ -109,4 +109,36 @@ test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范�
   await page.reload()
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
   await expect(panel.getByRole('heading', { name: '独立读人数汇总 · 遗铃发布版 2' })).toBeVisible()
+  await panel.getByRole('combobox', { name: '发布报告', exact: true }).selectOption({ index: 1 })
+  await expect(panel.getByRole('heading', { name: '读者事件报告 · 遗铃发布版 1' })).toBeVisible()
+
+  await file.setInputFiles({
+    name: 'reading-diagnosis.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(
+      JSON.stringify({
+        ...common,
+        mode: 'events',
+        release_version: '遗铃发布版 3',
+        window_hours: 24,
+        events: [
+          ...['甲', '乙', '丙'].flatMap((reader) => [event(0, reader, '01'), event(1, reader, '05')]),
+          event(2, '甲', '13'),
+        ],
+        publication_changes: [
+          {
+            chapter_id: chapters[2].chapter_id,
+            kind: 'access',
+            at: chapters[2].published_at,
+            note: '本章开始仅订阅读者可读。',
+          },
+        ],
+      }),
+    ),
+  })
+  await importButton.click()
+  const diagnosis = panel.getByRole('region', { name: '追读待验证线索' })
+  await expect(diagnosis).toContainText('入门 → 回声')
+  await expect(diagnosis).toContainText('33.33%')
+  await expect(diagnosis).toContainText('本章开始仅订阅读者可读。')
 })

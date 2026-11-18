@@ -7,6 +7,7 @@ import { OutlineGenerationPanel } from './OutlineGenerationPanel'
 
 type OutlinePlan = components['schemas']['OutlinePlan']
 type ChapterPlan = components['schemas']['ChapterPlan']
+type NewPromisePlan = components['schemas']['NewPromisePlan']
 type OutlineCard = components['schemas']['OutlineCard']
 type OutlineCardReference = components['schemas']['OutlineCardReference']
 export type FrozenCard = Omit<OutlineCard, 'source_title'> & { source_title?: string }
@@ -51,6 +52,13 @@ const PromiseState: Record<string, string> = {
   abandoned: '作者确认放弃',
   stale: '证据待复核',
 }
+
+const windowFields = [
+  ['plant_chapter_id', '埋设章'],
+  ['opens_chapter_id', '开始回收'],
+  ['closes_chapter_id', '最迟回收'],
+] as const
+type WindowField = (typeof windowFields)[number][0]
 
 export const outlineFields = {
   goal: '目标',
@@ -211,6 +219,28 @@ export function OutlineWorkspace({
       return next
     })
   }
+
+  function windowChapters(
+    window: Pick<NewPromisePlan, WindowField>,
+    change: (field: WindowField, id: string) => void,
+  ) {
+    return windowFields.map(([field, name]) => (
+      <label key={field}>
+        {name}
+        <select required value={window[field]} onChange={(event) => change(field, event.target.value)}>
+          <option value="">选择章纲</option>
+          {chapters
+            .filter((chapter) => usedChapters.has(chapter.id))
+            .map((chapter) => (
+              <option key={chapter.id} value={chapter.id}>
+                {chapter.title}
+              </option>
+            ))}
+        </select>
+      </label>
+    ))
+  }
+  const fullWindows = (editing.promises?.length ?? 0) + (editing.new_promises?.length ?? 0) >= 250
 
   return (
     <div className="records" id="bench-outline" tabIndex={-1}>
@@ -572,36 +602,11 @@ export function OutlineWorkspace({
                     ))}
                   </select>
                 </label>
-                {(
-                  [
-                    ['plant_chapter_id', '埋设章'],
-                    ['opens_chapter_id', '开始回收'],
-                    ['closes_chapter_id', '最迟回收'],
-                  ] as const
-                ).map(([field, name]) => (
-                  <label key={field}>
-                    {name}
-                    <select
-                      required
-                      value={window[field]}
-                      onChange={(event) => {
-                        const id = event.target.value
-                        edit((plan) => {
-                          plan.promises![index][field] = id
-                        })
-                      }}
-                    >
-                      <option value="">选择章纲</option>
-                      {chapters
-                        .filter((chapter) => usedChapters.has(chapter.id))
-                        .map((chapter) => (
-                          <option key={chapter.id} value={chapter.id}>
-                            {chapter.title}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                ))}
+                {windowChapters(window, (field, id) =>
+                  edit((plan) => {
+                    plan.promises![index][field] = id
+                  }),
+                )}
                 <button type="button" onClick={() => edit((plan) => plan.promises?.splice(index, 1))}>
                   移除窗口
                 </button>
@@ -609,7 +614,7 @@ export function OutlineWorkspace({
             ))}
             <button
               type="button"
-              disabled={!view.promise_options.length || !usedChapters.size}
+              disabled={!view.promise_options.length || !usedChapters.size || fullWindows}
               onClick={() =>
                 edit((plan) => {
                   plan.promises = [
@@ -621,8 +626,77 @@ export function OutlineWorkspace({
             >
               新增伏笔窗口
             </button>
-            {!view.promise_options.length && (
-              <p className="small">可先在「故事与审阅」建立伏笔记录，再安排窗口。</p>
+            {(editing.new_promises ?? []).map((window, index) => (
+              <fieldset key={index}>
+                <legend>新伏笔计划 {index + 1}</legend>
+                <label>
+                  伏笔标题
+                  <input
+                    required
+                    maxLength={200}
+                    value={window.title}
+                    onChange={(event) => {
+                      const title = event.target.value
+                      edit((plan) => {
+                        plan.new_promises![index].title = title
+                      })
+                    }}
+                  />
+                </label>
+                <label>
+                  计划说明
+                  <textarea
+                    maxLength={4000}
+                    value={window.notes ?? ''}
+                    onChange={(event) => {
+                      const notes = event.target.value
+                      edit((plan) => {
+                        plan.new_promises![index].notes = notes
+                      })
+                    }}
+                  />
+                </label>
+                {windowChapters(window, (field, id) =>
+                  edit((plan) => {
+                    plan.new_promises![index][field] = id
+                  }),
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    edit((plan) => {
+                      plan.new_promises?.splice(index, 1)
+                      if (!plan.new_promises?.length) delete plan.new_promises
+                    })
+                  }
+                >
+                  移除新伏笔
+                </button>
+              </fieldset>
+            ))}
+            <button
+              type="button"
+              disabled={!usedChapters.size || fullWindows}
+              onClick={() =>
+                edit((plan) => {
+                  plan.new_promises = [
+                    ...(plan.new_promises ?? []),
+                    {
+                      title: '',
+                      notes: '',
+                      plant_chapter_id: '',
+                      opens_chapter_id: '',
+                      closes_chapter_id: '',
+                    },
+                  ]
+                })
+              }
+            >
+              新建伏笔计划
+            </button>
+            {!usedChapters.size && <p className="small">添加章纲后可安排伏笔窗口。</p>}
+            {!!editing.new_promises?.length && (
+              <p className="small">确认大纲会把新伏笔加入台账，初始状态为「计划」。</p>
             )}
             <p>
               <button type="submit" className="primary" disabled={!dirty}>
@@ -690,6 +764,12 @@ export function OutlineWorkspace({
                   修订 {previous.revision} · {previous.confirmed ? '已确认' : '草稿'}
                 </h3>
                 <p>{previous.plan.summary}</p>
+                {previous.plan.new_promises?.map((window) => (
+                  <p key={window.title}>
+                    {window.title} · {chapterName(window.plant_chapter_id)} 至{' '}
+                    {chapterName(window.closes_chapter_id)}
+                  </p>
+                ))}
                 {(previous.plan.volumes ?? []).map((volume) => (
                   <details key={volume.id}>
                     <summary>{volume.title}</summary>

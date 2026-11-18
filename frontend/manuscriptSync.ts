@@ -1,11 +1,16 @@
 import {
   applySyncedObject,
-  exportLocalManuscript,
+  acknowledgeLocalPublications,
+  manuscriptHash,
+  readLocalPublications,
+  readLocalSyncSnapshot,
   syncManuscriptObjects,
   syncObjectSignature,
   validateSyncedObject,
+  type LocalPublication,
   type LocalProject,
 } from './offlineStore'
+import type { ProjectVersionRecord } from './projectSyncModel'
 import {
   approveSyncResolution,
   listSyncHeads,
@@ -14,6 +19,7 @@ import {
   pushSyncPending,
   queueSyncChange,
   queueSyncResolution,
+  readPublicationReceipts,
   readSyncConflict,
   readSyncState,
   SyncResolutionChanged,
@@ -79,11 +85,68 @@ async function pull(scope: SyncScope, transport: SyncTransport) {
   throw new Error('尚有云端历史待读取，已保留游标，请再次同步。')
 }
 
+function orderProjectVersions(versions: ProjectVersionRecord[]) {
+  const byId = new Map(versions.map((entry) => [entry.version.id, entry]))
+  const seen = new Set<string>()
+  const ordered: ProjectVersionRecord[] = []
+  for (const entry of versions) {
+    const path: ProjectVersionRecord[] = []
+    let revision: ProjectVersionRecord | undefined = entry
+    while (revision && !seen.has(revision.version.id)) {
+      path.push(revision)
+      seen.add(revision.version.id)
+      revision = revision.version.parent_id ? byId.get(revision.version.parent_id) : undefined
+    }
+    ordered.push(...path.reverse())
+  }
+  return ordered
+}
+
+async function localObjects(project: LocalProject) {
+  const {
+    manuscript,
+    brief: { versions, current },
+    publications,
+  } = await readLocalSyncSnapshot(project.novel.id)
+  const objects = syncManuscriptObjects(manuscript)
+  const format = 'ainovel-manuscript-sync/1'
+  const branch_id = project.branch.id
+  for (const { version } of orderProjectVersions(versions))
+    objects.set(`project-version:${version.id}`, { format, kind: 'project-version', branch_id, version })
+  if (current)
+    objects.set(`project:${branch_id}`, {
+      format,
+      kind: 'project-head',
+      branch_id,
+      revision_id: current.version.id,
+    })
+  return { objects, versions, publications: new Map(publications.map((record) => [record.objectId, record])) }
+}
+
+function publicationChangeId(scope: SyncScope, record: LocalPublication) {
+  return manuscriptHash(
+    JSON.stringify([scope.service, scope.workId, scope.deviceId, record.objectId, record.id]),
+  )
+}
+
+async function acknowledgePublications(scope: SyncScope) {
+  const pending = await readLocalPublications(scope.workId)
+  if (!pending.length) return
+  const ids = await Promise.all(pending.map((record) => publicationChangeId(scope, record)))
+  const receipts = new Map(
+    (await readPublicationReceipts(scope, ids)).map((receipt) => [receipt.change_id, receipt]),
+  )
+  await acknowledgeLocalPublications(
+    pending.filter(({ objectId }, index) => receipts.get(ids[index])?.object_id === objectId),
+  )
+}
+
 async function reconcile(project: LocalProject, scope: SyncScope) {
   const { blockedObjects } = await readSyncState(scope)
-  const local = syncManuscriptObjects(await exportLocalManuscript(project.novel.id))
+  const { objects: local, publications } = await localObjects(project)
   const deferred = new Map<string, string>()
-  const priority = (id: string) => (id.startsWith('revision:') ? 0 : id.startsWith('evidence:') ? 2 : 1)
+  const priority = (id: string) =>
+    id.startsWith('revision:') || id.startsWith('project-version:') ? 0 : id.startsWith('evidence:') ? 2 : 1
   const depth = (payload: SyncPayload | null | undefined) => {
     const revision = payload?.revision
     return revision &&
@@ -97,7 +160,8 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
     (left, right) =>
       priority(left.id) - priority(right.id) ||
       depth(left.receipt?.payload) - depth(right.receipt?.payload) ||
-      (left.receipt?.sequence ?? 0) - (right.receipt?.sequence ?? 0),
+      (left.source?.sequence ?? left.receipt?.sequence ?? 0) -
+        (right.source?.sequence ?? right.receipt?.sequence ?? 0),
   )
   for (const head of heads) {
     if (!head.receipt || head.baseline?.revision === head.revision || blockedObjects.includes(head.id))
@@ -108,12 +172,46 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
       const signature = syncObjectSignature(local.get(head.id) ?? null)
       const resolution = head.approval?.changeId === head.revision ? head.approval : undefined
       const safeBase = resolution?.signature ?? head.baseline?.signature ?? 'null'
+      const publicationId = publications.get(head.id)?.id ?? null
+      if (object?.kind === 'project-version') {
+        const { device_id, change_id, sequence } = head.source ?? head.receipt
+        await applySyncedObject(project.novel.id, head.id, object, signature, {
+          source: { device_id, change_id, sequence },
+        })
+        await markSyncBaseline(scope, head.id, {
+          revision: head.revision,
+          signature: target,
+          sequence: head.sequence,
+        })
+        continue
+      }
       if (object?.kind === 'revision' && signature !== 'null' && signature !== target) {
         deferred.set(head.id, '云端和本机以同一来源编号保存了不同修订，待人工核查。')
         continue
       }
-      if (signature !== target && signature === safeBase) {
-        if (!(await applySyncedObject(project.novel.id, head.id, object, signature))) {
+      const adoptsHead = head.id.startsWith('chapter:') || head.id.startsWith('project:')
+      if (
+        resolution &&
+        ((resolution.publicationId ?? null) !== publicationId || resolution.signature !== signature)
+      )
+        continue
+      if (adoptsHead && publicationId && !resolution) {
+        if (head.lastPublication?.id === head.revision)
+          await markSyncBaseline(scope, head.id, {
+            revision: head.revision,
+            signature: target,
+            sequence: head.sequence,
+          })
+        // An earlier accepted send becomes the CAS base. The newer local save remains pending.
+        continue
+      }
+      if ((signature !== target && signature === safeBase) || (resolution && publicationId)) {
+        if (
+          !(await applySyncedObject(project.novel.id, head.id, object, signature, {
+            publicationId,
+            consumePublication: !!resolution,
+          }))
+        ) {
           deferred.set(head.id, '本机内容已变化，下次同步会重新核对。')
           continue
         }
@@ -122,7 +220,11 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         // If the author kept writing, submit their newer version against its prior baseline.
         continue
       }
-      await markSyncBaseline(scope, head.id, { revision: head.revision, signature: target })
+      await markSyncBaseline(scope, head.id, {
+        revision: head.revision,
+        signature: target,
+        sequence: head.sequence,
+      })
     } catch (error) {
       deferred.set(head.id, error instanceof Error ? error.message : '云端对象待核对。')
     }
@@ -137,27 +239,38 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
     state.pending.map((entry) => (entry.kind === 'push' ? entry.request.object_id : entry.object_id)),
   )
   const heads = new Map((await listSyncHeads(scope)).map((head) => [head.id, head]))
-  const objects = syncManuscriptObjects(await exportLocalManuscript(project.novel.id))
+  const { objects, publications } = await localObjects(project)
   for (const [id, object] of objects) {
     if (object && new TextEncoder().encode(JSON.stringify(object)).length > 1024 * 1024 - 4096) {
       unsent.set(id, '本机对象超过单项同步限制，可导出稿件包供独立工作区检查。')
       continue
     }
-    const base = heads.get(id)?.baseline
+    const marker = publications.get(id)
+    const head = heads.get(id)
+    const base = head?.baseline
     const signature = syncObjectSignature(object)
     if (
-      signature === (base?.signature ?? 'null') ||
+      (!marker && signature === (base?.signature ?? 'null')) ||
       pending.has(id) ||
       deferred.has(id) ||
       state.blockedObjects.includes(id)
     )
       continue
-    await queueSyncChange(scope, {
-      object_id: id,
-      parent_revision: base?.revision ?? null,
-      payload: object as SyncPayload | null,
-      tombstone: object === null,
-    })
+    const acknowledged = head?.lastPublication
+    const parent =
+      marker && acknowledged && acknowledged.sequence > (base?.sequence ?? 0)
+        ? acknowledged.id
+        : base?.revision
+    await queueSyncChange(
+      scope,
+      {
+        object_id: id,
+        parent_revision: parent ?? null,
+        payload: object as SyncPayload | null,
+        tombstone: object === null,
+      },
+      marker ? await publicationChangeId(scope, marker) : undefined,
+    )
   }
   return unsent
 }
@@ -166,13 +279,16 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
   if (scope.workId !== project.branch.id) throw new Error('同步范围与当前工作版本不一致。')
   async function exchange() {
     await pull(scope, transport)
+    await acknowledgePublications(scope)
     const deferred = await reconcile(project, scope)
     const unsent = await draftChanges(project, scope, deferred)
     await pushSyncPending(scope, transport)
     await pull(scope, transport)
+    await acknowledgePublications(scope)
     const remaining = await reconcile(project, scope)
     return {
       ...(await readSyncState(scope)),
+      localPending: (await readLocalPublications(scope.workId)).length,
       deferred: [...new Map([...unsent, ...remaining])].map(([object_id, reason]) => ({ object_id, reason })),
     }
   }
@@ -188,10 +304,17 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
 export async function prepareWebResolution(project: LocalProject, scope: SyncScope, id: string) {
   const compared = await readSyncConflict(scope, id)
   if (!compared?.current || compared.resolvedBy) throw new Error('冲突已变化，请再次同步。')
-  const object =
-    syncManuscriptObjects(await exportLocalManuscript(project.novel.id)).get(compared.incoming.object_id) ??
-    null
-  return { ...compared, current: compared.current, object, signature: syncObjectSignature(object) }
+  const { objects, versions, publications } = await localObjects(project)
+  const object = objects.get(compared.incoming.object_id) ?? null
+  const publicationId = publications.get(compared.incoming.object_id)?.id ?? null
+  return {
+    ...compared,
+    current: compared.current,
+    object,
+    versions,
+    signature: syncObjectSignature(object),
+    publicationId,
+  }
 }
 
 export async function resolveWebManuscript(
@@ -203,11 +326,24 @@ export async function resolveWebManuscript(
 ) {
   const id = compared.incoming.conflict_id!
   const fresh = await prepareWebResolution(project, scope, id)
-  if (fresh.current.change_id !== compared.current.change_id || fresh.signature !== compared.signature)
+  if (
+    fresh.current.change_id !== compared.current.change_id ||
+    fresh.signature !== compared.signature ||
+    fresh.publicationId !== compared.publicationId
+  )
     throw new Error('本机或云端版本已变化，请重新比较。')
+  if (choice === 'local' && fresh.object?.kind === 'project-head') {
+    const selected = fresh.object.revision_id
+    if (!fresh.versions.some(({ version, source }) => source && version.id === selected))
+      throw new Error('本机立项刚有新确认，请先同步源修订，再比较冲突。')
+  }
   const resolutionId = crypto.randomUUID()
   const objectId = compared.incoming.object_id
-  await approveSyncResolution(scope, objectId, { changeId: resolutionId, signature: compared.signature })
+  await approveSyncResolution(scope, objectId, {
+    changeId: resolutionId,
+    signature: compared.signature,
+    publicationId: compared.publicationId,
+  })
   const parent_revision = compared.current.change_id
   await queueSyncResolution(
     scope,

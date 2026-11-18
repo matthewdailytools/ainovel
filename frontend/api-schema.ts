@@ -1220,6 +1220,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/conception/setting-inspection': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Inspect Workspace Settings */
+    post: operations['inspect_workspace_settings_api_branches__branch_id__conception_setting_inspection_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/conception/items/{item_id}/history': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Setting Item History */
+    get: operations['get_setting_item_history_api_branches__branch_id__conception_items__item_id__history_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/conception/items/{item_id}/restore': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Restore Workspace Setting Item */
+    post: operations['restore_workspace_setting_item_api_branches__branch_id__conception_items__item_id__restore_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/conception/adopt': {
     parameters: {
       query?: never
@@ -3031,6 +3082,8 @@ export interface components {
       project?: components['schemas']['ConfirmedProject'] | null
       /** Project Impacts */
       project_impacts?: components['schemas']['ConceptionProjectImpact'][]
+      /** Setting Findings */
+      setting_findings?: components['schemas']['SettingFinding'][]
     }
     /** ConceptionWorldExtractInput */
     ConceptionWorldExtractInput: {
@@ -3082,6 +3135,8 @@ export interface components {
       note: string
       /** Reconciled Project Items */
       reconciled_project_items?: string[]
+      /** Reviewed Setting Findings */
+      reviewed_setting_findings?: string[]
     }
     /** ConfirmOutline */
     ConfirmOutline: {
@@ -3595,6 +3650,7 @@ export interface components {
       evidence?: components['schemas']['PortableEvidence'][]
       /** Source Revisions */
       source_revisions?: components['schemas']['PortableRevision'][]
+      project_history?: components['schemas']['ProjectHistory'] | null
     }
     /** Mapping */
     Mapping: {
@@ -3770,6 +3826,22 @@ export interface components {
       /** Chapter Id */
       chapter_id?: string | null
     }
+    /** NewPromisePlan */
+    NewPromisePlan: {
+      /** Plant Chapter Id */
+      plant_chapter_id: string
+      /** Opens Chapter Id */
+      opens_chapter_id: string
+      /** Closes Chapter Id */
+      closes_chapter_id: string
+      /** Title */
+      title: string
+      /**
+       * Notes
+       * @default
+       */
+      notes: string
+    }
     /** NovelInput */
     NovelInput: {
       /** Title */
@@ -3827,6 +3899,8 @@ export interface components {
       volumes?: components['schemas']['VolumePlan'][]
       /** Promises */
       promises?: components['schemas']['PromiseWindow'][]
+      /** New Promises */
+      new_promises?: components['schemas']['NewPromisePlan'][]
     }
     /** OutlineProposal */
     OutlineProposal: {
@@ -4019,6 +4093,23 @@ export interface components {
       /** Idea */
       idea: string
     }
+    /** ProjectHistory */
+    ProjectHistory: {
+      /** Adopted Revision Id */
+      adopted_revision_id: string | null
+      /** Versions */
+      versions: components['schemas']['ProjectVersion'][]
+    }
+    /** ProjectVersion */
+    ProjectVersion: {
+      /** Id */
+      id: string
+      /** Parent Id */
+      parent_id: string | null
+      /** Idea */
+      idea: string
+      brief: components['schemas']['ProjectBrief']
+    }
     /** Promise */
     Promise: {
       /** Title */
@@ -4069,14 +4160,14 @@ export interface components {
     }
     /** PromiseWindow */
     PromiseWindow: {
-      /** Promise Id */
-      promise_id: string
       /** Plant Chapter Id */
       plant_chapter_id: string
       /** Opens Chapter Id */
       opens_chapter_id: string
       /** Closes Chapter Id */
       closes_chapter_id: string
+      /** Promise Id */
+      promise_id: string
     }
     /** PublicationChange */
     PublicationChange: {
@@ -4392,6 +4483,17 @@ export interface components {
       /** Title */
       title: string
     }
+    /** RestoreSettingItem */
+    RestoreSettingItem: {
+      /** Base Revision */
+      base_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Idempotency Key */
+      idempotency_key: string
+      /** Source Workspace Id */
+      source_workspace_id: string
+    }
     /** ResumeInput */
     ResumeInput: {
       /**
@@ -4581,6 +4683,116 @@ export interface components {
       start: number
       /** End */
       end: number
+    }
+    /** SettingFinding */
+    SettingFinding: {
+      /** Id */
+      id: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind:
+        | 'same_name'
+        | 'missing_link'
+        | 'self_link'
+        | 'duplicate_link'
+        | 'skipped_link'
+        | 'empty_link'
+        | 'policy_link'
+      /** Locations */
+      locations: components['schemas']['SettingFindingLocation'][]
+      /**
+       * Reviewed
+       * @default false
+       */
+      reviewed: boolean
+    }
+    /** SettingFindingLocation */
+    SettingFindingLocation: {
+      /** Item Id */
+      item_id: string
+      /** Category Id */
+      category_id?: string | null
+      /** Category Title */
+      category_title?: string | null
+      /** Item Number */
+      item_number?: number | null
+      /** Link Number */
+      link_number?: number | null
+    }
+    /** SettingInspection */
+    SettingInspection: {
+      /** Findings */
+      findings: components['schemas']['SettingFinding'][]
+    }
+    /** SettingItemHistory */
+    SettingItemHistory: {
+      /** Base Revision */
+      base_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      current: components['schemas']['SettingItemState'] | null
+      /** Entries */
+      entries: components['schemas']['SettingItemVersion'][]
+      /** Next Before Revision */
+      next_before_revision: number | null
+    }
+    /** SettingItemProvenance */
+    SettingItemProvenance: {
+      /**
+       * Origin
+       * @enum {string}
+       */
+      origin: 'author' | 'ai' | 'sync'
+      /** Artifact Id */
+      artifact_id?: string | null
+      /** Source Origin */
+      source_origin?: ('author' | 'ai') | null
+      /** Source Device Id */
+      source_device_id?: string | null
+      /** Source Artifact Id */
+      source_artifact_id?: string | null
+      /** Source Revision Id */
+      source_revision_id?: string | null
+      /** Project Confirmation Id */
+      project_confirmation_id?: string | null
+      /** Project Revision */
+      project_revision?: number | null
+      /**
+       * Author Edited
+       * @default false
+       */
+      author_edited: boolean
+      evidence?: components['schemas']['Source'] | null
+      /**
+       * Evidence Current
+       * @default false
+       */
+      evidence_current: boolean
+    }
+    /** SettingItemState */
+    SettingItemState: {
+      /** Category Id */
+      category_id: string
+      /** Category Title */
+      category_title: string
+      /** Item Number */
+      item_number: number
+      item: components['schemas']['ConceptionItem']
+      provenance: components['schemas']['SettingItemProvenance']
+    }
+    /** SettingItemVersion */
+    SettingItemVersion: {
+      /** Workspace Id */
+      workspace_id: string
+      /** Revision */
+      revision: number
+      /** Created */
+      created: number
+      state: components['schemas']['SettingItemState'] | null
+      /** Restored From */
+      restored_from?: string | null
     }
     /** SettingPolicy */
     SettingPolicy: {
@@ -7664,6 +7876,112 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['SaveConception']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConceptionWorkspace']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  inspect_workspace_settings_api_branches__branch_id__conception_setting_inspection_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveConception']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SettingInspection']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_setting_item_history_api_branches__branch_id__conception_items__item_id__history_get: {
+    parameters: {
+      query?: {
+        before_revision?: number | null
+        limit?: number
+      }
+      header?: never
+      path: {
+        branch_id: string
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SettingItemHistory']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  restore_workspace_setting_item_api_branches__branch_id__conception_items__item_id__restore_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RestoreSettingItem']
       }
     }
     responses: {

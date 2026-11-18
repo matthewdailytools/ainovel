@@ -1,3 +1,15 @@
+import {
+  validateProjectDraft,
+  validateProjectHistory,
+  validateProjectSyncObject,
+  type ProjectHeadObject,
+  type ProjectHistory,
+  type ProjectSource,
+  type ProjectVersion,
+  type ProjectVersionObject,
+  type ProjectVersionRecord,
+} from './projectSyncModel'
+
 const DATABASE = 'ainovel-offline-workspace'
 const FORMAT = 'ainovel-manuscript/1'
 export const maxManuscriptBytes = 24 * 1024 * 1024
@@ -46,6 +58,7 @@ export type ManuscriptPack = LocalProject & {
   chapters: LocalChapter[]
   revisions: LocalRevision[]
   source_revisions?: LocalRevision[]
+  project_history?: ProjectHistory
 }
 const SYNC_FORMAT = 'ainovel-manuscript-sync/1'
 export type SyncedObject =
@@ -53,6 +66,8 @@ export type SyncedObject =
   | { format: typeof SYNC_FORMAT; kind: 'chapter'; chapter: LocalChapter; head: LocalRevision }
   | { format: typeof SYNC_FORMAT; kind: 'revision'; branch_id: string; revision: LocalRevision }
   | { format: typeof SYNC_FORMAT; kind: 'evidence'; document: LocalEvidence }
+  | ProjectHeadObject
+  | ProjectVersionObject
 
 function revisionSignature(row: LocalRevision) {
   return [row.id, row.chapter_id, row.revision, row.parent_id, row.sha256, row.cause, row.created]
@@ -81,6 +96,10 @@ export function syncObjectSignature(object: SyncedObject | null) {
   if (object?.kind === 'revision') {
     return JSON.stringify(['revision', object.branch_id, ...revisionSignature(object.revision)])
   }
+  if (object?.kind === 'project-head')
+    return JSON.stringify([object.kind, object.branch_id, object.revision_id])
+  if (object?.kind === 'project-version')
+    return JSON.stringify([object.kind, object.branch_id, object.version])
   return 'null'
 }
 
@@ -115,7 +134,20 @@ export function syncManuscriptObjects(pack: ManuscriptPack): Map<string, SyncedO
   }
   return objects
 }
-type Store = 'projects' | 'chapters' | 'revisions' | 'sourceRevisions'
+type Store =
+  | 'projects'
+  | 'chapters'
+  | 'revisions'
+  | 'sourceRevisions'
+  | 'projectHeads'
+  | 'projectVersions'
+  | 'publications'
+type LocalProjectVersion = ProjectVersionRecord & { branchId: string }
+type LocalProjectHead = { branchId: string; versionId: string }
+export type LocalPublication = { branchId: string; objectId: string; id: string }
+type ApplyOptions = { source?: ProjectSource; publicationId?: string | null; consumePublication?: boolean }
+const projectStores = ['projects', 'projectHeads', 'projectVersions'] satisfies Store[]
+const manuscriptStores = ['projects', 'chapters', 'revisions', 'sourceRevisions'] satisfies Store[]
 
 export class OfflineStoreError extends Error {
   constructor(
@@ -135,7 +167,7 @@ function result<T>(request: IDBRequest<T>): Promise<T> {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 2)
+    const request = indexedDB.open(DATABASE, 4)
     let blocked = false
     request.onblocked = () => {
       blocked = true
@@ -152,7 +184,20 @@ function openDatabase(): Promise<IDBDatabase> {
         revisions.createIndex('byChapter', 'chapter_id')
         revisions.createIndex('byRevision', ['chapter_id', 'revision'], { unique: true })
       }
-      db.createObjectStore('sourceRevisions', { keyPath: ['branchId', 'revision.id'] }).createIndex(
+      if (event.oldVersion < 2) {
+        db.createObjectStore('sourceRevisions', { keyPath: ['branchId', 'revision.id'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
+      }
+      if (event.oldVersion < 3) {
+        db.createObjectStore('projectHeads', { keyPath: 'branchId' })
+        db.createObjectStore('projectVersions', { keyPath: ['branchId', 'version.id'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
+      }
+      db.createObjectStore('publications', { keyPath: ['branchId', 'objectId'] }).createIndex(
         'byBranch',
         'branchId',
       )
@@ -336,7 +381,7 @@ export function listLocalChapters(projectId: string): Promise<LocalChapter[]> {
 export async function createLocalChapter(projectId: string, title: string): Promise<LocalChapter> {
   const chapterTitle = content(title.trim(), 200, '章节名', true)
   const emptyHash = await manuscriptHash('')
-  return transact(['projects', 'chapters', 'revisions'], 'readwrite', async (tx) => {
+  return transact(['projects', 'chapters', 'revisions', 'publications'], 'readwrite', async (tx) => {
     const project = await readProject(tx, projectId)
     const chapters = await listChaptersTx(tx, project.branch.id)
     const chapter: LocalChapter = {
@@ -362,6 +407,7 @@ export async function createLocalChapter(projectId: string, title: string): Prom
     await result(tx.objectStore('chapters').add(chapter))
     await result(tx.objectStore('revisions').add(revision))
     await result(tx.objectStore('projects').put(project))
+    await markPublication(tx, chapter.branch_id, `revision:${revision.id}`, `chapter:${chapter.id}`)
     return chapter
   })
 }
@@ -387,7 +433,7 @@ export async function saveLocalChapter(
   }
   const body = content(text, 250_000, '正文')
   const sha256 = await manuscriptHash(body)
-  return transact(['projects', 'chapters', 'revisions'], 'readwrite', async (tx) => {
+  return transact(['projects', 'chapters', 'revisions', 'publications'], 'readwrite', async (tx) => {
     const project = await readProject(tx, projectId)
     const chapter = await readChapter(tx, project, chapterId)
     const versions = tx.objectStore('revisions')
@@ -413,24 +459,43 @@ export async function saveLocalChapter(
     await result(versions.add(revision))
     await result(tx.objectStore('chapters').put(chapter))
     await result(tx.objectStore('projects').put(project))
+    await markPublication(tx, chapter.branch_id, `revision:${revision.id}`, `chapter:${chapter.id}`)
     return revision
   })
 }
 
+async function readManuscript(tx: IDBTransaction, project: LocalProject): Promise<ManuscriptPack> {
+  const chapters = await listChaptersTx(tx, project.branch.id)
+  const revisions = (await Promise.all(chapters.map((chapter) => historyTx(tx, chapter.id)))).flat()
+  const sources = await result<{ revision: LocalRevision }[]>(
+    tx.objectStore('sourceRevisions').index('byBranch').getAll(project.branch.id),
+  )
+  return {
+    format: FORMAT,
+    ...project,
+    chapters,
+    revisions,
+    ...(sources.length ? { source_revisions: sources.map(({ revision }) => revision) } : {}),
+  }
+}
+
 export function exportLocalManuscript(projectId: string): Promise<ManuscriptPack> {
-  return transact(['projects', 'chapters', 'revisions', 'sourceRevisions'], 'readonly', async (tx) => {
+  return transact([...manuscriptStores, 'projectHeads', 'projectVersions'], 'readonly', async (tx) => {
     const project = await readProject(tx, projectId)
-    const chapters = await listChaptersTx(tx, project.branch.id)
-    const revisions = (await Promise.all(chapters.map((chapter) => historyTx(tx, chapter.id)))).flat()
-    const sources = await result<{ revision: LocalRevision }[]>(
-      tx.objectStore('sourceRevisions').index('byBranch').getAll(project.branch.id),
-    )
+    const [manuscript, brief] = await Promise.all([
+      readManuscript(tx, project),
+      readProjectBrief(tx, project.branch.id),
+    ])
     return {
-      format: FORMAT,
-      ...project,
-      chapters,
-      revisions,
-      ...(sources.length ? { source_revisions: sources.map(({ revision }) => revision) } : {}),
+      ...manuscript,
+      ...(brief.versions.length
+        ? {
+            project_history: {
+              adopted_revision_id: brief.current?.version.id ?? null,
+              versions: brief.versions.map(({ version }) => version),
+            },
+          }
+        : {}),
     }
   })
 }
@@ -453,6 +518,146 @@ export function readLocalSourceRevision(projectId: string, revisionId: string) {
   })
 }
 
+function getProjectHead(tx: IDBTransaction, branchId: string) {
+  return result<LocalProjectHead | undefined>(tx.objectStore('projectHeads').get(branchId))
+}
+
+function getProjectVersion(tx: IDBTransaction, branchId: string, versionId: string) {
+  return result<LocalProjectVersion | undefined>(tx.objectStore('projectVersions').get([branchId, versionId]))
+}
+
+async function putProjectHead(tx: IDBTransaction, project: LocalProject, versionId: string) {
+  await result(tx.objectStore('projectHeads').put({ branchId: project.branch.id, versionId }))
+  project.branch.story_revision++
+  await result(tx.objectStore('projects').put(project))
+}
+
+async function readProjectBrief(tx: IDBTransaction, branchId: string) {
+  const versions = await result<LocalProjectVersion[]>(
+    tx.objectStore('projectVersions').index('byBranch').getAll(branchId),
+  )
+  const head = await getProjectHead(tx, branchId)
+  return { versions, current: versions.find(({ version }) => version.id === head?.versionId) }
+}
+
+export function readLocalProjectBrief(projectId: string) {
+  return transact(projectStores, 'readonly', async (tx) =>
+    readProjectBrief(tx, (await readProject(tx, projectId)).branch.id),
+  )
+}
+
+function publicationRows(tx: IDBTransaction, branchId: string) {
+  return result<LocalPublication[]>(tx.objectStore('publications').index('byBranch').getAll(branchId))
+}
+
+function readPublication(tx: IDBTransaction, branchId: string, objectId: string) {
+  return result<LocalPublication | undefined>(tx.objectStore('publications').get([branchId, objectId]))
+}
+
+async function markPublication(tx: IDBTransaction, branchId: string, ...objects: string[]) {
+  await Promise.all(
+    objects.map((objectId) =>
+      result(
+        tx.objectStore('publications').put({ branchId, objectId, id: newId() } satisfies LocalPublication),
+      ),
+    ),
+  )
+}
+
+export function readLocalPublications(branchId: string) {
+  return transact(['publications'], 'readonly', (tx) => publicationRows(tx, branchId))
+}
+
+export function acknowledgeLocalPublications(records: LocalPublication[]) {
+  return transact(['publications'], 'readwrite', async (tx) => {
+    for (const { branchId, objectId, id } of records) {
+      if ((await readPublication(tx, branchId, objectId))?.id === id)
+        await result(tx.objectStore('publications').delete([branchId, objectId]))
+    }
+  })
+}
+
+export function readLocalSyncSnapshot(projectId: string) {
+  return transact(
+    [...manuscriptStores, 'projectHeads', 'projectVersions', 'publications'],
+    'readonly',
+    async (tx) => {
+      const project = await readProject(tx, projectId)
+      const branchId = project.branch.id
+      const [manuscript, brief, publications] = await Promise.all([
+        readManuscript(tx, project),
+        readProjectBrief(tx, branchId),
+        publicationRows(tx, branchId),
+      ])
+      return { manuscript, brief, publications }
+    },
+  )
+}
+
+export function confirmLocalProjectBrief(
+  projectId: string,
+  base: string | null,
+  draft: Pick<ProjectVersion, 'idea' | 'brief'>,
+) {
+  const version = { id: newId(), parent_id: base, ...validateProjectDraft(draft.idea, draft.brief) }
+  return transact([...projectStores, 'publications'], 'readwrite', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const branchId = project.branch.id
+    const current = await getProjectHead(tx, branchId)
+    if ((current?.versionId ?? null) !== base)
+      throw new OfflineStoreError('conflict', '立项在其他窗口已有新确认，请核对后再提交。')
+    await result(tx.objectStore('projectVersions').add({ branchId, version } satisfies LocalProjectVersion))
+    await putProjectHead(tx, project, version.id)
+    await markPublication(tx, branchId, `project-version:${version.id}`, `project:${branchId}`)
+    return version
+  })
+}
+
+async function applyProjectObject(
+  projectId: string,
+  object: ProjectHeadObject | ProjectVersionObject,
+  expected: string,
+  options: ApplyOptions,
+) {
+  return transact([...projectStores, 'publications'], 'readwrite', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const branchId = project.branch.id
+    if (object.branch_id !== branchId) invalid('立项范围与工作版本不符。')
+    if (object.kind === 'project-version') {
+      const { source } = options
+      const version = object.version
+      const existing = await getProjectVersion(tx, branchId, version.id)
+      if (
+        existing &&
+        syncObjectSignature({ ...object, version: existing.version }) !== syncObjectSignature(object)
+      )
+        invalid('同一立项的源修订保存了不同内容。')
+      if (version.parent_id && !(await getProjectVersion(tx, branchId, version.parent_id)))
+        throw new OfflineStoreError('missing', '缺少立项父版本，待云端历史到齐。')
+      if ((!existing || !existing.source) && source) {
+        await result(
+          tx.objectStore('projectVersions').put({ branchId, version, source } satisfies LocalProjectVersion),
+        )
+      }
+      return !!existing || !!source
+    }
+    const local = await getProjectHead(tx, branchId)
+    const before = local ? { ...object, revision_id: local.versionId } : null
+    const publication = await readPublication(tx, branchId, `project:${branchId}`)
+    if (
+      syncObjectSignature(before) !== expected ||
+      (options.publicationId !== undefined && options.publicationId !== (publication?.id ?? null))
+    )
+      return false
+    const version = await getProjectVersion(tx, branchId, object.revision_id)
+    if (!version?.source) throw new OfflineStoreError('missing', '缺少采用立项的云端来源记录。')
+    if (local?.versionId !== object.revision_id) await putProjectHead(tx, project, object.revision_id)
+    if (options.consumePublication && publication)
+      await result(tx.objectStore('publications').delete([branchId, publication.objectId]))
+    return true
+  })
+}
+
 function sourceLink(revision: LocalRevision, parent: LocalRevision | undefined) {
   return revision.revision === 0
     ? revision.parent_id === null
@@ -470,6 +675,8 @@ export async function validateSyncedObject(
   objectId: string,
   value: unknown,
 ): Promise<SyncedObject | null> {
+  if (objectId.startsWith('project:') || objectId.startsWith('project-version:'))
+    return validateProjectSyncObject(project.branch.id, objectId, value)
   if (value === null && objectId.startsWith('chapter:')) {
     identity(objectId.slice(8))
     return null
@@ -543,8 +750,11 @@ export function applySyncedObject(
   objectId: string,
   object: SyncedObject | null,
   expected: string,
+  options: ApplyOptions = {},
 ) {
-  return transact(['projects', 'chapters', 'revisions', 'sourceRevisions'], 'readwrite', async (tx) => {
+  if (object?.kind === 'project-head' || object?.kind === 'project-version')
+    return applyProjectObject(projectId, object, expected, options)
+  return transact([...manuscriptStores, 'publications'], 'readwrite', async (tx) => {
     const project = await readProject(tx, projectId)
     const projectStore = tx.objectStore('projects')
     const branchId = project.branch.id
@@ -613,7 +823,12 @@ export function applySyncedObject(
       old && !old.archived && head
         ? ({ format: SYNC_FORMAT, kind: 'chapter', chapter: old, head } as const)
         : null
-    if (syncObjectSignature(local) !== expected) return false
+    const publication = await readPublication(tx, branchId, objectId)
+    if (
+      syncObjectSignature(local) !== expected ||
+      (options.publicationId !== undefined && options.publicationId !== (publication?.id ?? null))
+    )
+      return false
     if (!object) {
       if (old && !old.archived) await result(chapters.put({ ...old, archived: 1 }))
     } else {
@@ -666,6 +881,8 @@ export function applySyncedObject(
     }
     project.branch.story_revision++
     await result(projectStore.put(project))
+    if (options.consumePublication && publication)
+      await result(tx.objectStore('publications').delete([branchId, objectId]))
     return true
   })
 }
@@ -742,6 +959,7 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     'revisions',
     'evidence',
     'source_revisions',
+    'project_history',
   ])
   if (pack.format !== FORMAT) invalid('稿件交换包格式无法读取，请使用兼容版本。')
   const n = fields(pack.novel, ['id', 'title', 'brief', 'created'])
@@ -834,6 +1052,14 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
       evidence.push(document)
     }
   }
+  let project_history: ProjectHistory | undefined
+  if (pack.project_history != null) {
+    try {
+      project_history = validateProjectHistory(pack.project_history)
+    } catch (error) {
+      invalid(error instanceof Error ? error.message : '立项历史格式无效。')
+    }
+  }
   return {
     format: FORMAT,
     novel,
@@ -842,6 +1068,7 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     revisions,
     ...(evidence.length ? { evidence } : {}),
     ...(source_revisions.length ? { source_revisions } : {}),
+    ...(project_history ? { project_history } : {}),
   }
 }
 
@@ -853,14 +1080,31 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
   } catch {
     invalid('无法读取稿件交换包 JSON。')
   }
-  const { novel, branch, chapters, revisions, evidence, source_revisions } = await validateManuscript(value)
-  return transact(['projects', 'chapters', 'revisions', 'sourceRevisions'], 'readwrite', async (tx) => {
+  const { novel, branch, chapters, revisions, evidence, source_revisions, project_history } =
+    await validateManuscript(value)
+  return transact([...manuscriptStores, 'projectHeads', 'projectVersions'], 'readwrite', async (tx) => {
     const project = { novel, branch, ...(evidence?.length ? { evidence } : {}) }
     await result(tx.objectStore('projects').add(project))
     for (const chapter of chapters) await result(tx.objectStore('chapters').add(chapter))
     for (const revision of revisions) await result(tx.objectStore('revisions').add(revision))
     for (const revision of source_revisions ?? [])
       await result(tx.objectStore('sourceRevisions').add({ branchId: branch.id, revision }))
+    if (project_history) {
+      for (const version of project_history.versions) {
+        await result(
+          tx
+            .objectStore('projectVersions')
+            .add({ branchId: branch.id, version, fromPackage: true } satisfies LocalProjectVersion),
+        )
+      }
+      if (project_history.adopted_revision_id)
+        await result(
+          tx.objectStore('projectHeads').add({
+            branchId: branch.id,
+            versionId: project_history.adopted_revision_id,
+          } satisfies LocalProjectHead),
+        )
+    }
     return project
   })
 }

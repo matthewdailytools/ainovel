@@ -3,6 +3,7 @@
 import json
 from time import time
 from typing import Annotated
+from unicodedata import normalize
 
 from pydantic import Field, StringConstraints
 
@@ -10,7 +11,7 @@ from .db import DomainError, dumps, uid
 from .models import Input
 from .project_brief import confirmed_project_tx
 from .setting_review import confirmed_world_basis
-from .story_graph import graph_snapshot
+from .story_graph import SaveRecord, graph_snapshot, save_record_tx
 
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")]
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
@@ -56,17 +57,31 @@ class VolumePlan(Input):
     units: list[UnitPlan] = Field(default_factory=list, max_length=100)
 
 
-class PromiseWindow(Input):
-    promise_id: Identifier
+WINDOW_CHAPTERS = ("plant_chapter_id", "opens_chapter_id", "closes_chapter_id")
+
+
+class ChapterWindow(Input):
     plant_chapter_id: Identifier
     opens_chapter_id: Identifier
     closes_chapter_id: Identifier
+
+
+class PromiseWindow(ChapterWindow):
+    promise_id: Identifier
+
+
+class NewPromisePlan(ChapterWindow):
+    title: Title
+    notes: Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)] = ""
 
 
 class OutlinePlan(Input):
     summary: Summary
     volumes: list[VolumePlan] = Field(default_factory=list, max_length=100)
     promises: list[PromiseWindow] = Field(default_factory=list, max_length=250)
+    new_promises: list[NewPromisePlan] = Field(
+        default_factory=list, max_length=250, exclude_if=lambda value: not value
+    )
 
 
 class SaveOutline(Input):
@@ -151,7 +166,11 @@ def _freeze_cards(tx, branch_id, references, previous):
 def _validate(graph, plan, basis, confirmed):
     chapters = {row["id"]: row for row in graph["chapters"] if not row["archived"]}
     settings = {item["id"] for item in basis["items"]}
-    promises = {row["id"] for row in graph["records"] if row["kind"] == "promise" and not row["archived"]}
+    promises = {
+        row["id"]: row["payload"]["title"]
+        for row in graph["records"]
+        if row["kind"] == "promise" and not row["archived"]
+    }
     volumes = plan["volumes"]
     nodes = [volume["id"] for volume in volumes] + [
         unit["id"] for volume in volumes for unit in volume["units"]
@@ -185,20 +204,38 @@ def _validate(graph, plan, basis, confirmed):
     ):
         raise DomainError("outline_incomplete", "确认前须填写总纲，每卷至少一个单元，每单元至少一份章纲。")
     indexed = {identifier: position for position, identifier in enumerate(active_ids)}
+    new_promises = plan.get("new_promises", [])
+    if len(plan["promises"]) + len(new_promises) > 250:
+        raise DomainError("outline_promise", "四级大纲最多安排 250 条伏笔窗口。")
+    titles = {_promise_title(title) for title in promises.values()}
     seen = set()
     for window in plan["promises"]:
         promise_id = window["promise_id"]
-        ids = [window[key] for key in ("plant_chapter_id", "opens_chapter_id", "closes_chapter_id")]
-        if (
-            promise_id in seen
-            or promise_id not in promises
-            or not all(chapter_id in indexed for chapter_id in ids)
-        ):
-            raise DomainError("outline_promise", "每条未归档伏笔可安排一个窗口，起止章须在当前大纲内。")
-        when = [indexed[identifier] for identifier in ids]
-        if when != sorted(when):
-            raise DomainError("outline_window", "伏笔埋设、进入回收窗口、最迟回收的章序须依次排列。")
+        if promise_id in seen or promise_id not in promises:
+            raise DomainError("outline_promise", "每条未归档伏笔可安排一个窗口。")
+        _validate_window(window, indexed)
         seen.add(promise_id)
+    for window in new_promises:
+        title = _promise_title(window["title"])
+        if title in titles:
+            raise DomainError(
+                "outline_promise_duplicate", f"伏笔「{window['title']}」重名，请使用已有窗口或改名。"
+            )
+        _validate_window(window, indexed)
+        titles.add(title)
+
+
+def _promise_title(title):
+    return normalize("NFKC", title).strip().casefold()
+
+
+def _validate_window(window, indexed):
+    ids = [window[key] for key in WINDOW_CHAPTERS]
+    if any(identifier not in indexed for identifier in ids):
+        raise DomainError("outline_promise", "伏笔埋设、进入回收窗口和最迟回收的章须在当前大纲内。")
+    when = [indexed[identifier] for identifier in ids]
+    if when != sorted(when):
+        raise DomainError("outline_window", "伏笔埋设、进入回收窗口、最迟回收的章序须依次排列。")
 
 
 def _insert(tx, branch_id, revision, confirmed, plan, basis):
@@ -216,49 +253,105 @@ def _check_base(row, base_revision):
 
 def save_outline(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
-        if before_write is not None:
-            before_write(tx)
-        previous = _decode(_latest(tx, branch_id))
-        _check_base(previous, data.base_revision)
-        payload = data.plan.model_dump()
-        basis = _settings(tx, branch_id, data.confirmation_id)
-        project = confirmed_project_tx(tx, branch_id)
-        basis["project_id"] = project["id"] if project else None
-        cards = _freeze_cards(
+        return save_outline_tx(tx, branch_id, data, before_write=before_write)
+
+
+def save_outline_tx(tx, branch_id, data, *, before_write=None, frozen_cards=None, sync_source=None):
+    if before_write is not None:
+        before_write(tx)
+    previous = _decode(_latest(tx, branch_id))
+    _check_base(previous, data.base_revision)
+    payload = data.plan.model_dump()
+    basis = _settings(tx, branch_id, data.confirmation_id)
+    project = confirmed_project_tx(tx, branch_id)
+    basis["project_id"] = project["id"] if project else None
+    cards = (
+        frozen_cards
+        if frozen_cards is not None
+        else _freeze_cards(
             tx,
             branch_id,
             (ref for _, _, chapter in _chapter_plans(payload) for ref in chapter.get("reference_cards", [])),
             previous["setting_basis"] if previous else None,
         )
-        if cards:
-            basis["reference_cards"] = cards
-        if data.source_generation_id:
-            from .outline_generation import check_candidate_tx
+    )
+    if cards:
+        basis["reference_cards"] = cards
+    if sync_source:
+        basis["sync_outline_source"] = sync_source
+    if data.source_generation_id:
+        from .outline_generation import check_candidate_tx
 
-            check_candidate_tx(tx, branch_id, data.source_generation_id, data.confirmation_id)
-            basis["generation_id"] = data.source_generation_id
-        _validate(graph_snapshot(tx, branch_id), payload, basis, False)
-        _insert(tx, branch_id, data.base_revision + 1, False, payload, basis)
-        return _view(tx, branch_id)
+        check_candidate_tx(tx, branch_id, data.source_generation_id, data.confirmation_id)
+        basis["generation_id"] = data.source_generation_id
+    elif previous and not previous["confirmed"]:
+        source = previous["setting_basis"]
+        if (
+            source.get("generation_id")
+            and source["confirmation_id"] == basis["confirmation_id"]
+            and source.get("project_id") == basis["project_id"]
+        ):
+            basis["generation_id"] = source["generation_id"]
+    _validate(graph_snapshot(tx, branch_id), payload, basis, False)
+    _insert(tx, branch_id, data.base_revision + 1, False, payload, basis)
+    return _view(tx, branch_id)
 
 
 def confirm_outline(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
-        if before_write is not None:
-            before_write(tx)
-        row = _latest(tx, branch_id)
-        _check_base(row, data.base_revision)
-        if not row["confirmed"]:
-            draft = _decode(row)
-            basis = draft["setting_basis"]
-            _settings(tx, branch_id, basis["confirmation_id"])
-            _check_project(tx, branch_id, basis)
-            _validate(graph_snapshot(tx, branch_id), draft["plan"], basis, True)
-            _insert(tx, branch_id, data.base_revision + 1, True, draft["plan"], basis)
-            from .work_snapshot import checkpoint_tx
+        return confirm_outline_tx(tx, branch_id, data, before_write=before_write)
 
-            checkpoint_tx(tx, branch_id, "确认四级大纲")
-        return _view(tx, branch_id)
+
+def confirm_outline_tx(tx, branch_id, data, *, before_write=None):
+    if before_write is not None:
+        before_write(tx)
+    row = _latest(tx, branch_id)
+    if row and row["confirmed"]:
+        receipt = json.loads(row["setting_basis"]).get("outline_story_receipt", {})
+        if data.base_revision == receipt.get("draft_revision"):
+            return _view(tx, branch_id)
+    _check_base(row, data.base_revision)
+    if not row["confirmed"]:
+        draft = _decode(row)
+        basis = draft["setting_basis"]
+        _settings(tx, branch_id, basis["confirmation_id"])
+        _check_project(tx, branch_id, basis)
+        graph = graph_snapshot(tx, branch_id)
+        plan = draft["plan"]
+        _validate(graph, plan, basis, True)
+        basis["outline_story_receipt"] = _materialize_promises(tx, graph, plan, draft["revision"])
+        _insert(tx, branch_id, data.base_revision + 1, True, plan, basis)
+        from .work_snapshot import checkpoint_tx
+
+        checkpoint_tx(tx, branch_id, "确认四级大纲")
+    return _view(tx, branch_id)
+
+
+def _materialize_promises(tx, graph, plan, draft_revision):
+    before = graph["story_revision"]
+    created_ids = []
+    for pending in plan.pop("new_promises", []):
+        identifier = save_record_tx(
+            tx,
+            graph["branch_id"],
+            SaveRecord(
+                base_story_revision=before + len(created_ids),
+                record={
+                    "kind": "promise",
+                    "title": pending["title"],
+                    "notes": pending.get("notes", ""),
+                    "stages": [{"status": "planned"}],
+                },
+            ),
+        )
+        plan["promises"].append({"promise_id": identifier, **{key: pending[key] for key in WINDOW_CHAPTERS}})
+        created_ids.append(identifier)
+    return {
+        "draft_revision": draft_revision,
+        "before": before,
+        "after": before + len(created_ids),
+        "created_ids": created_ids,
+    }
 
 
 def _view(tx, branch_id):
@@ -291,6 +384,7 @@ def _view(tx, branch_id):
         "draft": draft,
         "confirmed": confirmed,
         "stale": stale,
+        "story_revision": graph["story_revision"],
         "chapters": [row for row in graph["chapters"] if not row["archived"]],
         "promise_options": [
             {"id": row["id"], "title": row["payload"]["title"]}

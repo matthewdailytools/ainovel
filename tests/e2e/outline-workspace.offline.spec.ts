@@ -51,7 +51,8 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
     data: { ...cardEdit, base_revision: 0 },
   })
   expect(cardSaved.ok(), await cardSaved.text()).toBe(true)
-  const graph = await (await page.request.get(`/api/branches/${branch_id}/story-graph`)).json()
+  const graphPath = `/api/branches/${branch_id}/story-graph`
+  const graph = await (await page.request.get(graphPath)).json()
   const promise = await page.request.post(`/api/branches/${branch_id}/story-records`, {
     headers,
     data: {
@@ -87,16 +88,31 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   for (const field of ['埋设章', '开始回收', '最迟回收']) {
     await page.getByRole('combobox', { name: field, exact: true }).selectOption({ label: '门外寻铃' })
   }
+  await page.getByRole('button', { name: '新建伏笔计划' }).click()
+  const pending = page.getByRole('group', { name: '新伏笔计划 1' })
+  await pending.getByLabel('伏笔标题').fill('门上的旧记号由谁刻下')
+  await pending.getByLabel('计划说明').fill('发现记号后核对刻痕是谁留下的。')
+  for (const field of ['埋设章', '开始回收', '最迟回收']) {
+    await pending.getByRole('combobox', { name: field, exact: true }).selectOption({ label: '门外寻铃' })
+  }
   await page.getByRole('button', { name: '保存大纲草稿' }).click()
+  await expect(page.getByText('已保存大纲草稿修订 1。', { exact: true })).toBeVisible()
+  const beforeConfirm = await (await page.request.get(graphPath)).json()
+  expect(beforeConfirm.records).toHaveLength(1)
   await page.getByRole('button', { name: '确认已保存大纲' }).click()
   await expect(page.getByText('已确认大纲修订 2', { exact: true })).toBeVisible()
   await expect(page.getByText(/铃声为何消失 · 计划/)).toBeVisible()
+  await expect(page.getByText(/门上的旧记号由谁刻下 · 计划/)).toBeVisible()
   const redesigned = await page.request.patch(referencePath, {
     headers,
     data: { ...cardEdit, base_revision: 1, cards: [{ ...card, technique: '让新线索改变选择' }] },
   })
   expect(redesigned.ok(), await redesigned.text()).toBe(true)
-  await page.getByRole('button', { name: '门外寻铃', exact: true }).click()
+  await page
+    .getByRole('listitem')
+    .filter({ hasText: '铃声为何消失' })
+    .getByRole('button', { name: '门外寻铃', exact: true })
+    .click()
   await expect(page.getByText('本章章纲 · 修订 2')).toBeVisible()
   await expect(page.getByText('发现铃身的断痕', { exact: true })).toBeVisible()
   const directory = page.getByRole('navigation', { name: '全书目录' })
@@ -108,5 +124,5 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   await expect(page.locator('blockquote').getByText(quote, { exact: true })).toBeVisible()
   await page.locator('.cm-content[contenteditable=true]').focus()
   await page.keyboard.insertText('学徒迈过门槛，铜铃响了。')
-  await expect(page.getByLabel('今日事项')).toContainText('1 条伏笔处于回收窗口或已到期')
+  await expect(page.getByLabel('今日事项')).toContainText('2 条伏笔处于回收窗口或已到期')
 })

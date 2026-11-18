@@ -66,74 +66,82 @@ def confirmed_project_tx(tx, branch_id, identifier=None):
 
 
 def confirm(domain, branch_id, data, *, before_write=None):
+    with domain.db.connect(True) as tx:
+        return confirm_tx(tx, branch_id, data, before_write=before_write)
+
+
+def confirm_tx(tx, branch_id, data, *, before_write=None, sync_source=None, archive_source_id=None):
     payload = data.model_dump()
     fingerprint = hashlib.sha256(dumps([KIND, branch_id, payload]).encode()).hexdigest()
-    with domain.db.connect(True) as tx:
-        if before_write is not None:
-            before_write(tx)
-        branch = tx.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
-        if not branch:
-            raise DomainError("not_found", "工作版本不存在。", 404)
-        prior = tx.execute(
-            "SELECT artifact_id,result FROM receipts WHERE key=?", (data.idempotency_key,)
+    if before_write is not None:
+        before_write(tx)
+    branch = tx.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
+    if not branch:
+        raise DomainError("not_found", "工作版本不存在。", 404)
+    prior = tx.execute(
+        "SELECT artifact_id,result FROM receipts WHERE key=?", (data.idempotency_key,)
+    ).fetchone()
+    if prior:
+        if json.loads(prior["result"]).get("project_brief") != fingerprint:
+            raise DomainError("idempotency", "提交标识已用于其他立项内容。", 409)
+        row = tx.execute("SELECT payload FROM artifacts WHERE id=?", (prior["artifact_id"],)).fetchone()
+        return {**json.loads(row["payload"]), "id": prior["artifact_id"]}
+    current = confirmed_project_tx(tx, branch_id)
+    revision = current["revision"] if current else 0
+    if revision != data.base_revision:
+        raise DomainError("project_brief_changed", "立项已在其他窗口确认，请核对后再提交。", 409)
+    if data.candidate_id:
+        candidate = tx.execute(
+            "SELECT payload,basis FROM artifacts WHERE id=? AND branch_id=? AND kind=? AND status='accepted'",
+            (data.candidate_id, branch_id, DRAFT_KIND),
         ).fetchone()
-        if prior:
-            if json.loads(prior["result"]).get("project_brief") != fingerprint:
-                raise DomainError("idempotency", "提交标识已用于其他立项内容。", 409)
-            row = tx.execute("SELECT payload FROM artifacts WHERE id=?", (prior["artifact_id"],)).fetchone()
-            return {**json.loads(row["payload"]), "id": prior["artifact_id"]}
-        current = confirmed_project_tx(tx, branch_id)
-        revision = current["revision"] if current else 0
-        if revision != data.base_revision:
-            raise DomainError("project_brief_changed", "立项已在其他窗口确认，请核对后再提交。", 409)
-        if data.candidate_id:
-            candidate = tx.execute(
-                "SELECT payload,basis FROM artifacts WHERE id=? AND branch_id=? AND kind=? AND status='accepted'",
-                (data.candidate_id, branch_id, DRAFT_KIND),
-            ).fetchone()
-            if not candidate:
-                raise DomainError("project_brief_source", "立项草案不属于当前工作版本。", 409)
-            basis = json.loads(candidate["basis"])
-            if basis["story_revision"] != branch["story_revision"] or basis["project_revision"] != revision:
-                raise DomainError("project_brief_changed", "这份 AI 立项草案的依据已更新，请重新生成。", 409)
-            if json.loads(candidate["payload"])["idea"] != data.idea:
-                raise DomainError(
-                    "project_brief_source", "创作原话已有变化，请重新分析或按手动立项确认。", 409
-                )
-        identifier = uid()
-        saved = {
-            "revision": revision + 1,
-            "idea": data.idea,
-            "brief": payload["brief"],
-            "candidate_id": data.candidate_id,
-        }
-        tx.execute(
-            "INSERT INTO artifacts(id,novel_id,branch_id,kind,payload,basis,status,created) "
-            "VALUES(?,?,?,?,?,?,'accepted',?)",
-            (
-                identifier,
-                branch["novel_id"],
-                branch_id,
-                KIND,
-                dumps(saved),
-                dumps(
-                    {
-                        "previous_project_id": current["id"] if current else None,
-                        "story_revision": branch["story_revision"],
-                    }
-                ),
-                time(),
-            ),
-        )
-        tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
-        tx.execute(
-            "INSERT INTO receipts VALUES(?,?,?)",
-            (data.idempotency_key, identifier, dumps({"project_brief": fingerprint})),
-        )
-        from .work_snapshot import checkpoint_tx
+        if not candidate:
+            raise DomainError("project_brief_source", "立项草案不属于当前工作版本。", 409)
+        basis = json.loads(candidate["basis"])
+        if basis["story_revision"] != branch["story_revision"] or basis["project_revision"] != revision:
+            raise DomainError("project_brief_changed", "这份 AI 立项草案的依据已更新，请重新生成。", 409)
+        if json.loads(candidate["payload"])["idea"] != data.idea:
+            raise DomainError("project_brief_source", "创作原话已有变化，请重新分析或按手动立项确认。", 409)
+    identifier = uid()
+    saved = {
+        "revision": revision + 1,
+        "idea": data.idea,
+        "brief": payload["brief"],
+        "candidate_id": data.candidate_id,
+    }
+    basis = {
+        "previous_project_id": current["id"] if current else None,
+        "story_revision": branch["story_revision"],
+    }
+    checkpoint = "确认立项"
+    if sync_source:
+        basis["sync_project_source"] = sync_source
+        checkpoint = "同步采用立项"
+    if archive_source_id:
+        basis["manuscript_project_source"] = {"revision_id": archive_source_id}
+        checkpoint = "从稿件包恢复立项"
+    tx.execute(
+        "INSERT INTO artifacts(id,novel_id,branch_id,kind,payload,basis,status,created) "
+        "VALUES(?,?,?,?,?,?,'accepted',?)",
+        (
+            identifier,
+            branch["novel_id"],
+            branch_id,
+            KIND,
+            dumps(saved),
+            dumps(basis),
+            time(),
+        ),
+    )
+    tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
+    tx.execute(
+        "INSERT INTO receipts VALUES(?,?,?)",
+        (data.idempotency_key, identifier, dumps({"project_brief": fingerprint})),
+    )
+    from .work_snapshot import checkpoint_tx
 
-        checkpoint_tx(tx, branch_id, "确认立项")
-        return {**saved, "id": identifier}
+    checkpoint_tx(tx, branch_id, checkpoint)
+    return {**saved, "id": identifier}
 
 
 def register_routes(app, domain):

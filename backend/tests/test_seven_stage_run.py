@@ -44,11 +44,20 @@ def plan(chapters, setting_ids):
 
 
 class Model:
-    def __init__(self, during_write=None, settings=None, limit_inspection=False):
+    def __init__(
+        self,
+        during_write=None,
+        settings=None,
+        limit_inspection=False,
+        setting_findings=False,
+        new_promise=False,
+    ):
         self.calls = []
         self.during_write = during_write
         self.settings = settings
         self.limit_inspection = limit_inspection
+        self.setting_findings = setting_findings
+        self.new_promise = new_promise
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         frame = json.loads(prompt.split("\n只返回")[0])
@@ -73,10 +82,40 @@ class Model:
         elif action == "conception.generate.category":
             assert frame["上下文"]["已确认立项"]["idea"] == IDEA
             value = {"items": [{"title": "门铃规则", "detail": "铜铃只在门内响。", "links": []}]}
+            if self.setting_findings and instruction["category_id"] == "world":
+                value = {
+                    "items": [
+                        {
+                            "title": "门铃规则",
+                            "detail": "铜铃只在门内响。",
+                            "links": ["N2"],
+                            "setting_policy": {"strength": "hard", "scope": "门内"},
+                        },
+                        {
+                            "title": "回声规则",
+                            "detail": "回声只有在门外能听到。",
+                            "links": [],
+                            "setting_policy": {"strength": "hard", "scope": "门外"},
+                        },
+                    ]
+                }
         elif action == "conception.review.bundle":
             value = {"issues": []}
         elif action == "生成四级大纲候选":
-            value = plan(instruction["章节目录"], [item["id"] for item in instruction["已确认世界设定"]])
+            chapters = instruction["章节目录"]
+            value = plan(chapters, [item["id"] for item in instruction["已确认世界设定"]])
+            if self.new_promise:
+                assert not instruction["可用伏笔"]
+                assert "new_promises" in instruction["要求"]
+                value["new_promises"] = [
+                    {
+                        "title": "门环上的旧刻痕",
+                        "notes": "确认刻痕能否指出师姐去向。",
+                        "plant_chapter_id": chapters[0]["id"],
+                        "opens_chapter_id": chapters[-1]["id"],
+                        "closes_chapter_id": chapters[-1]["id"],
+                    }
+                ]
             if available := instruction.get("获准采用的手法卡"):
                 assert SOURCE not in dumps(frame)
                 card = available[0]
@@ -257,6 +296,8 @@ def test_seven_stage_run_reaches_verified_checkpoints(client, domain, settings, 
         assert updated["result"]["seven_stage_run"]["inspection_id"] != original_report
         assert updated["result"]["seven_stage_run"]["completed_chapters"] == state["completed_chapters"]
         assert model.calls.count("writing.expand_plot") == 1
+        assert len(updated["result"]["seven_stage_run"]["children"]) == child_count + 1
+        child_count += 1
     preview = client.get(inspection).json()["preview"]
     approved = client.post(
         inspection,
@@ -404,9 +445,10 @@ def test_resume_distinguishes_pre_send_failure_from_missing_receipt(
         assert resumed.json()["status"] == "waiting_child"
         drain(settings, model)
         state = domain.task(run_id)["result"]["seven_stage_run"]
-        assert state["children"] == [child]
+        assert state["children"][0] == child
+        assert len(state["children"]) == 2
         assert state["stage"] == "inspection"
-        assert model.calls == ["writing.expand_plot", "审查正文"]
+        assert model.calls == ["writing.expand_plot", "审查正文", "对账立项章纲与节奏"]
         assert domain.chapter(story["chapter_id"])["content"] == BODY
     else:
         assert resumed.status_code == 409, resumed.text
@@ -501,3 +543,96 @@ def test_explicit_reference_scope_analysis_and_card_handoff(
     assert state["reference_basis"]["source"]["quote_sha256"]
     assert state["reference_basis"]["revision"] == reference["revision"]
     assert domain.branch(branch)["story_revision"] > 0
+
+
+def test_auto_setting_conflicts_wait_for_author_confirmation(client, domain, settings, story):
+    branch, endpoint, identifier = start(client, domain, story, "idea")
+    model = Model(settings=settings, setting_findings=True)
+    drain(settings, model)
+    waiting = domain.task(identifier)
+    assert waiting["status"] == "needs_review", waiting["error"]
+    assert waiting["result"]["seven_stage_run"]["stage"] == "settings"
+    assert "设定台" in waiting["error"]
+    assert "生成四级大纲候选" not in model.calls
+    config = f"/api/branches/{branch}/conception"
+    current = client.get(config).json()
+    assert current["confirmation"] is None
+    assert any(row["kind"] == "policy_link" for row in current["setting_findings"])
+    explicit = client.post(
+        config + "/confirm",
+        json={
+            "base_revision": current["revision"],
+            "base_story_revision": current["story_revision"],
+            "idempotency_key": uid(),
+            "note": "分别核对门内发声和门外听到回声的范围。",
+            "reviewed_setting_findings": [row["id"] for row in current["setting_findings"]],
+        },
+    )
+    assert explicit.status_code == 200, explicit.text
+    assert client.post(f"{endpoint}/{identifier}/resume").status_code == 200
+    drain(settings, model)
+    advanced = domain.task(identifier)
+    stage = advanced["result"]["seven_stage_run"]
+    assert stage["stage"] == "inspection", advanced["error"]
+    assert stage["setting_id"] == explicit.json()["confirmation"]["id"]
+    assert model.calls.count("conception.generate.category") == 4
+
+
+@pytest.mark.parametrize("mode", ["automatic", "manual", "change_before", "change_after"])
+def test_outline_promise_receipt_allows_only_its_own_story_changes(client, domain, settings, story, mode):
+    automatic = mode == "automatic"
+    branch, run_endpoint, identifier = start(
+        client, domain, story, "settings", auto_confirm_planning=automatic
+    )
+    outline = f"/api/branches/{branch}/outline-workspace"
+    resume = f"{run_endpoint}/{identifier}/resume"
+    graph_route = f"/api/branches/{branch}/story-graph"
+    model = Model(settings=settings, new_promise=True)
+    drain(settings, model)
+    if not automatic:
+        waiting = domain.task(identifier)
+        state = waiting["result"]["seven_stage_run"]
+        assert waiting["status"] == "needs_review" and state["stage"] == "outline", waiting["error"]
+        candidate = domain.artifact(state["artifact_id"])
+        assert candidate["payload"]["plan"]["new_promises"][0]["title"] == "门环上的旧刻痕"
+        assert client.get(graph_route).json()["records"] == []
+        draft_input = {
+            "base_revision": state["outline_revision"],
+            "source_generation_id": candidate["id"],
+            "confirmation_id": state["setting_id"],
+            "plan": candidate["payload"]["plan"],
+        }
+        saved = client.put(outline, json=draft_input)
+        assert saved.status_code == 200, saved.text
+        del draft_input["source_generation_id"]
+        draft_input["base_revision"] = saved.json()["draft"]["revision"]
+        draft_input["plan"]["new_promises"][0]["notes"] = "作者将寻找刻痕排在归铃之前。"
+        saved = client.put(outline, json=draft_input)
+        assert saved.status_code == 200, saved.text
+        if mode == "change_before":
+            domain.save(story["chapter_id"], 0, "作者在确认大纲之前另行修改正文。")
+        confirmed = client.post(
+            outline + "/confirm", json={"base_revision": saved.json()["draft"]["revision"]}
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        assert confirmed.json()["confirmed"]["setting_basis"]["generation_id"] == candidate["id"]
+        if mode == "change_after":
+            domain.save(story["chapter_id"], 0, "作者在确认大纲之后另行修改正文。")
+        resumed = client.post(resume)
+        if mode.startswith("change"):
+            assert resumed.status_code == 409 and resumed.json()["code"] == "seven_stage_changed"
+            assert "writing.expand_plot" not in model.calls
+            return
+        assert resumed.status_code == 200, resumed.text
+        drain(settings, model)
+
+    run = domain.task(identifier)
+    state = run["result"]["seven_stage_run"]
+    assert state["stage"] == "inspection", run["error"]
+    assert state["completed_chapters"][0]["id"] == story["chapter_id"]
+    view = client.get(outline).json()
+    assert view["confirmed"]["id"] == state["outline_id"]
+    assert state["story_revision"] == view["story_revision"]
+    assert [(row["title"], row["state"]) for row in view["promises"]] == [("门环上的旧刻痕", "planned")]
+    assert len(client.get(graph_route).json()["records"]) == 1
+    assert model.calls.count("生成四级大纲候选") == model.calls.count("writing.expand_plot") == 1

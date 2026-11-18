@@ -5,6 +5,7 @@ import json
 from time import time
 from unicodedata import normalize
 
+from fastapi import Query
 from pydantic import Field, StrictInt, StringConstraints
 from typing import Annotated, Literal
 
@@ -31,6 +32,7 @@ BUILTINS = {
 
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")]
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+INVALID_LINK_FINDINGS = {"missing_link", "self_link", "duplicate_link"}
 
 
 class SettingPolicy(Input):
@@ -65,6 +67,10 @@ class SaveConception(ConceptionBasis):
 
 class ConceptionDecision(ConceptionBasis):
     idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class RestoreSettingItem(ConceptionDecision):
+    source_workspace_id: Identifier
 
 
 class ConfirmConception(ConceptionDecision):
@@ -131,7 +137,13 @@ class SettingFindingLocation(Input):
 class SettingFinding(Input):
     id: Identifier
     kind: Literal[
-        "same_name", "missing_link", "self_link", "duplicate_link", "skipped_link", "empty_link", "policy_link"
+        "same_name",
+        "missing_link",
+        "self_link",
+        "duplicate_link",
+        "skipped_link",
+        "empty_link",
+        "policy_link",
     ]
     locations: list[SettingFindingLocation]
     reviewed: bool = False
@@ -139,6 +151,42 @@ class SettingFinding(Input):
 
 class SettingInspection(Input):
     findings: list[SettingFinding]
+
+
+class SettingItemProvenance(Input):
+    origin: Literal["author", "ai", "sync"]
+    artifact_id: Identifier | None = None
+    source_origin: Literal["author", "ai"] | None = None
+    source_device_id: str | None = None
+    source_artifact_id: Identifier | None = None
+    source_revision_id: Identifier | None = None
+    project_confirmation_id: Identifier | None = None
+    project_revision: int | None = None
+    author_edited: bool = False
+    evidence: Source | None = None
+    evidence_current: bool = False
+
+
+class SettingItemState(Input):
+    category_id: Identifier
+    category_title: str
+    item_number: int
+    item: ConceptionItem
+    provenance: SettingItemProvenance
+
+
+class SettingItemVersion(Input):
+    workspace_id: Identifier
+    revision: int
+    created: float
+    state: SettingItemState | None
+    restored_from: Identifier | None = None
+
+
+class SettingItemHistory(ConceptionBasis):
+    current: SettingItemState | None
+    entries: list[SettingItemVersion]
+    next_before_revision: int | None
 
 
 class ConceptionWorkspace(Input):
@@ -199,7 +247,7 @@ def _items(categories):
 
 
 def _comparison_text(value):
-    return " ".join(normalize("NFKC", value).casefold().split())
+    return " ".join(normalize("NFC", value).split())
 
 
 def _policy_terms(item):
@@ -228,6 +276,7 @@ def setting_findings(categories):
                 "category_id": category["id"],
                 "category_title": category["title"],
                 "item_number": number,
+                "link_number": None,
             },
         )
         for category in categories
@@ -240,8 +289,10 @@ def setting_findings(categories):
             (location, entries[location["item_id"]][0] if location["item_id"] in entries else None)
             for location in locations
         ]
-        identifier = hashlib.sha256(dumps([kind, evidence]).encode()).hexdigest()
-        findings.append({"id": identifier, "kind": kind, "locations": locations, "reviewed": False})
+        identifier = hashlib.sha256(
+            json.dumps([kind, evidence], ensure_ascii=False, sort_keys=True).encode()
+        ).hexdigest()
+        findings.append({"id": identifier, "kind": kind, "locations": list(locations), "reviewed": False})
 
     names = {}
     for item, skipped, location in entries.values():
@@ -249,7 +300,8 @@ def setting_findings(categories):
         if skipped or not item["detail"].strip() or (location["category_id"] != "world" and not policy):
             continue
         meaning = (_comparison_text(item["detail"]), (policy or {}).get("strength"), _policy_terms(item))
-        names.setdefault(_comparison_text(item["title"]), []).append((meaning, location))
+        name = normalize("NFKC", _comparison_text(item["title"])).casefold()
+        names.setdefault(name, []).append((meaning, location))
     for group in names.values():
         if len({meaning for meaning, _ in group}) > 1:
             report("same_name", *(location for _, location in group))
@@ -262,7 +314,18 @@ def setting_findings(categories):
             invalid = _invalid_link_reason(source["id"], target_id, entries, preceding)
             preceding.add(target_id)
             if invalid:
-                report(invalid, origin, target[2] if target else {"item_id": target_id})
+                destination = (
+                    target[2]
+                    if target
+                    else {
+                        "item_id": target_id,
+                        "category_id": None,
+                        "category_title": None,
+                        "item_number": None,
+                        "link_number": None,
+                    }
+                )
+                report(invalid, origin, destination)
             elif not skipped and target:
                 entry, target_skipped, destination = target
                 if target_skipped:
@@ -277,10 +340,19 @@ def setting_findings(categories):
     return findings
 
 
+def _review_covers(findings, reviewed):
+    selected = set(reviewed)
+    return (
+        len(selected) == len(reviewed)
+        and not any(finding["kind"] in INVALID_LINK_FINDINGS for finding in findings)
+        and selected == {finding["id"] for finding in findings}
+    )
+
+
 def setting_findings_reviewed(payload, findings=None):
     if findings is None:
         findings = setting_findings(payload["categories"])
-    return {finding["id"] for finding in findings} == set(payload.get("reviewed_setting_findings", []))
+    return _review_covers(findings, payload.get("reviewed_setting_findings", []))
 
 
 def completeness_issues(categories, observed=(), source_records=()):
@@ -443,7 +515,7 @@ def _project_impacts(workspace, project_id):
     return impacts
 
 
-def _current(tx, branch, revision, confirmation, observed=None, source_records=None):
+def _current(tx, branch, revision, confirmation, observed=None, source_records=None, findings=None):
     project = confirmed_project_tx(tx, branch["id"])
     project_id = project["id"] if project else None
     if confirmation.get("project_confirmation_id") != project_id:
@@ -452,23 +524,17 @@ def _current(tx, branch, revision, confirmation, observed=None, source_records=N
         confirmation.get("reconciled_project_items", [])
     ):
         return False
-    return confirmation["revision"] == revision and (
-        confirmation["story_revision"] == branch["story_revision"]
-        or (
-            confirmation["definitions"] == _definitions(tx, branch["id"])
-            and confirmation["observed"]
-            == (observed if observed is not None else _observed(tx, branch["id"]))
-            and confirmation.get("sources", [])
-            == (
-                source_records
-                if source_records is not None
-                else _source_records(tx, branch["id"], confirmation)
-            )
-        )
+    if confirmation["revision"] != revision or not setting_findings_reviewed(confirmation, findings):
+        return False
+    return confirmation["story_revision"] == branch["story_revision"] or (
+        confirmation["definitions"] == _definitions(tx, branch["id"])
+        and confirmation["observed"] == (observed if observed is not None else _observed(tx, branch["id"]))
+        and confirmation.get("sources", [])
+        == (source_records if source_records is not None else _source_records(tx, branch["id"], confirmation))
     )
 
 
-def _validate(categories):
+def _validate(categories, *, allow_invalid_links=False):
     ids = [category["id"] for category in categories]
     if len(ids) != len(set(ids)) or not set(BUILTINS).issubset(ids):
         raise DomainError("conception_categories", "请保留内置类别，每个类别标识必须唯一。")
@@ -482,34 +548,43 @@ def _validate(categories):
     count = sum(len(category["items"]) for category in categories)
     if len(items) != count or count > 240:
         raise DomainError("conception_items", "每项构思须有唯一标识，每个工作版本最多保存 240 项。")
-    for key, (_, item) in items.items():
-        links = item["links"]
-        if len(set(links)) != len(links) or key in links or any(ref not in items for ref in links):
-            raise DomainError("conception_links", f"「{item['title']}」含无效关联，请重新选择关联项目。")
+    if not allow_invalid_links:
+        for key, (_, item) in items.items():
+            preceding = set()
+            for number, target in enumerate(item["links"], 1):
+                if _invalid_link_reason(key, target, items, preceding):
+                    raise DomainError(
+                        "conception_links",
+                        f"「{item['title']}」（{key}）的第 {number} 个关联（{target}）无效，请重新选择。",
+                    )
+                preceding.add(target)
     if len(dumps(categories).encode("utf-8")) > 100_000:
         raise DomainError("conception_size", "构思内容超过 100 KB，请缩减本书工作台内容后再保存。")
 
 
 def _snapshot_tx(tx, branch):
     workspace = _workspace(tx, branch["id"])
+    categories = workspace["categories"]
+    findings = setting_findings(categories)
     observed = _observed(tx, branch["id"])
     evidence = _source_records(tx, branch["id"], workspace)
     project = confirmed_project_tx(tx, branch["id"])
     row = _latest(tx, branch["id"], CONFIRMATION)
     confirmation = None
     reconciled_items = set()
+    reviewed_findings = set()
     if row:
         payload = _read_payload(row)
         confirmation = {
             "id": row["id"],
             "revision": payload["revision"],
-            "current": _current(tx, branch, workspace["revision"], payload, observed, evidence),
+            "current": _current(tx, branch, workspace["revision"], payload, observed, evidence, findings),
             "note": payload["note"],
             "planning_brief": payload["planning_brief"],
         }
         if confirmation["current"]:
             reconciled_items = set(payload.get("reconciled_project_items", []))
-    categories = workspace["categories"]
+            reviewed_findings = set(payload.get("reviewed_setting_findings", []))
     return {
         "revision": workspace["revision"],
         "story_revision": branch["story_revision"],
@@ -519,6 +594,9 @@ def _snapshot_tx(tx, branch):
         "observed": observed,
         "sources": evidence,
         "project": project,
+        "setting_findings": [
+            {**finding, "reviewed": finding["id"] in reviewed_findings} for finding in findings
+        ],
         "project_impacts": [
             {**item, "reconciled": item["item_id"] in reconciled_items}
             for item in _project_impacts(workspace, project["id"] if project else None)
@@ -537,6 +615,108 @@ def _check_basis(branch, workspace, data):
         raise DomainError("conception_changed", "构思或故事记录已更新。请保留当前编辑并重新读取后核对。", 409)
 
 
+def inspect_settings(domain, branch_id, data):
+    categories = [category.model_dump(exclude_none=True) for category in data.categories]
+    _validate(categories, allow_invalid_links=True)
+    with domain.db.connect() as tx:
+        tx.execute("BEGIN")
+        branch = _branch(tx, branch_id)
+        _check_basis(branch, _workspace(tx, branch_id), data)
+    return {"findings": setting_findings(categories)}
+
+
+def _item_version(workspace, item_id):
+    for category in workspace["categories"]:
+        for position, item in enumerate(category["items"], 1):
+            if item["id"] == item_id:
+                origin = workspace["origins"].get(item_id, {"origin": "author"})
+                return (item, origin, category["id"], category["title"], position)
+    return None
+
+
+def _item_history_state(tx, branch_id, entry):
+    if entry is None:
+        return None
+    item, origin, category_id, category_title, number = entry
+    evidence = origin.get("evidence")
+    return {
+        "category_id": category_id,
+        "category_title": category_title,
+        "item_number": number,
+        "item": item,
+        "provenance": {
+            "origin": origin["origin"],
+            "artifact_id": origin.get("artifact_id"),
+            "source_origin": origin.get("source_origin"),
+            "source_device_id": origin.get("source_device_id"),
+            "source_artifact_id": origin.get("source_artifact_id"),
+            "source_revision_id": origin.get("source_revision_id"),
+            "project_confirmation_id": origin.get("project_confirmation_id"),
+            "project_revision": origin.get("project_revision"),
+            "author_edited": origin.get("edited", False),
+            "evidence": evidence,
+            "evidence_current": bool(evidence and _source_current(tx, branch_id, evidence)),
+        },
+    }
+
+
+def _item_change(entry):
+    # A sibling moving or a category being renamed does not create an item revision.
+    return entry[:3] if entry is not None else None
+
+
+def setting_item_history(domain, branch_id, item_id, before_revision, limit):
+    with domain.db.connect() as tx:
+        tx.execute("BEGIN")
+        branch = _branch(tx, branch_id)
+        workspace = _workspace(tx, branch_id)
+        current = _item_version(workspace, item_id)
+        cutoff = workspace["revision"] + 1 if before_revision is None else before_revision
+        rows = tx.execute(
+            "SELECT id,payload,basis,created FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+            "AND json_extract(payload,'$.revision')<? ORDER BY json_extract(payload,'$.revision') DESC",
+            (branch_id, WORKSPACE, cutoff),
+        )
+        entries = []
+        newer = None
+
+        def record(version):
+            row, revision, entry = version
+            restore = json.loads(row["basis"]).get("restored_item") or {}
+            entries.append(
+                {
+                    "workspace_id": row["id"],
+                    "revision": revision,
+                    "created": row["created"],
+                    "state": _item_history_state(tx, branch_id, entry),
+                    "restored_from": restore.get("workspace_id")
+                    if restore.get("item_id") == item_id
+                    else None,
+                }
+            )
+
+        for row in rows:
+            payload = _read_payload(row)
+            entry = _item_version(payload, item_id)
+            if newer is not None and _item_change(newer[2]) != _item_change(entry):
+                record(newer)
+                if len(entries) > limit:
+                    break
+            newer = (row, payload["revision"], entry)
+        else:
+            if newer is not None and newer[2] is not None:
+                record(newer)
+        if before_revision is None and not entries and current is None:
+            raise DomainError("conception_item", "本工作版本中找不到该编号的设定条目。", 404)
+        return {
+            "base_revision": workspace["revision"],
+            "base_story_revision": branch["story_revision"],
+            "current": _item_history_state(tx, branch_id, current),
+            "entries": entries[:limit],
+            "next_before_revision": entries[limit - 1]["revision"] if len(entries) > limit else None,
+        }
+
+
 def _insert(tx, branch, kind, payload, basis):
     identifier = uid()
     tx.execute(
@@ -547,19 +727,22 @@ def _insert(tx, branch, kind, payload, basis):
     return identifier
 
 
-def _persist(tx, branch, before, categories, generated=None):
+def _persist(tx, branch, before, categories, origin_overrides=None, *, restored_item=None):
     _validate(categories)
     previous = _items(before["categories"])
     origins = {}
     for key, entry in _items(categories).items():
-        if generated and key in generated:
-            origins[key] = generated[key]
+        if origin_overrides and key in origin_overrides:
+            origins[key] = origin_overrides[key]
         elif previous.get(key) == entry:
             origins[key] = before["origins"].get(key, {"origin": "author"})
         elif key in before["origins"]:
             origins[key] = {**before["origins"][key], "edited": True}
         else:
             origins[key] = {"origin": "author"}
+    basis = {"story_revision": branch["story_revision"], "conception_revision": before["revision"]}
+    if restored_item:
+        basis["restored_item"] = restored_item
     return _insert(
         tx,
         branch,
@@ -570,7 +753,7 @@ def _persist(tx, branch, before, categories, generated=None):
             "categories": categories,
             "origins": origins,
         },
-        {"story_revision": branch["story_revision"], "conception_revision": before["revision"]},
+        basis,
     )
 
 
@@ -598,6 +781,50 @@ def _receipt(tx, data, artifact_id, fingerprint):
         "INSERT INTO receipts VALUES(?,?,?)",
         (data.idempotency_key, artifact_id, dumps({"conception_decision": fingerprint})),
     )
+
+
+def restore_setting_item(domain, branch_id, item_id, data):
+    with domain.db.connect(True) as tx:
+        branch = _branch(tx, branch_id)
+        fingerprint, replay = _decision(tx, branch, data, f"restore-item:{item_id}")
+        if replay:
+            return _snapshot_tx(tx, branch)
+        before = _workspace(tx, branch_id)
+        _check_basis(branch, before, data)
+        row = tx.execute(
+            "SELECT payload FROM artifacts WHERE id=? AND branch_id=? AND kind=? AND status='accepted'",
+            (data.source_workspace_id, branch_id, WORKSPACE),
+        ).fetchone()
+        source = _item_version(_read_payload(row), item_id) if row else None
+        if source is None:
+            raise DomainError("conception_item_version", "此历史修订中没有该设定条目。", 404)
+        current = _item_version(before, item_id)
+        if _item_change(current) == _item_change(source):
+            raise DomainError("conception_item_unchanged", "选中的历史版本与当前条目一致。", 409)
+        item, origin, category_id, _, number = source
+        target = next((category for category in before["categories"] if category["id"] == category_id), None)
+        if target is None:
+            raise DomainError("conception_item_category", "该历史条目的原类别已被移除，无法原位恢复。", 409)
+        position = current[4] - 1 if current is not None and current[2] == category_id else number - 1
+        # Keep the revision we read intact so baseline comparison and origins are preserved.
+        categories = []
+        for category in before["categories"]:
+            entries = [entry for entry in category["items"] if entry["id"] != item_id]
+            if category["id"] == category_id:
+                if len(entries) >= 40:
+                    raise DomainError("conception_items", "原类别已满，无法恢复该条目。", 409)
+                entries.insert(position, item)
+            categories.append({**category, "items": entries})
+        artifact_id = _persist(
+            tx,
+            branch,
+            before,
+            categories,
+            {item_id: origin},
+            restored_item={"item_id": item_id, "workspace_id": data.source_workspace_id},
+        )
+        _receipt(tx, data, artifact_id, fingerprint)
+        return _snapshot_tx(tx, branch)
 
 
 def adopt(domain, branch_id, data, *, before_write=None):
@@ -677,48 +904,62 @@ def adopt(domain, branch_id, data, *, before_write=None):
 
 def confirm(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
-        if before_write is not None:
-            before_write(tx)
-        branch = _branch(tx, branch_id)
-        fingerprint, replay = _decision(tx, branch, data, "confirm")
-        if replay:
-            return _snapshot_tx(tx, branch)
-        workspace = _workspace(tx, branch_id)
-        _check_basis(branch, workspace, data)
-        project = confirmed_project_tx(tx, branch_id)
-        project_id = project["id"] if project else None
-        impacted = [item["item_id"] for item in _project_impacts(workspace, project_id)]
-        accepted = set(data.reconciled_project_items)
-        if accepted != set(impacted) or len(accepted) != len(data.reconciled_project_items):
-            raise DomainError("conception_project_review", "请逐项核对受立项变更影响的设定，再确认。", 409)
-        categories = workspace["categories"]
-        observed = _observed(tx, branch_id)
-        evidence = _source_records(tx, branch_id, workspace)
-        planning_brief = "\n\n".join(
-            f"{item['title']}\n{item['detail'].strip()}"
-            for category in categories
-            if category["id"] in {"core", "outline"} and not category["skipped"]
-            for item in category["items"]
-            if item["detail"].strip()
-        )
-        payload = {
-            "version": VERSION,
-            **workspace,
-            "story_revision": branch["story_revision"],
-            "issues": completeness_issues(categories, observed, evidence),
-            "observed": observed,
-            "sources": evidence,
-            "definitions": _definitions(tx, branch_id),
-            "note": data.note.strip(),
-            "planning_brief": planning_brief if len(planning_brief) <= 30_000 else "",
-        }
-        if project:
-            payload["project_confirmation_id"] = project_id
-        if impacted:
-            payload["reconciled_project_items"] = impacted
-        identifier = _insert(tx, branch, CONFIRMATION, payload, {"story_revision": branch["story_revision"]})
-        _receipt(tx, data, identifier, fingerprint)
+        return confirm_tx(tx, branch_id, data, before_write=before_write)
+
+
+def confirm_tx(tx, branch_id, data, *, before_write=None, sync_source=None):
+    if before_write is not None:
+        before_write(tx)
+    branch = _branch(tx, branch_id)
+    fingerprint, replay = _decision(tx, branch, data, "confirm")
+    if replay:
         return _snapshot_tx(tx, branch)
+    workspace = _workspace(tx, branch_id)
+    _check_basis(branch, workspace, data)
+    project = confirmed_project_tx(tx, branch_id)
+    project_id = project["id"] if project else None
+    impacted = [item["item_id"] for item in _project_impacts(workspace, project_id)]
+    accepted = set(data.reconciled_project_items)
+    if accepted != set(impacted) or len(accepted) != len(data.reconciled_project_items):
+        raise DomainError("conception_project_review", "请逐项核对受立项变更影响的设定，再确认。", 409)
+    categories = workspace["categories"]
+    findings = setting_findings(categories)
+    reviewed = data.reviewed_setting_findings
+    if not _review_covers(findings, reviewed):
+        raise DomainError("conception_setting_review", "请到设定冲突体检逐项核对后再确认。", 409)
+    observed = _observed(tx, branch_id)
+    evidence = _source_records(tx, branch_id, workspace)
+    planning_brief = "\n\n".join(
+        f"{item['title']}\n{item['detail'].strip()}"
+        for category in categories
+        if category["id"] in {"core", "outline"} and not category["skipped"]
+        for item in category["items"]
+        if item["detail"].strip()
+    )
+    payload = {
+        "version": VERSION,
+        **workspace,
+        "story_revision": branch["story_revision"],
+        "issues": completeness_issues(categories, observed, evidence),
+        "observed": observed,
+        "sources": evidence,
+        "definitions": _definitions(tx, branch_id),
+        "note": data.note.strip(),
+        "planning_brief": planning_brief if len(planning_brief) <= 30_000 else "",
+    }
+    if project:
+        payload["project_confirmation_id"] = project_id
+    if impacted:
+        payload["reconciled_project_items"] = impacted
+    if findings:
+        payload["setting_findings"] = [{**finding, "reviewed": True} for finding in findings]
+        payload["reviewed_setting_findings"] = reviewed
+    basis = {"story_revision": branch["story_revision"]}
+    if sync_source:
+        basis["sync_settings_source"] = sync_source
+    identifier = _insert(tx, branch, CONFIRMATION, payload, basis)
+    _receipt(tx, data, identifier, fingerprint)
+    return _snapshot_tx(tx, branch)
 
 
 def handoff_tx(tx, branch_id, identifier):
@@ -800,6 +1041,25 @@ def register_routes(app, domain):
     @app.put(path)
     def save_workspace(branch_id: str, data: SaveConception) -> ConceptionWorkspace:
         return save(domain, branch_id, data)
+
+    @app.post(path + "/setting-inspection")
+    def inspect_workspace_settings(branch_id: str, data: SaveConception) -> SettingInspection:
+        return inspect_settings(domain, branch_id, data)
+
+    @app.get(path + "/items/{item_id}/history")
+    def get_setting_item_history(
+        branch_id: str,
+        item_id: Identifier,
+        before_revision: Annotated[int | None, Query(ge=1)] = None,
+        limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    ) -> SettingItemHistory:
+        return setting_item_history(domain, branch_id, item_id, before_revision, limit)
+
+    @app.post(path + "/items/{item_id}/restore")
+    def restore_workspace_setting_item(
+        branch_id: str, item_id: Identifier, data: RestoreSettingItem
+    ) -> ConceptionWorkspace:
+        return restore_setting_item(domain, branch_id, item_id, data)
 
     @app.post(path + "/adopt")
     def adopt_candidate(branch_id: str, data: AdoptConception) -> ConceptionWorkspace:

@@ -18,6 +18,8 @@ import {
 import './offlineWorkspace.css'
 import { WebSyncPanel } from './WebSyncPanel'
 import { PortableEvidence } from './PortableEvidence'
+import { LocalProjectBrief } from './OfflineProjectBrief'
+import { discardOwnDraft, readDraft, writeDraft, type Draft } from './drafts'
 
 type EditorState = {
   chapter: LocalChapter
@@ -63,15 +65,20 @@ export function OfflineWorkspace() {
   const [editor, setEditor] = useState<EditorState>()
   const [preview, setPreview] = useState<LocalRevision>()
   const [conflict, setConflict] = useState<LocalRevision[]>()
+  const [recovery, setRecovery] = useState<Draft>()
+  const [draftNotice, setDraftNotice] = useState('')
   const [projectTitle, setProjectTitle] = useState('')
   const [chapterTitle, setChapterTitle] = useState('')
   const [localBusy, setBusy] = useState(false)
   const [syncBusy, setSyncBusy] = useState(false)
+  const [projectDirty, setProjectDirty] = useState(false)
+  const [syncedProjectVersion, setSyncedProjectVersion] = useState(0)
   const busy = localBusy || syncBusy
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const locked = useRef(false)
   const dirty = !!editor && editor.text !== editor.base.content
+  const draftId = selected && editor ? `offline/${selected.branch.id}/${editor.chapter.id}` : undefined
 
   useEffect(() => {
     let active = true
@@ -109,12 +116,38 @@ export function OfflineWorkspace() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [dirty])
 
+  useEffect(() => {
+    if (!dirty || !editor || !draftId) return
+    let active = true
+    const timer = setTimeout(() => {
+      void writeDraft({
+        id: draftId,
+        base: editor.base.revision,
+        revisionId: editor.base.id,
+        text: editor.text,
+        updated: Date.now(),
+      }).then(
+        () => {
+          if (active) setDraftNotice('输入已暂存为草稿。')
+        },
+        () => {
+          if (active) setDraftNotice('无法暂存当前输入，请下载草稿以保留这段文字。')
+        },
+      )
+    }, 250)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [dirty, editor, draftId])
+
   function showError(reason: unknown) {
     setError(reason instanceof Error ? reason.message : '操作失败，请重试。')
   }
 
-  function mayLeave() {
-    return !dirty || window.confirm('这一章有未保存的输入。是否放弃编辑并离开？')
+  function mayLeave(workChange = false) {
+    if (workChange && projectDirty && !window.confirm('立项卡有未确认的修改。是否离开当前作品？')) return false
+    return !dirty || window.confirm('这一章有未提交的输入。是否离开当前编辑区？')
   }
 
   async function run(operation: () => Promise<void>) {
@@ -139,6 +172,8 @@ export function OfflineWorkspace() {
     setChapters(rows)
     setEditor(undefined)
     setConflict(undefined)
+    setRecovery(undefined)
+    setDraftNotice('')
     setPreview(undefined)
   }
 
@@ -149,7 +184,15 @@ export function OfflineWorkspace() {
     if (!base) throw new Error('找不到此章的保存修订。')
     setEditor({ chapter, history, base, text: base.content })
     setConflict(undefined)
+    setRecovery(undefined)
+    setDraftNotice('')
     setPreview(undefined)
+    try {
+      const saved = await readDraft(`offline/${selected.branch.id}/${chapter.id}`)
+      if (saved && saved.text !== base.content) setRecovery(saved)
+    } catch {
+      setDraftNotice('无法读取编辑草稿，已打开正式保存稿。')
+    }
   }
 
   async function save(restore?: LocalRevision) {
@@ -172,6 +215,9 @@ export function OfflineWorkspace() {
       setConflict(undefined)
       setPreview(undefined)
       setStatus(`本地已保存 · 修订 ${revision.revision}`)
+      setRecovery(undefined)
+      setDraftNotice('')
+      if (draftId) void discardOwnDraft(draftId).catch(() => undefined)
     } catch (reason) {
       if (reason instanceof OfflineStoreError && reason.code === 'conflict') {
         setConflict(await readLocalHistory(selected.novel.id, editor.chapter.id))
@@ -196,7 +242,7 @@ export function OfflineWorkspace() {
           <form
             onSubmit={(event) => {
               event.preventDefault()
-              if (!mayLeave()) return
+              if (!mayLeave(true)) return
               void run(async () => {
                 const project = await createLocalProject(projectTitle)
                 setProjects((rows) => [...rows, project])
@@ -225,7 +271,7 @@ export function OfflineWorkspace() {
               disabled={busy || !ready}
               onChange={(event) => {
                 const project = projects.find((item) => item.novel.id === event.target.value)
-                if (project && mayLeave()) void run(() => openProject(project))
+                if (project && mayLeave(true)) void run(() => openProject(project))
               }}
             >
               <option value="" disabled>
@@ -240,6 +286,13 @@ export function OfflineWorkspace() {
           </label>
           {selected && (
             <>
+              <LocalProjectBrief
+                key={`project-${selected.branch.id}`}
+                projectId={selected.novel.id}
+                refreshToken={syncedProjectVersion}
+                disabled={busy}
+                onDirty={setProjectDirty}
+              />
               <PortableEvidence
                 key={selected.branch.id}
                 docs={selected.evidence ?? []}
@@ -249,13 +302,14 @@ export function OfflineWorkspace() {
               <WebSyncPanel
                 key={selected.branch.id}
                 project={selected}
-                unsaved={dirty || localBusy}
+                unsaved={dirty || projectDirty || localBusy}
                 onBusy={setSyncBusy}
                 onApplied={async () => {
                   const saved = (await listLocalProjects()).find(
                     (work) => work.branch.id === selected.branch.id,
                   )
                   if (!saved) return
+                  setSyncedProjectVersion((version) => version + 1)
                   setProjects(await listLocalProjects())
                   const latest = await listLocalChapters(saved.novel.id)
                   setSelected(saved)
@@ -315,6 +369,31 @@ export function OfflineWorkspace() {
               <p>
                 修订 {editor.base.revision} · {dirty ? '有未保存输入' : '当前稿已保存到浏览器'}
               </p>
+              {draftNotice && <p role="status">{draftNotice}</p>}
+              {recovery && !dirty && (
+                <details>
+                  <summary>
+                    {recovery.fromOtherWindow ? '有其他窗口暂存的草稿' : '有未提交的暂存草稿'}
+                  </summary>
+                  <p>
+                    暂存时的修订 {recovery.base} ·{' '}
+                    {recovery.revisionId === editor.base.id ? '依据仍有效' : '保存稿已有新版本'}
+                  </p>
+                  <pre>{recovery.text || '空稿'}</pre>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      const source = editor.history.find((row) => row.id === recovery.revisionId)
+                      if (recovery.revisionId !== editor.base.id) setConflict(editor.history)
+                      setEditor({ ...editor, base: source ?? editor.base, text: recovery.text })
+                      setRecovery(undefined)
+                    }}
+                  >
+                    载入暂存草稿
+                  </button>
+                </details>
+              )}
               <label>
                 章节正文
                 <textarea
@@ -324,6 +403,9 @@ export function OfflineWorkspace() {
                   onChange={(event) => {
                     const text = event.target.value
                     setEditor((value) => value && { ...value, text })
+                    setDraftNotice('')
+                    if (draftId && text === editor.base.content)
+                      void discardOwnDraft(draftId).catch(() => undefined)
                     setStatus('')
                   }}
                 />
@@ -332,7 +414,7 @@ export function OfflineWorkspace() {
                 <button
                   type="button"
                   className="primary"
-                  disabled={busy || !dirty}
+                  disabled={busy || !dirty || !!conflict}
                   onClick={() => void run(() => save())}
                 >
                   保存正文到浏览器
@@ -431,7 +513,7 @@ export function OfflineWorkspace() {
             onChange={(event) => {
               const file = event.target.files?.[0]
               event.target.value = ''
-              if (!file || !mayLeave()) return
+              if (!file || !mayLeave(true)) return
               void run(async () => {
                 const project = await importLocalManuscript(file)
                 setProjects((rows) => [...rows, project])

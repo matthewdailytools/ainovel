@@ -580,8 +580,8 @@ def _outline(worker, state):
     from .outline_workspace import ConfirmOutline, SaveOutline, confirm_outline, read_outline, save_outline
 
     branch = worker.task["branch_id"]
-    _unchanged(_story_revision(worker.domain, branch), state["story_revision"])
-    _ensure_chapters(worker, state)
+    if not state.get("child_id"):
+        _ensure_chapters(worker, state)
     request = _module_payload(worker, "outline.plan", "按已确认立项和设定编排四级大纲。")
     request["outline_generation"] = {
         "base_revision": state["outline_revision"],
@@ -594,6 +594,7 @@ def _outline(worker, state):
     view = read_outline(worker.domain, branch)
     latest = view["draft"]
     from_candidate = latest and latest["setting_basis"].get("generation_id") == candidate["id"]
+    _check_outline_story(latest, state, candidate["id"], view["story_revision"])
     if not from_candidate or not latest["confirmed"]:
         if not worker.task["payload"]["auto_confirm_planning"]:
             _checkpoint(worker, "needs_review", "请载入本次大纲候选、核对并确认后继续。")
@@ -616,10 +617,31 @@ def _outline(worker, state):
             ConfirmOutline(base_revision=view["draft"]["revision"]),
             before_write=_guard(worker, state),
         )
+        _check_outline_story(view["draft"], state, candidate["id"], view["story_revision"])
     if view["stale"]:
         raise DomainError("outline_changed", "本次确认大纲已失效。", 409)
+    state["story_revision"] = view["story_revision"]
     state["outline_id"] = view["confirmed"]["id"]
     _transition(worker, state, "writing")
+
+
+def _check_outline_story(latest, state, candidate_id, revision):
+    expected = state["story_revision"]
+    if revision == expected:
+        return
+    if latest and latest["confirmed"] and candidate_id:
+        basis = latest["setting_basis"]
+        receipt = basis.get("outline_story_receipt", {})
+        if (
+            basis.get("generation_id") == candidate_id
+            and receipt.get("before") == expected
+            and receipt.get("after") == revision
+            and receipt.get("draft_revision") == latest["revision"] - 1
+            and receipt["draft_revision"] > state["outline_revision"]
+            and len(receipt.get("created_ids", [])) == revision - expected
+        ):
+            return
+    _unchanged(revision, expected)
 
 
 def _volume_checkpoint(worker, state, volume):
@@ -922,6 +944,14 @@ def _control(domain, branch_id, task_id, action):
                 raise DomainError(
                     "seven_stage_changed", "当前检查点的依据已失效，请从有效版本另行接力。", 409
                 )
+            if state["stage"] == "outline" and revision != state["story_revision"]:
+                from .outline_workspace import _decode, _latest
+
+                child = tx.execute(
+                    "SELECT result FROM tasks WHERE id=? AND status='succeeded'", (child_id,)
+                ).fetchone()
+                candidate_id = json.loads(child["result"]).get("artifact_id") if child else None
+                _check_outline_story(_decode(_latest(tx, branch_id)), state, candidate_id, revision)
             next_status = "queued"
             if recovery:
                 if recovery["state"] == "blocked":

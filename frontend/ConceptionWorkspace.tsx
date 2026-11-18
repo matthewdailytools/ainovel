@@ -2,7 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, label, type Artifact, type Branch, type Task } from './api'
 import type { Notify } from './App'
 import { AuthorIntentPanel } from './AuthorIntent'
-import { ConceptionCandidateReview, ConceptionItemEditor, ConceptionQuote } from './ConceptionItems'
+import { ConceptionItemHistory } from './ConceptionItemHistory'
+import {
+  ConceptionCandidateReview,
+  ConceptionItemEditor,
+  ConceptionQuote,
+  ConceptionSettingFindings,
+  type SettingInspection,
+} from './ConceptionItems'
 import { ConceptionWorldExtract } from './ConceptionWorldExtract'
 import { GenreSettings } from './GenreProfile'
 import { ProjectBriefPanel, type ProjectDraft } from './ProjectBrief'
@@ -38,7 +45,7 @@ type GenerationTask = Task & {
     pending_consistency_review?: boolean
   }
 }
-type FeedbackPanel = 'settings' | 'generation' | 'confirmation' | 'reverse'
+type FeedbackPanel = 'settings' | 'generation' | 'confirmation' | 'reverse' | 'history'
 
 export function ConceptionWorkspace({
   branch,
@@ -64,6 +71,14 @@ export function ConceptionWorkspace({
   const [budget, setBudget] = useState('')
   const [completionNote, setCompletionNote] = useState('')
   const [projectReview, setProjectReview] = useState<{ key: string; itemIds: string[] }>()
+  const [settingReview, setSettingReview] = useState<{ key: string; findingIds: string[] }>()
+  const [settingPreview, setSettingPreview] = useState<{
+    draft: ConceptionDraft
+    inspection: SettingInspection
+  }>()
+  const [locateItem, setLocateItem] = useState<string>()
+  const [historyItemId, setHistoryItemId] = useState('')
+  const [historyLookup, setHistoryLookup] = useState('')
   const [storyOpen, setStoryOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [tasks, setTasks] = useState<GenerationTask[]>([])
@@ -107,8 +122,23 @@ export function ConceptionWorkspace({
   const reconciledProjectItems = projectImpacts
     .filter((item) => item.reconciled || checkedProjectItems.includes(item.item_id))
     .map((item) => item.item_id)
+  const checkedSettingFindings = settingReview?.key === projectReviewKey ? settingReview.findingIds : []
+  const savedSettingFindings = state?.setting_findings ?? []
+  const reviewedSettingFindings = savedSettingFindings
+    .filter((finding) => finding.reviewed || checkedSettingFindings.includes(finding.id))
+    .map((finding) => finding.id)
+  const draftInspection =
+    draft && !conflict && settingPreview?.draft === draft ? settingPreview.inspection : undefined
+  const settingFindings = draft ? draftInspection?.findings : savedSettingFindings
   const panel = useRef<HTMLElement>(null)
+  const historyPanel = useRef<HTMLElement>(null)
   useLeaveGuard(dirty, '未保存的构思设定')
+
+  useEffect(() => {
+    if (!locateItem) return
+    document.getElementById(`conception-item-${locateItem}`)?.focus()
+    setLocateItem(undefined)
+  }, [category?.id, locateItem])
 
   const refresh = useCallback(async () => {
     const data = await api<ConceptionState>(path)
@@ -260,6 +290,25 @@ export function ConceptionWorkspace({
     setCategoryTitleEdit('')
     panel.current?.focus()
   }
+  function openItemHistory(id: string) {
+    setHistoryLookup(id)
+    setHistoryItemId(id)
+    historyPanel.current?.focus()
+  }
+  async function restoreItem(
+    id: string,
+    basis: { base_revision: number; base_story_revision: number; source_workspace_id: string },
+  ) {
+    if (draft) return
+    const updated = await post<ConceptionState>(
+      `items/${encodeURIComponent(id)}/restore`,
+      basis,
+      'idempotency_key',
+    )
+    if (!alive.current) return
+    setState(updated)
+    setStatus(`条目已恢复为设定草稿修订 ${updated.revision}。可核对后重新确认。`)
+  }
   async function save() {
     if (!draft) return
     const updated = await api<ConceptionState>(path, 'PUT', {
@@ -270,6 +319,14 @@ export function ConceptionWorkspace({
     setState(updated)
     clearDraft()
     setStatus('构思设定已保存。')
+  }
+  async function inspectDraft() {
+    if (!draft) return
+    const inspection = await api<SettingInspection>(`${path}/setting-inspection`, 'POST', {
+      ...baseRevision(draft),
+      categories: draft.categories,
+    })
+    if (alive.current) setSettingPreview({ draft, inspection })
   }
   async function generate(id: string | null) {
     if (!state || draft) return
@@ -363,6 +420,7 @@ export function ConceptionWorkspace({
         ...baseRevision(state),
         note: completionNote.trim(),
         reconciled_project_items: reconciledProjectItems,
+        reviewed_setting_findings: reviewedSettingFindings,
       },
       'idempotency_key',
     )
@@ -554,7 +612,13 @@ export function ConceptionWorkspace({
                 <legend>编辑本类项目</legend>
                 {!category.items.length && <p className="small muted">这个类别还没有设定项目。</p>}
                 {category.items.map((item) => (
-                  <div className="conception-item" key={item.id}>
+                  <article
+                    className="conception-item"
+                    key={item.id}
+                    id={`conception-item-${item.id}`}
+                    tabIndex={-1}
+                    aria-label={item.title || '未命名项目'}
+                  >
                     <ConceptionItemEditor
                       item={item}
                       choices={choices}
@@ -582,6 +646,15 @@ export function ConceptionWorkspace({
                           }
                         />
                       ))}
+                    {state.categories.some((row) => row.items.some((saved) => saved.id === item.id)) && (
+                      <button
+                        type="button"
+                        aria-label={`查看「${item.title || '未命名项目'}」的历史`}
+                        onClick={() => openItemHistory(item.id)}
+                      >
+                        查看历史
+                      </button>
+                    )}
                     <button
                       type="button"
                       aria-label={`移除项目 ${item.title || '未命名项目'}`}
@@ -604,7 +677,7 @@ export function ConceptionWorkspace({
                     >
                       移除项目
                     </button>
-                  </div>
+                  </article>
                 ))}
                 <div className="actions">
                   <button
@@ -683,6 +756,46 @@ export function ConceptionWorkspace({
           </>
         )}
       </section>
+
+      {state && (
+        <section className="card" aria-labelledby="conception-item-history" ref={historyPanel} tabIndex={-1}>
+          <h2 id="conception-item-history">设定条目历史</h2>
+          {feedback('history')}
+          <div className="actions">
+            <label>
+              条目编号
+              <input
+                value={historyLookup}
+                maxLength={128}
+                onChange={(event) => setHistoryLookup(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={busy || !/^[a-zA-Z0-9_-]+$/.test(historyLookup.trim())}
+              onClick={() => openItemHistory(historyLookup.trim())}
+            >
+              按编号查看历史
+            </button>
+          </div>
+          {historyItemId && (
+            <ConceptionItemHistory
+              key={`${branch.id}/${historyItemId}`}
+              path={path}
+              itemId={historyItemId}
+              revision={state.revision}
+              storyRevision={state.story_revision}
+              dirty={dirty}
+              busy={busy}
+              onRefresh={async () => {
+                await refresh()
+                if (alive.current && feedbackPanel === 'history') setError('')
+              }}
+              onRestore={(basis) => void perform(() => restoreItem(historyItemId, basis), 'history')}
+            />
+          )}
+        </section>
+      )}
 
       <section className="card" id="conception-generation" aria-label="构思生成与草案">
         <h2>AI 构思辅助</h2>
@@ -878,9 +991,61 @@ export function ConceptionWorkspace({
       <section className="card" aria-label="构思核对与交接">
         <h2>完整度与作者确认</h2>
         {feedback('confirmation')}
-        <p className="small">提示供你决定是否继续完善。保留待办也可以确认。</p>
+        <p className="small">完整度提示可保留为待办。设定冲突体检的发现需在确认前逐项核对。</p>
         {state && (
           <>
+            <section aria-labelledby="conception-setting-inspection">
+              <h3 id="conception-setting-inspection">设定冲突体检</h3>
+              {dirty && (
+                <div className="actions">
+                  <button
+                    type="button"
+                    disabled={busy || conflict || itemNamesMissing}
+                    onClick={() => void perform(inspectDraft, 'confirmation')}
+                  >
+                    体检未保存草稿
+                  </button>
+                  <span className="small">
+                    {conflict
+                      ? '保存版已有更新，请先重新读取并核对草稿。'
+                      : itemNamesMissing
+                        ? '请先补齐条目名称。'
+                        : '保存后可记录核对选择。'}
+                  </span>
+                </div>
+              )}
+              {settingFindings && (
+                <>
+                  <p className="small" role="status">
+                    {dirty ? '未保存草稿' : `已保存修订 ${state.revision}`} ·{' '}
+                    {settingFindings.length ? `需关注 ${settingFindings.length} 项` : '当前无发现项'}
+                  </p>
+                  {!!settingFindings.length && (
+                    <ConceptionSettingFindings
+                      findings={settingFindings}
+                      categories={categories}
+                      checked={dirty ? [] : checkedSettingFindings}
+                      busy={busy}
+                      onLocate={(id, itemId) => {
+                        selectCategory(id)
+                        setLocateItem(itemId)
+                      }}
+                      onReview={
+                        dirty
+                          ? undefined
+                          : (id, checked) =>
+                              setSettingReview({
+                                key: projectReviewKey,
+                                findingIds: checked
+                                  ? [...checkedSettingFindings, id]
+                                  : checkedSettingFindings.filter((value) => value !== id),
+                              })
+                      }
+                    />
+                  )}
+                </>
+              )}
+            </section>
             {!!projectImpacts.length && (
               <fieldset disabled={busy || dirty}>
                 <legend>立项修订影响</legend>
@@ -956,7 +1121,12 @@ export function ConceptionWorkspace({
               <button
                 className="primary"
                 type="button"
-                disabled={busy || dirty || reconciledProjectItems.length !== projectImpacts.length}
+                disabled={
+                  busy ||
+                  dirty ||
+                  reconciledProjectItems.length !== projectImpacts.length ||
+                  reviewedSettingFindings.length !== savedSettingFindings.length
+                }
                 onClick={() => void perform(confirm, 'confirmation')}
               >
                 确认当前构思

@@ -2,20 +2,38 @@ import { useEffect, useState } from 'react'
 import { api } from './api'
 import type { Notify } from './App'
 import { CloudAttachments } from './CloudAttachments'
+import { describeProjectVersion, type ProjectVersion } from './projectSyncModel'
 
 type Conflict = { id: string; object_id: string }
+type FormalSource = { id: string; device_id: string; change_id: string; sequence: number }
 type SyncStatus = {
   enabled: boolean
   work_id: string
   cursor: number
   pending: number
+  project_source?: FormalSource | null
+  settings_source?: FormalSource | null
   conflicts: Conflict[]
   deferred: { object_id: string; reason: string }[]
 }
-type Side = { head?: { content: string }; novel?: { title: string; brief: string } } | null
+type Side = {
+  kind?: string
+  revision_id?: string
+  head?: { content: string }
+  novel?: { title: string; brief: string }
+} | null
 type Comparison = {
   local_sha256: string
   local: Side
+  project_versions?: Record<string, ProjectVersion>
+  settings_versions?: Record<
+    string,
+    {
+      categories: { title: string; skipped: boolean; items: { title: string; detail: string }[] }[]
+      note: string
+      project_version_id: string | null
+    }
+  >
   remote: {
     head_revision: string
     parent_revision: string | null
@@ -25,8 +43,26 @@ type Comparison = {
   }
 }
 
-function readable(side: Side) {
+function readable(side: Side, comparison: Comparison) {
   if (!side) return '无此对象或已归档'
+  if (side.kind === 'project-head' && side.revision_id) {
+    const version = comparison.project_versions?.[side.revision_id]
+    return version ? describeProjectVersion(version) : '尚未取得该版本的立项来源。'
+  }
+  if (side.kind === 'settings-head' && side.revision_id) {
+    const version = comparison.settings_versions?.[side.revision_id]
+    if (!version) return '尚未取得该版本的设定来源。'
+    return [
+      `立项来源 ${version.project_version_id ?? '无'}`,
+      version.note,
+      ...version.categories.flatMap((category) => [
+        `${category.title}${category.skipped ? ' · 暂缓' : ''}`,
+        ...category.items.map((item) => `${item.title} · ${item.detail}`),
+      ]),
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
   return side.head?.content ?? [side.novel?.title, side.novel?.brief].filter(Boolean).join('\n')
 }
 
@@ -84,7 +120,7 @@ export function DesktopSyncPanel({
   return (
     <section className="card" aria-label="作品云同步">
       <h2>作品云同步</h2>
-      <p>同步当前工作版本的目录、章稿、基本信息和随稿依据。启用前请确认云服务及作品范围。</p>
+      <p>同步当前工作版本的目录、章稿、已确认立项和设定，以及随稿依据。启用前请确认云服务及作品范围。</p>
       <p>
         工作版本编号 <code>{branchId}</code>
       </p>
@@ -129,6 +165,23 @@ export function DesktopSyncPanel({
         <p role="status">
           {status.enabled ? '已启用' : '本地模式'} · 游标 {status.cursor} · {status.pending} 条待发送或确认
         </p>
+      )}
+      {[
+        { label: '立项', source: status?.project_source },
+        { label: '设定', source: status?.settings_source },
+      ].map(
+        ({ label, source }) =>
+          source && (
+            <details key={label}>
+              <summary>当前{label}的云端来源</summary>
+              <p>
+                版本 <code>{source.id}</code>
+              </p>
+              <p>
+                设备 <code>{source.device_id}</code> · 回执 <code>{source.change_id}</code>
+              </p>
+            </details>
+          ),
       )}
       {!!status?.deferred.length && (
         <ul>
@@ -189,7 +242,7 @@ export function DesktopSyncPanel({
                   ? comparison.value.remote.parent_revision
                     ? '尚未取得共同基线修订。'
                     : '没有已记录的共同基线。'
-                  : readable(side)}
+                  : readable(side, comparison.value)}
               </pre>
             </details>
           ))}
@@ -206,7 +259,11 @@ export function DesktopSyncPanel({
               disabled={busy || !ready}
               onClick={() =>
                 void run(async () => {
-                  if (!window.confirm(`${label}并保存为解决后的版本？原章稿修订保留。`)) return
+                  const history =
+                    comparison.value.remote.current.payload?.kind === 'project-head'
+                      ? '立项版本'
+                      : '原章稿修订'
+                  if (!window.confirm(`${label}并保存为解决后的版本？${history}保留。`)) return
                   setStatus(
                     await api<SyncStatus>(`${path}/conflicts/${comparison.id}/resolve`, 'POST', {
                       ...credential,

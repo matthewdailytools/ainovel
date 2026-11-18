@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from .conception import CONFIRMATION, _latest, _read_payload, revision_tx
+from .conception import CONFIRMATION, _latest, _read_payload, revision_tx, setting_findings_reviewed
 from .db import DomainError
 from .evidence import source_units
 from .models import Input
@@ -32,6 +32,10 @@ def confirmed_world_basis(tx, branch_id, confirmation_id=None):
     ):
         if confirmation_id:
             raise DomainError("conception_changed", "设定草稿已改变，请重新确认。", 409)
+        return absent
+    if not setting_findings_reviewed(snapshot):
+        if confirmation_id:
+            raise DomainError("conception_setting_review", "请到设定冲突体检逐项核对后再确认。", 409)
         return absent
     observed_ids = {source["item_id"] for source in snapshot.get("sources", [])}
     return {

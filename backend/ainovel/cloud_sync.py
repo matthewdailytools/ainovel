@@ -20,6 +20,8 @@ from .db import DomainError
 from .cloud_attachments import SCHEMA as ATTACHMENT_SCHEMA, register_routes as register_attachments
 from .manuscript_exchange import RevisionObject, _source_link
 from .models import Input
+from .project_sync import ProjectVersionObject, parse_project_object
+from .settings_sync import SettingsVersionObject, parse_settings_object, validate_version_sources
 
 MAX_OBJECT_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = MAX_OBJECT_BYTES * 2
@@ -349,6 +351,17 @@ class SyncStore:
                 return replay
             if data.object_id.startswith("revision:"):
                 return self._push_source_revision(tx, work, device, data, payload, fingerprint)
+            formal = None
+            if data.object_id.startswith(("project-version:", "project:")):
+                formal = self._validate_project(tx, work, data.object_id, data.payload, data.tombstone)
+            if data.object_id.startswith(("settings-version:", "settings:")):
+                formal = self._validate_settings(tx, work, data.object_id, data.payload, data.tombstone)
+            if isinstance(formal, (ProjectVersionObject, SettingsVersionObject)):
+                if data.parent_revision is not None:
+                    base = self._change(tx, work, data.parent_revision)
+                    if not base or base["object_id"] != data.object_id:
+                        raise DomainError("sync_parent_unknown", "父修订不属于该正式对象。", 409)
+                return self._append(tx, work, device, data, fingerprint, payload, data.change_id, "applied")
             if data.parent_revision is not None:
                 parent = self._change(tx, work, data.parent_revision)
                 if not parent or parent["object_id"] != data.object_id:
@@ -390,6 +403,46 @@ class SyncStore:
         if not _source_link(row, parent):
             raise DomainError("sync_history", "来源修订须等待同一章的连续父稿入库。", 409)
         return self._append(tx, work, device, data, fingerprint, payload, data.change_id, "applied")
+
+    def _validate_project(self, tx, work, object_id, payload, tombstone):
+        value = parse_project_object(work, object_id, payload, tombstone)
+        if isinstance(value, ProjectVersionObject):
+            version = value.version
+            if version.parent_id and not self._head(tx, work, f"project-version:{version.parent_id}"):
+                raise DomainError("sync_project", "立项要先提交连续父版本。", 409)
+            if head := self._head(tx, work, object_id):
+                prior = self._change(tx, work, head)
+                if ProjectVersionObject.model_validate_json(prior["payload"]) != value:
+                    raise DomainError("sync_project", "同一立项修订编号不能改写。", 409)
+        elif not self._head(tx, work, f"project-version:{value.revision_id}"):
+            raise DomainError("sync_project", "尚未收到要采用的立项修订。", 409)
+        return value
+
+    def _validate_settings(self, tx, work, object_id, payload, tombstone):
+        value = parse_settings_object(work, object_id, payload, tombstone)
+        if isinstance(value, SettingsVersionObject):
+            version = value.version
+            if version.parent_id and not self._head(tx, work, f"settings-version:{version.parent_id}"):
+                raise DomainError("sync_settings", "设定要先提交连续父版本。", 409)
+            if head := self._head(tx, work, object_id):
+                previous = self._change(tx, work, head)
+                if SettingsVersionObject.model_validate_json(previous["payload"]) != value:
+                    raise DomainError("sync_settings", "同一设定修订编号不能改写。", 409)
+
+            def revision(identifier):
+                head = self._head(tx, work, f"revision:{identifier}")
+                if head:
+                    return RevisionObject.model_validate_json(
+                        self._change(tx, work, head)["payload"]
+                    ).revision
+                return None
+
+            validate_version_sources(
+                version, lambda identifier: self._head(tx, work, f"project-version:{identifier}"), revision
+            )
+        elif not self._head(tx, work, f"settings-version:{value.revision_id}"):
+            raise DomainError("sync_settings", "尚未收到要采用的设定修订。", 409)
+        return value
 
     def receipt(self, work, digest, change_id):
         with self.transaction(snapshot=True) as tx:
@@ -493,6 +546,10 @@ class SyncStore:
                 payload=payload,
                 tombstone=tombstone,
             )
+            if change.object_id.startswith("project:"):
+                self._validate_project(tx, work, change.object_id, payload, tombstone)
+            if change.object_id.startswith("settings:"):
+                self._validate_settings(tx, work, change.object_id, payload, tombstone)
             receipt = self._append(
                 tx,
                 work,

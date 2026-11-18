@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CloudAttachments } from './CloudAttachments'
 import type { LocalProject } from './offlineStore'
+import { describeProjectVersion } from './projectSyncModel'
 import { readSyncState, setSyncEnabled, type SyncPayload } from './syncClient'
 import {
   cloudScope,
@@ -12,11 +13,16 @@ import {
 
 type State = Awaited<ReturnType<typeof readSyncState>> & {
   deferred?: { object_id: string; reason: string }[]
+  localPending?: number
 }
 type Comparison = Awaited<ReturnType<typeof prepareWebResolution>>
 
-function excerpt(value: SyncPayload | null) {
+function excerpt(value: SyncPayload | null, comparison: Comparison) {
   if (!value) return '无此对象或已归档'
+  if (value.kind === 'project-head') {
+    const source = comparison.versions.find(({ version }) => version.id === value.revision_id)
+    return source ? describeProjectVersion(source.version) : '尚未取得该版本的立项来源。'
+  }
   const part = value.head ?? value.novel
   if (part && typeof part === 'object' && !Array.isArray(part)) {
     if (typeof part.content === 'string') return part.content
@@ -91,7 +97,7 @@ export function WebSyncPanel({
         setStatus(await readSyncState(scope))
         return
       }
-      if (unsaved) throw new Error('请先保存本章编辑，再进行同步或合并。')
+      if (unsaved) throw new Error('请先保存当前写作或立项修改，再进行同步或合并。')
       const next =
         action === 'choose' && compared && (value === 'local' || value === 'current' || value === 'incoming')
           ? await resolveWebManuscript(project, scope, transport, compared, value)
@@ -116,7 +122,7 @@ export function WebSyncPanel({
   return (
     <details>
       <summary>作品云同步</summary>
-      <p>同步目录、章稿、基本信息和随稿依据。设备凭据仅用于本次页面。</p>
+      <p>同步目录、章稿、已确认立项和随稿依据。设备凭据仅用于本次页面。</p>
       <p>
         工作版本编号 <code>{project.branch.id}</code>
       </p>
@@ -162,6 +168,7 @@ export function WebSyncPanel({
         <p role="status">
           {status.enabled ? '已启用' : '本地模式'} · 游标 {status.cursor} · {status.pending.length}{' '}
           条待发送或确认
+          {!!status.localPending && ` · ${status.localPending} 项正式保存仍待同步`}
         </p>
       )}
       {!!status?.deferred?.length && (
@@ -174,8 +181,8 @@ export function WebSyncPanel({
         </ul>
       )}
       {status?.conflicts.map((id) => (
-        <button key={id} type="button" disabled={busy} onClick={() => void run('compare', id)}>
-          比较冲突 {id}
+        <button key={id} type="button" title={id} disabled={busy} onClick={() => void run('compare', id)}>
+          比较冲突 {id.slice(0, 8)}
         </button>
       ))}
       {compared && (
@@ -195,7 +202,7 @@ export function WebSyncPanel({
                   ? compared.incoming.parent_revision
                     ? '本机尚未取得共同基线修订。'
                     : '没有已记录的共同基线。'
-                  : excerpt(side as SyncPayload | null)}
+                  : excerpt(side as SyncPayload | null, compared)}
               </pre>
             </details>
           ))}
@@ -211,7 +218,8 @@ export function WebSyncPanel({
               type="button"
               disabled={busy || !token || unsaved}
               onClick={() => {
-                if (window.confirm(`${label}并结束冲突？原稿修订保留。`)) void run('choose', choice)
+                const history = compared.current.payload?.kind === 'project-head' ? '立项版本' : '原稿修订'
+                if (window.confirm(`${label}并结束冲突？${history}保留。`)) void run('choose', choice)
               }}
             >
               {label}

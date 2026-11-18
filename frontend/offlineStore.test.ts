@@ -3,12 +3,15 @@ import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import {
   createLocalChapter,
   createLocalProject,
+  confirmLocalProjectBrief,
   applySyncedObject,
   exportLocalManuscript,
   importLocalManuscript,
   listLocalProjects,
   manuscriptHash,
+  readLocalPublications,
   readLocalHistory,
+  readLocalProjectBrief,
   saveLocalChapter,
   validateManuscript,
   validateSyncedObject,
@@ -98,7 +101,7 @@ test('quota failure aborts the whole browser write and preserves existing formal
 
 test('an unsupported newer database opens read-only from this app’s perspective and keeps records intact', async () => {
   await new Promise<void>((resolve, reject) => {
-    const opening = indexedDB.open('ainovel-offline-workspace', 3)
+    const opening = indexedDB.open('ainovel-offline-workspace', 5)
     opening.onupgradeneeded = () => opening.result.createObjectStore('v2').add('保留新版数据', 'data')
     opening.onsuccess = () => {
       opening.result.close()
@@ -108,7 +111,7 @@ test('an unsupported newer database opens read-only from this app’s perspectiv
   })
   await expect(listLocalProjects()).rejects.toMatchObject({ code: 'database' })
   const record = await new Promise((resolve, reject) => {
-    const opening = indexedDB.open('ainovel-offline-workspace', 3)
+    const opening = indexedDB.open('ainovel-offline-workspace', 5)
     opening.onsuccess = () => {
       const tx = opening.result.transaction('v2')
       const read = tx.objectStore('v2').get('data')
@@ -118,6 +121,162 @@ test('an unsupported newer database opens read-only from this app’s perspectiv
     opening.onerror = () => reject(opening.error)
   })
   expect(record).toBe('保留新版数据')
+})
+
+test('formal M1 confirmations use a local CAS and keep incoming competing revisions immutable', async () => {
+  const project = await createLocalProject('异地立项')
+  const projectId = project.novel.id
+  const branchId = project.branch.id
+  const draft = {
+    idea: '追查遗落的铜铃',
+    brief: {
+      position: '层层解开旧案',
+      track: '线索式悬疑',
+      genre_ids: ['xianxia'],
+      audience: '偏好悬疑的读者',
+      distinction: '证物都在首章出现',
+      length: '十万字',
+      cadence: '',
+      ending: '解开铜铃旧案',
+      final_image: '',
+    },
+  }
+  const local = await confirmLocalProjectBrief(projectId, null, draft)
+  const pending = await readLocalPublications(branchId)
+  expect(pending.map(({ objectId }) => objectId).sort()).toEqual([
+    `project-version:${local.id}`,
+    `project:${branchId}`,
+  ])
+  const put = IDBObjectStore.prototype.put
+  const failure = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    value,
+    key,
+  ) {
+    if (this.name === 'publications') throw new DOMException('Storage full', 'QuotaExceededError')
+    return put.call(this, value, key)
+  })
+  try {
+    await expect(
+      confirmLocalProjectBrief(projectId, local.id, { ...draft, idea: '未能排队的立项' }),
+    ).rejects.toMatchObject({ code: 'quota' })
+    expect((await readLocalProjectBrief(projectId)).versions.map(({ version }) => version)).toEqual([local])
+    expect(await readLocalPublications(branchId)).toEqual(pending)
+  } finally {
+    failure.mockRestore()
+  }
+  await expect(confirmLocalProjectBrief(projectId, null, draft)).rejects.toMatchObject({ code: 'conflict' })
+  const remote = { ...local, id: 'competing-project', parent_id: local.id, idea: '从线索中的草药重新立项' }
+  const format = 'ainovel-manuscript-sync/1'
+  const source = { device_id: 'other-device', change_id: 'remote-project-version', sequence: 4 }
+  const adopted = await validateSyncedObject(project, `project:${branchId}`, {
+    format,
+    kind: 'project-head',
+    branch_id: branchId,
+    revision_id: remote.id,
+  })
+  const base = JSON.stringify(['project-head', branchId, local.id])
+  await expect(applySyncedObject(projectId, `project:${branchId}`, adopted, base)).rejects.toMatchObject({
+    code: 'missing',
+  })
+  const versionId = `project-version:${remote.id}`
+  const object = await validateSyncedObject(project, versionId, {
+    format,
+    kind: 'project-version',
+    branch_id: branchId,
+    version: remote,
+  })
+  await expect(applySyncedObject(projectId, versionId, object, 'null', { source })).resolves.toBe(true)
+  await expect(applySyncedObject(projectId, `project:${branchId}`, adopted, base)).resolves.toBe(true)
+  const after = await readLocalProjectBrief(projectId)
+  expect(after.current).toMatchObject({ version: remote, source })
+  expect(after.versions.map(({ version }) => version.id)).toEqual(
+    expect.arrayContaining([local.id, remote.id]),
+  )
+  const archive = await exportLocalManuscript(projectId)
+  const history = archive.project_history!
+  expect(history.adopted_revision_id).toBe(remote.id)
+  expect(history.versions).toEqual(expect.arrayContaining([local, remote]))
+  expect(JSON.stringify(archive)).not.toContain(source.change_id)
+  await expect(
+    validateManuscript({ ...archive, project_history: { ...history, versions: [remote] } }),
+  ).rejects.toMatchObject({ code: 'format' })
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  await importLocalManuscript(bundle(archive))
+  const recovered = (await readLocalProjectBrief(projectId)).current
+  expect(recovered).toMatchObject({ version: remote, fromPackage: true })
+  expect(recovered?.source).toBeUndefined()
+  expect((await exportLocalManuscript(projectId)).project_history).toEqual(history)
+})
+
+test('failure writing a chapter publication rolls back content and current head', async () => {
+  const project = await createLocalProject('待发一致性')
+  const chapter = await createLocalChapter(project.novel.id, '旧铃')
+  const [base] = await readLocalHistory(project.novel.id, chapter.id)
+  const pending = await readLocalPublications(project.branch.id)
+  const put = IDBObjectStore.prototype.put
+  const failure = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    value,
+    key,
+  ) {
+    if (this.name === 'publications') throw new DOMException('Storage full', 'QuotaExceededError')
+    return put.call(this, value, key)
+  })
+  try {
+    await expect(
+      saveLocalChapter(project.novel.id, chapter.id, base.id, '要么同时保存，要么回滚。'),
+    ).rejects.toMatchObject({ code: 'quota' })
+    expect(await readLocalHistory(project.novel.id, chapter.id)).toEqual([base])
+    expect(await readLocalPublications(project.branch.id)).toEqual(pending)
+  } finally {
+    failure.mockRestore()
+  }
+})
+
+test('an older comparison cannot adopt over a newer local publication with the same text', async () => {
+  const project = await createLocalProject('同文不同版')
+  const branchId = project.branch.id
+  const key = project.novel.id
+  const chapter = await createLocalChapter(key, '铜铃')
+  const [old] = await readLocalHistory(key, chapter.id)
+  const objectId = `chapter:${chapter.id}`
+  const shown = (await readLocalPublications(branchId)).find((entry) => entry.objectId === objectId)!
+
+  const edit = await saveLocalChapter(key, chapter.id, old.id, '一稿内容。')
+  const restored = await saveLocalChapter(key, chapter.id, edit.id, '', old.id)
+  expect(restored.sha256).toBe(old.sha256)
+  const earlier = JSON.stringify([
+    'chapter',
+    chapter.id,
+    branchId,
+    chapter.position,
+    chapter.title,
+    old.sha256,
+  ])
+  const incoming = await validateSyncedObject(project, objectId, {
+    format: 'ainovel-manuscript-sync/1',
+    kind: 'chapter',
+    chapter: { ...chapter, revision: 1 },
+    head: {
+      ...old,
+      id: 'remote-head',
+      parent_id: old.id,
+      revision: 1,
+      content: '他人改写。',
+      sha256: await manuscriptHash('他人改写。'),
+    },
+  })
+  expect(
+    await applySyncedObject(key, objectId, incoming, earlier, {
+      publicationId: shown.id,
+      consumePublication: true,
+    }),
+  ).toBe(false)
+  expect((await readLocalHistory(key, chapter.id)).at(-1)).toEqual(restored)
+  expect((await readLocalPublications(branchId)).find((entry) => entry.objectId === objectId)?.id).not.toBe(
+    shown.id,
+  )
 })
 
 test('source histories recover exact evidence without replacing any locally numbered revision', async () => {

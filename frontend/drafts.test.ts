@@ -21,5 +21,7 @@ test('each window preserves its own draft and marks other-window recovery for re
     text: '另一窗口的未保存稿',
     fromOtherWindow: false,
   })
+  await second.discardOwnDraft('chapter')
+  expect(await second.readDraft('chapter')).toMatchObject({ text: '甲😀𠮷\n原稿', fromOtherWindow: true })
   vi.unstubAllGlobals()
 })

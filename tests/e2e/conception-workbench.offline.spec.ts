@@ -127,6 +127,123 @@ test('遗铃从确认设定到正文对账并保留过期证据', async ({ page 
   await expect(evidence).toContainText('铜铃在门外响了。')
 })
 
+test('设定体检可定位双方、预检草稿并冻结作者复核', async ({ page }) => {
+  const { base, headers } = await openWorkbench(page, '同名门牌 · 设定冲突体检')
+  const data = await readWorkbench(page, base)
+  data.categories.find((category) => category.id === 'world')!.items = [
+    {
+      id: 'brass-gate',
+      title: '一号门',
+      detail: '凭铜牌开启。',
+      setting_policy: { strength: 'hard', scope: '东城', exceptions: '守夜人除外' },
+    },
+    {
+      id: 'print-gate',
+      title: '一号门',
+      detail: '凭指纹开启。',
+      setting_policy: { strength: 'hard', scope: '西城', exceptions: '城主除外' },
+    },
+  ]
+  const seeded = await page.request.put(base, {
+    headers,
+    data: {
+      base_revision: data.revision,
+      base_story_revision: data.story_revision,
+      categories: data.categories,
+    },
+  })
+  expect(seeded.ok(), await seeded.text()).toBe(true)
+  await page.reload()
+  await page.getByRole('button', { name: '小说构思', exact: true }).click()
+  const panel = page.getByRole('region', { name: '设定冲突体检' })
+  await panel.getByText('同名条目的内容或约束不同 · 待核对', { exact: true }).click()
+  await expect(panel.getByText(/世界设定（world） · 第 1 项 · 条目编号 brass-gate/)).toBeVisible()
+  await expect(panel.getByText(/世界设定（world） · 第 2 项 · 条目编号 print-gate/)).toBeVisible()
+  await expect(panel.getByText(/适用范围 西城 · 例外 城主除外/)).toBeVisible()
+  const confirm = page.getByRole('button', { name: '确认当前构思', exact: true })
+  await expect(confirm).toBeDisabled()
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.evaluate(() => (document.documentElement.style.fontSize = '200%'))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+  const locate = panel.getByRole('button', { name: '定位「一号门」 · 2', exact: true })
+  await locate.focus()
+  await page.keyboard.press('Enter')
+  const editor = page.locator('#conception-item-print-gate')
+  await expect(editor).toBeFocused()
+  await editor.getByRole('textbox', { name: '例外', exact: true }).fill('巡河官除外')
+  await panel.getByRole('button', { name: '体检未保存草稿' }).click()
+  await expect(panel.getByText('未保存草稿 · 需关注 1 项')).toBeVisible()
+  const difference = panel.getByText('同名条目的内容或约束不同 · 待核对', { exact: true })
+  if (!(await panel.getByText(/例外 巡河官除外/).isVisible())) await difference.click()
+  await expect(panel.getByText(/例外 巡河官除外/)).toBeVisible()
+  await expect(panel.getByRole('checkbox')).toHaveCount(0)
+  expect((await readWorkbench(page, base)).revision).toBe(data.revision + 1)
+  await page.getByRole('button', { name: '保存构思设定', exact: true }).click()
+  await expect(panel.getByText('已保存修订 2 · 需关注 1 项')).toBeVisible()
+  const checkbox = panel.getByRole('checkbox', { name: '已核对此项，按当前内容保留' })
+  if (!(await checkbox.isVisible())) await difference.click()
+  await checkbox.check()
+  await expect(confirm).toBeEnabled()
+  await confirm.click()
+  await expect(page.getByText(/当前构思已确认 · 构思修订 2/)).toBeVisible()
+  const saved = await readWorkbench(page, base)
+  expect(saved.setting_findings.map((finding) => finding.reviewed)).toEqual([true])
+})
+
+test('设定条目历史对照后只恢复所选条目，并在保存版变化时要求重读', async ({ page }) => {
+  const { base, headers } = await openWorkbench(page, '潮锁 · 单项设定历史')
+  const state = await readWorkbench(page, base)
+  const world = state.categories.find((category) => category.id === 'world')!
+  const save = async (revision: number) => {
+    const response = await page.request.put(base, {
+      headers,
+      data: {
+        base_revision: revision,
+        base_story_revision: state.story_revision,
+        categories: state.categories,
+      },
+    })
+    expect(response.ok(), await response.text()).toBe(true)
+  }
+  world.items = [{ id: 'tide-lock', title: '潮锁规则', detail: '潮响三次开锁。', links: [] }]
+  await save(state.revision)
+  world.items[0].detail = '潮响五次开锁。'
+  await save(state.revision + 1)
+  await page.reload()
+  await page.getByRole('button', { name: '小说构思', exact: true }).click()
+  await page
+    .getByRole('navigation', { name: '构思类别' })
+    .getByRole('button', { name: /世界设定/ })
+    .click()
+  const open = page.getByRole('button', { name: '查看「潮锁规则」的历史' })
+  await open.focus()
+  await page.keyboard.press('Enter')
+  const history = page.getByRole('region', { name: '设定条目历史' })
+  await expect(history).toBeFocused()
+  await expect(history.getByRole('region', { name: '当前保存版 · 修订 2' })).toContainText('潮响五次开锁。')
+  await expect(history.getByRole('region', { name: '历史版本 · 修订 1' })).toContainText('潮响三次开锁。')
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.evaluate(() => (document.documentElement.style.fontSize = '200%'))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+
+  world.items.push({ id: 'dock-guard', title: '守港人', detail: '轮岗之前核对铜牌。', links: [] })
+  await save(state.revision + 2)
+  const restore = history.getByRole('button', { name: '恢复所选版本为设定草稿' })
+  await restore.click()
+  await expect(history.getByRole('alert')).toContainText('构思或故事记录已更新')
+  await history.getByRole('button', { name: '重新读取设定和历史' }).click()
+  await expect(history.getByRole('region', { name: '当前保存版 · 修订 3' })).toContainText('潮响五次开锁。')
+  await restore.click()
+  await expect(history.getByText('条目已恢复为设定草稿修订 4。可核对后重新确认。')).toBeVisible()
+  const updated = await readWorkbench(page, base)
+  expect(updated.categories.find((category) => category.id === 'world')!.items).toMatchObject([
+    { id: 'tide-lock', detail: '潮响三次开锁。' },
+    { id: 'dock-guard', detail: '轮岗之前核对铜牌。' },
+  ])
+  expect(updated.confirmation).toBeNull()
+  await expect(page.getByRole('button', { name: '确认当前构思', exact: true })).toBeEnabled()
+})
+
 test('按作品保存同级分类与项目，刷新恢复，并带缺项确认后交接写作', async ({ page }) => {
   const { base, novel, chapterId, headers } = await openWorkbench(
     page,

@@ -60,6 +60,301 @@ def test_per_novel_categories_conflicts_and_independent_drafts(client, domain, s
     assert client.get(endpoint).json()["categories"][-1] == custom
 
 
+def test_setting_inspection_previews_unsaved_invalid_references_without_writing(client, story):
+    endpoint = path(story["branch_id"])
+    original = client.get(endpoint).json()
+    edited = client.get(endpoint).json()
+    world = next(row for row in edited["categories"] if row["id"] == "world")
+    world["items"] = [
+        item("gate", "北城城门", ("missing", "gate", "pass", "pass")),
+        item("pass", "通关令牌"),
+    ]
+    request = {**basis(edited), "categories": edited["categories"]}
+    response = client.post(f"{endpoint}/setting-inspection", json=request)
+    assert response.status_code == 200, response.text
+    findings = {finding["kind"]: finding for finding in response.json()["findings"]}
+    assert set(findings) == {"missing_link", "self_link", "duplicate_link"}
+    for kind, number, target, target_position in (
+        ("missing_link", 1, "missing", None),
+        ("self_link", 2, "gate", 1),
+        ("duplicate_link", 4, "pass", 2),
+    ):
+        source, destination = findings[kind]["locations"]
+        assert (source["category_id"], source["item_id"], source["item_number"], source["link_number"]) == (
+            "world",
+            "gate",
+            1,
+            number,
+        )
+        assert (destination["item_id"], destination["item_number"]) == (target, target_position)
+    discarded = client.put(endpoint, json=request)
+    assert discarded.status_code == 400
+    assert "gate" in discarded.text and "missing" in discarded.text
+    assert client.get(endpoint).json() == original
+    add_core(client, endpoint)
+    assert client.post(f"{endpoint}/setting-inspection", json=request).status_code == 409
+
+
+def test_setting_review_keeps_versioned_author_choice_for_recorded_differences(client, domain, story):
+    endpoint = path(story["branch_id"])
+    edited = client.get(endpoint).json()
+    categories = {row["id"]: row for row in edited["categories"]}
+    categories["world"]["items"] = [
+        {
+            **item("gate-east", "１号门", ("gate-west", "pass", "talent")),
+            "detail": "凭铜牌开启。",
+            "setting_policy": {"strength": "hard", "scope": "东城", "exceptions": "守夜人除外"},
+        },
+        {
+            **item("gate-west", "1号门"),
+            "detail": "只识指纹。",
+            "setting_policy": {"strength": "hard", "scope": "西城", "exceptions": "城主除外"},
+        },
+        {
+            **item("gate-east-copy", "1号门"),
+            "detail": " 凭铜牌开启。 ",
+            "setting_policy": {"strength": "hard", "scope": "东城", "exceptions": "守夜人除外"},
+        },
+        {**item("talent", "待定义天赋"), "detail": ""},
+    ]
+    categories["events"].update({"skipped": True, "items": [item("pass", "获取铜牌")]})
+    saved = save(client, endpoint, edited)
+    findings = {finding["kind"]: finding for finding in saved["setting_findings"]}
+    assert set(findings) == {"same_name", "policy_link", "skipped_link", "empty_link"}
+    same_name = findings["same_name"]
+    assert [(side["item_id"], side["item_number"]) for side in same_name["locations"]] == [
+        ("gate-east", 1),
+        ("gate-west", 2),
+        ("gate-east-copy", 3),
+    ]
+    assert [side["item_id"] for side in findings["policy_link"]["locations"]] == ["gate-east", "gate-west"]
+    assert findings["skipped_link"]["locations"][1]["category_id"] == "events"
+    keys = [finding["id"] for finding in findings.values()]
+    payload = {**basis(saved), "idempotency_key": "confirm-with-findings"}
+    for tokens in ([], keys[:-1], [*keys, keys[0]]):
+        refused = client.post(f"{endpoint}/confirm", json={**payload, "reviewed_setting_findings": tokens})
+        assert refused.status_code == 409 and "conception_setting_review" in refused.text
+    payload["reviewed_setting_findings"] = keys
+    accepted = client.post(f"{endpoint}/confirm", json=payload)
+    assert accepted.status_code == 200, accepted.text
+    confirmed = accepted.json()
+    assert confirmed["confirmation"]["current"]
+    assert all(finding["reviewed"] for finding in confirmed["setting_findings"])
+    frozen = domain.artifact(confirmed["confirmation"]["id"])["payload"]
+    assert frozen["setting_findings"] == confirmed["setting_findings"]
+    assert frozen["reviewed_setting_findings"] == keys
+    assert client.post(f"{endpoint}/confirm", json=payload).json() == confirmed
+    world = next(row for row in confirmed["categories"] if row["id"] == "world")
+    world["items"][1]["setting_policy"]["exceptions"] = "巡河官除外"
+    changed = save(client, endpoint, confirmed)
+    assert not changed["confirmation"]["current"]
+    assert not any(finding["reviewed"] for finding in changed["setting_findings"])
+    obsolete = client.post(
+        f"{endpoint}/confirm",
+        json={**payload, **basis(changed), "idempotency_key": "confirm-previous-findings"},
+    )
+    assert obsolete.status_code == 409 and "conception_setting_review" in obsolete.text
+
+
+def test_setting_item_history_pages_and_restores_single_item_with_original_source(client, domain, story):
+    branch = story["branch_id"]
+    endpoint = path(branch)
+    route = f"{endpoint}/items/lock/history"
+    original = "潮响三次才能开锁。"
+    chapter = domain.save(story["chapter_id"], 0, original)
+    state = client.get(endpoint).json()
+    contents = item("lock", "潮锁规则")
+    evidence = {
+        "chapter_id": chapter["id"],
+        "revision": chapter["revision"],
+        "start": 0,
+        "end": len(original),
+        "quote": original,
+    }
+    sections = [{"id": "world", "items": [contents]}]
+    proposal = domain.stage(
+        {"novel_id": story["id"], "branch_id": branch},
+        "conception_bundle",
+        {"categories": sections, "source_evidence": {"lock": evidence}},
+        {"conception_revision": state["revision"], "story_revision": state["story_revision"]},
+    )
+    adopted = client.post(
+        f"{endpoint}/adopt",
+        json={
+            **basis(state),
+            "artifact_id": proposal["id"],
+            "categories": sections,
+            "idempotency_key": "source-rule",
+        },
+    )
+    assert adopted.status_code == 200, adopted.text
+    state = adopted.json()
+
+    def world(value):
+        return next(category for category in value["categories"] if category["id"] == "world")["items"]
+
+    world(state)[0]["detail"] = "第二版允许手动打开。"
+    second = save(client, endpoint, state)
+    world(second).append(item("unrelated", "守港人"))
+    sibling = save(client, endpoint, second)
+    approved = confirm(client, endpoint, sibling)
+    approved_id = approved["confirmation"]["id"]
+    first_page = client.get(route, params={"limit": 1}).json()
+    assert first_page["base_revision"] == sibling["revision"]
+    assert first_page["entries"][0]["revision"] == second["revision"]
+    assert first_page["current"]["provenance"]["author_edited"]
+    older = client.get(route, params={"before_revision": first_page["next_before_revision"]}).json()
+    prior = older["entries"][0]
+    assert older["next_before_revision"] is None
+    assert prior["revision"] == 1
+    assert prior["state"]["provenance"]["evidence"] == evidence
+    assert prior["state"]["provenance"]["artifact_id"] == proposal["id"]
+    assert not prior["state"]["provenance"]["author_edited"]
+
+    restore = f"{endpoint}/items/lock/restore"
+    draft = {
+        **basis(approved),
+        "source_workspace_id": prior["workspace_id"],
+        "idempotency_key": "restore-lock",
+    }
+    assert (
+        client.post(restore, json={**draft, "base_revision": second["revision"]}).json()["code"]
+        == "conception_changed"
+    )
+    other = domain.create_novel("另一作品")
+    assert client.get(f"{path(other['branch_id'])}/items/lock/history").status_code == 404
+    cross = client.post(
+        f"{path(other['branch_id'])}/items/lock/restore",
+        json={**draft, "base_revision": 0, "base_story_revision": 0},
+    )
+    assert cross.status_code == 404 and cross.json()["code"] == "conception_item_version"
+    updated = client.post(restore, json=draft)
+    assert updated.status_code == 200, updated.text
+    restored = updated.json()
+    assert restored["revision"] == approved["revision"] + 1
+    assert restored["confirmation"]["id"] == approved_id and not restored["confirmation"]["current"]
+    assert world(restored) == [contents, item("unrelated", "守港人")]
+    assert restored["sources"] == [
+        {"item_id": "lock", "evidence": evidence, "current": True, "author_edited": False}
+    ]
+    assert world(domain.artifact(approved_id)["payload"])[0]["detail"] == "第二版允许手动打开。"
+    assert client.post(restore, json=draft).json() == restored
+    latest = client.get(route).json()["entries"][0]
+    assert latest["revision"] == restored["revision"] and latest["restored_from"] == prior["workspace_id"]
+    assert confirm(client, endpoint, restored, "confirm-restored-lock")["confirmation"]["current"]
+
+
+def test_deleted_setting_restore_requires_its_links_and_preserves_current_draft(client, story):
+    endpoint = path(story["branch_id"])
+    original = client.get(endpoint).json()
+    world = next(category for category in original["categories"] if category["id"] == "world")
+    original_items = [item("route", "走私路径", ("pass",)), item("pass", "铜牌")]
+    world["items"] = original_items
+    seeded = save(client, endpoint, original)
+    next(category for category in seeded["categories"] if category["id"] == "world")["items"] = []
+    removed = save(client, endpoint, seeded)
+    history = client.get(f"{endpoint}/items/route/history").json()
+    assert history["current"] is None and history["entries"][0]["state"] is None
+    source = history["entries"][1]["workspace_id"]
+    blocked = client.post(
+        f"{endpoint}/items/route/restore",
+        json={**basis(removed), "source_workspace_id": source, "idempotency_key": "restore-route"},
+    )
+    assert blocked.status_code == 400 and blocked.json()["code"] == "conception_links"
+    assert "route" in blocked.text and "pass" in blocked.text
+    assert client.get(endpoint).json() == removed
+    dependency = client.post(
+        f"{endpoint}/items/pass/restore",
+        json={**basis(removed), "source_workspace_id": source, "idempotency_key": "restore-pass"},
+    )
+    assert dependency.status_code == 200, dependency.text
+    restored = client.post(
+        f"{endpoint}/items/route/restore",
+        json={**basis(dependency.json()), "source_workspace_id": source, "idempotency_key": "restore-route"},
+    )
+    assert restored.status_code == 200, restored.text
+    assert (
+        next(category for category in restored.json()["categories"] if category["id"] == "world")["items"]
+        == original_items
+    )
+
+
+def test_restoring_setting_invalidates_current_outline_candidate_and_review(client, domain, story):
+    from ainovel.outline_generation import _current as candidate_current
+    from ainovel.outline_generation import freeze_tx
+    from test_outline_workspace import chapter_plan, put_and_confirm
+    from test_workflow_inspection import item as report_item
+    from test_workflow_inspection import read, report
+
+    branch = story["branch_id"]
+    chapter = domain.save(story["chapter_id"], 0, "在门内轻轻摇铃。")
+    endpoint = path(branch)
+    state = client.get(endpoint).json()
+    index = next(index for index, category in enumerate(state["categories"]) if category["id"] == "world")
+    state["categories"][index]["items"] = [item("bell", "铜铃规则")]
+    original = save(client, endpoint, state)
+    original["categories"][index]["items"][0]["detail"] = "铜铃只在门内响。"
+    changed = save(client, endpoint, original)
+    confirmed = confirm(client, endpoint, changed)
+    confirmation_id = confirmed["confirmation"]["id"]
+    outline = f"/api/branches/{branch}/outline-workspace"
+    planned = put_and_confirm(
+        client,
+        outline,
+        {
+            "base_revision": 0,
+            "confirmation_id": confirmation_id,
+            "plan": {
+                "summary": "铜铃线索",
+                "volumes": [
+                    {
+                        "id": "volume",
+                        "title": "铜铃",
+                        "summary": "铃声引路",
+                        "units": [
+                            {
+                                "id": "unit",
+                                "title": "门前",
+                                "summary": "试铃",
+                                "chapters": [chapter_plan(chapter["id"], "摇响铃声")],
+                            }
+                        ],
+                    }
+                ],
+            },
+        },
+    )
+    rule_reports = f"/api/branches/{branch}/workflow-inspections"
+    before = report(client, rule_reports, read(client, rule_reports)["preview"])
+    assert before["current"]
+    with domain.db.connect() as tx:
+        frozen = freeze_tx(
+            tx,
+            branch,
+            {"base_revision": planned["draft"]["revision"], "confirmation_id": confirmation_id},
+        )
+        assert candidate_current(tx, branch, frozen)
+
+    route = f"{endpoint}/items/bell"
+    source = client.get(f"{route}/history").json()["entries"][-1]
+    restored = client.post(
+        f"{route}/restore",
+        json={
+            **basis(confirmed),
+            "source_workspace_id": source["workspace_id"],
+            "idempotency_key": "restore-bell",
+        },
+    )
+    assert restored.status_code == 200, restored.text
+    with domain.db.connect() as tx:
+        assert not candidate_current(tx, branch, frozen)
+    current = client.get(outline).json()
+    assert current["confirmed"] == planned["confirmed"] and "采用设定已有变化" in current["stale"]
+    after = read(client, rule_reports)["latest"]
+    assert after["id"] == before["id"] and not after["current"]
+    assert report_item(after, "05")["current_status"] == "outdated"
+
+
 def test_author_can_confirm_with_issues_and_restore_snapshot(client, domain, story, settings):
     endpoint = path(story["branch_id"])
     edited = add_core(client, endpoint)

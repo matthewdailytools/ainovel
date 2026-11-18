@@ -9,10 +9,11 @@ from pydantic import Field, StringConstraints
 
 from .db import DomainError, dumps, uid
 from .models import Input
+from .project_portability import Identifier, ProjectHistory
+from .project_sync import export_project_history, restore_project_history
 
 FORMAT = "ainovel-manuscript/1"
 EVIDENCE = "portable_workbench_evidence"
-Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")]
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
@@ -88,6 +89,7 @@ class ManuscriptPackage(Input):
     source_revisions: list[PortableRevision] = Field(
         default_factory=list, max_length=50_000, exclude_if=lambda value: not value
     )
+    project_history: ProjectHistory | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def _digest(text):
@@ -344,6 +346,7 @@ def export_manuscript(domain, branch_id):
                 "revisions": revisions,
                 "evidence": _evidence(tx, branch_id),
                 "source_revisions": source_revisions(tx, branch_id),
+                "project_history": export_project_history(tx, branch_id),
             }
         )
 
@@ -405,6 +408,8 @@ def import_manuscript(domain, package):
                 for document in package.evidence
             ],
         )
+        if package.project_history:
+            restore_project_history(tx, branch.id, package.project_history)
     return {"id": novel.id, "branch_id": branch.id}
 
 

@@ -72,6 +72,60 @@ def request_restore(client, branch, snapshot_id, mode="in_place", **fields):
     )
 
 
+def test_fork_rebinds_unconfirmed_promise_windows(snapshot_client, domain, story):
+    client = snapshot_client
+    branch = story["branch_id"]
+    chapter_id = story["chapter_id"]
+    chapter = {**chapter_plan(chapter_id, "查找缺口"), "setting_ids": []}
+    pending = {
+        "title": "门环的缺口",
+        "notes": "以后用缺口确认来历。",
+        "plant_chapter_id": chapter_id,
+        "opens_chapter_id": chapter_id,
+        "closes_chapter_id": chapter_id,
+    }
+    draft = verify(
+        client.put(
+            outline(branch),
+            json={
+                "base_revision": 0,
+                "plan": {
+                    "summary": "用缺口查出门环来历",
+                    "volumes": [
+                        {
+                            "id": "v",
+                            "title": "门环",
+                            "summary": "追查缺口",
+                            "units": [
+                                {"id": "u", "title": "核对", "summary": "确认来历", "chapters": [chapter]}
+                            ],
+                        }
+                    ],
+                    "new_promises": [pending],
+                },
+            },
+        )
+    )["draft"]
+    snapshot = verify(client.post(route(branch), json={"label": "未确认伏笔计划"}), 201)
+    fork = request_restore(client, branch, snapshot["id"], "new_branch", branch_name="伏笔计划复本")
+    target = fork["branch_id"]
+    new_id = fork["chapters"][chapter_id]["id"]
+    assert new_id != chapter_id
+    restored = verify(client.get(outline(target)))["draft"]
+    assert not restored["confirmed"]
+    assert verify(client.get(outline(branch)))["draft"] == draft
+    assert restored["plan"]["new_promises"] == [
+        {key: new_id if key.endswith("_chapter_id") else value for key, value in pending.items()}
+    ]
+    assert graph(domain, branch)["records"] == graph(domain, target)["records"] == []
+    confirmed = verify(
+        client.post(outline(target) + "/confirm", json={"base_revision": restored["revision"]})
+    )
+    assert confirmed["promises"][0]["plant_chapter_id"] == new_id
+    assert graph(domain, branch)["records"] == []
+    assert graph(domain, target)["records"][0]["payload"]["title"] == pending["title"]
+
+
 def test_snapshot_rebinds_project_and_keeps_card_addresses_and_length_targets(
     snapshot_client, domain, story, reference
 ):

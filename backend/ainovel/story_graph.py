@@ -354,53 +354,61 @@ def validate_record(tx, branch_id, identifier, payload):
 
 
 def save_record(domain, branch_id, data, identifier=None):
-    domain.branch(branch_id)
-    creating = identifier is None
-    identifier = identifier or uid()
-    payload = data.record.model_dump()
     with domain.db.connect(True) as tx:
-        branch = tx.execute("SELECT story_revision FROM branches WHERE id=?", (branch_id,)).fetchone()
-        if branch[0] != data.base_story_revision:
-            raise DomainError("story_changed", "故事版本已改变，输入保留，请刷新比较。", 409)
-        old = tx.execute(
-            "SELECT * FROM story_records WHERE id=? AND branch_id=?", (identifier, branch_id)
-        ).fetchone()
-        if not creating and (not old or old["revision"] != data.base_revision):
-            raise DomainError("record_changed", "记录已改变，请重新载入。", 409)
-        if creating and (data.base_revision is not None or data.archived):
-            raise DomainError("story_record", "新记录不能指定旧修订或直接归档。")
-        if old and old["kind"] != payload["kind"]:
-            raise DomainError("story_record", "记录类型不可改变，请新建对应记录。")
-        validate_record(tx, branch_id, identifier, payload)
-        revision = old["revision"] + 1 if old else 0
+        save_record_tx(tx, branch_id, data, identifier)
+        return graph_snapshot(tx, branch_id)
+
+
+def save_record_tx(tx, branch_id, data, identifier=None, *, new_identifier=None):
+    creating = identifier is None
+    if new_identifier and (
+        not creating or tx.execute("SELECT 1 FROM story_records WHERE id=?", (new_identifier,)).fetchone()
+    ):
+        raise DomainError("record_changed", "指定的故事记录编号已在使用。", 409)
+    identifier = identifier or new_identifier or uid()
+    payload = data.record.model_dump()
+    branch = tx.execute("SELECT story_revision FROM branches WHERE id=?", (branch_id,)).fetchone()
+    if not branch:
+        raise DomainError("not_found", "工作版本不存在。", 404)
+    if branch["story_revision"] != data.base_story_revision:
+        raise DomainError("story_changed", "故事版本已改变，输入保留，请刷新比较。", 409)
+    old = tx.execute(
+        "SELECT * FROM story_records WHERE id=? AND branch_id=?", (identifier, branch_id)
+    ).fetchone()
+    if not creating and (not old or old["revision"] != data.base_revision):
+        raise DomainError("record_changed", "记录已改变，请重新载入。", 409)
+    if creating and (data.base_revision is not None or data.archived):
+        raise DomainError("story_record", "新记录不能指定旧修订或直接归档。")
+    if old and old["kind"] != payload["kind"]:
+        raise DomainError("story_record", "记录类型不可改变，请新建对应记录。")
+    validate_record(tx, branch_id, identifier, payload)
+    revision = old["revision"] + 1 if old else 0
+    tx.execute(
+        "INSERT INTO story_records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+        "revision=excluded.revision,payload=excluded.payload,archived=excluded.archived,updated=excluded.updated",
+        (
+            identifier,
+            branch_id,
+            payload["kind"],
+            revision,
+            dumps(payload),
+            int(data.archived),
+            time(),
+            time(),
+        ),
+    )
+    tx.execute(
+        "INSERT INTO story_record_history VALUES(?,?,?,?,?)",
+        (identifier, revision, dumps(payload), int(data.archived), time()),
+    )
+    tx.execute("DELETE FROM story_record_dependencies WHERE record_id=?", (identifier,))
+    for parent in references(payload):
+        parent_revision = tx.execute("SELECT revision FROM story_records WHERE id=?", (parent,)).fetchone()[0]
         tx.execute(
-            "INSERT INTO story_records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
-            "revision=excluded.revision,payload=excluded.payload,archived=excluded.archived,updated=excluded.updated",
-            (
-                identifier,
-                branch_id,
-                payload["kind"],
-                revision,
-                dumps(payload),
-                int(data.archived),
-                time(),
-                time(),
-            ),
+            "INSERT INTO story_record_dependencies VALUES(?,?,?)", (identifier, parent, parent_revision)
         )
-        tx.execute(
-            "INSERT INTO story_record_history VALUES(?,?,?,?,?)",
-            (identifier, revision, dumps(payload), int(data.archived), time()),
-        )
-        tx.execute("DELETE FROM story_record_dependencies WHERE record_id=?", (identifier,))
-        for parent in references(payload):
-            parent_revision = tx.execute(
-                "SELECT revision FROM story_records WHERE id=?", (parent,)
-            ).fetchone()[0]
-            tx.execute(
-                "INSERT INTO story_record_dependencies VALUES(?,?,?)", (identifier, parent, parent_revision)
-            )
-        tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
-    return graph(domain, branch_id)
+    tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
+    return identifier
 
 
 def query_context(

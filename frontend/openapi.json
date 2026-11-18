@@ -2575,6 +2575,139 @@
         }
       }
     },
+    "/api/branches/{branch_id}/conception/setting-inspection": {
+      "post": {
+        "summary": "Inspect Workspace Settings",
+        "operationId": "inspect_workspace_settings_api_branches__branch_id__conception_setting_inspection_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaveConception" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SettingInspection" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/conception/items/{item_id}/history": {
+      "get": {
+        "summary": "Get Setting Item History",
+        "operationId": "get_setting_item_history_api_branches__branch_id__conception_items__item_id__history_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "before_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }],
+              "title": "Before Revision"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "maximum": 50, "minimum": 1, "default": 20, "title": "Limit" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SettingItemHistory" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/conception/items/{item_id}/restore": {
+      "post": {
+        "summary": "Restore Workspace Setting Item",
+        "operationId": "restore_workspace_setting_item_api_branches__branch_id__conception_items__item_id__restore_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/RestoreSettingItem" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ConceptionWorkspace" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/conception/adopt": {
       "post": {
         "summary": "Adopt Candidate",
@@ -5777,6 +5910,11 @@
             "items": { "$ref": "#/components/schemas/ConceptionProjectImpact" },
             "type": "array",
             "title": "Project Impacts"
+          },
+          "setting_findings": {
+            "items": { "$ref": "#/components/schemas/SettingFinding" },
+            "type": "array",
+            "title": "Setting Findings"
           }
         },
         "additionalProperties": false,
@@ -5881,6 +6019,12 @@
             "type": "array",
             "maxItems": 240,
             "title": "Reconciled Project Items"
+          },
+          "reviewed_setting_findings": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+            "type": "array",
+            "maxItems": 7440,
+            "title": "Reviewed Setting Findings"
           }
         },
         "additionalProperties": false,
@@ -6604,6 +6748,9 @@
             "type": "array",
             "maxItems": 50000,
             "title": "Source Revisions"
+          },
+          "project_history": {
+            "anyOf": [{ "$ref": "#/components/schemas/ProjectHistory" }, { "type": "null" }]
           }
         },
         "additionalProperties": false,
@@ -6810,6 +6957,37 @@
         "required": ["name", "definition", "value", "unit"],
         "title": "NativeMetric"
       },
+      "NewPromisePlan": {
+        "properties": {
+          "plant_chapter_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Plant Chapter Id"
+          },
+          "opens_chapter_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Opens Chapter Id"
+          },
+          "closes_chapter_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Closes Chapter Id"
+          },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "notes": { "type": "string", "maxLength": 4000, "title": "Notes", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["plant_chapter_id", "opens_chapter_id", "closes_chapter_id", "title"],
+        "title": "NewPromisePlan"
+      },
       "NovelInput": {
         "properties": {
           "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
@@ -6905,6 +7083,12 @@
             "type": "array",
             "maxItems": 250,
             "title": "Promises"
+          },
+          "new_promises": {
+            "items": { "$ref": "#/components/schemas/NewPromisePlan" },
+            "type": "array",
+            "maxItems": 250,
+            "title": "New Promises"
           }
         },
         "additionalProperties": false,
@@ -7178,6 +7362,52 @@
         "required": ["base_revision", "base_story_revision", "account", "client_request_id", "idea"],
         "title": "ProjectGenerateInput"
       },
+      "ProjectHistory": {
+        "properties": {
+          "adopted_revision_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Adopted Revision Id"
+          },
+          "versions": {
+            "items": { "$ref": "#/components/schemas/ProjectVersion" },
+            "type": "array",
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Versions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["adopted_revision_id", "versions"],
+        "title": "ProjectHistory"
+      },
+      "ProjectVersion": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Parent Id"
+          },
+          "idea": { "type": "string", "maxLength": 6000, "minLength": 1, "title": "Idea" },
+          "brief": { "$ref": "#/components/schemas/ProjectBrief" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "parent_id", "idea", "brief"],
+        "title": "ProjectVersion"
+      },
       "Promise": {
         "properties": {
           "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
@@ -7233,13 +7463,6 @@
       },
       "PromiseWindow": {
         "properties": {
-          "promise_id": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[a-zA-Z0-9_-]+$",
-            "title": "Promise Id"
-          },
           "plant_chapter_id": {
             "type": "string",
             "maxLength": 128,
@@ -7260,11 +7483,18 @@
             "minLength": 1,
             "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Closes Chapter Id"
+          },
+          "promise_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Promise Id"
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": ["promise_id", "plant_chapter_id", "opens_chapter_id", "closes_chapter_id"],
+        "required": ["plant_chapter_id", "opens_chapter_id", "closes_chapter_id", "promise_id"],
         "title": "PromiseWindow"
       },
       "PublicationChange": {
@@ -7642,6 +7872,29 @@
         "required": ["title"],
         "title": "RenameInput"
       },
+      "RestoreSettingItem": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          },
+          "source_workspace_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Source Workspace Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "base_story_revision", "idempotency_key", "source_workspace_id"],
+        "title": "RestoreSettingItem"
+      },
       "ResumeInput": {
         "properties": {
           "acknowledge_unknown": { "type": "boolean", "title": "Acknowledge Unknown", "default": false },
@@ -7866,6 +8119,197 @@
         "type": "object",
         "required": ["title", "start", "end"],
         "title": "Segment"
+      },
+      "SettingFinding": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "same_name",
+              "missing_link",
+              "self_link",
+              "duplicate_link",
+              "skipped_link",
+              "empty_link",
+              "policy_link"
+            ],
+            "title": "Kind"
+          },
+          "locations": {
+            "items": { "$ref": "#/components/schemas/SettingFindingLocation" },
+            "type": "array",
+            "title": "Locations"
+          },
+          "reviewed": { "type": "boolean", "title": "Reviewed", "default": false }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "kind", "locations"],
+        "title": "SettingFinding"
+      },
+      "SettingFindingLocation": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Item Id"
+          },
+          "category_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Category Id"
+          },
+          "category_title": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Category Title"
+          },
+          "item_number": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Item Number" },
+          "link_number": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Link Number" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["item_id"],
+        "title": "SettingFindingLocation"
+      },
+      "SettingInspection": {
+        "properties": {
+          "findings": {
+            "items": { "$ref": "#/components/schemas/SettingFinding" },
+            "type": "array",
+            "title": "Findings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["findings"],
+        "title": "SettingInspection"
+      },
+      "SettingItemHistory": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "base_story_revision": { "type": "integer", "minimum": 0, "title": "Base Story Revision" },
+          "current": { "anyOf": [{ "$ref": "#/components/schemas/SettingItemState" }, { "type": "null" }] },
+          "entries": {
+            "items": { "$ref": "#/components/schemas/SettingItemVersion" },
+            "type": "array",
+            "title": "Entries"
+          },
+          "next_before_revision": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Next Before Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "base_story_revision", "current", "entries", "next_before_revision"],
+        "title": "SettingItemHistory"
+      },
+      "SettingItemProvenance": {
+        "properties": {
+          "origin": { "type": "string", "enum": ["author", "ai", "sync"], "title": "Origin" },
+          "artifact_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Artifact Id"
+          },
+          "source_origin": {
+            "anyOf": [{ "type": "string", "enum": ["author", "ai"] }, { "type": "null" }],
+            "title": "Source Origin"
+          },
+          "source_device_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Source Device Id"
+          },
+          "source_artifact_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Source Artifact Id"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Source Revision Id"
+          },
+          "project_confirmation_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Project Confirmation Id"
+          },
+          "project_revision": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Project Revision"
+          },
+          "author_edited": { "type": "boolean", "title": "Author Edited", "default": false },
+          "evidence": { "anyOf": [{ "$ref": "#/components/schemas/Source" }, { "type": "null" }] },
+          "evidence_current": { "type": "boolean", "title": "Evidence Current", "default": false }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["origin"],
+        "title": "SettingItemProvenance"
+      },
+      "SettingItemState": {
+        "properties": {
+          "category_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Category Id"
+          },
+          "category_title": { "type": "string", "title": "Category Title" },
+          "item_number": { "type": "integer", "title": "Item Number" },
+          "item": { "$ref": "#/components/schemas/ConceptionItem" },
+          "provenance": { "$ref": "#/components/schemas/SettingItemProvenance" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["category_id", "category_title", "item_number", "item", "provenance"],
+        "title": "SettingItemState"
+      },
+      "SettingItemVersion": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Workspace Id"
+          },
+          "revision": { "type": "integer", "title": "Revision" },
+          "created": { "type": "number", "title": "Created" },
+          "state": { "anyOf": [{ "$ref": "#/components/schemas/SettingItemState" }, { "type": "null" }] },
+          "restored_from": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Restored From"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["workspace_id", "revision", "created", "state"],
+        "title": "SettingItemVersion"
       },
       "SettingPolicy": {
         "properties": {

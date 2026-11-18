@@ -13,6 +13,7 @@ from fastapi import Body
 import httpx
 from pydantic import Field, SecretStr, TypeAdapter, ValidationError
 
+from . import settings_sync
 from .cloud_sync import ComparedConflict, MAX_CURSOR, MAX_OBJECT_BYTES, Pulled, Receipt
 from .db import DomainError, dumps, uid
 from .manuscript_exchange import (
@@ -29,6 +30,20 @@ from .manuscript_exchange import (
     store_source_revision,
 )
 from .models import Input
+from .project_sync import (
+    SCHEMA as PROJECT_SCHEMA,
+    ProjectVersionObject,
+    apply_project_head,
+    current_project_source,
+    draft_project_objects,
+    has_project_source,
+    head_object,
+    observe_project_version,
+    parse_project_object,
+    read_project_head,
+    read_project_version,
+    version_object,
+)
 
 FORMAT = "ainovel-manuscript-sync/1"
 RESPONSE_LIMIT = 8 * 1024 * 1024
@@ -50,6 +65,51 @@ CREATE TABLE IF NOT EXISTS desktop_sync_conflicts(
 CREATE TABLE IF NOT EXISTS desktop_sync_deferred(
  branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
  receipt TEXT NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(branch_id,object_id));
+CREATE TABLE IF NOT EXISTS desktop_sync_dirty(
+ branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
+ PRIMARY KEY(branch_id,object_id));
+CREATE TABLE IF NOT EXISTS extension_migrations(name TEXT PRIMARY KEY,applied REAL NOT NULL);
+INSERT OR IGNORE INTO desktop_sync_dirty
+ SELECT branch_id,'bootstrap' FROM desktop_sync WHERE enabled=1
+ AND NOT EXISTS(SELECT 1 FROM extension_migrations WHERE name='desktop-sync-dirty/1');
+INSERT OR IGNORE INTO extension_migrations VALUES('desktop-sync-dirty/1',unixepoch());
+CREATE TRIGGER IF NOT EXISTS desktop_sync_chapter_added AFTER INSERT ON chapters
+ WHEN EXISTS(SELECT 1 FROM desktop_sync WHERE branch_id=NEW.branch_id AND enabled=1) BEGIN
+ INSERT OR IGNORE INTO desktop_sync_dirty VALUES(NEW.branch_id,'chapter:'||NEW.id);
+ END;
+CREATE TRIGGER IF NOT EXISTS desktop_sync_chapter_changed AFTER UPDATE OF title,position,revision,archived ON chapters
+ WHEN EXISTS(SELECT 1 FROM desktop_sync WHERE branch_id=NEW.branch_id AND enabled=1) BEGIN
+ INSERT OR IGNORE INTO desktop_sync_dirty VALUES(NEW.branch_id,'chapter:'||NEW.id);
+ END;
+CREATE TRIGGER IF NOT EXISTS desktop_sync_revision_added AFTER INSERT ON revisions BEGIN
+ INSERT OR IGNORE INTO desktop_sync_dirty
+ SELECT c.branch_id,'revision:'||NEW.id FROM chapters c JOIN desktop_sync s ON s.branch_id=c.branch_id
+ WHERE c.id=NEW.chapter_id AND s.enabled=1;
+ END;
+CREATE TRIGGER IF NOT EXISTS desktop_sync_source_added AFTER INSERT ON manuscript_revision_sources
+ WHEN EXISTS(SELECT 1 FROM desktop_sync WHERE branch_id=NEW.branch_id AND enabled=1) BEGIN
+ INSERT OR IGNORE INTO desktop_sync_dirty VALUES(NEW.branch_id,'revision:'||NEW.id);
+ END;
+CREATE TRIGGER IF NOT EXISTS desktop_sync_branch_changed AFTER UPDATE OF name,mode ON branches
+ WHEN EXISTS(SELECT 1 FROM desktop_sync WHERE branch_id=NEW.id AND enabled=1) BEGIN
+ INSERT OR IGNORE INTO desktop_sync_dirty VALUES(NEW.id,'branch:'||NEW.id);
+ END;
+CREATE TRIGGER IF NOT EXISTS desktop_sync_novel_changed AFTER UPDATE OF title,brief ON novels BEGIN
+ INSERT OR IGNORE INTO desktop_sync_dirty
+ SELECT b.id,'branch:'||b.id FROM branches b JOIN desktop_sync s ON s.branch_id=b.id
+ WHERE b.novel_id=NEW.id AND s.enabled=1;
+ END;
+CREATE TRIGGER IF NOT EXISTS desktop_sync_accepted_artifact AFTER INSERT ON artifacts
+ WHEN NEW.status='accepted'
+ AND NEW.kind IN('project_brief','conception_completion','workflow_inspection','book_completion','portable_workbench_evidence')
+ AND EXISTS(SELECT 1 FROM desktop_sync WHERE branch_id=NEW.branch_id AND enabled=1) BEGIN
+ INSERT OR IGNORE INTO desktop_sync_dirty VALUES(NEW.branch_id,
+ CASE WHEN NEW.kind='project_brief' THEN 'project:'||NEW.branch_id ELSE 'evidence:'||NEW.id END);
+ END;
+CREATE TRIGGER IF NOT EXISTS desktop_sync_confirmed_outline AFTER INSERT ON outline_revisions
+ WHEN NEW.confirmed=1 AND EXISTS(SELECT 1 FROM desktop_sync WHERE branch_id=NEW.branch_id AND enabled=1) BEGIN
+ INSERT OR IGNORE INTO desktop_sync_dirty VALUES(NEW.branch_id,'evidence:'||NEW.id);
+ END;
 """
 
 
@@ -162,6 +222,20 @@ def _parse(cls, value):
 
 
 def _local(tx, branch_id, object_id):
+    if object_id.startswith("settings-version:"):
+        version = settings_sync.read_settings_version(
+            tx, branch_id, object_id.removeprefix("settings-version:")
+        )
+        return settings_sync.version_object(branch_id, version).model_dump() if version else None
+    if object_id == f"settings:{branch_id}":
+        adopted = settings_sync.read_settings_head(tx, branch_id)
+        return settings_sync.head_object(branch_id, adopted).model_dump() if adopted else None
+    if object_id.startswith("project-version:"):
+        version = read_project_version(tx, branch_id, object_id.removeprefix("project-version:"))
+        return version_object(branch_id, version).model_dump() if version else None
+    if object_id == f"project:{branch_id}":
+        adopted = read_project_head(tx, branch_id)
+        return head_object(branch_id, adopted).model_dump() if adopted else None
     if object_id.startswith("revision:"):
         row = source_revision(tx, branch_id, object_id.removeprefix("revision:"))
         return _revision_object(branch_id, row) if row else None
@@ -322,6 +396,16 @@ def _apply_chapter(tx, domain, branch_id, event):
 
 
 def _apply(tx, domain, branch_id, event):
+    if event.object_id.startswith("settings:"):
+        value = settings_sync.parse_settings_object(
+            branch_id, event.object_id, event.payload, event.tombstone
+        )
+        settings_sync.apply_settings_head(tx, branch_id, value, event)
+        return
+    if event.object_id.startswith("project:"):
+        value = parse_project_object(branch_id, event.object_id, event.payload, event.tombstone)
+        apply_project_head(tx, branch_id, value, event)
+        return
     if event.object_id.startswith("revision:"):
         try:
             value = RevisionObject.model_validate(event.payload)
@@ -369,7 +453,17 @@ def _apply(tx, domain, branch_id, event):
     )
 
 
-def _verified_digest(event):
+def _verified_digest(branch_id, event):
+    if event.object_id.startswith(("settings:", "settings-version:")):
+        return _digest(
+            settings_sync.parse_settings_object(
+                branch_id, event.object_id, event.payload, event.tombstone
+            ).model_dump()
+        )
+    if event.object_id.startswith(("project:", "project-version:")):
+        return _digest(
+            parse_project_object(branch_id, event.object_id, event.payload, event.tombstone).model_dump()
+        )
     if event.tombstone and event.payload is None and event.object_id.startswith("chapter:"):
         return _digest(None)
     schema = (
@@ -396,7 +490,9 @@ class DesktopSync:
         self.transport = transport
         self.operations = Lock()
         with domain.db.connect() as tx:
-            tx.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nCOMMIT;")
+            tx.executescript(
+                "BEGIN IMMEDIATE;\n" + SCHEMA + PROJECT_SCHEMA + settings_sync.SCHEMA + "\nCOMMIT;"
+            )
 
     @contextmanager
     def _operation(self):
@@ -413,13 +509,17 @@ class DesktopSync:
             tx.execute("BEGIN")
             row = tx.execute("SELECT * FROM desktop_sync WHERE branch_id=?", (branch_id,)).fetchone()
             pending = tx.execute(
-                "SELECT count(*) FROM desktop_sync_outbox WHERE branch_id=?", (branch_id,)
+                "SELECT count(*) FROM (SELECT object_id FROM desktop_sync_outbox WHERE branch_id=? "
+                "UNION SELECT object_id FROM desktop_sync_dirty WHERE branch_id=?)",
+                (branch_id, branch_id),
             ).fetchone()[0]
             return {
                 "enabled": bool(row and row["enabled"]),
                 "work_id": branch_id,
                 "cursor": row["cursor"] if row else 0,
                 "pending": pending,
+                "project_source": current_project_source(tx, branch_id),
+                "settings_source": settings_sync.current_settings_source(tx, branch_id),
                 "conflicts": [
                     {"id": item["id"], "object_id": item["object_id"]}
                     for item in tx.execute(
@@ -467,6 +567,7 @@ class DesktopSync:
                     "ON CONFLICT(branch_id) DO UPDATE SET enabled=1",
                     (branch_id, _sha(origin)),
                 )
+                tx.execute("INSERT OR IGNORE INTO desktop_sync_dirty VALUES(?,'bootstrap')", (branch_id,))
             return self._state(branch_id)
 
     def disable(self, branch_id):
@@ -500,15 +601,31 @@ class DesktopSync:
         tx.execute(
             "DELETE FROM desktop_sync_deferred WHERE branch_id=? AND object_id=?", (branch_id, object_id)
         )
-        if known and known["sequence"] >= incoming.sequence:
+        immutable = object_id.startswith(("project-version:", "settings-version:"))
+        if known and known["sequence"] >= incoming.sequence and not immutable:
             return
         local = _local(tx, branch_id, object_id)
         local_digest = _digest(local)
+        if immutable:
+            try:
+                if object_id.startswith("settings-version:"):
+                    wrapped = settings_sync.parse_settings_object(
+                        branch_id, object_id, incoming.payload, incoming.tombstone
+                    )
+                    settings_sync.observe_settings_version(tx, branch_id, wrapped.version, incoming)
+                else:
+                    wrapped = parse_project_object(branch_id, object_id, incoming.payload, incoming.tombstone)
+                    observe_project_version(tx, branch_id, wrapped.version, incoming)
+            except DomainError as error:
+                self._defer(tx, branch_id, incoming, error.message)
+                return
+            _remember(tx, branch_id, incoming, _digest(wrapped.model_dump()))
+            return
         if queued is not None and queued["conflict_id"] is None:
             _remember(tx, branch_id, incoming, queued["local_sha256"])
             return
         try:
-            identical = local_digest == _verified_digest(incoming)
+            identical = local_digest == _verified_digest(branch_id, incoming)
         except DomainError as error:
             self._defer(tx, branch_id, incoming, error.message)
             return
@@ -519,11 +636,15 @@ class DesktopSync:
             self._defer(tx, branch_id, incoming, "本机已有未同步修改，待与远端版本比较。")
             return
         if not identical:
+            tx.execute("SAVEPOINT apply_sync_object")
             try:
                 _apply(tx, self.domain, branch_id, incoming)
             except DomainError as error:
+                tx.execute("ROLLBACK TO apply_sync_object")
                 self._defer(tx, branch_id, incoming, error.message)
                 return
+            finally:
+                tx.execute("RELEASE apply_sync_object")
         _remember(tx, branch_id, incoming, _digest(_local(tx, branch_id, object_id)))
 
     def _pull(self, branch_id, origin, token):
@@ -563,6 +684,8 @@ class DesktopSync:
 
     def _prepare(self, branch_id):
         with self.domain.db.connect(True) as tx:
+            if not tx.execute("SELECT 1 FROM desktop_sync_dirty WHERE branch_id=?", (branch_id,)).fetchone():
+                return
             object_ids = [
                 f"chapter:{row['id']}"
                 for row in tx.execute(
@@ -585,16 +708,31 @@ class DesktopSync:
             documents = {
                 f"evidence:{doc['id']}": {"format": FORMAT, "kind": "evidence", "document": doc}
                 for doc in _evidence(tx, branch_id)
-                if len(dumps(doc).encode("utf-8")) <= MAX_OBJECT_BYTES - 4096
+                if doc["kind"] != "project" and len(dumps(doc).encode("utf-8")) <= MAX_OBJECT_BYTES - 4096
             }
-            for object_id in [f"branch:{branch_id}", *histories, *object_ids, *documents]:
+            projects = {
+                f"project-version:{value.version.id}"
+                if isinstance(value, ProjectVersionObject)
+                else f"project:{branch_id}": value.model_dump()
+                for value in draft_project_objects(tx, branch_id)
+            }
+            settings = {
+                f"settings-version:{value.version.id}"
+                if isinstance(value, settings_sync.SettingsVersionObject)
+                else f"settings:{branch_id}": value.model_dump()
+                for value in settings_sync.draft_settings_objects(tx, branch_id)
+            }
+            formal = {**projects, **settings}
+            blocked = False
+            for object_id in [f"branch:{branch_id}", *histories, *object_ids, *formal, *documents]:
                 if tx.execute(
                     "SELECT 1 FROM desktop_sync_outbox WHERE branch_id=? AND object_id=? UNION ALL "
                     "SELECT 1 FROM desktop_sync_conflicts WHERE branch_id=? AND object_id=? LIMIT 1",
                     (branch_id, object_id, branch_id, object_id),
                 ).fetchone():
+                    blocked = True
                     continue
-                value = documents.get(object_id) or _local(tx, branch_id, object_id)
+                value = formal.get(object_id) or documents.get(object_id) or _local(tx, branch_id, object_id)
                 known = _shadow(tx, branch_id, object_id)
                 current = _digest(value)
                 if (value is None and not known) or (known and current == known["local_sha256"]):
@@ -611,6 +749,9 @@ class DesktopSync:
                     "INSERT INTO desktop_sync_outbox VALUES(?,?,?,?,?,NULL)",
                     (branch_id, change, object_id, dumps(request), current),
                 )
+            if not blocked:
+                # Any newer edit made while sending opens a fresh dirty marker in its own transaction.
+                tx.execute("DELETE FROM desktop_sync_dirty WHERE branch_id=?", (branch_id,))
 
     def _push(self, branch_id, origin, token):
         with self.domain.db.connect() as tx:
@@ -659,7 +800,22 @@ class DesktopSync:
         with self.domain.db.connect() as tx:
             tx.execute("BEGIN")
             local = _local(tx, branch_id, remote.object_id)
-            return {"remote": remote.model_dump(), "local": local, "local_sha256": _digest(local)}
+            result = {"remote": remote.model_dump(), "local": local, "local_sha256": _digest(local)}
+            if remote.object_id in {f"project:{branch_id}", f"settings:{branch_id}"}:
+                settings = remote.object_id.startswith("settings:")
+                read_version = settings_sync.read_settings_version if settings else read_project_version
+                versions = {}
+                for payload in (
+                    local,
+                    remote.current.payload,
+                    remote.incoming.payload,
+                    remote.base.payload if remote.base else None,
+                ):
+                    if payload and (identifier := payload.get("revision_id")):
+                        if version := read_version(tx, branch_id, identifier):
+                            versions[identifier] = version.model_dump()
+                result["settings_versions" if settings else "project_versions"] = versions
+            return result
 
     def resolve(self, branch_id, origin, token, identifier, data):
         with self._operation():
@@ -681,6 +837,24 @@ class DesktopSync:
                         or remote.resolved_by
                     ):
                         raise DomainError("sync_compare", "本机或云端内容已变化，请重新比较。", 409)
+                    if (
+                        data.choice == "local"
+                        and local
+                        and local["kind"] == "project-head"
+                        and not has_project_source(tx, branch_id, local["revision_id"])
+                    ):
+                        raise DomainError(
+                            "sync_pending", "本机立项刚有新确认，请先同步源修订，再比较冲突。", 409
+                        )
+                    if (
+                        data.choice == "local"
+                        and local
+                        and local["kind"] == "settings-head"
+                        and not settings_sync.has_settings_source(tx, branch_id, local["revision_id"])
+                    ):
+                        raise DomainError(
+                            "sync_pending", "本机设定刚有新确认，请先同步源修订，再比较冲突。", 409
+                        )
                     request = {
                         "change_id": data.idempotency_key,
                         "parent_revision": data.parent_revision,

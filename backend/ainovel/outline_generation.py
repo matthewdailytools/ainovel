@@ -11,6 +11,7 @@ from .outline_workspace import (
     Identifier,
     OutlineCardReference,
     OutlinePlan,
+    WINDOW_CHAPTERS,
     _card_key,
     _chapter_plans,
     _check_base,
@@ -211,7 +212,9 @@ async def run(worker, request, frozen):
     promise_ids = [row["id"] for row in frozen["promises"]]
     graph = {
         "chapters": [{**chapter, "archived": False} for chapter in frozen["chapters"]],
-        "records": [{**row, "archived": False} for row in frozen["promises"]],
+        "records": [
+            {**row, "archived": False, "payload": {"title": row["title"]}} for row in frozen["promises"]
+        ],
     }
     schema = OutlinePlan.model_json_schema()
     definitions = schema["$defs"]
@@ -224,12 +227,12 @@ async def run(worker, request, frozen):
     else:
         chapter["setting_ids"]["maxItems"] = 0
     if promise_ids:
-        window = definitions["PromiseWindow"]["properties"]
-        window["promise_id"]["enum"] = promise_ids
-        for field in ("plant_chapter_id", "opens_chapter_id", "closes_chapter_id"):
-            window[field]["enum"] = chapter_ids
+        definitions["PromiseWindow"]["properties"]["promise_id"]["enum"] = promise_ids
     else:
         schema["properties"]["promises"]["maxItems"] = 0
+    for window_kind in ("PromiseWindow", "NewPromisePlan"):
+        for field in WINDOW_CHAPTERS:
+            definitions[window_kind]["properties"][field]["enum"] = chapter_ids
     instruction = {
         "动作": ACTION,
         "作者本次要求": request["instruction"],
@@ -242,7 +245,8 @@ async def run(worker, request, frozen):
             "生成总纲、卷纲、单元纲和章纲，尊重作者原话、已确认终局、已采用设定和已保存大纲。"
             "逐章安排目标、阻碍、转折和结果，每格用一两句。章纲按目录顺序覆盖全部章节，各一次。"
             "卷与单元的 id 使用互不相同的简短字母数字编号。"
-            "按需引用现有设定与伏笔编号。伏笔窗口须按埋设、进入回收窗口、最迟回收排列。"
+            "按需引用现有设定与伏笔编号。缺少合适记录时，在 new_promises 提议新伏笔，填写唯一标题和计划说明。"
+            "新旧伏笔窗口均须使用目录章号，按埋设、进入回收窗口、最迟回收排列。"
             "这是规划候选，不能把计划写成已发生的事实。"
         ),
     }

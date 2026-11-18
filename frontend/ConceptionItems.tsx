@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { components } from './api-schema'
 import type {
   CandidateCategory,
   ConceptionCategory,
@@ -7,6 +8,103 @@ import type {
   ConceptionModelReview,
   ConceptionSource,
 } from './conception'
+
+export type SettingFinding = components['schemas']['SettingFinding']
+export type SettingInspection = components['schemas']['SettingInspection']
+
+const findingLabels: Record<SettingFinding['kind'], string> = {
+  same_name: '同名条目的内容或约束不同',
+  missing_link: '关联目标不存在',
+  self_link: '项目关联自身',
+  duplicate_link: '同一目标重复关联',
+  skipped_link: '关联目标所在类别已暂缓',
+  empty_link: '关联目标尚无设定内容',
+  policy_link: '关联规则的适用范围或例外文字不同',
+}
+const invalidLinks: SettingFinding['kind'][] = ['missing_link', 'self_link', 'duplicate_link']
+
+export function ConceptionSettingFindings({
+  findings,
+  categories,
+  checked,
+  busy,
+  onLocate,
+  onReview,
+}: {
+  findings: SettingFinding[]
+  categories: ConceptionCategory[]
+  checked: string[]
+  busy: boolean
+  onLocate: (categoryId: string, itemId: string) => void
+  onReview?: (id: string, selected: boolean) => void
+}) {
+  const items = new Map(categories.flatMap((category) => category.items.map((item) => [item.id, item])))
+  return (
+    <ul className="conception-issues" style={{ overflowWrap: 'anywhere' }}>
+      {findings.map((finding) => {
+        const reviewed = finding.reviewed || checked.includes(finding.id)
+        const mustFix = invalidLinks.includes(finding.kind)
+        return (
+          <li key={finding.id}>
+            <details>
+              <summary>
+                {findingLabels[finding.kind]} · {mustFix ? '需修复' : reviewed ? '已核对' : '待核对'}
+              </summary>
+              <ol>
+                {finding.locations.map((location, index) => {
+                  const item = items.get(location.item_id)
+                  const policy = item?.setting_policy
+                  const categoryId = location.category_id
+                  return (
+                    <li key={`${location.item_id}-${index}`}>
+                      <p className="small">
+                        {location.category_title
+                          ? `${location.category_title}（${categoryId}） · 第 ${location.item_number} 项`
+                          : '目标位置未找到'}
+                        {location.link_number ? ` · 第 ${location.link_number} 个关联` : ''}
+                        {' · 条目编号 '}
+                        {location.item_id}
+                      </p>
+                      {item && categoryId && (
+                        <>
+                          <button type="button" onClick={() => onLocate(categoryId, item.id)}>
+                            定位「{item.title}」 · {location.item_number}
+                          </button>
+                          {item.detail && <p className="small">{item.detail}</p>}
+                          {policy && (
+                            <p className="small">
+                              {policy.strength === 'hard' ? '硬规定' : '可调整设定'}
+                              {' · 适用范围 '}
+                              {policy.scope || '未填写'}
+                              {' · 例外 '}
+                              {policy.exceptions || '未填写'}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </li>
+                  )
+                })}
+              </ol>
+              {finding.kind === 'skipped_link' && <p className="small">暂缓的类别不会随当前构思交接。</p>}
+              {onReview && !mustFix && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={reviewed}
+                    disabled={busy || finding.reviewed}
+                    onChange={(event) => onReview(finding.id, event.target.checked)}
+                  />
+                  已核对此项，按当前内容保留
+                </label>
+              )}
+            </details>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
 
 export function ConceptionQuote({
   source,
