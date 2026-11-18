@@ -1,5 +1,195 @@
 import { expect, test } from '@playwright/test'
 
+test('第 08 项区分章纲计划与采纳稿，按固定手法卡版本读取本机原文', async ({ page }) => {
+  await page.goto('/')
+  const { csrf } = await (await page.request.get('/api/session')).json()
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const work = await page.request.post('/api/novels', { headers, data: { title: '拾铃 · 手法对账' } })
+  expect(work.ok(), await work.text()).toBe(true)
+  const { id: novelId, branch_id: branchId } = await work.json()
+  const branch = `/api/branches/${branchId}`
+  const chapter = await page.request.post(`${branch}/chapters`, { headers, data: { title: '拾铃' } })
+  expect(chapter.ok(), await chapter.text()).toBe(true)
+  const { id: chapterId } = await chapter.json()
+  const chapterUrl = `/api/chapters/${chapterId}`
+  const content = '学徒在旧门外发现半枚铃痕。'
+  const saved = await page.request.put(chapterUrl, { headers, data: { base_revision: 0, content } })
+  expect(saved.ok(), await saved.text()).toBe(true)
+  const { revision } = await saved.json()
+
+  const original = '守夜人只认出一段绳结。'
+  const newer = '他到河下游找结绳的人。'
+  const quote = original + newer
+  const upload = await page.request.post('/api/library/import', {
+    headers,
+    multipart: { file: { name: '手法对账样本.txt', mimeType: 'text/plain', buffer: Buffer.from(quote) } },
+  })
+  expect(upload.ok(), await upload.text()).toBe(true)
+  const { id: bookId } = await upload.json()
+  const [unit] = await (await page.request.get(`/api/library/books/${bookId}/units`)).json()
+  const reference = await page.request.post('/api/reference-sessions', {
+    headers,
+    data: {
+      unit_id: unit.id,
+      start: 0,
+      end: quote.length,
+      quote,
+      goal: '观察局部收获怎样引出下一步',
+      branch_id: branchId,
+      chapter_id: chapterId,
+    },
+  })
+  expect(reference.ok(), await reference.text()).toBe(true)
+  const { id: sessionId, payload } = await reference.json()
+  const referenceUrl = `/api/reference-sessions/${sessionId}`
+  const card = {
+    id: 'partial-clue',
+    observation: '角色仅看清局部。',
+    interpretation: '局部线索仍可指向具体行动。',
+    technique: '先辨认一条局部线索',
+    conditions: '此前还不能确认来历。',
+    exceptions: '替换人物、地点和道具。',
+    evidence: original,
+  }
+  const edit = { goal: payload.goal, branch_id: branchId, chapter_id: chapterId }
+  const cardSaved = await page.request.patch(referenceUrl, {
+    headers,
+    data: { ...edit, base_revision: 0, cards: [card] },
+  })
+  expect(cardSaved.ok(), await cardSaved.text()).toBe(true)
+  const [{ version }] = await (await page.request.get(`${branch}/reference-cards`)).json()
+  const outlineUrl = `${branch}/outline-workspace`
+  const outline = await page.request.put(outlineUrl, {
+    headers,
+    data: {
+      base_revision: 0,
+      plan: {
+        summary: '学徒循铃痕找到旧铺。',
+        volumes: [
+          {
+            id: 'volume',
+            title: '拾铃卷',
+            summary: '查明铃的来处。',
+            units: [
+              {
+                id: 'unit',
+                title: '认铃',
+                summary: '辨认刻痕。',
+                chapters: [
+                  {
+                    chapter_id: chapterId,
+                    goal: '看清刻痕',
+                    obstacle: '痕迹不全',
+                    turn: '认出旧铺常用刻法',
+                    result: '找到可问的人',
+                    reference_cards: [
+                      {
+                        session_id: sessionId,
+                        card_id: card.id,
+                        revision: version.revision,
+                        version_id: version.id,
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  })
+  expect(outline.ok(), await outline.text()).toBe(true)
+  const { draft } = await outline.json()
+  const signedOutline = await page.request.post(`${outlineUrl}/confirm`, {
+    headers,
+    data: { base_revision: draft.revision },
+  })
+  expect(signedOutline.ok(), await signedOutline.text()).toBe(true)
+  const { confirmed } = await signedOutline.json()
+  const cardChanged = await page.request.patch(referenceUrl, {
+    headers,
+    data: { ...edit, base_revision: version.revision, cards: [{ ...card, evidence: newer }] },
+  })
+  expect(cardChanged.ok(), await cardChanged.text()).toBe(true)
+
+  const queued = await page.request.post('/api/modules', {
+    headers,
+    data: {
+      novel_id: novelId,
+      branch_id: branchId,
+      chapter_id: chapterId,
+      base_revision: revision,
+      action: 'writing.rewrite_selection',
+      instruction: '聚焦能够行动的线索。',
+      selection_start: 0,
+      selection_end: content.length,
+      selection_text: content,
+      outline_revision_id: confirmed.id,
+      account: 'offline',
+    },
+  })
+  expect(queued.ok(), await queued.text()).toBe(true)
+  const { id: taskId } = await queued.json()
+  const taskUrl = `/api/tasks/${taskId}`
+  await expect.poll(async () => (await (await page.request.get(taskUrl)).json()).status).toBe('succeeded')
+  const { result: taskResult } = await (await page.request.get(taskUrl)).json()
+  const applied = await page.request.post(`/api/artifacts/${taskResult.artifact_id}/accept`, {
+    headers,
+    data: { idempotency_key: 'inspection-08-browser', candidate_revision: 0 },
+  })
+  expect(applied.ok(), await applied.text()).toBe(true)
+  const accepted = await applied.json()
+
+  const evidenceUrl = `${branch}/reference-cards/${version.id}/evidence`
+  const requested: string[] = []
+  page.on('request', (request) => {
+    if (request.url().includes('/reference-cards/') && request.url().endsWith('/evidence'))
+      requested.push(new URL(request.url()).pathname)
+  })
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novelId)
+  await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  const panel = page.getByRole('region', { name: '十处对账体检', exact: true })
+  await panel.getByText('本次依据与未核查项', { exact: true }).click()
+  const planned = panel.getByRole('region', { name: '章纲计划手法卡', exact: true })
+  const adopted = panel.getByRole('region', { name: '已采纳稿的手法卡依据', exact: true })
+  await expect(planned.getByText('拾铃 · 手法卡 partial-clue · 修订 1', { exact: true })).toBeVisible()
+  await expect(adopted.getByText(`章节编号 ${chapterId}`, { exact: true })).toBeVisible()
+  await expect(adopted.getByText(`章稿修订 ${accepted.revision}`, { exact: true })).toBeVisible()
+  await page.setViewportSize({ width: 420, height: 900 })
+  expect(await adopted.evaluate((section) => section.scrollWidth <= section.clientWidth)).toBe(true)
+  expect(requested).toEqual([])
+  await adopted.getByText('查看手法卡原文', { exact: true }).press('Enter')
+  await expect(adopted.locator('blockquote')).toHaveText(original)
+  expect(requested).toEqual([evidenceUrl])
+  await expect(adopted.getByText(newer, { exact: true })).toHaveCount(0)
+
+  await panel.getByRole('button', { name: '生成体检单', exact: true }).click()
+  const report = panel.getByRole('region', { name: '体检单结果', exact: true })
+  const recorded = report.getByRole('region', { name: '已采纳稿的手法卡依据', exact: true })
+  await expect(recorded.getByText(`章稿修订 ${accepted.revision}`, { exact: true })).toBeVisible()
+  const edited = await page.request.put(chapterUrl, {
+    headers,
+    data: { base_revision: accepted.revision, content: '作者重新写了取得铃痕的过程。' },
+  })
+  expect(edited.ok(), await edited.text()).toBe(true)
+  await panel.getByRole('button', { name: '重新读取依据', exact: true }).click()
+  await expect(report.getByText('部分依据已更新，过期项待复检', { exact: true })).toBeVisible()
+  await expect(recorded.getByText(`章稿修订 ${accepted.revision}`, { exact: true })).toBeVisible()
+  expect(requested).toEqual([evidenceUrl])
+  const item = report.getByRole('listitem').filter({ hasText: '08 已确认引用与改稿影响' })
+  await item.getByText('对照依据', { exact: true }).click()
+  await expect(item.locator('pre')).toContainText(taskResult.artifact_id)
+  await expect(item.locator('pre')).not.toContainText(original)
+  await page.route(`**${evidenceUrl}`, (route) =>
+    route.fulfill({ json: { version_id: version.id, source_state: 'metadata_only', excerpt: null } }),
+  )
+  await recorded.getByText('查看手法卡原文', { exact: true }).click()
+  await expect(recorded.getByRole('status')).toHaveText('本机没有这一手法卡修订的可核验原文。')
+  expect(requested).toEqual([evidenceUrl, evidenceUrl])
+})
+
 test('语义候选显示送审证据，作者另行裁定后签入正式体检', async ({ page }) => {
   await page.goto('/')
   const { csrf } = await (await page.request.get('/api/session')).json()

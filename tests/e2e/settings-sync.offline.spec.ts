@@ -148,18 +148,22 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
       .filter({ hasText: '条目编号 east-bell' })
     const detail = east.getByRole('textbox', { name: '设定内容', exact: true })
     await expect(detail).toHaveValue(commonText)
-    await detail.fill(webText)
-    await panel.getByRole('button', { name: '体检本地设定草稿' }).click()
     const confirm = panel.getByRole('button', { name: '确认设定并保存到浏览器' })
-    await expect(confirm).toBeDisabled()
-    for (const label of ['同名条目的内容或约束不同', '关联规则的适用范围或例外文字不同']) {
-      const finding = panel.locator('details').filter({ has: web.getByText(label, { exact: true }) })
-      await finding.getByText(label, { exact: true }).click()
-      await expect(finding.getByText(/世界设定 · 第 2 项 · west-bell/)).toBeVisible()
-      await finding.getByRole('checkbox', { name: '已核对此项，按当前内容保留' }).check()
+    async function confirmSettingsDraft() {
+      await panel.getByRole('button', { name: '体检本地设定草稿' }).click()
+      await expect(confirm).toBeDisabled()
+      for (const label of ['同名条目的内容或约束不同', '关联规则的适用范围或例外文字不同']) {
+        const finding = panel.locator('details').filter({ has: web.getByText(label, { exact: true }) })
+        await finding.getByText(label, { exact: true }).click()
+        await expect(finding.getByText(/世界设定 · 第 2 项 · west-bell/)).toBeVisible()
+        await finding.getByRole('checkbox', { name: '已核对此项，按当前内容保留' }).check()
+      }
+      await expect(confirm).toBeEnabled()
+      await confirm.click()
+      await expect(confirm).toHaveCount(0)
     }
-    await expect(confirm).toBeEnabled()
-    await confirm.click()
+    await detail.fill(webText)
+    await confirmSettingsDraft()
     await expect(panel.getByText('已确认并保存新的设定修订。')).toBeVisible()
 
     const remote = await desktopConfirm(desktopText, 'm3-confirm-desktop')
@@ -203,6 +207,39 @@ test('桌面和独立 Web 同时确认设定后比较共同依据并保留双方
     await panel.getByRole('button', { name: '查看上一修订' }).click()
     await historical.getByText('世界设定', { exact: true }).click()
     await expect(historical.getByText(commonText, { exact: true })).toBeVisible()
+
+    const combinedText = '由作者重新核对：东城下雨且午夜之后才听得到。'
+    const readCursor = async () =>
+      Number(
+        (
+          await web
+            .getByRole('status')
+            .filter({ hasText: /已启用 · 游标/ })
+            .innerText()
+        ).match(/游标 (\d+)/)?.[1],
+      )
+    const previousCursor = await readCursor()
+    await context.setOffline(true)
+    await panel.getByRole('button', { name: '编辑当前设定' }).click()
+    await expect(detail).toHaveValue(webText)
+    await detail.fill(combinedText)
+    await confirmSettingsDraft()
+    await context.setOffline(false)
+    await run.click()
+    await expect.poll(readCursor).toBeGreaterThan(previousCursor)
+    const resynced = await desktopSync('run')
+    expect(resynced.conflicts).toHaveLength(0)
+    expect(resynced.deferred).toHaveLength(0)
+    const renewed: ConceptionState = await (await page.request.get(settings)).json()
+    expect(renewed.categories.find(({ id }) => id === 'world')!.items.map(({ detail }) => detail)).toEqual([
+      combinedText,
+      otherText,
+    ])
+    expect(renewed.project?.id).toBe(projectId)
+    // The competing revision remains reachable after confirming and sending the combined decision.
+    await panel.getByRole('combobox', { name: '浏览正式设定修订' }).selectOption(remote.confirmation!.id)
+    await historical.getByText('世界设定', { exact: true }).click()
+    await expect(historical.getByText(desktopText, { exact: true })).toBeVisible()
   } finally {
     await context.close()
   }

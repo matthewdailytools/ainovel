@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, type Chapter } from './api'
+import { api, ApiError, type Chapter } from './api'
+import type { components } from './api-schema'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { InspectionSemanticPanel, type InspectionSuggestion } from './InspectionSemanticPanel'
 
@@ -60,6 +61,18 @@ type Collection = {
   history: { id: string; created: number; scope?: Scope; origin?: Report['origin'] }[]
 }
 type Outline = { confirmed: { plan: { volumes: { id: string; title: string }[] } } | null }
+type Citation = Pick<components['schemas']['CardCitation'], 'title' | 'evidence_start' | 'evidence_end'>
+type CardReference = {
+  chapter_id: string
+  session_id: string
+  card_id: string
+  revision: number
+  version_id?: string
+  source?: Citation | null
+  chapter_revision?: number
+  artifact_id?: string
+}
+type CardEvidence = components['schemas']['ReferenceCardEvidence']
 
 const labels: Record<Status, string> = {
   green: '通过',
@@ -92,7 +105,150 @@ function StatusBadge({ status }: { status: Status }) {
   )
 }
 
-function CheckList({ items, onChoose }: { items: Item[]; onChoose?: (item: Item) => void }) {
+function referenceRows(value: unknown): CardReference[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (row): row is CardReference =>
+      !!row &&
+      typeof row.chapter_id === 'string' &&
+      typeof row.session_id === 'string' &&
+      typeof row.card_id === 'string' &&
+      Number.isInteger(row.revision),
+  )
+}
+
+function CardOriginal({ branchId, versionId }: { branchId: string; versionId: string }) {
+  const [result, setResult] = useState<'loading' | 'unavailable' | 'failed' | { excerpt: string }>()
+  async function read() {
+    if (result === 'loading' || typeof result === 'object') return
+    setResult('loading')
+    try {
+      const proof = await api<CardEvidence>(
+        `/branches/${encodeURIComponent(branchId)}/reference-cards/${encodeURIComponent(versionId)}/evidence`,
+      )
+      setResult(
+        proof.version_id === versionId &&
+          (proof.source_state === 'local' || proof.source_state === 'included_excerpt') &&
+          typeof proof.excerpt === 'string' &&
+          proof.excerpt.trim()
+          ? { excerpt: proof.excerpt }
+          : 'unavailable',
+      )
+    } catch (error) {
+      setResult(error instanceof ApiError && error.status === 404 ? 'unavailable' : 'failed')
+    }
+  }
+  return (
+    <details onToggle={(event) => event.currentTarget.open && void read()}>
+      <summary>查看手法卡原文</summary>
+      <div role="status">
+        {result === 'loading' && <p>正在读取本机原文…</p>}
+        {result === 'unavailable' && <p>本机没有这一手法卡修订的可核验原文。</p>}
+      </div>
+      {result === 'failed' && (
+        <div>
+          <p role="alert">读取手法卡原文失败。</p>
+          <button type="button" onClick={() => void read()}>
+            重试读取原文
+          </button>
+        </div>
+      )}
+      {typeof result === 'object' && <blockquote>{result.excerpt}</blockquote>}
+    </details>
+  )
+}
+
+function CheckCardReferences({
+  basis,
+  chapters,
+  branchId,
+}: {
+  basis: Item['basis']
+  chapters: Preview['chapters']
+  branchId: string
+}) {
+  const groups = [
+    { label: '章纲计划手法卡', rows: referenceRows(basis.planned_card_references), adopted: false },
+    { label: '已采纳稿的手法卡依据', rows: referenceRows(basis.card_references), adopted: true },
+  ]
+  if (groups.every(({ rows }) => !rows.length)) return null
+  return groups.map(({ label, rows, adopted }) => (
+    <section key={label} aria-label={label} style={{ overflowWrap: 'anywhere' }}>
+      <p>
+        <strong>{label}</strong>
+      </p>
+      {rows.length ? (
+        <ul>
+          {rows.map((row) => {
+            const chapter = chapters.find(({ id }) => id === row.chapter_id)
+            const versionId =
+              typeof row.version_id === 'string' && /^[a-f0-9]{64}$/.test(row.version_id)
+                ? row.version_id
+                : undefined
+            const citation = typeof row.source?.title === 'string' ? row.source : undefined
+            return (
+              <li
+                key={JSON.stringify([
+                  branchId,
+                  row.chapter_id,
+                  row.session_id,
+                  row.card_id,
+                  row.revision,
+                  versionId,
+                  row.artifact_id,
+                ])}
+              >
+                <p>
+                  {chapter?.title || '章节'} · 手法卡 {row.card_id} · 修订 {row.revision}
+                </p>
+                <p>章节编号 {row.chapter_id}</p>
+                {adopted && (
+                  <p>
+                    {typeof row.chapter_revision === 'number'
+                      ? `章稿修订 ${row.chapter_revision}`
+                      : '章稿修订未记录'}
+                  </p>
+                )}
+                {versionId && <p>手法卡版本 {versionId}</p>}
+                {citation && (
+                  <p>
+                    来源 {citation.title}
+                    {typeof citation.evidence_start === 'number' &&
+                      typeof citation.evidence_end === 'number' && (
+                        <>
+                          {' '}
+                          · 原文位置 {citation.evidence_start}–{citation.evidence_end}
+                        </>
+                      )}
+                  </p>
+                )}
+                {versionId && citation ? (
+                  <CardOriginal branchId={branchId} versionId={versionId} />
+                ) : (
+                  <p>缺少可核验的手法卡版本或来源。</p>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <p>本范围无记录。</p>
+      )}
+    </section>
+  ))
+}
+
+function CheckList({
+  items,
+  chapters,
+  branchId,
+  onChoose,
+}: {
+  items: Item[]
+  chapters: Preview['chapters']
+  branchId: string
+  onChoose?: (item: Item) => void
+}) {
   return (
     <ol className="fact-grid">
       {items.map((item) => (
@@ -120,6 +276,9 @@ function CheckList({ items, onChoose }: { items: Item[]; onChoose?: (item: Item)
                 </blockquote>
               ))}
             </div>
+          )}
+          {item.check_id === '08' && (
+            <CheckCardReferences basis={item.basis} chapters={chapters} branchId={branchId} />
           )}
           <details>
             <summary>对照依据</summary>
@@ -505,7 +664,12 @@ export function InspectionPanel({
           </p>
           <details>
             <summary>本次依据与未核查项</summary>
-            <CheckList items={data.preview.items} onChoose={(item) => setSelected(item.check_id)} />
+            <CheckList
+              items={data.preview.items}
+              chapters={data.preview.chapters}
+              branchId={branchId}
+              onChoose={(item) => setSelected(item.check_id)}
+            />
           </details>
           <InspectionSemanticPanel
             key={`${scope}/${scopeId}`}
@@ -702,7 +866,12 @@ export function InspectionPanel({
                       载入历史作者核对
                     </button>
                   )}
-                  <CheckList items={visible.items} />
+                  <CheckList
+                    key={visible.id}
+                    items={visible.items}
+                    chapters={visible.chapters}
+                    branchId={branchId}
+                  />
                 </section>
               )}
             </details>

@@ -1,18 +1,28 @@
 import asyncio
+from contextlib import closing
+from dataclasses import replace
 from hashlib import sha256
 from io import BytesIO
 import json
+from pathlib import Path
+from sqlite3 import connect
 from zipfile import ZipFile
 
+from fastapi.testclient import TestClient
+
+from ainovel.api import create_app
+from ainovel.backups import unpack_verified
+from ainovel.budget import Budget
 from ainovel.db import uid
 from ainovel.worker import Worker
 from test_conception_workbench import (
     confirm as confirm_settings,
     path as settings_path,
-    save as save_settings,
 )
 from test_outline_workspace import chapter_plan, put_and_confirm
-from test_project_brief import BRIEF
+from test_project_brief import IDEA, Model as ProjectModel, run as run_project
+from test_reference_flow import SOURCE, run as run_reference, update as update_reference
+from test_seven_stage_run import Model as RelayModel, drain
 from test_workflow_inspection import item, read, report, source
 
 
@@ -106,7 +116,13 @@ def assert_blocked(client, endpoint, data, gate):
     assert client.get(endpoint).json()["latest"] is None
 
 
-def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(client, domain, settings, story):
+def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(
+    client,
+    domain,
+    settings,
+    tmp_path,
+):
+    story = accepted(client.post("/api/novels", json={"title": "合成验收 · 门内铜铃"}), 201)
     branch = story["branch_id"]
     route = f"/api/branches/{branch}"
     inspection = route + "/workflow-inspections"
@@ -114,29 +130,122 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
     outlines = route + "/outline-workspace"
     records = route + "/story-records"
     chapters = [
-        domain.save(
-            story["chapter_id"] if number == 1 else domain.create_chapter(branch, f"第{number}章")["id"],
-            0,
-            content,
-        )
-        for number, content in enumerate(CONTENT, 1)
+        accepted(client.post(route + "/chapters", json={"title": f"第{number}章"}), 201)
+        for number in range(1, 5)
     ]
+
+    def read_chapter(id):
+        return accepted(client.get(f"/api/chapters/{id}"))
+
+    def save_chapter(chapter, text):
+        return accepted(
+            client.put(
+                f"/api/chapters/{chapter['id']}",
+                json={"base_revision": chapter["revision"], "content": text},
+            )
+        )
+
+    for position, expected in enumerate(CONTENT[:3]):
+        chapters[position] = save_chapter(chapters[position], expected)
     first, second, third, fourth = chapters
+    setting_route = settings_path(branch)
+    state = accepted(client.get(setting_route))
+    proposal_task = accepted(
+        client.post(
+            setting_route + "/project-brief/generate",
+            json={
+                "base_revision": state["revision"],
+                "base_story_revision": state["story_revision"],
+                "account": "deepseek",
+                "client_request_id": uid(),
+                "idea": IDEA,
+            },
+        ),
+        202,
+    )
+    project_model = ProjectModel()
+    proposal = run_project(domain, settings, proposal_task, project_model)
+    assert accepted(client.get(setting_route + "/project-brief")) is None
     project = accepted(
         client.put(
-            settings_path(branch) + "/project-brief",
+            setting_route + "/project-brief",
             json={
                 "base_revision": 0,
                 "idempotency_key": "stage-three-project",
-                "idea": "学徒凭铜铃刻痕找回师姐，随后归还师门信物。",
-                "brief": {**BRIEF, "length": "两卷四章", "ending": "学徒找到师姐，将铜铃归还师门。"},
+                "candidate_id": proposal["id"],
+                "idea": IDEA,
+                "brief": {
+                    **proposal["payload"]["brief"],
+                    "length": "两卷四章",
+                    "ending": "学徒找到师姐，将铜铃归还师门。",
+                },
             },
         )
     )
-    setting_route = settings_path(branch)
-    state = client.get(setting_route).json()
-    next(row for row in state["categories"] if row["id"] == "world")["items"] = [RULE]
-    confirmed_setting = confirm_settings(client, setting_route, save_settings(client, setting_route, state))
+    assert project["candidate_id"] == proposal["id"]
+    assert project["brief"]["ending"] != proposal["payload"]["brief"]["ending"]
+
+    book = accepted(
+        client.post("/api/library/import", files={"file": ("合成拆解.txt", SOURCE.encode())}), 201
+    )
+    unit = accepted(client.get(f"/api/library/books/{book['id']}/units"))[0]
+    template = accepted(
+        client.post(
+            "/api/reference-sessions",
+            json={
+                "unit_id": unit["id"],
+                "start": 0,
+                "end": len(SOURCE.encode("utf-16-le")) // 2,
+                "quote": SOURCE,
+                "goal": "有限信息下取得局部进展",
+                "branch_id": branch,
+                "chapter_id": fourth["id"],
+            },
+        ),
+        201,
+    )
+    analysis, _ = run_reference(client, settings, domain, template["id"], "analyze")
+    selected = analysis["payload"]["cards"][0]
+    assert selected["evidence"] == SOURCE
+    update_reference(client, domain, template, cards=[selected], selected_ids=[selected["id"]])
+    pinned = accepted(client.get(outlines + "/reference-options"))[0]
+    address = {key: pinned[key] for key in ("session_id", "card_id", "revision", "version_id")}
+
+    state = accepted(client.get(setting_route))
+    setting_basis = {"base_revision": state["revision"], "base_story_revision": state["story_revision"]}
+    suggested = run_project(
+        domain,
+        settings,
+        accepted(
+            client.post(
+                setting_route + "/generate",
+                json={
+                    **setting_basis,
+                    "account": "deepseek",
+                    "client_request_id": uid(),
+                    "category_id": "world",
+                    "project_confirmation_id": project["id"],
+                },
+            ),
+            202,
+        ),
+        project_model,
+    )
+    assert suggested["basis"]["project_confirmation_id"] == project["id"]
+    assert project_model.calls[-1]["上下文"]["已确认立项"]["brief"]["ending"] == project["brief"]["ending"]
+    rule = {**RULE, "id": suggested["payload"]["categories"][0]["items"][0]["id"]}
+    edited_setting = accepted(
+        client.post(
+            setting_route + "/adopt",
+            json={
+                **setting_basis,
+                "idempotency_key": uid(),
+                "artifact_id": suggested["id"],
+                "categories": [{"id": "world", "items": [rule]}],
+            },
+        )
+    )
+    confirmed_setting = confirm_settings(client, setting_route, edited_setting)
     setting_id = confirmed_setting["confirmation"]["id"]
 
     planted = {
@@ -212,7 +321,13 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
                         "id": f"unit-{number}",
                         "title": title,
                         "summary": summary,
-                        "chapters": [chapter_plan(chapter["id"], chapter["content"]) for chapter in scoped],
+                        "chapters": [
+                            {
+                                **chapter_plan(chapter["id"], CONTENT[chapter["position"] - 1]),
+                                "setting_ids": [rule["id"]],
+                            }
+                            for chapter in scoped
+                        ],
                     }
                 ],
             }
@@ -230,16 +345,26 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
             }
         ],
     }
-    outline_id = put_and_confirm(
+    plan["volumes"][1]["units"][0]["chapters"][1]["reference_cards"] = [address]
+    prior_outline = put_and_confirm(
         client, outlines, {"base_revision": 0, "confirmation_id": setting_id, "plan": plan}
-    )["confirmed"]["id"]
+    )["confirmed"]
+    assert prior_outline["setting_basis"]["reference_cards"] == [pinned]
 
-    class RuleModel:
+    class WorkshopModel(RelayModel):
         async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
-            request = json.loads(prompt.split("\n只返回")[0])["任务"]
-            if request["动作"] == "审查正文":
+            frame = json.loads(prompt.split("\n只返回")[0])
+            request = frame["任务"]
+            action = request.get("动作") or request["action"]
+            if action == "writing.expand_plot":
+                basis = frame["上下文"]["采用章纲"]
+                assert basis["chapter"]["chapter_id"] == fourth["id"]
+                assert basis["reference_cards"][0]["version_id"] == address["version_id"]
+                assert SOURCE not in prompt
+                result = await super().generate(account, task_id, system, prompt, max_output, **kwargs)
+                return {**result, "text": CONTENT[3]}
+            if action == "审查正文" and not request["固定条件"]:
                 assert request["正文"] == fourth["content"]
-                assert not request["固定条件"]
                 return {
                     "text": json.dumps(
                         {
@@ -252,7 +377,8 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
                     "usage": {"input": 1, "output": 1},
                     "call_id": uid(),
                 }
-            assert request["动作"] == "对照单条已确认设定与保存稿"
+            if action != "对照单条已确认设定与保存稿":
+                return await super().generate(account, task_id, system, prompt, max_output, **kwargs)
             assert request["适用规则"] == RULE["setting_policy"]
             selected = request["可引用原文"][0]
             conflict = "在门外摇响铜铃" in selected["text"]
@@ -269,6 +395,87 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
                 "call_id": uid(),
             }
 
+    model = WorkshopModel(settings=settings)
+    candidate_task = accepted(
+        client.post(
+            "/api/modules",
+            json={
+                "action": "writing.expand_plot",
+                "novel_id": story["id"],
+                "branch_id": branch,
+                "chapter_id": fourth["id"],
+                "base_revision": fourth["revision"],
+                "outline_revision_id": prior_outline["id"],
+                "instruction": "沿锁定章纲写归铃，正文待作者核对。",
+                "fixed": ["获得一条新线索"],
+                "account": "deepseek",
+                "client_request_id": uid(),
+            },
+        ),
+        202,
+    )
+    assert asyncio.run(Worker(settings, model).run_once())
+    candidate_run = accepted(client.get(f"/api/tasks/{candidate_task['id']}"))
+    assert candidate_run["status"] == "succeeded", candidate_run["error"]
+    candidate_id = candidate_run["result"]["artifact_id"]
+    candidate_url = f"/api/artifacts/{candidate_id}"
+    old_candidate = accepted(client.get(candidate_url))
+    assert old_candidate["basis"]["outline"]["id"] == prior_outline["id"]
+    assert read_chapter(fourth["id"])["revision"] == 0
+
+    plan["volumes"][1]["units"][0]["chapters"][1]["turn"] = "确认两道刻痕都指向师姐后归铃。"
+    outline_id = put_and_confirm(
+        client,
+        outlines,
+        {
+            "base_revision": prior_outline["revision"],
+            "confirmation_id": setting_id,
+            "plan": plan,
+        },
+    )["confirmed"]["id"]
+    rejected = accepted(
+        client.post(
+            candidate_url + "/accept",
+            json={
+                "idempotency_key": uid(),
+                "candidate_revision": old_candidate["candidate_revision"],
+            },
+        ),
+        409,
+    )
+    assert rejected["code"] == "outline_changed"
+    assert accepted(client.get(candidate_url))["basis"] == old_candidate["basis"]
+    assert read(client, inspection)["latest"] is None
+
+    runs = route + "/seven-stage-runs"
+    request = {
+        "start_from": "outline",
+        "source_id": outline_id,
+        "account": "deepseek",
+        "budget_limit": 1,
+        "auto_adopt_body": True,
+        "client_request_id": uid(),
+    }
+    relay = accepted(client.post(runs, json=request), 202)
+    assert accepted(client.post(runs, json=request), 202)["id"] == relay["id"]
+    run_url = f"{runs}/{relay['id']}"
+    drain(settings, model)
+
+    def relay_state():
+        task = accepted(client.get(f"/api/tasks/{relay['id']}"))
+        return task["status"], task["result"]["seven_stage_run"]
+
+    status, progressed = relay_state()
+    assert status == "needs_review" and progressed["stage"] == "inspection"
+    assert progressed["project_id"] == project["id"] and progressed["setting_id"] == setting_id
+    assert progressed["outline_id"] == outline_id and progressed["inspection_candidate_id"]
+    assert [row["id"] for row in progressed["completed_chapters"]] == [chapter["id"] for chapter in chapters]
+    assert all(row["existing"] for row in progressed["completed_chapters"][:3])
+    assert progressed["completed_chapters"][3]["artifact_id"] != candidate_id
+    assert set(progressed["volume_snapshot_ids"]) == {"volume-1", "volume-2"}
+    fourth = chapters[3] = read_chapter(fourth["id"])
+    assert fourth["revision"] == 1 and fourth["content"] == CONTENT[3]
+
     def chapter_review(chapter, *, hard_rule=True):
         task = accepted(
             client.post(
@@ -283,7 +490,7 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
                         "核对铜铃响声的硬规则。" if hard_rule else "复查改动后第三章如何承接末章伏笔回收。"
                     ),
                     **(
-                        {"conception_snapshot_id": setting_id, "setting_item_id": RULE["id"]}
+                        {"conception_snapshot_id": setting_id, "setting_item_id": rule["id"]}
                         if hard_rule
                         else {}
                     ),
@@ -293,7 +500,7 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
             ),
             202,
         )
-        assert asyncio.run(Worker(settings, RuleModel()).run_once())
+        assert asyncio.run(Worker(settings, model).run_once())
         done = domain.task(task["id"])
         assert done["status"] == "succeeded", done["error"]
         return done["result"]["artifact_id"]
@@ -301,7 +508,7 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
     for chapter in chapters:
         chapter_review(chapter)
     missing = read(client, inspection)
-    assert missing["latest"] is None
+    assert missing["latest"]["id"] == progressed["inspection_id"]
     assert item(missing["preview"], "01")["status"] == "pending"
     overdue = report(client, inspection, missing["preview"])
     assert item(overdue, "07")["current_status"] == "yellow"
@@ -378,7 +585,7 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
         "inspection",
     )
 
-    conflict = domain.save(third["id"], third["revision"], "阿芹在门外摇响铜铃，凭第二道刻痕找到师姐。")
+    conflict = save_chapter(third, "阿芹在门外摇响铜铃，凭第二道刻痕找到师姐。")
     chapters[2] = conflict
     fail_id = chapter_review(conflict)
     unrelated = read(client, f"{inspection}/{baseline['second']['id']}")
@@ -421,9 +628,7 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
     assert item(repair_attempt, "05")["current_status"] == "red"
     assert accepted(client.post(completion + "/confirm", json=data), 409)["code"] == "completion_changed"
 
-    repaired = domain.save(
-        conflict["id"], conflict["revision"], "阿芹在门外听不见铃声，回到门内摇铃才凭第二道刻痕找到师姐。"
-    )
+    repaired = save_chapter(conflict, "阿芹在门外听不见铃声，回到门内摇铃才凭第二道刻痕找到师姐。")
     chapters[2] = repaired
     final_rule = chapter_review(repaired)
     accepted(
@@ -446,12 +651,27 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
         assert final_rule in {row["report_id"] for row in item(document, "05")["basis"]["reports"]}
         assert source(repaired) in item(document, "02")["author_review"]["evidence"]
         assert final[label]["id"] != baseline[label]["id"]
+    accepted(client.post(run_url + "/resume"))
+    drain(settings, model)
+    status, pending = relay_state()
+    assert status == "needs_review" and pending["stage"] == "completion"
+    assert pending["inspection_id"] == final["book"]["id"] and not pending.get("completion_id")
+    preparation = accepted(client.get(f"/api/artifacts/{pending['completion_preparation_id']}"))
+    assert preparation["payload"]["sample_chapter_ids"] == [first["id"]]
+    assert preparation["kind"] == "completion_preparation_candidate"
     data["basis_sha256"] = client.get(completion).json()["basis_sha256"]
     data["characters"]["sources"] = [source(repaired), source(fourth)]
     preview = accepted(client.post(completion + "/preview", json=data))
     assert all(row["status"] == "green" for row in preview["checks"])
     frozen = accepted(client.post(completion + "/confirm", json=data), 201)
     assert frozen["current"] and frozen["manifest"] == preview["manifest"]
+    accepted(client.post(run_url + "/resume"))
+    drain(settings, model)
+    status, settled = relay_state()
+    assert status == "succeeded" and settled["completion_id"] == frozen["id"]
+    assert settled["children"] == pending["children"]
+    assert model.calls.count("writing.expand_plot") == 2
+    assert model.calls.count("准备完本收束核对建议") == 1
     detail = accepted(client.get(f"{completion}/history/{frozen['id']}"))
     assert detail["current"] and detail["review"]["characters"]["sources"] == [
         source(repaired),
@@ -490,3 +710,122 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(cli
         sample = archive.read("试读.md").decode()
         assert first["content"] in sample and second["content"] in sample
         assert not any(chapter["content"] in sample for chapter in [repaired, fourth])
+        delivery_payload = {name: archive.read(name) for name in archive.namelist()}
+
+    card_reference = item(final["book"], "08")["basis"]["card_references"][0]
+    assert (
+        card_reference["chapter_id"] == fourth["id"] and card_reference["version_id"] == address["version_id"]
+    )
+    assert card_reference["source"]["title"] == pinned["source_title"]
+    assert SOURCE not in json.dumps(card_reference, ensure_ascii=False)
+    query = "SELECT id,task_id,account,charged,status FROM calls ORDER BY id"
+    with Budget(settings).db() as ledger:
+        costs = [tuple(row) for row in ledger.execute(query)]
+    assert costs and all(row[2] == "deepseek" and row[3] > 0 for row in costs)
+
+    snapshots = route + "/work-snapshots"
+    point = accepted(
+        client.post(
+            snapshots,
+            json={"scope": "volume", "scope_id": "volume-2", "label": "还铃卷 · 已核对后"},
+        ),
+        201,
+    )
+    assert point["scoped_chapter_ids"] == [third["id"], fourth["id"]]
+    assert point["reports"] == {"workflow_inspection": final["book"]["id"], "book_completion": frozen["id"]}
+    changed = save_chapter(repaired, "阿芹把铜铃暂留在门边，先去找师姐。")
+    accepted(
+        client.put(
+            f"/api/chapters/{third['id']}",
+            json={"base_revision": repaired["revision"], "content": "另一个窗口误用旧修订提交的稿件。"},
+        ),
+        409,
+    )
+    assert read_chapter(changed["id"])["content"] == changed["content"]
+    preview = accepted(client.get(f"{snapshots}/{point['id']}/preview"))
+    refusal = accepted(
+        client.post(
+            f"{snapshots}/{point['id']}/restore",
+            json={
+                "mode": "in_place",
+                "basis_sha256": preview["basis_sha256"],
+                "idempotency_key": uid(),
+            },
+        ),
+        409,
+    )
+    assert refusal["code"] == "snapshot_restore_scope" and "伏笔窗口跨越本卷边界" in refusal["message"]
+    assert read_chapter(changed["id"])["revision"] == changed["revision"]
+    for entry in (first, second):
+        assert read_chapter(entry["id"])["revision"] == entry["revision"]
+    unchanged_local = read(client, f"{inspection}/{baseline['second']['id']}")
+    assert unchanged_local["current"]
+    assert not accepted(client.get(f"{completion}/history/{frozen['id']}"))["current"]
+
+    recovery_route = f"{snapshots}/{point['id']}/restore"
+    recovery_request = {
+        "mode": "new_branch",
+        "branch_name": "还铃卷核对复本",
+        "basis_sha256": preview["basis_sha256"],
+        "idempotency_key": uid(),
+    }
+    fork = accepted(client.post(recovery_route, json=recovery_request), 201)
+    other = f"/api/branches/{fork['branch_id']}"
+    assert read_chapter(changed["id"])["content"] == changed["content"]
+    forked_outline = accepted(client.get(other + "/outline-workspace"))
+    assert not forked_outline["stale"]
+    assert forked_outline["confirmed"]["setting_basis"]["restored_outline_id"] == outline_id
+    assert forked_outline["confirmed"]["setting_basis"]["confirmation_id"] == fork["setting_id"] != setting_id
+    mapped_card = fork["reference_sources"]["version_ids"][address["version_id"]]
+    verified_card = forked_outline["confirmed"]["setting_basis"]["reference_cards"][0]
+    assert verified_card == {**pinned, "version_id": mapped_card}
+    assert mapped_card != address["version_id"]
+    window = forked_outline["promises"][0]
+    assert window["state"] == "resolved"
+    assert window["plant_chapter_id"] == fork["chapters"][first["id"]]["id"]
+    assert window["closes_chapter_id"] == fork["chapters"][fourth["id"]]["id"]
+    assert window["stages"][1]["sources"][0]["chapter_id"] == window["plant_chapter_id"]
+    assert window["stages"][2]["sources"][0]["chapter_id"] == window["closes_chapter_id"]
+    for original in chapters:
+        restored = read_chapter(fork["chapters"][original["id"]]["id"])
+        assert restored["content"] == original["content"]
+        assert sha256(restored["content"].encode()).hexdigest() == next(
+            row["sha256"] for row in point["chapters"] if row["id"] == original["id"]
+        )
+    assert accepted(client.get(other + "/book-completion"))["latest"] is None
+    assert client.get(other + f"/book-completion/{frozen['id']}/export").status_code == 404
+    fork_package = accepted(client.get(other + "/manuscript-package"))
+    assert fork_package["outline_history"]["adopted_revision_id"] == forked_outline["confirmed"]["id"]
+    assert not fork_package["reference_history"].get("excerpts")
+    assert any(row["id"] == mapped_card for row in fork_package["reference_history"]["versions"])
+    assert SOURCE not in json.dumps(fork_package, ensure_ascii=False)
+    export_path = f"{completion}/{frozen['id']}/export"
+
+    def check_delivery(api):
+        response = api.get(export_path)
+        assert response.status_code == 200, response.text
+        with ZipFile(BytesIO(response.content)) as historical:
+            assert {name: historical.read(name) for name in historical.namelist()} == delivery_payload
+
+    check_delivery(client)
+    with Budget(settings).db() as ledger:
+        assert [tuple(row) for row in ledger.execute(query)] == costs
+    backup = accepted(client.post("/api/backups"))
+    backup_path = Path(backup["path"])
+    accepted(client.post(f"/api/backups/{backup['id']}/verify"))
+    with ZipFile(backup_path) as archive:
+        assert "usage-evidence.sqlite" in archive.namelist()
+        assert all(b"test-not-real" not in archive.read(name) for name in archive.namelist())
+    isolated = tmp_path / "closed-volume-workbench"
+    unpack_verified(backup_path, isolated)
+    with closing(connect(isolated / "usage-evidence.sqlite")) as ledger:
+        assert list(ledger.execute(query)) == costs
+    with TestClient(create_app(replace(settings, data_dir=isolated))) as recovered:
+        recovered.headers["X-Ainovel-CSRF"] = accepted(recovered.get("/api/session"))["csrf"]
+        assert accepted(recovered.post(recovery_route, json=recovery_request), 201) == fork
+        assert accepted(recovered.get(f"{snapshots}/{point['id']}/preview"))["snapshot"] == point
+        assert accepted(recovered.get(f"{route}/work-snapshots"))[0]["id"] == fork["recovery_snapshot_id"]
+        assert accepted(recovered.get(candidate_url))["basis"] == old_candidate["basis"]
+        assert accepted(recovered.get(f"{inspection}/{final['book']['id']}"))["current"] is False
+        assert accepted(recovered.get(other + "/outline-workspace"))["promises"] == forked_outline["promises"]
+        check_delivery(recovered)

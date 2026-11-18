@@ -5,7 +5,7 @@ import json
 import re
 import unicodedata
 from time import time
-from functools import partial
+from functools import cache, partial
 from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, model_validator
@@ -18,7 +18,6 @@ from .manual_finalization import _known_issues, _manifest
 from .models import Input
 from .outline_workspace import _chapter_plans, _view
 from .project_brief import confirmed_project_tx
-from .reference import card_version
 from .scene_time import SceneTime, event_basis_valid
 from .setting_review import confirmed_world_basis
 from .story_graph import Source, graph_snapshot, sources
@@ -204,14 +203,54 @@ def _rule_reports(tx, branch_id, chapters, confirmation_id):
     return list(latest.values())
 
 
-def _card_references(tx, branch_id, chapters):
-    from .reference_sync import read_reference_version
+def _card_references(tx, branch_id, chapters, plans):
+    from .reference_sync import read_reference_version, reference_card_at
 
+    @cache
+    def resolve(session_id, card_id, revision, version_id):
+        if version_id:
+            version = read_reference_version(tx, branch_id, version_id)
+            if version and (version.session_id, version.card_id, version.revision) != (
+                session_id,
+                card_id,
+                revision,
+            ):
+                return None
+        else:
+            try:
+                version = reference_card_at(tx, branch_id, session_id, card_id, revision)
+            except DomainError as error:
+                if error.code != "reference_citation":
+                    raise
+                return None
+        return version if version and version.assessment == "ready" else None
+
+    def bind(chapter_id, addresses):
+        bound = {}
+        for ref in addresses:
+            session_id, card_id, revision = (ref[key] for key in ("session_id", "card_id", "revision"))
+            version_id = ref.get("version_id")
+            version = resolve(session_id, card_id, revision, version_id)
+            resolved_id = version.id if version else version_id
+            bound[(session_id, card_id, revision, resolved_id)] = {
+                "session_id": session_id,
+                "card_id": card_id,
+                "revision": revision,
+                **({"version_id": resolved_id} if resolved_id else {}),
+                "chapter_id": chapter_id,
+                # Inspection archives carry a source address, never an external excerpt.
+                "source": version.citation.model_dump() if version else None,
+            }
+        return bound.values()
+
+    planned = [
+        row for chapter in plans for row in bind(chapter["chapter_id"], chapter.get("reference_cards", []))
+    ]
     indexed = {chapter["id"]: chapter for chapter in chapters}
-    result = []
+    adopted = []
     for row in tx.execute(
         "SELECT a.id,a.chapter_id,a.basis,r.result FROM artifacts a JOIN receipts r ON a.id=r.artifact_id "
-        "WHERE a.branch_id=? AND a.kind='chapter_draft' AND a.status='accepted' "
+        "WHERE a.branch_id=? AND a.kind IN ('chapter_draft','text_patch') AND a.status='accepted' "
         "AND (json_type(a.basis,'$.reference_session.card_references')='array' "
         "OR json_type(a.basis,'$.outline.reference_cards')='array') ORDER BY a.rowid,r.rowid",
         (branch_id,),
@@ -222,47 +261,12 @@ def _card_references(tx, branch_id, chapters):
             continue
         basis = json.loads(row["basis"])
         selected = (basis.get("reference_session") or {}).get("card_references", [])
-        planned = (basis.get("outline") or {}).get("reference_cards", [])
-        addresses = dict.fromkeys(
-            (ref["session_id"], ref["card_id"], ref["revision"], ref.get("version_id"))
-            for ref in [*selected, *planned]
+        chapter_plan = (basis.get("outline") or {}).get("reference_cards", [])
+        adopted.extend(
+            {**ref, "artifact_id": row["id"], "chapter_revision": revision}
+            for ref in bind(chapter["id"], [*selected, *chapter_plan])
         )
-        for session_id, card_id, card_revision, version_id in addresses:
-            source = None
-            if version_id:
-                version = read_reference_version(tx, branch_id, version_id)
-                if (
-                    version
-                    and version.assessment == "ready"
-                    and (version.session_id, version.card_id, version.revision)
-                    == (session_id, card_id, card_revision)
-                ):
-                    source = version.citation.model_dump()
-            else:
-                session = tx.execute("SELECT * FROM reference_sessions WHERE id=?", (session_id,)).fetchone()
-                if session:
-                    try:
-                        source = card_version(
-                            {**dict(session), "payload": json.loads(session["payload"])},
-                            card_id,
-                            card_revision,
-                        )["source"]
-                    except DomainError as error:
-                        if error.code not in {"reference_card", "reference_card_incomplete"}:
-                            raise
-            result.append(
-                {
-                    "session_id": session_id,
-                    "card_id": card_id,
-                    "revision": card_revision,
-                    **({"version_id": version_id} if version_id else {}),
-                    "artifact_id": row["id"],
-                    "chapter_id": chapter["id"],
-                    "chapter_revision": revision,
-                    "source": source,
-                }
-            )
-    return result
+    return planned, adopted
 
 
 def current_length_target(tx, branch_id, scope, scope_id, *, include_cleared=False):
@@ -439,8 +443,8 @@ def _evaluate(tx, branch_id, scope, scope_id):
         if row["invalid_reasons"]
     ]
     impacted = [row["id"] for row in manifest if row["stale"]]
-    references = _card_references(tx, branch_id, chapters)
-    broken_cards = [row for row in references if not row["source"]]
+    planned_references, references = _card_references(tx, branch_id, chapters, plans)
+    broken_cards = [row for row in [*planned_references, *references] if not row["source"]]
     length_revision = current_length_target(tx, branch_id, scope, scope_id, include_cleared=True)
     length_target = length_revision if length_revision and length_revision["targets"] is not None else None
     length_status, length_summary = length_result(
@@ -509,12 +513,14 @@ def _evaluate(tx, branch_id, scope, scope_id):
         item(
             "08",
             f"待复检章节 {len(impacted)} 章，失效记录 {len(invalid)} 条，"
-            f"当前严重意见 {len(issues)} 条，手法卡引用 {len(references)} 条。",
+            f"当前严重意见 {len(issues)} 条，章纲计划手法卡 {len(planned_references)} 条，"
+            f"已采用稿依据 {len(references)} 条。",
             {
                 "impacted_chapters": impacted,
                 "invalid_records": invalid,
                 "review_blockers": issues,
                 "outline_id": plan_basis["outline_id"],
+                **({"planned_card_references": planned_references} if planned_references else {}),
                 "card_references": references,
             },
             "red" if issues else "outdated" if impacted or invalid or broken_cards else "pending",
