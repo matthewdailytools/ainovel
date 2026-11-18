@@ -15,6 +15,7 @@ def same_task_payload(left, right):
         optional = {
             "genre_profile_basis",
             "author_contract_basis",
+            "conception_snapshot_id",
             "source_review_id",
             "reference_session_id",
             "reference_revision",
@@ -352,6 +353,10 @@ class Domain:
                 raise DomainError(
                     "story_confirmation_required", "请到长篇工作台逐项选择结构候选后确认，不能通用采纳。", 409
                 )
+            if artifact["kind"] == "conception_bundle":
+                raise DomainError(
+                    "conception_confirmation_required", "请在小说构思中选择并采用所需条目。", 409
+                )
             if candidate_revision is not None and candidate_revision != payload.get("_candidate_revision", 0):
                 raise DomainError("candidate_conflict", "候选已有新修订，请重新比较后采纳；正文未改动。", 409)
             chosen_memory = selection(
@@ -655,6 +660,10 @@ class Domain:
         profile = self.genre_profile(branch_id)
         contract = self.author_contract(branch_id)
         initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
+        if kind == "conception_generate":
+            from .conception_generation import freeze
+
+            initial["conception_generation_snapshot"] = freeze(self, payload)
         from .flow_entailment import KEY as FLOW_KEY, VERSION as FLOW_VERSION
 
         if kind in {"workflow", "candidate_recheck", "source_corrected_candidate_recheck"}:
@@ -789,6 +798,14 @@ class Domain:
             revision = db.execute("SELECT story_revision FROM branches WHERE id=?", (branch_id,)).fetchone()[
                 0
             ]
+            if kind == "conception_generate":
+                from .conception_generation import validate_basis_tx
+
+                validate_basis_tx(db, branch_id, payload)
+            if identifier := payload.get("conception_snapshot_id"):
+                from .conception import queued_handoff_tx
+
+                initial["conception_snapshot"] = queued_handoff_tx(db, branch_id, kind, identifier)
             reader = db.execute(
                 "SELECT id FROM artifacts WHERE branch_id=? AND kind='reader' "
                 "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",

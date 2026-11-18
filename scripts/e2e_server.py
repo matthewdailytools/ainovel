@@ -86,6 +86,78 @@ class Model(ReferenceModel):
         source_instruction = instruction
         while "原始任务" in source_instruction:
             source_instruction = source_instruction["原始任务"]
+        if source_instruction.get("action") == "conception.review.bundle":
+            author_text = source_instruction["作者本次要求"]
+            if author_text.startswith("写一个修表学徒查找旧账缺页"):
+                assert author_text == "写一个修表学徒查找旧账缺页的故事。"
+                assert {item["category_id"] for item in value["上下文"]["候选分类"]} == {
+                    "core",
+                    "characters",
+                    "world",
+                    "relationships",
+                    "events",
+                    "timeline",
+                    "foreshadowing",
+                    "outline",
+                }
+            return {
+                "text": json.dumps(
+                    {
+                        "issues": [
+                            {"category_id": "core", "message": "工程替身提示：请核对主角能否找回指定的缺页。"}
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-conception-review-advisory",
+            }
+        if source_instruction.get("action") == "conception.extract.world":
+            quote = "渡口规矩是收工后才登记借出的尺。"
+            units = source_instruction["可引用原文"]
+            source = next((unit for unit in units if quote in unit["text"]), None)
+            return {
+                "text": json.dumps(
+                    {
+                        "items": [
+                            {
+                                "title": "渡口借尺登记",
+                                "detail": "渡口借出的尺在收工后登记。",
+                                "source_id": source["source_id"],
+                                "quote": quote,
+                            }
+                        ]
+                        if source
+                        else []
+                    },
+                    ensure_ascii=False,
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-conception-world-evidence",
+            }
+        if source_instruction.get("action") == "conception.generate.category":
+            title = source_instruction["category_title"]
+            return {
+                "text": json.dumps(
+                    {
+                        "items": [
+                            {
+                                "title": f"候选 · {title}",
+                                "detail": "沈砚在渡口测量并记录。工程替身仅用于核对发布与采纳边界。",
+                                "links": [],
+                            },
+                            {
+                                "title": f"待比较 · {title}",
+                                "detail": "双栏旧账的后半页尚未核实，留作另一条候选。",
+                                "links": [],
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": f"offline-conception-{source_instruction['category_id']}",
+            }
         if source_instruction.get(
             "动作"
         ) == "按章纲写完整正文" and "memory-selection-e2e" in source_instruction.get("本章", {}).get(
@@ -302,10 +374,19 @@ class Model(ReferenceModel):
                 "call_id": "offline-design",
             }
         if instruction.get("action") == "writing.advise":
+            call_id = "offline"
+            if instruction["作者要求"] == "下一段如何保留可复核的读数？":
+                plan = value["上下文"]["conception_plan"]
+                assert any(
+                    item["title"] == "纸面副本必须当场核对"
+                    for category in plan["categories"]
+                    for item in category["items"]
+                )
+                call_id = f"offline-conception-writing-{plan['id']}"
             return {
                 "text": "方向一：她先核对公开刻度，再向守闸人借尺复测，暂不修门。\n方向二：改查私藏账簿。\n以上只供作者选择，不代表已经发生。",
                 "usage": {"input": 1, "output": 1},
-                "call_id": "offline",
+                "call_id": call_id,
             }
         if instruction.get("action") == "writing.expand_plot":
             return {
@@ -541,6 +622,15 @@ class Model(ReferenceModel):
                     "call_id": "offline-book-structure",
                 }
             result = await self.book_model.generate(account, task_id, system, prompt, max_output, **kwargs)
+            action = source_instruction.get("动作")
+            brief = source_instruction.get("作品简报", source_instruction.get("全书简报", ""))
+            if "工程验收构思快照" in brief and action in {"全书滚动规划", "按章纲写完整正文"}:
+                plan = value["上下文"]["conception_plan"]
+                items = [item["title"] for category in plan["categories"] for item in category["items"]]
+                assert len(items) == 1 and items[0].startswith("候选 · ")
+                assert "未来安排" in plan["scope"] and "当成当前事实" in plan["scope"]
+                stage = "planning" if action == "全书滚动规划" else "prose"
+                result["call_id"] = f"offline-conception-{stage}-{plan['id']}"
             if instruction.get("动作") == "按章纲写完整正文" and task_id in self.memory_selection_modes:
                 result["text"] += "\n" + self.memory_selection_modes[task_id]
             return result

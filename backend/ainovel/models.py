@@ -79,6 +79,7 @@ class ModuleInput(Input):
     budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     genre_profile_basis: GenreProfileBasis | None = None
     author_contract_basis: AuthorContractBasis | None = None
+    conception_snapshot_id: str | None = Field(default=None, min_length=1, max_length=128)
     source_review_id: str | None = Field(default=None, min_length=1, max_length=128)
     finding_indices: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list, max_length=20)
 
@@ -168,6 +169,7 @@ class WorkflowInput(Input):
     client_request_id: str | None = Field(default=None, min_length=8, max_length=128)
     novel_id: str
     source_branch_id: str | None = None
+    conception_snapshot_id: str | None = Field(default=None, min_length=1, max_length=128)
     mode: Literal["assisted", "automatic"]
     brief: str = Field(min_length=1, max_length=30_000)
     fixed: list[str] = Field(default_factory=list, max_length=30)

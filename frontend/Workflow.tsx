@@ -25,6 +25,7 @@ import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from
 import { FrozenStructureOutputPolicy, StructureOutputSettings } from './StructureOutputSettings'
 import { PlanPreparationDetails, planPreparationNeedsReview } from './PlanPreparationDetails'
 import { PlanRestartPanel, PlanRestartReceipt } from './PlanRestartPanel'
+import type { ConceptionHandoff } from './conception'
 import {
   DEFAULT_STRUCTURE_OUTPUT_TOKENS,
   workflowStructureOutput,
@@ -40,6 +41,9 @@ export function WorkflowPage({
   notify,
   onStarted,
   onGenreSettings,
+  initialMode = 'assisted',
+  conceptionHandoff,
+  onConceptionSettings,
 }: {
   novel: Novel
   accounts: Account[]
@@ -49,10 +53,17 @@ export function WorkflowPage({
   notify: Notify
   onStarted: (id: string) => Promise<void>
   onGenreSettings: () => void
+  initialMode?: 'assisted' | 'automatic'
+  conceptionHandoff?: ConceptionHandoff
+  onConceptionSettings: () => void
 }) {
-  const [mode, setMode] = useState<'assisted' | 'automatic'>('assisted')
+  const [mode, setMode] = useState(initialMode)
   const [completionScope, setCompletionScope] = useState<'whole_book' | 'segment'>('whole_book')
-  const [brief, setBrief] = useState(novel.brief)
+  const [briefEdit, setBrief] = useState<string>()
+  const [useConception, setUseConception] = useState(true)
+  const conception = conceptionHandoff?.confirmation
+  const brief = briefEdit ?? ((useConception && conception?.planning_brief) || novel.brief)
+  const conceptionSnapshotId = useConception ? conception?.id : undefined
   const [fixed, setFixed] = useState('')
   const [plots, setPlots] = useState('')
   const [count, setCount] = useState(36)
@@ -100,7 +111,7 @@ export function WorkflowPage({
   const formSignature = JSON.stringify([
     mode,
     completionScope,
-    brief,
+    briefEdit,
     fixed,
     plots,
     count,
@@ -115,6 +126,7 @@ export function WorkflowPage({
     sourceIdentityContext,
     profile,
     runLimit,
+    useConception,
   ])
   const [submittedForm, setSubmittedForm] = useState(formSignature)
   useLeaveGuard(formSignature !== submittedForm, '整书创作设置')
@@ -249,6 +261,7 @@ export function WorkflowPage({
       const payload: WorkflowInput = {
         novel_id: novel.id,
         source_branch_id: branchId || null,
+        ...(conceptionSnapshotId ? { conception_snapshot_id: conceptionSnapshotId } : {}),
         mode,
         completion_scope: completionScope,
         brief,
@@ -323,6 +336,26 @@ export function WorkflowPage({
       <div className="workflow-grid">
         <section className="card">
           <form onSubmit={start}>
+            {conception && (
+              <div className="notice">
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={useConception}
+                    onChange={(event) => setUseConception(event.target.checked)}
+                  />
+                  使用已确认构思（修订 {conception.revision}）
+                </label>
+                <p className="small">
+                  {mode === 'assisted'
+                    ? '你可以继续编辑简报并填写逐章情节。'
+                    : '你可以继续编辑简报与固定条件。'}
+                </p>
+                <button type="button" onClick={onConceptionSettings}>
+                  回到构思工作台
+                </button>
+              </div>
+            )}
             <AuthorContractNotice
               branchId={branchId}
               onSettings={onGenreSettings}
@@ -657,6 +690,9 @@ export function WorkflowPage({
                         <summary>本次任务冻结的创作约定</summary>
                         <AuthorContractDetails contract={task.result.author_contract_snapshot} />
                       </details>
+                    )}
+                    {task.result.conception_snapshot && (
+                      <p className="small">本批使用了构思修订 {task.result.conception_snapshot.revision}。</p>
                     )}
                     {task.result.genre_profile_snapshot &&
                     !task.result.genre_profile_snapshot.legacy_unconfigured ? (

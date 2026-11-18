@@ -345,6 +345,14 @@ def create_app(settings=None, schema_only=False):
     def run_module(data: ModuleInput):
         if data.action.startswith("reference."):
             raise DomainError("reference_route", "请从参考会话提交动作，以冻结选段、规则、方案和检查对象。")
+        if data.conception_snapshot_id and data.action not in {
+            "writing.advise",
+            "writing.rewrite_selection",
+            "writing.expand_plot",
+            "review.chapter",
+            "revision.targeted",
+        }:
+            raise DomainError("conception_scope", "此动作不使用构思交接资料。")
         provider_ready(data.account)
         if (
             data.action
@@ -362,6 +370,7 @@ def create_app(settings=None, schema_only=False):
         for key in (
             "genre_profile_basis",
             "author_contract_basis",
+            "conception_snapshot_id",
             "source_review_id",
             "reference_session_id",
             "reference_revision",
@@ -454,6 +463,12 @@ def create_app(settings=None, schema_only=False):
         if not provider or not provider.key or provider.input_rate is None or provider.output_rate is None:
             raise DomainError("configuration", "模型账户或单价尚未配置，请查看 .env 与 ainovel.toml。")
 
+    from .conception import copy_handoff_tx, register_routes as register_conception_routes
+    from .conception_generation import register_routes as register_conception_generation
+
+    register_conception_routes(app, domain)
+    register_conception_generation(app, domain, provider_ready)
+
     @app.post("/api/workflows", status_code=202)
     def start_workflow(data: WorkflowInput):
         from .story_inheritance import inherit
@@ -462,7 +477,7 @@ def create_app(settings=None, schema_only=False):
             raise DomainError("scene_policy", "自动场景维护需要同时启用章节结构维护。")
 
         payload = data.model_dump()
-        for key in ("genre_profile_basis", "author_contract_basis"):
+        for key in ("genre_profile_basis", "author_contract_basis", "conception_snapshot_id"):
             if payload[key] is None:
                 payload.pop(key)
         previous = domain.find_request("workflow", payload)
@@ -477,6 +492,8 @@ def create_app(settings=None, schema_only=False):
         if data.mode == "automatic" and data.plots:
             raise DomainError("plots", "全自动仅接收简报与粗纲，不复用半自动的章级输入。")
         source = domain.branch(data.source_branch_id, data.novel_id) if data.source_branch_id else None
+        if data.conception_snapshot_id and not source:
+            raise DomainError("conception_snapshot", "交接构思时需要指定来源工作版本。", 409)
         if data.inherit_story_record_ids and (not source or data.inherit_source_revision is None):
             raise DomainError("story_inheritance", "继承结构需要明确来源工作版本及已读取的故事修订。", 409)
         definitions = domain.context(source["id"])["definitions"] if source else []
@@ -522,6 +539,8 @@ def create_app(settings=None, schema_only=False):
                     time(),
                 ),
             )
+            if data.conception_snapshot_id:
+                copy_handoff_tx(tx, source["id"], branch_id, data.conception_snapshot_id)
             for definition in definitions:
                 tx.execute(
                     "INSERT INTO artifacts(id,novel_id,branch_id,kind,payload,basis,status,created) VALUES(?,?,?,?,?,?,'accepted',?)",
@@ -865,6 +884,7 @@ def create_app(settings=None, schema_only=False):
     def artifacts(branch_id: str, chapter_id: str | None = None):
         rows = db.all(
             "SELECT id FROM artifacts WHERE branch_id=?"
+            " AND kind NOT IN ('conception_workspace','conception_completion','conception_handoff','conception_bundle')"
             + (" AND chapter_id=?" if chapter_id else "")
             + " ORDER BY created DESC LIMIT 50",
             (branch_id, chapter_id) if chapter_id else (branch_id,),

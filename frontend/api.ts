@@ -1,4 +1,5 @@
 import type { components } from './api-schema'
+import type { ConceptionSnapshot } from './conception'
 export type IntentFields = {
   emotion_target: string
   core_hook: string
@@ -152,6 +153,7 @@ export type Task = {
     plan?: unknown
     completion?: unknown
     author_contract_snapshot?: AuthorContract
+    conception_snapshot?: ConceptionSnapshot
     genre_profile_snapshot?: GenreProfile
     character_field_repairs?: unknown
     character_field_repair_version?: string

@@ -50,6 +50,7 @@ import {
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { latestArtifact, refreshArtifactList } from './artifactRefresh'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
+import type { ConceptionHandoff } from './conception'
 import {
   adviceDirectionBasis,
   checkDirectionTarget,
@@ -71,6 +72,13 @@ const actions = [
 ] as const
 const designActions = new Set<ModuleInput['action']>(['world.generate', 'character.generate', 'outline.plan'])
 const designKinds = new Set(['world', 'characters', 'outline'])
+const actionsWithConception = new Set<ModuleInput['action']>([
+  'writing.advise',
+  'writing.rewrite_selection',
+  'writing.expand_plot',
+  'review.chapter',
+  'revision.targeted',
+])
 const presets = [
   '第三人称限定视角，克制白话，动作有因果，避免重复解释。',
   '对白：人物用词有区别，保留停顿与潜台词，不替人物解释每一句话。',
@@ -90,6 +98,8 @@ export function Writing({
   onGenreSettings,
   feedbackHandoff,
   onClearFeedback,
+  conceptionHandoff,
+  onConceptionSettings,
 }: {
   novel: Novel
   branch: Branch
@@ -99,6 +109,8 @@ export function Writing({
   onGenreSettings: () => void
   feedbackHandoff?: FeedbackHandoff
   onClearFeedback: () => void
+  conceptionHandoff?: ConceptionHandoff
+  onConceptionSettings: () => void
 }) {
   const [importOpen, setImportOpen] = useState(false)
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -132,6 +144,9 @@ export function Writing({
   const [confirmedFeedbackRevision, setConfirmedFeedbackRevision] = useState<number | null>(null)
   const [fixed, setFixed] = useState('')
   const [profile, setProfile] = useState(presets[0])
+  const [useConception, setUseConception] = useState(true)
+  const conception = conceptionHandoff?.confirmation
+  const conceptionSnapshotId = useConception && actionsWithConception.has(action) ? conception?.id : undefined
   const [seenContract, setSeenContract] = useState<AuthorContract>()
   const [seenGenre, setSeenGenre] = useState<GenreProfile>()
   const [references, setReferences] = useState<Excerpt[]>([])
@@ -145,6 +160,7 @@ export function Writing({
     selectedRefs,
     plotContractCheck,
     sourceIdentityContext,
+    conceptionSnapshotId,
   ])
   const [submittedAssistantForm, setSubmittedAssistantForm] = useState(assistantFormSignature)
   useLeaveGuard(assistantFormSignature !== submittedAssistantForm, '未提交的写作辅助设置')
@@ -515,6 +531,7 @@ export function Writing({
         throw new Error('本次要求与来源记录合计过长，请缩短本次要求后再生成。')
       const data: ModuleInput = {
         include_scene_ranges: false,
+        ...(conceptionSnapshotId ? { conception_snapshot_id: conceptionSnapshotId } : {}),
         action,
         novel_id: novel.id,
         branch_id: branch.id,
@@ -933,6 +950,24 @@ export function Writing({
           />
         )}
         <GenreProfileNotice branchId={branch.id} onSettings={onGenreSettings} onResolved={setSeenGenre} />
+        {conception && (
+          <div className="notice">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={useConception}
+                onChange={(event) => setUseConception(event.target.checked)}
+              />
+              使用已确认构思（修订 {conception.revision}）
+            </label>
+            <p className="small">
+              {actionsWithConception.has(action) ? '所选任务会使用构思设定。' : '当前动作使用独立资料。'}
+            </p>
+            <button type="button" onClick={onConceptionSettings}>
+              回到构思工作台
+            </button>
+          </div>
+        )}
         {feedbackHandoff && (
           <section className="notice" aria-label="手动反馈局部修订">
             <h3>手动反馈 → 作者选区修订</h3>
@@ -1189,6 +1224,11 @@ export function Writing({
                 <summary>本次任务冻结的创作约定</summary>
                 <AuthorContractDetails contract={activeTask.result.author_contract_snapshot} />
               </details>
+            )}
+            {activeTask.result.conception_snapshot && (
+              <p className="small">
+                本次任务使用了构思修订 {activeTask.result.conception_snapshot.revision}。
+              </p>
             )}
             {activeTask.result.genre_profile_snapshot &&
               !activeTask.result.genre_profile_snapshot.legacy_unconfigured && (

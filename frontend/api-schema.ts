@@ -671,6 +671,92 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/conception': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workspace */
+    get: operations['get_workspace_api_branches__branch_id__conception_get']
+    /** Save Workspace */
+    put: operations['save_workspace_api_branches__branch_id__conception_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/conception/adopt': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Adopt Candidate */
+    post: operations['adopt_candidate_api_branches__branch_id__conception_adopt_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/conception/confirm': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Confirm Workspace */
+    post: operations['confirm_workspace_api_branches__branch_id__conception_confirm_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/conception/generate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Generate Conception */
+    post: operations['generate_conception_api_branches__branch_id__conception_generate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/conception/extract-world': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Extract Conception World */
+    post: operations['extract_conception_world_api_branches__branch_id__conception_extract_world_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workflows': {
     parameters: {
       query?: never
@@ -1708,6 +1794,19 @@ export interface components {
       /** Memory Facts Sha256 */
       memory_facts_sha256?: string | null
     }
+    /** AdoptConception */
+    AdoptConception: {
+      /** Base Revision */
+      base_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Idempotency Key */
+      idempotency_key: string
+      /** Artifact Id */
+      artifact_id: string
+      /** Categories */
+      categories: components['schemas']['CandidateSelection'][]
+    }
     /** AdoptExtraction */
     AdoptExtraction: {
       /** Selected Scene Ids */
@@ -1888,6 +1987,13 @@ export interface components {
       /** Budget Limit */
       budget_limit?: number | null
     }
+    /** CandidateSelection */
+    CandidateSelection: {
+      /** Id */
+      id: string
+      /** Items */
+      items: components['schemas']['ConceptionItem'][]
+    }
     /** CandidateVersionInput */
     CandidateVersionInput: {
       /**
@@ -1932,6 +2038,128 @@ export interface components {
        */
       profile: string
     }
+    /** ConceptionCategory */
+    ConceptionCategory: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Items */
+      items?: components['schemas']['ConceptionItem'][]
+      /**
+       * Skipped
+       * @default false
+       */
+      skipped: boolean
+    }
+    /** ConceptionConfirmation */
+    ConceptionConfirmation: {
+      /** Id */
+      id: string
+      /** Revision */
+      revision: number
+      /** Current */
+      current: boolean
+      /** Note */
+      note: string
+      /** Planning Brief */
+      planning_brief: string
+    }
+    /** ConceptionGenerateInput */
+    ConceptionGenerateInput: {
+      /** Base Revision */
+      base_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
+      /** Category Id */
+      category_id?: string | null
+      /**
+       * Instruction
+       * @default
+       */
+      instruction: string
+    }
+    /** ConceptionIssue */
+    ConceptionIssue: {
+      /** Category Id */
+      category_id: string
+      /** Message */
+      message: string
+    }
+    /** ConceptionItem */
+    ConceptionItem: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /**
+       * Detail
+       * @default
+       */
+      detail: string
+      /** Links */
+      links?: string[]
+    }
+    /** ConceptionObserved */
+    ConceptionObserved: {
+      /** Id */
+      id: string
+      /** Category Id */
+      category_id: string
+      /** Title */
+      title: string
+      /** Revision */
+      revision: number
+      /** Description */
+      description: string
+    }
+    /** ConceptionSource */
+    ConceptionSource: {
+      /** Item Id */
+      item_id: string
+      evidence: components['schemas']['Source']
+      /** Current */
+      current: boolean
+      /** Author Edited */
+      author_edited: boolean
+    }
+    /** ConceptionWorkspace */
+    ConceptionWorkspace: {
+      /** Revision */
+      revision: number
+      /** Story Revision */
+      story_revision: number
+      /** Categories */
+      categories: components['schemas']['ConceptionCategory'][]
+      /** Issues */
+      issues: components['schemas']['ConceptionIssue'][]
+      confirmation: components['schemas']['ConceptionConfirmation'] | null
+      /** Observed */
+      observed: components['schemas']['ConceptionObserved'][]
+      /** Sources */
+      sources: components['schemas']['ConceptionSource'][]
+    }
+    /** ConceptionWorldExtractInput */
+    ConceptionWorldExtractInput: {
+      /** Base Revision */
+      base_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
+      /** Chapter Ids */
+      chapter_ids: string[]
+    }
     /** ConditionalContinuationInput */
     ConditionalContinuationInput: {
       /** Client Request Id */
@@ -1951,6 +2179,20 @@ export interface components {
       base_story_revision: number
       /** Mappings */
       mappings: components['schemas']['Mapping'][]
+    }
+    /** ConfirmConception */
+    ConfirmConception: {
+      /** Base Revision */
+      base_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Idempotency Key */
+      idempotency_key: string
+      /**
+       * Note
+       * @default
+       */
+      note: string
     }
     /** ContinuationInput */
     ContinuationInput: {
@@ -2390,6 +2632,8 @@ export interface components {
       budget_limit?: number | null
       genre_profile_basis?: components['schemas']['GenreProfileBasis'] | null
       author_contract_basis?: components['schemas']['AuthorContractBasis'] | null
+      /** Conception Snapshot Id */
+      conception_snapshot_id?: string | null
       /** Source Review Id */
       source_review_id?: string | null
       /** Finding Indices */
@@ -2704,6 +2948,15 @@ export interface components {
        */
       pause_after_maintenance: boolean
     }
+    /** SaveConception */
+    SaveConception: {
+      /** Base Revision */
+      base_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Categories */
+      categories: components['schemas']['ConceptionCategory'][]
+    }
     /** SaveInput */
     SaveInput: {
       /** Base Revision */
@@ -2974,6 +3227,8 @@ export interface components {
       novel_id: string
       /** Source Branch Id */
       source_branch_id?: string | null
+      /** Conception Snapshot Id */
+      conception_snapshot_id?: string | null
       /**
        * Mode
        * @enum {string}
@@ -4555,6 +4810,212 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_workspace_api_branches__branch_id__conception_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConceptionWorkspace']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_workspace_api_branches__branch_id__conception_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveConception']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConceptionWorkspace']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  adopt_candidate_api_branches__branch_id__conception_adopt_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AdoptConception']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConceptionWorkspace']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_workspace_api_branches__branch_id__conception_confirm_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ConfirmConception']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConceptionWorkspace']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  generate_conception_api_branches__branch_id__conception_generate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ConceptionGenerateInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  extract_conception_world_api_branches__branch_id__conception_extract_world_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ConceptionWorldExtractInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
         headers: {
           [name: string]: unknown
         }
