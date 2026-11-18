@@ -1,7 +1,7 @@
 import { expect, test, type BrowserContext, type Locator, type Page, type Route } from '@playwright/test'
 import { createHash } from 'node:crypto'
+import type { components } from '../../frontend/api-schema'
 
-const ORIGIN = 'http://127.0.0.1:8877'
 const SUMMARY = '补齐AI粗纲未明确的工作细节并重新核对'
 const READ = '读取写前重核依据'
 const REREAD = '重新读取写前重核依据'
@@ -12,11 +12,34 @@ const LOOKUP = '查询原提交回执'
 const NOVEL = 'toy-novel-restart'
 const BRANCH = 'toy-branch-a'
 const SECOND_BRANCH = 'toy-branch-b'
+const branches = [BRANCH, SECOND_BRANCH]
 const PARENT = 'toy-parent-a'
 const SECOND_TASK = 'toy-parent-a2'
 const OTHER_TASK = 'toy-parent-b'
 const PLOT = '许棠在驿站整理账页，提到旧账缺口，把疑问记在纸条上，未移交账本。'
 const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+const categories = [
+  ['core', '故事核心'],
+  ['characters', '人物'],
+  ['world', '世界设定'],
+  ['relationships', '人物关系'],
+  ['events', '事件与多线情节'],
+  ['timeline', '时间线'],
+  ['foreshadowing', '伏笔与回收'],
+  ['outline', '全书与分卷大纲'],
+].map(([id, title]) => ({ id, title, items: [], skipped: false }))
+const conception = {
+  revision: 0,
+  story_revision: 12,
+  categories,
+  issues: categories.map(({ id }) => ({ category_id: id, message: '尚未填写构思内容。' })),
+  confirmation: null,
+  observed: [],
+  sources: [],
+  project: null,
+  project_impacts: [],
+  setting_findings: [],
+} satisfies components['schemas']['ConceptionWorkspace']
 type Row = Record<string, unknown>
 type Preparation = Row & { chapter_id: string; original_plot: string; original_plot_sha256: string }
 type MockTask = {
@@ -207,6 +230,8 @@ function restartBody(route: Route): RestartRequest {
   return body as RestartRequest
 }
 async function setup(context: BrowserContext, page: Page) {
+  const base = new URL(test.info().project.use.baseURL ?? 'http://127.0.0.1:8877')
+  expect(`${base.protocol}//${base.hostname}`).toBe('http://127.0.0.1')
   const sources = [task(PARENT), task(SECOND_TASK), task(OTHER_TASK, SECOND_BRANCH)]
   const originals = Object.fromEntries(sources.map((s) => [s.id, structuredClone(s)]))
   const world: World = {
@@ -277,7 +302,7 @@ async function setup(context: BrowserContext, page: Page) {
   await context.route('**/*', async (route) => {
     const request = route.request(),
       url = new URL(request.url())
-    if (url.origin !== ORIGIN) {
+    if (url.origin !== base.origin) {
       world.external.push(request.url())
       return route.abort('blockedbyclient')
     }
@@ -334,10 +359,33 @@ async function setup(context: BrowserContext, page: Page) {
       return reply(branch ? world.tasks.filter((t) => t.branch_id === branch) : world.tasks)
     }
     if (method === 'GET' && (path === '/artifacts' || path === '/library/excerpts')) return reply([])
+    if (
+      method === 'GET' &&
+      path === '/reference-sessions' &&
+      branches.some((id) => url.search === `?branch_id=${id}`)
+    )
+      return reply([])
     const branchMatch = path.match(/^\/branches\/([^/]+)\/(.+)$/)
-    if (method === 'GET' && branchMatch) {
+    if (method === 'GET' && branchMatch && branches.includes(branchMatch[1])) {
       const id = branchMatch[1],
         action = branchMatch[2]
+      if (!url.search) {
+        if (action === 'outline-workspace')
+          return reply({
+            draft: null,
+            confirmed: null,
+            stale: [],
+            story_revision: 12,
+            chapters: [],
+            promise_options: [],
+            settings: [],
+            promises: [],
+          })
+        if (action === 'outline-workspace/setting-options') return reply({ confirmation_id: null, items: [] })
+        if (action === 'conception') return reply(conception)
+        if (action === 'seven-stage-runs/sources') return reply({ writing_id: null, inspection_id: null })
+        if (action === 'seven-stage-runs') return reply([])
+      }
       if (action === 'chapters') return reply([])
       if (action === 'reading-state') return reply({ chapter_id: null, cursor: 0, note: '', revision: 0 })
       if (action === 'author-contract')
@@ -478,7 +526,7 @@ test.afterEach(async ({ page }, info) => {
       actualBackendConnections: 0,
     }),
   })
-  expect(world.external, 'only isolated Vite origin may reach a server').toEqual([])
+  expect(world.external, 'only the isolated fixture origin may reach a server').toEqual([])
   expect(world.unmatched, 'all API routes must be explicitly fulfilled or intentionally aborted').toEqual([])
   expect(world.errors).toEqual([])
 })

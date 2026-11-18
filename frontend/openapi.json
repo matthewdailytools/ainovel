@@ -6402,6 +6402,10 @@
           },
           "setting_policy": {
             "anyOf": [{ "$ref": "#/components/schemas/SettingPolicy" }, { "type": "null" }]
+          },
+          "adoption_state": {
+            "anyOf": [{ "type": "string", "enum": ["pending", "proposed", "adopted"] }, { "type": "null" }],
+            "title": "Adoption State"
           }
         },
         "additionalProperties": false,

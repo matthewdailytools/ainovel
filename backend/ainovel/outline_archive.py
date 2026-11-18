@@ -19,7 +19,6 @@ from .outline_sync import (
 from .outline_workspace import (
     ConfirmOutline,
     SaveOutline,
-    _chapter_plans,
     _latest,
     confirm_outline_tx,
     save_outline_tx,
@@ -128,23 +127,6 @@ def validate_outline_history(history, projects, settings, chapters, references=N
             validate_version_sources(
                 version, projects.get, settings.get, chapters.get, reference_lookup=references.get
             )
-            basis = settings.get(version.settings_version_id)
-            actual = {
-                item.id
-                for category in (basis.categories if basis else [])
-                if category.id == "world" and not category.skipped
-                for item in category.items
-                if item.detail.strip() and basis.origins[item.id].evidence is None
-            }
-            used = {
-                item
-                for _, _, chapter in _chapter_plans(version.plan.model_dump())
-                for item in chapter["setting_ids"]
-            }
-            if not used <= actual:
-                raise DomainError(
-                    "outline_setting", "章纲引用的设定不在该正式世界设定版本的可用条目内。", 409
-                )
         except DomainError as error:
             raise DomainError(
                 "manuscript_outline", f"稿件包大纲修订 {version.id} 未通过校验。{error.message}", 409

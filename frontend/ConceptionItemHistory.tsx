@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import type { components } from './api-schema'
+import { settingAdoptionLabels } from './conception'
 import { ConceptionQuote } from './ConceptionItems'
 
 type History = components['schemas']['SettingItemHistory']
@@ -31,6 +32,9 @@ function ItemVersion({ title, value }: { title: string; value: ItemState | null 
             {value.item.id}
           </p>
           <p style={{ whiteSpace: 'pre-wrap' }}>{value.item.detail || '尚无设定内容。'}</p>
+          {value.item.adoption_state && (
+            <p className="small">采用状态 {settingAdoptionLabels[value.item.adoption_state]}</p>
+          )}
           {value.item.setting_policy && (
             <p className="small">
               {value.item.setting_policy.strength === 'hard' ? '硬规定' : '可调整设定'}

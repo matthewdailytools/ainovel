@@ -1,20 +1,12 @@
 import pytest
-from fastapi.testclient import TestClient
 
-from ainovel.api import create_app
-from ainovel.workflow_inspection import body_chars, latest_book_inspection, register_routes
+from ainovel.workflow_inspection import body_chars, latest_book_inspection
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 
 
 @pytest.fixture
-def inspection_client(settings, domain):
-    app = create_app(settings)
-    if not any(route.path.endswith("/workflow-inspections") for route in app.routes):
-        register_routes(app, domain)
-    with TestClient(app) as client:
-        session = client.get("/api/session").json()
-        client.headers["X-Ainovel-CSRF"] = session["csrf"]
-        yield client
+def inspection_client(client):
+    return client
 
 
 def endpoint(story):
@@ -264,6 +256,114 @@ def test_invalid_author_excerpt_and_missing_chapter_target_cannot_pass(inspectio
     assert invalid_scope.status_code == 409
     created = report(inspection_client, route, preview, length_targets={"expected_chapters": 2})
     assert item(created, "09")["status"] == "red"
+
+
+def test_scoped_promises_use_confirmed_windows_and_actual_cross_scope_sources(
+    inspection_client, domain, story
+):
+    client = inspection_client
+    branch = story["branch_id"]
+    base = f"/api/branches/{branch}"
+    route = endpoint(story)
+    first = domain.save(story["chapter_id"], 0, "开卷先做一道记号。")
+    later = []
+    for title in ("窗边埋设", "追查记号", "约定回收"):
+        chapter = domain.create_chapter(branch, title)
+        later.append(domain.save(chapter["id"], 0, title + "。"))
+    graph_url = base + "/story-records"
+    planned = {"kind": "promise", "title": "窗上的记号", "stages": [{"status": "planned"}]}
+    saved = client.post(
+        graph_url,
+        json={"base_story_revision": domain.branch(branch)["story_revision"], "record": planned},
+    )
+    assert saved.status_code == 201, saved.text
+    promise = saved.json()["records"][0]
+    chapter_scope = {"scope": "chapter", "scope_id": first["id"]}
+    unplaced = report(client, route, read(client, route, **chapter_scope)["preview"])
+    assert [row["id"] for row in item(unplaced, "07")["basis"]["records"]] == [promise["id"]]
+    assert not item(unplaced, "07")["can_mark_not_applicable"]
+
+    plan = {
+        "summary": "两卷各有核对范围",
+        "volumes": [
+            {
+                "id": f"v{number}",
+                "title": f"第{number}卷",
+                "summary": "检查窗上记号",
+                "units": [
+                    {
+                        "id": f"u{number}",
+                        "title": "线索",
+                        "summary": "按实际正文核对",
+                        "chapters": [
+                            {**chapter_plan(chapter["id"], "记录记号"), "setting_ids": []}
+                            for chapter in group
+                        ],
+                    }
+                ],
+            }
+            for number, group in enumerate(([first], later), 1)
+        ],
+        "promises": [
+            {
+                "promise_id": promise["id"],
+                "plant_chapter_id": later[0]["id"],
+                "opens_chapter_id": later[0]["id"],
+                "closes_chapter_id": later[2]["id"],
+            }
+        ],
+    }
+    put_and_confirm(client, base + "/outline-workspace", {"base_revision": 0, "plan": plan})
+    outside = []
+    for scope in (chapter_scope, {"scope": "volume", "scope_id": "v1"}):
+        preview = read(client, route, **scope)["preview"]
+        check = item(preview, "07")
+        assert check["basis"]["windows"] == check["basis"]["records"] == []
+        assert check["can_mark_not_applicable"]
+        verdict = {**author("07", first, "not_applicable"), "evidence": []}
+        confirmed = report(client, route, preview, author_reviews=[verdict])
+        assert item(confirmed, "07")["current_status"] == "not_applicable"
+        outside.append(confirmed)
+    older = read(client, f"{route}/{unplaced['id']}")
+    assert older["basis_sha256"] == unplaced["basis_sha256"]
+    assert item(older, "07") == {**item(unplaced, "07"), "current_status": "outdated"}
+
+    for scope in (
+        {"scope": "chapter", "scope_id": later[1]["id"]},
+        {"scope": "volume", "scope_id": "v2"},
+        {},
+    ):
+        check = item(read(client, route, **scope)["preview"], "07")
+        assert check["status"] == "yellow" and not check["can_mark_not_applicable"]
+        assert [row["id"] for row in check["basis"]["records"]] == [promise["id"]]
+        assert check["basis"]["windows"][0]["due"] == "due"
+    delivery = read(client, base + "/book-completion")
+    assert next(row for row in delivery["checks"] if row["id"] == "promises")["status"] == "red"
+
+    citations = [source(first), source(later[0])]
+    changed = client.put(
+        f"{graph_url}/{promise['id']}",
+        json={
+            "base_story_revision": domain.branch(branch)["story_revision"],
+            "base_revision": promise["revision"],
+            "record": {
+                **planned,
+                "stages": [*planned["stages"], {"status": "planted", "sources": citations}],
+            },
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    for old in outside:
+        history = read(client, f"{route}/{old['id']}")
+        assert history["basis_sha256"] == old["basis_sha256"]
+        assert item(history, "07") == {**item(old, "07"), "current_status": "outdated"}
+    check = item(read(client, route, **chapter_scope)["preview"], "07")
+    assert not check["can_mark_not_applicable"] and check["basis"]["windows"] == []
+    assert check["basis"]["records"][0]["stages"][-1]["sources"] == citations
+    domain.save(first["id"], first["revision"], "开卷改稿，原记号位置已经变化。")
+    check = item(read(client, route, **chapter_scope)["preview"], "07")
+    assert check["status"] == "outdated" and check["basis"]["records"][0]["invalid_reasons"]
+    assert check["basis"]["records"][0]["stages"][-1]["sources"] == citations
 
 
 def test_inspection_reads_confirmed_outline_due_promise_and_rule_conflict(inspection_client, domain, story):

@@ -27,15 +27,47 @@ test('独立 Web 断网新建设定，版本历史经桌面往返后可离线恢
   await panel.getByLabel('设定内容').fill(first)
   await panel.getByLabel('约束强度').selectOption('hard')
   await panel.getByLabel('适用范围').fill('门内')
+  const rule = panel.getByRole('region', { name: '铜铃响声', exact: true })
+  for (const [name, state, detail] of [
+    ['待定响铃机制', 'pending', '待作者确定响声是否传到城外。'],
+    ['提议水中鸣响', 'proposed', '有人建议铜铃入水也能响。'],
+  ] as const) {
+    await panel.getByRole('button', { name: '添加设定条目' }).click()
+    await panel.getByRole('region', { name: '未命名设定', exact: true }).getByLabel('项目名称').fill(name)
+    const item = panel.getByRole('region', { name, exact: true })
+    await item.getByLabel('设定内容').fill(detail)
+    await item.getByLabel('采用状态').selectOption(state)
+    await item.getByLabel('约束强度').selectOption('hard')
+  }
   await review()
+
+  await page.getByLabel('新章节名').fill('渡口试铃')
+  await page.getByRole('button', { name: '本地新建章节', exact: true }).click()
+  const outline = page.getByLabel('离线大纲台')
+  await outline.getByText('大纲台', { exact: true }).click()
+  await outline.getByRole('button', { name: '新建大纲', exact: true }).click()
+  await outline.getByRole('button', { name: '添加卷', exact: true }).click()
+  await outline.getByRole('button', { name: '添加单元', exact: true }).click()
+  await outline.getByRole('button', { name: '添加章纲', exact: true }).click()
+  await outline.getByText('引用设定 · 0 项', { exact: true }).press('Enter')
+  await expect(outline.getByRole('checkbox', { name: '铜铃响声', exact: true })).toBeVisible()
+  await expect(outline.getByRole('checkbox', { name: /待定响铃机制|提议水中鸣响/ })).toHaveCount(0)
+  page.once('dialog', (dialog) => dialog.accept())
+  await outline.getByRole('button', { name: '放弃本次大纲修改' }).click()
 
   await page.reload()
   await page.getByRole('combobox', { name: '离线作品', exact: true }).selectOption({ label: title })
   await open()
   await panel.getByRole('button', { name: '编辑当前设定' }).click()
-  await expect(panel.getByLabel('设定内容')).toHaveValue(first)
-  await panel.getByLabel('设定内容').fill(second)
-  await panel.getByLabel('例外').fill('新月夜')
+  await expect(rule.getByLabel('设定内容')).toHaveValue(first)
+  await expect(
+    panel.getByRole('region', { name: '待定响铃机制', exact: true }).getByLabel('采用状态'),
+  ).toHaveValue('pending')
+  await expect(
+    panel.getByRole('region', { name: '提议水中鸣响', exact: true }).getByLabel('采用状态'),
+  ).toHaveValue('proposed')
+  await rule.getByLabel('设定内容').fill(second)
+  await rule.getByLabel('例外').fill('新月夜')
   await review()
 
   const download = page.waitForEvent('download')
@@ -56,7 +88,15 @@ test('独立 Web 断网新建设定，版本历史经桌面往返后可离线恢
   expect(restore.ok(), await restore.text()).toBe(true)
   const conception = await (await page.request.get(`/api/branches/${pack.branch.id}/conception`)).json()
   expect(conception.confirmation).toBeTruthy()
-  expect(conception.categories.find(({ id }: { id: string }) => id === 'world').items[0].detail).toBe(second)
+  const items = conception.categories.find(({ id }: { id: string }) => id === 'world').items
+  expect(items[0].detail).toBe(second)
+  expect(items.slice(1).map(({ adoption_state }: { adoption_state: string }) => adoption_state)).toEqual([
+    'pending',
+    'proposed',
+  ])
+  const options = await page.request.get(`/api/branches/${pack.branch.id}/outline-workspace/setting-options`)
+  expect(options.ok(), await options.text()).toBe(true)
+  expect((await options.json()).items.map(({ id }: { id: string }) => id)).toEqual([items[0].id])
   const fromDesktop = await (
     await page.request.get(`/api/branches/${pack.branch.id}/manuscript-package`)
   ).json()
@@ -92,7 +132,7 @@ test('独立 Web 断网新建设定，版本历史经桌面往返后可离线恢
   await expect(panel.getByText(`当前 · 世界设定 · ${second}`, { exact: true })).toBeVisible()
   await panel.getByRole('button', { name: '恢复所选版本为设定草稿' }).press('Enter')
   await expect(panel.getByLabel('设定类别')).toBeFocused()
-  await expect(panel.getByLabel('设定内容')).toHaveValue(first)
+  await expect(rule.getByLabel('设定内容')).toHaveValue(first)
   await expect(panel.getByText(`当前确认修订 ${adopted.id}`)).toBeVisible()
   await expect(panel.getByRole('button', { name: '确认设定并保存到浏览器' })).toHaveCount(0)
   await panel.getByRole('button', { name: '体检本地设定草稿' }).click()

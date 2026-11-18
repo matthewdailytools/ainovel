@@ -2,6 +2,17 @@ import type { components } from './api-schema'
 
 type Schemas = components['schemas']
 export type ConceptionItem = Schemas['ConceptionItem']
+export type SettingAdoptionState = NonNullable<ConceptionItem['adoption_state']>
+export const settingAdoptionLabels = {
+  pending: '待定',
+  proposed: '已提出',
+  adopted: '已采用',
+} satisfies Record<SettingAdoptionState, string>
+
+export function settingIsAdopted(item: Pick<ConceptionItem, 'adoption_state'>) {
+  return item.adoption_state == null || item.adoption_state === 'adopted'
+}
+
 export type ConceptionCategory = Omit<Schemas['ConceptionCategory'], 'items'> & {
   items: ConceptionItem[]
 }

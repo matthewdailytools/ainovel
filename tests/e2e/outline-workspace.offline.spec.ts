@@ -103,6 +103,7 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   await expect(page.getByText('已确认大纲修订 2', { exact: true })).toBeVisible()
   await expect(page.getByText(/铃声为何消失 · 计划/)).toBeVisible()
   await expect(page.getByText(/门上的旧记号由谁刻下 · 计划/)).toBeVisible()
+  await expect(page.getByText('查看伏笔阶段与原文', { exact: true })).toHaveCount(0)
   const redesigned = await page.request.patch(referencePath, {
     headers,
     data: { ...cardEdit, base_revision: 1, cards: [{ ...card, technique: '让新线索改变选择' }] },
@@ -122,9 +123,85 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   await page.getByText('用少量线索引出下一步 · 手法卡修订 1', { exact: true }).press('Enter')
   await page.getByRole('button', { name: '查看手法卡原文依据' }).press('Enter')
   await expect(page.locator('blockquote').getByText(quote, { exact: true })).toBeVisible()
-  await page.locator('.cm-content[contenteditable=true]').focus()
-  await page.keyboard.insertText('学徒迈过门槛，铜铃响了。')
+  const savedText = '🔔学徒迈过门槛，铜铃响了。'
+  const actualQuote = savedText.slice(2)
+  const editor = page.locator('.cm-content[contenteditable=true]')
+  await editor.focus()
+  await page.keyboard.insertText(savedText)
   await expect(page.getByLabel('今日事项')).toContainText('2 条伏笔处于回收窗口或已到期')
+  const chapterPath = `/api/chapters/${chapterId}`
+  await expect.poll(async () => (await (await page.request.get(chapterPath)).json()).content).toBe(savedText)
+  const chapterHead = await (await page.request.get(chapterPath)).json()
+  const currentGraph = await (await page.request.get(graphPath)).json()
+  const record = currentGraph.records.find(
+    ({ payload }: { payload: { title: string } }) => payload.title === '铃声为何消失',
+  )
+  const savedProgress = await page.request.put(`/api/branches/${branch_id}/story-records/${record.id}`, {
+    headers,
+    data: {
+      base_story_revision: currentGraph.story_revision,
+      base_revision: record.revision,
+      record: {
+        ...record.payload,
+        stages: [
+          ...record.payload.stages,
+          {
+            status: 'resolved',
+            sources: [
+              {
+                chapter_id: chapterId,
+                revision: chapterHead.revision,
+                start: 2,
+                end: savedText.length,
+                quote: actualQuote,
+              },
+            ],
+          },
+        ],
+      },
+    },
+  })
+  expect(savedProgress.ok(), await savedProgress.text()).toBe(true)
+
+  await page.setViewportSize({ width: 420, height: 900 })
+  const writingPromises = page.getByText('本章关联的伏笔进度与原文', { exact: true })
+  const promiseRow = () =>
+    page
+      .locator('main')
+      .getByRole('listitem')
+      .filter({ hasText: /^铃声为何消失 · / })
+  const sourceLabel = `门外寻铃 · 章稿修订 ${chapterHead.revision} · 原文位置 2–${savedText.length}`
+  async function openProof(row: ReturnType<typeof promiseRow>) {
+    await row.getByText('查看伏笔阶段与原文', { exact: true }).press('Enter')
+    await row.getByText(sourceLabel, { exact: true }).press('Enter')
+    await expect(row.locator('blockquote')).toHaveText(actualQuote)
+  }
+  await writingPromises.press('Enter')
+  await expect(promiseRow()).toContainText('铃声为何消失 · 已回收')
+  await openProof(promiseRow())
+  await expect(page.getByLabel('今日事项')).toContainText('1 条伏笔处于回收窗口或已到期')
+  await expect(page.getByLabel('今日事项').getByText(/铃声为何消失/)).toHaveCount(0)
+
+  await page.getByRole('button', { name: '大纲与台账', exact: true }).click()
+  await expect(promiseRow()).toContainText('铃声为何消失 · 已回收')
+  await openProof(promiseRow())
+  await promiseRow().getByRole('button', { name: '门外寻铃', exact: true }).press('Enter')
+  await expect(editor).toContainText(savedText)
+  const rewritten = '学徒还在门外，没有听见铃声。'
+  await editor.press('ControlOrMeta+A')
+  await page.keyboard.insertText(rewritten)
+  await expect.poll(async () => (await (await page.request.get(chapterPath)).json()).content).toBe(rewritten)
+  await writingPromises.press('Enter')
+  await expect(promiseRow()).toContainText('铃声为何消失 · 证据待复核')
+  await openProof(promiseRow())
+  await expect(promiseRow()).toContainText('以下为固定历史原文')
+  await expect(editor).toContainText(rewritten)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(420)
+
+  await page.getByRole('button', { name: '大纲与台账', exact: true }).click()
+  await expect(promiseRow()).toContainText('铃声为何消失 · 证据待复核')
+  await openProof(promiseRow())
+  await expect(promiseRow()).toContainText('以下为固定历史原文')
 })
 
 test('窄屏正文的原生中文组合输入仅在确认后自动保存', async ({ page, context, browserName }) => {

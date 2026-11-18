@@ -1,4 +1,5 @@
 import { validateVersionGraph, type ProjectSource } from './projectSyncModel'
+import { settingIsAdopted } from './conception'
 import type { ArchivedReferenceCard } from './referenceArchive'
 import type { SettingsItem, SettingsVersion } from './settingsSyncModel'
 
@@ -390,10 +391,11 @@ export function eligibleOutlineSettings(version: SettingsVersion | undefined | n
     version?.categories
       .find(({ id, skipped }) => id === 'world' && !skipped)
       ?.items.filter(
-        ({ id, detail }) =>
-          detail.replace(/[\p{White_Space}\x1c-\x1f]/gu, '') &&
-          Object.hasOwn(version.origins, id) &&
-          !version.origins[id].evidence,
+        (item) =>
+          settingIsAdopted(item) &&
+          item.detail.replace(/[\p{White_Space}\x1c-\x1f]/gu, '') &&
+          Object.hasOwn(version.origins, item.id) &&
+          !version.origins[item.id].evidence,
       ) ?? []
   )
 }

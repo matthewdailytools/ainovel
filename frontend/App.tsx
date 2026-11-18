@@ -49,6 +49,7 @@ export function App() {
   const [account, setAccount] = useState('openai_1')
   const [title, setTitle] = useState('')
   const [creating, setCreating] = useState(false)
+  const createDisclosure = useRef<HTMLDetailsElement>(null)
   const [settings, setSettings] = useState(false)
   const [dataDir, setDataDir] = useState('')
   const notify: Notify = useCallback((e) => setError(e instanceof Error ? e.message : String(e)), [])
@@ -141,6 +142,7 @@ export function App() {
   async function createNovel(event: React.FormEvent) {
     event.preventDefault()
     if (creating || !title.trim()) return
+    const focusWasInDisclosure = createDisclosure.current?.contains(document.activeElement)
     setCreating(true)
     const generation = selection.current.generation
     const submittedTitle = title
@@ -154,6 +156,14 @@ export function App() {
         setPage('writing')
       }
       setTitle((current) => (current === submittedTitle ? '' : current))
+      const disclosure = createDisclosure.current
+      if (disclosure?.open) {
+        const active = document.activeElement
+        // Chromium can move focus to the document as soon as the submit button is disabled.
+        const returnFocus = disclosure.contains(active) || (focusWasInDisclosure && active === document.body)
+        disclosure.open = false
+        if (returnFocus) disclosure.querySelector('summary')?.focus()
+      }
     } catch (e) {
       notify(e)
     } finally {
@@ -344,7 +354,7 @@ export function App() {
                 setPage('writing')
               }}
             />
-            <details className="new-novel">
+            <details className="new-novel" ref={createDisclosure}>
               <summary>＋ 新建作品</summary>
               <form onSubmit={createNovel}>
                 <label>

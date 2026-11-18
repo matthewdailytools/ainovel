@@ -4,7 +4,14 @@ from typing import Literal
 
 from pydantic import Field
 
-from .conception import CONFIRMATION, _latest, _read_payload, revision_tx, setting_findings_reviewed
+from .conception import (
+    CONFIRMATION,
+    _latest,
+    _read_payload,
+    revision_tx,
+    setting_findings_reviewed,
+    setting_is_adopted,
+)
 from .db import DomainError
 from .evidence import source_units
 from .models import Input
@@ -51,7 +58,9 @@ def confirmed_world_basis(tx, branch_id, confirmation_id=None):
             for category in snapshot["categories"]
             if category["id"] == "world" and not category["skipped"]
             for item in category["items"]
-            if item["id"] not in observed_ids and item["detail"].strip()
+            if setting_is_adopted(item.get("adoption_state"))
+            and item["id"] not in observed_ids
+            and item["detail"].strip()
         ],
     }
 

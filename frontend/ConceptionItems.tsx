@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { components } from './api-schema'
+import { settingAdoptionLabels, type SettingAdoptionState } from './conception'
 import type {
   CandidateCategory,
   ConceptionCategory,
@@ -152,6 +153,19 @@ export function ConceptionItemEditor({
           onChange={(event) => onChange({ ...item, title: event.target.value })}
         />
       </label>
+      <label>
+        采用状态
+        <select
+          value={item.adoption_state ?? 'adopted'}
+          onChange={(event) =>
+            onChange({ ...item, adoption_state: event.target.value as SettingAdoptionState })
+          }
+        >
+          <option value="pending">{settingAdoptionLabels.pending}</option>
+          <option value="proposed">{settingAdoptionLabels.proposed}</option>
+          <option value="adopted">随本版确认采用</option>
+        </select>
+      </label>
       {worldSetting && (
         <fieldset>
           <legend>规则约束</legend>
@@ -170,7 +184,7 @@ export function ConceptionItemEditor({
                 })
               }}
             >
-              <option value="">待定</option>
+              <option value="">未指定强度</option>
               <option value="hard">硬规定</option>
               <option value="soft">可调整设定</option>
             </select>

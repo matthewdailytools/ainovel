@@ -31,7 +31,7 @@ test('窄屏新建作品：普通和实际翻倍文字下表单均可见，键�
   })
   const before = await (await page.request.get('/api/novels')).json()
   const budget = (await (await page.request.get('/api/config')).json()).budget
-  await page.locator('.new-novel summary').click()
+  await page.getByText('＋ 新建作品', { exact: true }).click()
   const form = page.locator('.new-novel form')
   const title = page.getByRole('textbox', { name: '作品名称', exact: true })
   await expect(title).toBeVisible()

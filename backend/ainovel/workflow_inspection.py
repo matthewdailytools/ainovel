@@ -11,7 +11,13 @@ from typing import Annotated, Literal
 from pydantic import Field, StringConstraints, model_validator
 
 from .author_contract import assemble_contract
-from .conception import CONFIRMATION, _latest as latest_conception_revision, _read_payload, _workspace
+from .conception import (
+    CONFIRMATION,
+    _latest as latest_conception_revision,
+    _read_payload,
+    _workspace,
+    setting_is_adopted,
+)
 from .db import DomainError, dumps, uid
 from .domain import utf16_slice
 from .manual_finalization import _known_issues, _manifest
@@ -150,13 +156,38 @@ def _item(check_id, summary, basis, status="pending", *, manifest, scope, can_ma
     }
 
 
-def _graph_rows(graph, ids, scope):
+def _scope_promise_windows(outline, ids, scope):
+    if scope == "book":
+        return outline["promises"], set()
+    positions = {row["id"]: row["position"] for row in outline["chapters"]}
+    selected_positions = {positions[identifier] for identifier in ids}
+    windows, placed = [], set()
+    for window in outline["promises"]:
+        anchors = [window[key] for key in ("plant_chapter_id", "opens_chapter_id", "closes_chapter_id")]
+        ordered = [positions[identifier] for identifier in anchors if identifier in positions]
+        if len(ordered) == 3 and ordered == sorted(ordered):
+            placed.add(window["promise_id"])
+            _, opens, closes = ordered
+            if any(opens <= position <= closes for position in selected_positions):
+                windows.append(window)
+                continue
+        if ids.intersection(anchors):
+            windows.append(window)
+    return windows, placed
+
+
+def _graph_rows(graph, ids, scope, planned_promises, local_promises):
     result = []
     for row in graph["records"]:
         if row["archived"]:
             continue
         refs = sources(row["payload"])
-        if scope == "book" or not refs or any(ref["chapter_id"] in ids for ref in refs):
+        if (
+            scope == "book"
+            or row["id"] in local_promises
+            or any(ref["chapter_id"] in ids for ref in refs)
+            or (not refs and row["id"] not in planned_promises)
+        ):
             result.append(
                 {
                     "id": row["id"],
@@ -330,6 +361,7 @@ def _world_needs_confirmation(tx, branch_id):
         for category in version["categories"]
         if category["id"] == "world" and not category["skipped"]
         for item in category["items"]
+        if setting_is_adopted(item.get("adoption_state"))
     )
 
 
@@ -417,19 +449,14 @@ def _evaluate(tx, branch_id, scope, scope_id):
         rule_status = "green"
     else:
         rule_status = "pending"
-    records = _graph_rows(graph, ids, scope)
+    windows, planned_promises = _scope_promise_windows(outline, ids, scope)
+    records = _graph_rows(graph, ids, scope, planned_promises, {window["promise_id"] for window in windows})
     people = [row for row in records if row["kind"] in {"character", "state", "relationship"}]
     events = [row for row in records if row["kind"] == "event"]
     knowledge = [row for row in records if row.get("category") == "knowledge"]
     scenes = _scene_rows(tx, branch_id, chapters, graph)
     scenes_stale = any(row["stale"] for row in scenes)
     promises = [row for row in records if row["kind"] == "promise"]
-    windows = [
-        row
-        for row in outline["promises"]
-        if scope == "book"
-        or {row["plant_chapter_id"], row["opens_chapter_id"], row["closes_chapter_id"]} & ids
-    ]
     promise_status = _record_status(promises)
     if promise_status != "outdated" and promises:
         if all(row["stages"][-1]["status"] in {"resolved", "retained", "abandoned"} for row in promises):

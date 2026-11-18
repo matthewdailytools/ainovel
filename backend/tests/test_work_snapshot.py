@@ -1,17 +1,15 @@
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from ainovel import reference_fork, reference_sync
-from ainovel.api import create_app
 from ainovel.backups import create_backup, unpack_verified
 from ainovel.db import Database, uid
 from ainovel.domain import Domain
 from ainovel.manuscript_exchange import export_manuscript, import_manuscript
 from ainovel.outline_workspace import read_outline
 from ainovel.story_graph import graph
-from ainovel.work_snapshot import RestoreInput, register_routes, restore
+from ainovel.work_snapshot import RestoreInput, restore
 from test_conception_workbench import confirm, path, save
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 from test_project_brief import BRIEF, IDEA
@@ -23,14 +21,8 @@ reference = reference_fixture
 
 
 @pytest.fixture
-def snapshot_client(settings, domain):
-    app = create_app(settings)
-    if not any(route.path.endswith("/work-snapshots") for route in app.routes):
-        register_routes(app, domain)
-    with TestClient(app) as client:
-        session = client.get("/api/session").json()
-        client.headers["X-Ainovel-CSRF"] = session["csrf"]
-        yield client
+def snapshot_client(client):
+    return client
 
 
 def verify(response, code=200):

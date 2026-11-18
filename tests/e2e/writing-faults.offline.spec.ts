@@ -27,6 +27,42 @@ function barrier() {
   return { promise, release }
 }
 
+test('新建失败保留输入，重试成功后收起表单并把焦点还给入口', async ({ page }) => {
+  await page.goto('/')
+  const createWork = page.getByText('＋ 新建作品', { exact: true })
+  await createWork.press('Enter')
+  const title = page.getByRole('textbox', { name: '作品名称', exact: true })
+  const submittedTitle = '后台验证 · 新建后继续写作'
+  await title.fill(submittedTitle)
+  const submit = page.getByRole('button', { name: '创建并开始写作', exact: true })
+  let rejectFirst = true
+  await page.route('**/api/novels', async (route) => {
+    if (route.request().method() === 'POST' && rejectFirst) {
+      rejectFirst = false
+      await route.fulfill({
+        status: 503,
+        json: { code: 'test_unavailable', message: '模拟本次创建暂不可用。' },
+      })
+      return
+    }
+    await route.continue()
+  })
+  await submit.press('Enter')
+  await expect(page.getByRole('alert')).toContainText('模拟本次创建暂不可用。')
+  await expect(title).toBeVisible()
+  await expect(title).toHaveValue(submittedTitle)
+  await expect(submit).toBeEnabled()
+
+  await submit.press('Enter')
+  await expect(
+    page.getByRole('combobox', { name: '作品', exact: true }).locator('option:checked'),
+  ).toHaveText(submittedTitle)
+  await expect(title).toBeHidden()
+  await expect(createWork).toBeFocused()
+  await page.getByRole('button', { name: '＋ 新章', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toBeVisible()
+})
+
 for (const target of ['chapter', 'novel'] as const) {
   test(`生成中切${target === 'chapter' ? '章' : '作品'}：回执或完成候选晚返回不覆盖新目标`, async ({
     page,

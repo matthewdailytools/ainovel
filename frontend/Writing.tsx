@@ -61,6 +61,7 @@ import {
   type FrozenCard,
   type OutlineView,
 } from './OutlineWorkspace'
+import { OutlinePromiseProgress } from './OutlinePromiseProgress'
 import {
   adviceDirectionBasis,
   checkDirectionTarget,
@@ -694,6 +695,18 @@ export function Writing({
     entry.id === chapter?.id ? !text.trim() : !(entry.chars ?? entry.content?.trim().length ?? 0),
   )
   const duePromises = outline?.promises.filter(({ due }) => !!due) ?? []
+  const chapterPromises =
+    chapter && outline
+      ? outline.promises.filter(
+          (promise) =>
+            [promise.plant_chapter_id, promise.opens_chapter_id, promise.closes_chapter_id].includes(
+              chapter.id,
+            ) ||
+            promise.stages.some(({ sources }) =>
+              sources?.some(({ chapter_id }) => chapter_id === chapter.id),
+            ),
+        )
+      : []
   const cards = plannedChapter ? chapterCards(outline?.confirmed, plannedChapter.chapter) : []
 
   function openChapter(id: string) {
@@ -1176,6 +1189,23 @@ export function Writing({
                 notify={notify}
               />
             ))}
+          </details>
+        )}
+        {!!chapterPromises.length && (
+          <details className="notice" key={chapter?.id}>
+            <summary>本章关联的伏笔进度与原文</summary>
+            <ul>
+              {chapterPromises.map((promise) => (
+                <li key={promise.promise_id}>
+                  <OutlinePromiseProgress
+                    promise={promise}
+                    chapterName={(id) =>
+                      outline?.chapters.find((entry) => entry.id === id)?.title ?? '历史章节'
+                    }
+                  />
+                </li>
+              ))}
+            </ul>
           </details>
         )}
         {conception && (

@@ -4,6 +4,7 @@ import { api } from './api'
 import type { components } from './api-schema'
 import { useLeaveGuard } from './leaveGuard'
 import { OutlineGenerationPanel } from './OutlineGenerationPanel'
+import { OutlinePromiseProgress, type OutlinePromise } from './OutlinePromiseProgress'
 
 type OutlinePlan = components['schemas']['OutlinePlan']
 type ChapterPlan = components['schemas']['ChapterPlan']
@@ -33,25 +34,7 @@ export type OutlineView = {
     setting: Setting
     evidence: { report_id: string; source: { text: string } } | null
   }[]
-  promises: {
-    promise_id: string
-    title: string
-    plant_chapter_id: string
-    opens_chapter_id: string
-    closes_chapter_id: string
-    state: string
-    due: 'open' | 'due' | null
-  }[]
-}
-
-const PromiseState: Record<string, string> = {
-  planned: '计划',
-  planted: '已埋设',
-  reinforced: '已推进',
-  resolved: '已回收',
-  retained: '作者确认保留',
-  abandoned: '作者确认放弃',
-  stale: '证据待复核',
+  promises: OutlinePromise[]
 }
 
 const windowFields = [
@@ -861,13 +844,7 @@ export function OutlineWorkspace({
           <ul>
             {view.promises.map((entry) => (
               <li key={entry.promise_id}>
-                {entry.title} · {PromiseState[entry.state]}
-                {entry.due === 'open' ? ' · 已进入回收窗口' : entry.due === 'due' ? ' · 回收已到期' : ''}{' '}
-                计划于{chapterName(entry.plant_chapter_id)}埋设，最迟
-                <button type="button" onClick={() => onWriting(entry.closes_chapter_id)}>
-                  {chapterName(entry.closes_chapter_id)}
-                </button>
-                回收
+                <OutlinePromiseProgress promise={entry} chapterName={chapterName} onChapter={onWriting} />
               </li>
             ))}
           </ul>

@@ -47,6 +47,9 @@ class ConceptionItem(Input):
     detail: str = Field(default="", max_length=4000)
     links: list[Identifier] = Field(default_factory=list, max_length=30)
     setting_policy: SettingPolicy | None = Field(default=None, exclude_if=lambda value: value is None)
+    adoption_state: Literal["pending", "proposed", "adopted"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class ConceptionCategory(Input):
@@ -246,6 +249,10 @@ def _items(categories):
     return {item["id"]: (category["id"], item) for category in categories for item in category["items"]}
 
 
+def setting_is_adopted(state):
+    return state in {None, "adopted"}
+
+
 def _comparison_text(value):
     return " ".join(normalize("NFC", value).split())
 
@@ -297,7 +304,12 @@ def setting_findings(categories):
     names = {}
     for item, skipped, location in entries.values():
         policy = item.get("setting_policy")
-        if skipped or not item["detail"].strip() or (location["category_id"] != "world" and not policy):
+        if (
+            skipped
+            or not setting_is_adopted(item.get("adoption_state"))
+            or not item["detail"].strip()
+            or (location["category_id"] != "world" and not policy)
+        ):
             continue
         meaning = (_comparison_text(item["detail"]), (policy or {}).get("strength"), _policy_terms(item))
         name = normalize("NFKC", _comparison_text(item["title"])).casefold()
@@ -326,8 +338,10 @@ def setting_findings(categories):
                     }
                 )
                 report(invalid, origin, destination)
-            elif not skipped and target:
+            elif not skipped and setting_is_adopted(source.get("adoption_state")) and target:
                 entry, target_skipped, destination = target
+                if not setting_is_adopted(entry.get("adoption_state")):
+                    continue
                 if target_skipped:
                     report("skipped_link", origin, destination)
                 elif not entry["detail"].strip():
@@ -944,7 +958,7 @@ def confirm_tx(tx, branch_id, data, *, before_write=None, sync_source=None, arch
         for category in categories
         if category["id"] in {"core", "outline"} and not category["skipped"]
         for item in category["items"]
-        if item["detail"].strip()
+        if setting_is_adopted(item.get("adoption_state")) and item["detail"].strip()
     )
     payload = {
         "version": VERSION,
@@ -984,7 +998,14 @@ def handoff_tx(tx, branch_id, identifier):
         raise DomainError("conception_changed", "构思或故事依据已有变化，请重新确认后交接。", 409)
     derived = {record["item_id"]: record for record in payload.get("sources", [])}
     eligible = [
-        {**category, "items": [item for item in category["items"] if item["id"] not in derived]}
+        {
+            **category,
+            "items": [
+                item
+                for item in category["items"]
+                if setting_is_adopted(item.get("adoption_state")) and item["id"] not in derived
+            ],
+        }
         for category in payload["categories"]
         if not category["skipped"]
     ]
@@ -1006,7 +1027,11 @@ def handoff_tx(tx, branch_id, identifier):
         if category["skipped"]:
             continue
         for item in category["items"]:
-            if item["id"] in derived and derived[item["id"]]["current"]:
+            if (
+                setting_is_adopted(item.get("adoption_state"))
+                and item["id"] in derived
+                and derived[item["id"]]["current"]
+            ):
                 observed.append(
                     {
                         "id": item["id"],

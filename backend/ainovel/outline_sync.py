@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import ValidationError
 
+from .conception import setting_is_adopted
 from .db import DomainError
 from .manuscript_exchange import Identifier
 from .models import Input
@@ -125,14 +126,25 @@ def validate_version_sources(
 ):
     if version.project_version_id and not project_lookup(version.project_version_id):
         raise DomainError("sync_outline_project", "大纲引用的立项版本尚未到齐。", 409)
+    chapters = [chapter for _, _, chapter in _chapter_plans(version.plan.model_dump())]
     if version.settings_version_id:
         settings = settings_lookup(version.settings_version_id)
         if not settings or settings.project_version_id != version.project_version_id:
             raise DomainError("sync_outline_settings", "大纲引用的设定版本或对应立项尚未到齐。", 409)
-    if chapter_lookup and any(
-        not chapter_lookup(chapter["chapter_id"])
-        for _, _, chapter in _chapter_plans(version.plan.model_dump())
-    ):
+        eligible = {
+            item.id
+            for category in settings.categories
+            if category.id == "world" and not category.skipped
+            for item in category.items
+            if setting_is_adopted(item.adoption_state)
+            and item.detail.strip()
+            and not settings.origins[item.id].evidence
+        }
+        if any(not set(chapter["setting_ids"]) <= eligible for chapter in chapters):
+            raise DomainError(
+                "sync_outline_settings", "章纲只能引用该正式世界设定版本中已采用的作者设定。", 409
+            )
+    if chapter_lookup and any(not chapter_lookup(chapter["chapter_id"]) for chapter in chapters):
         raise DomainError("sync_outline_chapters", "大纲引用的章节目录尚未到齐。", 409)
     if reference_lookup is not None:
         validate_frozen_reference_cards(

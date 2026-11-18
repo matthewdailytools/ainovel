@@ -5,7 +5,10 @@ import json
 from time import time
 from typing import Annotated, Literal
 
-from fastapi import Query
+from fastapi import HTTPException, Query, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from pydantic import Field, StringConstraints
 
 from .db import DomainError, dumps, uid
@@ -21,6 +24,7 @@ from .workflow_privacy import REFERENCE_SCOPE, evidence_has_reference_selection
 
 FORMAT = "ainovel-manuscript/1"
 EVIDENCE = "portable_workbench_evidence"
+MAX_PACKAGE_BYTES = 24 * 1024 * 1024
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 ReferenceSelection = Annotated[
     list[ReferenceVersionId] | None,
@@ -528,6 +532,38 @@ def import_manuscript(domain, package):
     return result
 
 
+class _BoundedPackageImport(APIRoute):
+    def get_route_handler(self):
+        handle = super().get_route_handler()
+
+        async def bounded(request: Request):
+            size = 0
+
+            async def receive():
+                nonlocal size
+                message = await request.receive()
+                if message["type"] == "http.request":
+                    size += len(message.get("body", b""))
+                    if size > MAX_PACKAGE_BYTES:
+                        # FastAPI preserves HTTPException during body parsing.
+                        raise HTTPException(status_code=413)
+                return message
+
+            try:
+                try:
+                    return await handle(Request(request.scope, receive))
+                except RequestValidationError as error:
+                    return await request_validation_exception_handler(request, error)
+            except HTTPException as error:
+                if error.status_code == 413:
+                    raise DomainError("file_limit", "请求超过 24 MiB，未读取或保存。", 413) from None
+                raise
+            except UnicodeError:
+                raise DomainError("manuscript_encoding", "稿件交换包含无效 Unicode，未导入作品。") from None
+
+        return bounded
+
+
 def register_routes(app, domain):
     @app.get("/api/branches/{branch_id}/manuscript-package")
     def get_package(
@@ -538,9 +574,16 @@ def register_routes(app, domain):
             domain, branch_id, include_reference_evidence_for=include_reference_evidence_for or ()
         )
 
-    @app.post("/api/manuscript-packages/import", status_code=201)
     def import_package(data: ManuscriptPackage):
         return import_manuscript(domain, data)
+
+    app.router.add_api_route(
+        "/api/manuscript-packages/import",
+        import_package,
+        methods=["POST"],
+        status_code=201,
+        route_class_override=_BoundedPackageImport,
+    )
 
     @app.post("/api/branches/{branch_id}/manuscript-outline/restore")
     def restore_outline(branch_id: str):

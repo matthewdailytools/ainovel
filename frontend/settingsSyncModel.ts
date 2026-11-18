@@ -1,4 +1,5 @@
 import { validateVersionGraph, type ProjectSource } from './projectSyncModel'
+import { settingAdoptionLabels, settingIsAdopted, type SettingAdoptionState } from './conception'
 
 const format = 'ainovel-manuscript-sync/1' as const
 export const settingCategories = [
@@ -19,6 +20,7 @@ export type SettingsItem = {
   detail: string
   links: string[]
   setting_policy?: SettingsPolicy
+  adoption_state?: SettingAdoptionState
 }
 export type SettingsCategory = { id: string; title: string; items: SettingsItem[]; skipped: boolean }
 export type SettingsEvidence = {
@@ -222,7 +224,7 @@ function integer(value: unknown, min: number) {
 }
 
 function parseItem(input: unknown): SettingsItem {
-  const row = record(input, ['id', 'title', 'detail', 'links', 'setting_policy'])
+  const row = record(input, ['id', 'title', 'detail', 'links', 'setting_policy', 'adoption_state'])
   const item: SettingsItem = {
     id: settingsId(row.id),
     title: title(row.title),
@@ -237,6 +239,12 @@ function parseItem(input: unknown): SettingsItem {
       scope: text(policy.scope === undefined ? '' : policy.scope, 800),
       exceptions: text(policy.exceptions === undefined ? '' : policy.exceptions, 800),
     }
+  }
+  if (row.adoption_state !== null && row.adoption_state !== undefined) {
+    const state = row.adoption_state
+    if (state !== 'pending' && state !== 'proposed' && state !== 'adopted')
+      return invalid('设定采用状态无效。')
+    item.adoption_state = state
   }
   return item
 }
@@ -351,7 +359,12 @@ async function inspectCategories(categories: SettingsCategory[]) {
 
   const names = new Map<string, { meaning: string; location: Location }[]>()
   for (const { item, skipped, location } of entries.values()) {
-    if (skipped || !compareText(item.detail) || (location.category_id !== 'world' && !item.setting_policy))
+    if (
+      skipped ||
+      !settingIsAdopted(item) ||
+      !compareText(item.detail) ||
+      (location.category_id !== 'world' && !item.setting_policy)
+    )
       continue
     const meaning = JSON.stringify([
       compareText(item.detail),
@@ -395,10 +408,12 @@ async function inspectCategories(categories: SettingsCategory[]) {
             link_number: null,
           },
         )
-      } else if (!skipped && target) {
+      } else if (!skipped && settingIsAdopted(item) && target) {
         if (target.skipped) report('skipped_link', source, target.location)
-        else if (!compareText(target.item.detail)) report('empty_link', source, target.location)
+        else if (settingIsAdopted(target.item) && !compareText(target.item.detail))
+          report('empty_link', source, target.location)
         else if (
+          settingIsAdopted(target.item) &&
           terms(target.item).some((term, index) => term && sourceTerms[index] && term !== sourceTerms[index])
         )
           report('policy_link', source, target.location)
@@ -588,6 +603,7 @@ export function describeSettingsVersion(version: SettingsVersion) {
     lines.push(`${category.title}${category.skipped ? ' · 暂缓' : ''}`)
     for (const item of category.items) {
       lines.push(`${item.title} · ${item.id}`, item.detail)
+      if (item.adoption_state) lines.push(`采用状态 ${settingAdoptionLabels[item.adoption_state]}`)
       const rule = item.setting_policy
       if (rule)
         lines.push(

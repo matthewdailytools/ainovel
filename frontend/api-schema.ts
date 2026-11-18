@@ -3331,6 +3331,8 @@ export interface components {
       /** Links */
       links?: string[]
       setting_policy?: components['schemas']['SettingPolicy'] | null
+      /** Adoption State */
+      adoption_state?: ('pending' | 'proposed' | 'adopted') | null
     }
     /** ConceptionObserved */
     ConceptionObserved: {

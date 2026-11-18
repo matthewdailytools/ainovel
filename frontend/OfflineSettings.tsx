@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
-import type { ConceptionItem } from './conception'
+import { settingAdoptionLabels, type ConceptionItem } from './conception'
 import { ConceptionItemEditor } from './ConceptionItems'
 import { useLeaveGuard } from './leaveGuard'
 import {
@@ -88,12 +88,14 @@ function SettingsRestorePreview({
               {before && (
                 <p>
                   当前 · {before.title} · {before.item.detail || '未填写'}
+                  {before.item.adoption_state && ` · ${settingAdoptionLabels[before.item.adoption_state]}`}
                 </p>
               )}
               {after && (
                 <>
                   <p>
                     所选 · {after.title} · {after.item.detail || '未填写'}
+                    {after.item.adoption_state && ` · ${settingAdoptionLabels[after.item.adoption_state]}`}
                     {!!after.item.links.length && ` · 关联 ${after.item.links.join('、')}`}
                   </p>
                   {onPick && after.item.setting_policy && (
@@ -148,7 +150,8 @@ function SettingsVersionPreview({ record }: { record: SettingsVersionRecord }) {
                 return (
                   <li key={item.id}>
                     <p>
-                      {item.title} · 条目编号 {item.id}
+                      {item.title} · 条目编号 {item.id} ·{' '}
+                      {settingAdoptionLabels[item.adoption_state ?? 'adopted']}
                     </p>
                     <p>{item.detail}</p>
                     {item.setting_policy && (
@@ -278,6 +281,7 @@ export function OfflineSettings({
       title: next.title,
       detail: next.detail ?? '',
       links: next.links ?? [],
+      ...(next.adoption_state ? { adoption_state: next.adoption_state } : {}),
       ...(next.setting_policy
         ? {
             setting_policy: {
