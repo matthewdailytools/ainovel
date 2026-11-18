@@ -961,6 +961,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/outline-workspace/confirmation-impact': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Confirm Impact */
+    get: operations['confirm_impact_api_branches__branch_id__outline_workspace_confirmation_impact_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/outline-workspace/revisions/{revision}': {
     parameters: {
       query?: never
@@ -3572,6 +3589,8 @@ export interface components {
        * @default false
        */
       acknowledge_required_promises: boolean
+      /** Impact Sha256 */
+      impact_sha256?: string | null
     }
     /** ConfirmProject */
     ConfirmProject: {
@@ -4527,6 +4546,53 @@ export interface components {
       revision: number
       /** Version Id */
       version_id?: string | null
+    }
+    /** OutlineChapterChange */
+    OutlineChapterChange: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Title */
+      title: string
+      /**
+       * Action
+       * @enum {string}
+       */
+      action: 'added' | 'removed' | 'changed'
+      /** Fields */
+      fields: ('placement' | 'goal' | 'obstacle' | 'turn' | 'result' | 'settings' | 'reference_cards')[]
+    }
+    /** OutlineConfirmationImpact */
+    OutlineConfirmationImpact: {
+      /** Draft Id */
+      draft_id: string
+      /** Base Revision */
+      base_revision: number
+      /** Confirmed Id */
+      confirmed_id: string | null
+      /** Confirmed Revision */
+      confirmed_revision: number | null
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Outline Fields */
+      outline_fields: ('summary' | 'organization' | 'settings' | 'promises')[]
+      /** Chapter Changes */
+      chapter_changes: components['schemas']['OutlineChapterChange'][]
+      /** Frozen Candidates */
+      frozen_candidates: components['schemas']['OutlineFrozenCandidate'][]
+    }
+    /** OutlineFrozenCandidate */
+    OutlineFrozenCandidate: {
+      /** Id */
+      id: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'chapter_draft' | 'text_patch'
+      /** Chapter Id */
+      chapter_id: string
+      /** Title */
+      title: string
     }
     /** OutlineGenerationTask */
     OutlineGenerationTask: {
@@ -8354,6 +8420,39 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_impact_api_branches__branch_id__outline_workspace_confirmation_impact_get: {
+    parameters: {
+      query: {
+        base_revision: number
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OutlineConfirmationImpact']
         }
       }
       /** @description Validation Error */

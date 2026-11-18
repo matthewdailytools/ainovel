@@ -5,6 +5,7 @@ from time import time
 from typing import Annotated, Literal
 from unicodedata import normalize
 
+from fastapi import Query
 from pydantic import Field, StringConstraints
 
 from .db import DomainError, dumps, uid
@@ -99,6 +100,7 @@ class SaveOutline(Input):
 class ConfirmOutline(Input):
     base_revision: int = Field(ge=1, strict=True)
     acknowledge_required_promises: bool = Field(default=False, strict=True)
+    impact_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 def _latest(tx, branch_id, confirmed=False):
@@ -361,6 +363,12 @@ def confirm_outline_tx(tx, branch_id, data, *, before_write=None, source_confirm
         if requirement_changed and not (data.acknowledge_required_promises or source_confirmed):
             raise DomainError("outline_required_promises", "请核对必达承诺变更后再确认大纲。", 409)
         _validate(graph, plan, basis, True)
+        if data.impact_sha256:
+            from .outline_confirmation_impact import confirmation_impact
+
+            impact = confirmation_impact(tx, branch_id, draft, previous, graph)
+            if data.impact_sha256 != impact["basis_sha256"]:
+                raise DomainError("outline_impact_changed", "大纲确认影响已更新，请重新核对后确认。", 409)
         basis["outline_story_receipt"] = _materialize_promises(tx, graph, plan, draft["revision"])
         if requirement_changed:
             basis["required_promises_confirmation"] = "formal_source" if source_confirmed else "author"
@@ -572,6 +580,8 @@ def chapter_basis(tx, branch_id, chapter_id, outline_id):
 
 
 def register_routes(app, domain):
+    from .outline_confirmation_impact import OutlineConfirmationImpact, read_confirmation_impact
+
     endpoint = "/api/branches/{branch_id}/outline-workspace"
 
     @app.get(endpoint)
@@ -585,6 +595,12 @@ def register_routes(app, domain):
     @app.post(endpoint + "/confirm")
     def confirm_workspace(branch_id: str, data: ConfirmOutline):
         return confirm_outline(domain, branch_id, data)
+
+    @app.get(endpoint + "/confirmation-impact")
+    def confirm_impact(
+        branch_id: str, base_revision: Annotated[int, Query(ge=1)]
+    ) -> OutlineConfirmationImpact:
+        return read_confirmation_impact(domain, branch_id, base_revision)
 
     @app.get(endpoint + "/revisions/{revision}")
     def outline_revision(branch_id: str, revision: int):

@@ -2039,6 +2039,40 @@
         }
       }
     },
+    "/api/branches/{branch_id}/outline-workspace/confirmation-impact": {
+      "get": {
+        "summary": "Confirm Impact",
+        "operationId": "confirm_impact_api_branches__branch_id__outline_workspace_confirmation_impact_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "base_revision",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 1, "title": "Base Revision" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OutlineConfirmationImpact" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/outline-workspace/revisions/{revision}": {
       "get": {
         "summary": "Outline Revision",
@@ -6931,6 +6965,10 @@
             "type": "boolean",
             "title": "Acknowledge Required Promises",
             "default": false
+          },
+          "impact_sha256": {
+            "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }],
+            "title": "Impact Sha256"
           }
         },
         "additionalProperties": false,
@@ -8353,6 +8391,77 @@
         "type": "object",
         "required": ["session_id", "card_id", "revision"],
         "title": "OutlineCardReference"
+      },
+      "OutlineChapterChange": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "title": { "type": "string", "title": "Title" },
+          "action": { "type": "string", "enum": ["added", "removed", "changed"], "title": "Action" },
+          "fields": {
+            "items": {
+              "type": "string",
+              "enum": ["placement", "goal", "obstacle", "turn", "result", "settings", "reference_cards"]
+            },
+            "type": "array",
+            "title": "Fields"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "title", "action", "fields"],
+        "title": "OutlineChapterChange"
+      },
+      "OutlineConfirmationImpact": {
+        "properties": {
+          "draft_id": { "type": "string", "title": "Draft Id" },
+          "base_revision": { "type": "integer", "title": "Base Revision" },
+          "confirmed_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Confirmed Id" },
+          "confirmed_revision": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Confirmed Revision"
+          },
+          "basis_sha256": { "type": "string", "title": "Basis Sha256" },
+          "outline_fields": {
+            "items": { "type": "string", "enum": ["summary", "organization", "settings", "promises"] },
+            "type": "array",
+            "title": "Outline Fields"
+          },
+          "chapter_changes": {
+            "items": { "$ref": "#/components/schemas/OutlineChapterChange" },
+            "type": "array",
+            "title": "Chapter Changes"
+          },
+          "frozen_candidates": {
+            "items": { "$ref": "#/components/schemas/OutlineFrozenCandidate" },
+            "type": "array",
+            "title": "Frozen Candidates"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "draft_id",
+          "base_revision",
+          "confirmed_id",
+          "confirmed_revision",
+          "basis_sha256",
+          "outline_fields",
+          "chapter_changes",
+          "frozen_candidates"
+        ],
+        "title": "OutlineConfirmationImpact"
+      },
+      "OutlineFrozenCandidate": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "kind": { "type": "string", "enum": ["chapter_draft", "text_patch"], "title": "Kind" },
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "title": { "type": "string", "title": "Title" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "kind", "chapter_id", "title"],
+        "title": "OutlineFrozenCandidate"
       },
       "OutlineGenerationTask": {
         "properties": {

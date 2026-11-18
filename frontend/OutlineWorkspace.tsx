@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Notify } from './App'
-import { api } from './api'
+import { api, ApiError } from './api'
 import type { components } from './api-schema'
 import { useLeaveGuard } from './leaveGuard'
 import { OutlineGenerationPanel } from './OutlineGenerationPanel'
 import { OutlinePromiseProgress, type OutlinePromise } from './OutlinePromiseProgress'
+import { OutlineImpactDetails, type OutlineConfirmationImpact } from './OutlineConfirmationImpact'
 
 type OutlinePlan = components['schemas']['OutlinePlan']
 type ChapterPlan = components['schemas']['ChapterPlan']
@@ -36,6 +37,14 @@ export type OutlineView = {
     evidence: { report_id: string; source: { text: string } } | null
   }[]
   promises: OutlinePromise[]
+}
+
+function readWorkspace(root: string) {
+  return Promise.all([
+    api<OutlineView>(root),
+    api<ConfirmedSettingBasis>(root + '/setting-options'),
+    api<OutlineCard[]>(root + '/reference-options'),
+  ])
 }
 
 const windowFields = [
@@ -170,28 +179,42 @@ export function OutlineWorkspace({
   const [previous, setPrevious] = useState<OutlineRevision>()
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const [reload, setReload] = useState(0)
+  const [impactReply, setImpactReply] = useState<{
+    key: string
+    value?: OutlineConfirmationImpact
+    error?: string
+  }>()
+  const impactRetry = useRef<HTMLButtonElement>(null)
+  const focusImpactRetry = useRef(false)
   const baseline = view?.draft?.plan ?? { summary: '', volumes: [], promises: [] }
   const dirty =
     !!editing &&
     (!!generationId ||
       JSON.stringify(baseline) !== JSON.stringify(editing) ||
       settingId !== (view?.draft?.setting_basis.confirmation_id ?? null))
+  const draftForImpact = !dirty && view?.draft && !view.draft.confirmed ? view.draft : undefined
+  const impactRevision = draftForImpact?.revision
+  const impactKey = `${root}/${draftForImpact?.id ?? ''}/${reload}`
+  const checkedImpact = impactReply?.key === impactKey ? impactReply : undefined
   useLeaveGuard(dirty, '大纲草稿')
+  const loadWorkspace = useCallback(
+    ([data, available, referenceCards]: Awaited<ReturnType<typeof readWorkspace>>) => {
+      setView(data)
+      setAgreedPromiseRevision(undefined)
+      setSettings(available)
+      setCards(referenceCards)
+      setEditing(data.draft?.plan ?? { summary: '', volumes: [], promises: [] })
+      setSettingId(data.draft?.setting_basis.confirmation_id ?? null)
+      setGenerationId(undefined)
+    },
+    [],
+  )
   useEffect(() => {
     let active = true
-    void Promise.all([
-      api<OutlineView>(root),
-      api<ConfirmedSettingBasis>(root + '/setting-options'),
-      api<OutlineCard[]>(root + '/reference-options'),
-    ])
-      .then(([data, available, referenceCards]) => {
-        if (!active) return
-        setView(data)
-        setAgreedPromiseRevision(undefined)
-        setSettings(available)
-        setCards(referenceCards)
-        setEditing(data.draft?.plan ?? { summary: '', volumes: [], promises: [] })
-        setSettingId(data.draft?.setting_basis.confirmation_id ?? null)
+    void readWorkspace(root)
+      .then((data) => {
+        if (active) loadWorkspace(data)
       })
       .catch((error) => {
         if (active) notify(error)
@@ -199,7 +222,31 @@ export function OutlineWorkspace({
     return () => {
       active = false
     }
-  }, [root, notify])
+  }, [root, notify, loadWorkspace])
+  useEffect(() => {
+    if (impactRevision === undefined) return
+    let active = true
+    void api<OutlineConfirmationImpact>(`${root}/confirmation-impact?base_revision=${impactRevision}`)
+      .then((value) => {
+        if (active) setImpactReply({ key: impactKey, value })
+      })
+      .catch((error: unknown) => {
+        if (active)
+          setImpactReply({
+            key: impactKey,
+            error: error instanceof Error ? error.message : '暂无法读取大纲确认影响。',
+          })
+      })
+    return () => {
+      active = false
+    }
+  }, [root, impactKey, impactRevision])
+  useEffect(() => {
+    if (focusImpactRetry.current && checkedImpact?.error && !busy) {
+      focusImpactRetry.current = false
+      impactRetry.current?.focus()
+    }
+  }, [checkedImpact?.error, busy])
   if (!view || !editing || !settings) return <p role="status">正在读取大纲与台账…</p>
   const chapterName = (id: string) =>
     view.chapters.find((chapter) => chapter.id === id)?.title ?? '已移出目录'
@@ -754,6 +801,30 @@ export function OutlineWorkspace({
             {!!editing.new_promises?.length && (
               <p className="small">确认大纲会把新伏笔加入台账，初始状态为「计划」。</p>
             )}
+            {draftForImpact && (
+              <section aria-label="大纲确认影响">
+                <h3>大纲确认影响</h3>
+                {!checkedImpact && <p role="status">正在读取确认影响…</p>}
+                {checkedImpact?.error && (
+                  <>
+                    <p role="alert">{checkedImpact.error}</p>
+                    <button
+                      ref={impactRetry}
+                      type="button"
+                      onClick={() =>
+                        void run(async () => {
+                          loadWorkspace(await readWorkspace(root))
+                          setReload((current) => current + 1)
+                        })
+                      }
+                    >
+                      重新读取大纲与影响
+                    </button>
+                  </>
+                )}
+                {checkedImpact?.value && <OutlineImpactDetails impact={checkedImpact.value} />}
+              </section>
+            )}
             {view.requires_promise_confirmation && !dirty && (
               <label>
                 <input
@@ -789,16 +860,31 @@ export function OutlineWorkspace({
                   dirty ||
                   !view.draft ||
                   view.draft.confirmed ||
+                  !checkedImpact?.value ||
                   (view.requires_promise_confirmation && !agreesToPromises)
                 }
                 onClick={() => {
+                  const impact = checkedImpact?.value
+                  if (!impact || impact.draft_id !== view.draft?.id) return
                   void run(async () => {
-                    const updated = await api<OutlineView>(root + '/confirm', 'POST', {
-                      base_revision: view.draft!.revision,
-                      ...(view.requires_promise_confirmation
-                        ? { acknowledge_required_promises: agreesToPromises }
-                        : {}),
-                    })
+                    let updated: OutlineView
+                    try {
+                      updated = await api<OutlineView>(root + '/confirm', 'POST', {
+                        base_revision: impact.base_revision,
+                        impact_sha256: impact.basis_sha256,
+                        ...(view.requires_promise_confirmation
+                          ? { acknowledge_required_promises: agreesToPromises }
+                          : {}),
+                      })
+                    } catch (error) {
+                      if (error instanceof ApiError && error.status === 409) {
+                        focusImpactRetry.current = true
+                        setAgreedPromiseRevision(undefined)
+                        setImpactReply({ key: impactKey, error: error.message })
+                        return
+                      }
+                      throw error
+                    }
                     setView(updated)
                     setAgreedPromiseRevision(undefined)
                     setEditing(updated.draft?.plan)
