@@ -2667,6 +2667,40 @@
         }
       }
     },
+    "/api/branches/{branch_id}/conception/project-brief/impact": {
+      "get": {
+        "summary": "Preview Project Impact",
+        "operationId": "preview_project_impact_api_branches__branch_id__conception_project_brief_impact_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "base_revision",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 0, "title": "Base Revision" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProjectRevisionImpact" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/conception": {
       "get": {
         "summary": "Get Workspace",
@@ -6569,6 +6603,10 @@
           "candidate_id": {
             "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
             "title": "Candidate Id"
+          },
+          "impact_sha256": {
+            "anyOf": [{ "type": "string", "pattern": "^[a-f0-9]{64}$" }, { "type": "null" }],
+            "title": "Impact Sha256"
           }
         },
         "additionalProperties": false,
@@ -8312,6 +8350,54 @@
         "type": "object",
         "required": ["adopted_revision_id", "versions"],
         "title": "ProjectHistory"
+      },
+      "ProjectImpactTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "settings",
+              "settings_draft",
+              "outline",
+              "outline_draft",
+              "inspection",
+              "completion",
+              "run"
+            ],
+            "title": "Kind"
+          },
+          "id": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Id" },
+          "revision": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Revision" },
+          "scope": {
+            "anyOf": [{ "type": "string", "enum": ["chapter", "volume", "book"] }, { "type": "null" }],
+            "title": "Scope"
+          },
+          "title": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Title" },
+          "status": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Status" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "id"],
+        "title": "ProjectImpactTarget"
+      },
+      "ProjectRevisionImpact": {
+        "properties": {
+          "project_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Project Id"
+          },
+          "base_revision": { "type": "integer", "title": "Base Revision" },
+          "basis_sha256": { "type": "string", "title": "Basis Sha256" },
+          "targets": {
+            "items": { "$ref": "#/components/schemas/ProjectImpactTarget" },
+            "type": "array",
+            "title": "Targets"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["project_id", "base_revision", "basis_sha256", "targets"],
+        "title": "ProjectRevisionImpact"
       },
       "ProjectVersion": {
         "properties": {

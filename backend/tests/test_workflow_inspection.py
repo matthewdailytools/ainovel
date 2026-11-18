@@ -148,7 +148,60 @@ def test_numeric_targets_are_versioned_and_omission_cannot_remove_a_failed_targe
     assert inspection_client.post(route, json={"basis_sha256": preview["basis_sha256"]}).status_code == 409
     historical = read(inspection_client, f"{route}/{created['id']}")
     assert historical["length_target"] == goal
-    assert item(historical, "09")["status"] == "red"
+    assert item(historical, "09") == {**item(created, "09"), "current_status": "outdated"}
+    assert historical["basis_sha256"] == created["basis_sha256"]
+
+
+@pytest.mark.parametrize("change", ["revision", "outline_scope"])
+def test_length_check_expires_with_changed_chapter_or_volume_membership(
+    inspection_client, domain, story, change
+):
+    client = inspection_client
+    branch = story["branch_id"]
+    first = domain.save(story["chapter_id"], 0, "学徒推门。")
+    second = domain.create_chapter(branch, "第二章")
+    domain.save(second["id"], 0, "师姐寻铃。")
+    outline = f"/api/branches/{branch}/outline-workspace"
+    volumes = [
+        {
+            "id": f"v{index}",
+            "title": f"第{index}卷",
+            "summary": "寻找铜铃",
+            "units": [
+                {
+                    "id": f"u{index}",
+                    "title": "线索",
+                    "summary": "找铃",
+                    "chapters": [{**chapter_plan(chapter["id"], "门内找铃"), "setting_ids": []}],
+                }
+            ],
+        }
+        for index, chapter in enumerate((first, second), 1)
+    ]
+    plan = {"summary": "寻找失铃", "volumes": volumes}
+    confirmed = put_and_confirm(client, outline, {"base_revision": 0, "plan": plan})["confirmed"]
+    route = endpoint(story)
+    scope = {"scope": "volume", "scope_id": "v1"}
+    saved = report(client, route, read(client, route, **scope)["preview"], length_targets={"min_chars": 1})
+    assert item(saved, "09")["status"] == "green"
+
+    if change == "revision":
+        response = client.put(
+            f"/api/chapters/{first['id']}", json={"base_revision": first["revision"], "content": "学徒敲门。"}
+        )
+        assert response.status_code == 200, response.text
+    else:
+        combined = {**volumes[0], "units": [*volumes[0]["units"], *volumes[1]["units"]]}
+        put_and_confirm(
+            client, outline, {"base_revision": confirmed["revision"], "plan": {**plan, "volumes": [combined]}}
+        )
+    active = read(client, route, **scope)["preview"]
+    historical = read(client, f"{route}/{saved['id']}")
+    assert active["length_target"] == saved["length_target"]
+    assert item(active, "09")["status"] == "green"
+    assert not historical["current"] and historical["basis_sha256"] == saved["basis_sha256"]
+    assert historical["chapters"] == saved["chapters"]
+    assert item(historical, "09") == {**item(saved, "09"), "current_status": "outdated"}
 
 
 def test_inspection_freezes_author_evidence_and_scoped_manifests(inspection_client, domain, story):

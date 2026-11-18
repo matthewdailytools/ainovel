@@ -4,6 +4,8 @@ import json
 from ainovel.db import uid
 from ainovel.worker import Worker
 from test_conception_workbench import confirm, path
+from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
+from test_workflow_inspection import author
 
 
 IDEA = "学徒靠刻痕找回失散的师姐。"
@@ -64,6 +66,151 @@ def run(domain, settings, task, model):
     done = domain.task(task["id"])
     assert done["status"] == "succeeded", done["error"]
     return domain.artifact(done["result"]["artifact_id"])
+
+
+def test_project_revision_preview_tracks_actual_downstream_records_and_rechecks_before_commit(
+    client, domain, story
+):
+    def verify(response, code=200):
+        assert response.status_code == code, response.text
+        return response.json()
+
+    branch = story["branch_id"]
+    endpoint = f"/api/branches/{branch}"
+    project_path = f"{path(branch)}/project-brief"
+    body = {"base_revision": 0, "idempotency_key": uid(), "idea": IDEA, "brief": BRIEF}
+    project = verify(client.put(project_path, json=body))
+    impact_path = project_path + "/impact?base_revision=1"
+    initial = verify(client.get(impact_path))
+    assert initial["targets"] == []
+    assert initial["project_id"] == project["id"]
+    chapter = domain.save(story["chapter_id"], 0, "学徒找到师姐，归还了铜铃。")
+    setting = setting_confirmation(client, branch)
+    outline_path = endpoint + "/outline-workspace"
+    plan = {
+        "summary": "学徒找到师姐。",
+        "volumes": [
+            {
+                "id": "volume",
+                "title": "归铃卷",
+                "summary": "循着刻痕找到师姐。",
+                "units": [
+                    {
+                        "id": "unit",
+                        "title": "归铃单元",
+                        "summary": "在门内归还。",
+                        "chapters": [chapter_plan(chapter["id"], "归还铜铃")],
+                    }
+                ],
+            }
+        ],
+    }
+    outline = put_and_confirm(
+        client, outline_path, {"base_revision": 0, "confirmation_id": setting, "plan": plan}
+    )["confirmed"]
+    draft = verify(
+        client.put(
+            outline_path,
+            json={
+                "base_revision": outline["revision"],
+                "confirmation_id": setting,
+                "plan": {**plan, "summary": "先修铃再归还。"},
+            },
+        )
+    )["draft"]
+    inspection_path = endpoint + "/workflow-inspections"
+    inspections = {}
+    for scope, scope_id in (("chapter", chapter["id"]), ("volume", "volume"), ("book", None)):
+        params = {"scope": scope, **({"scope_id": scope_id} if scope_id else {})}
+        preview = verify(client.get(inspection_path, params=params))["preview"]
+        inspections[scope] = verify(
+            client.post(
+                inspection_path,
+                json={
+                    **params,
+                    "basis_sha256": preview["basis_sha256"],
+                    "length_targets": {"min_chars": 1, "expected_chapters": 1},
+                    "author_reviews": [
+                        author(row["check_id"], chapter)
+                        for row in preview["items"]
+                        if row["status"] == "pending"
+                    ],
+                },
+            ),
+            201,
+        )["id"]
+    completion_path = endpoint + "/book-completion"
+    completion = verify(
+        client.post(
+            completion_path + "/confirm",
+            json={
+                "basis_sha256": verify(client.get(completion_path))["basis_sha256"],
+                "read_note": "已通读当前稿。",
+                "ending": {"note": "归还铜铃。"},
+                "characters": {"note": "学徒和师姐重逢。"},
+                "promises": {"note": "信物有交代。"},
+                "intro": "学徒寻找遗铃的失主。",
+                "spoiler_scope": "opening",
+                "sample_chapter_ids": [chapter["id"]],
+                "materials_reviewed": True,
+            },
+        ),
+        201,
+    )
+    export = f"{completion_path}/{completion['id']}/export"
+    original_package = client.get(export).content
+    run = verify(
+        client.post(
+            endpoint + "/seven-stage-runs",
+            json={
+                "start_from": "inspection",
+                "source_id": inspections["book"],
+                "client_request_id": uid(),
+                "account": "openai_1",
+                "budget_limit": 2,
+            },
+        ),
+        202,
+    )
+    current = verify(client.get(impact_path))
+    indexed = {row["id"]: row for row in current["targets"]}
+    assert set(indexed) == {
+        setting,
+        outline["id"],
+        draft["id"],
+        completion["id"],
+        run["id"],
+        *inspections.values(),
+    }
+    assert indexed[setting]["kind"] == "settings"
+    assert indexed[outline["id"]]["kind"] == "outline"
+    assert indexed[draft["id"]]["kind"] == "outline_draft"
+    assert indexed[inspections["volume"]]["title"] == "归铃卷"
+    assert indexed[inspections["chapter"]]["title"] == chapter["title"]
+    assert indexed[inspections["book"]]["scope"] == "book"
+    assert indexed[completion["id"]]["kind"] == "completion"
+    assert indexed[run["id"]]["status"] == "queued"
+    assert chapter["content"] not in json.dumps(current, ensure_ascii=False)
+
+    update = {
+        **body,
+        "base_revision": 1,
+        "idempotency_key": uid(),
+        "brief": {**BRIEF, "ending": "把铜铃交给师姐。"},
+    }
+    stale = client.put(project_path, json={**update, "impact_sha256": initial["basis_sha256"]})
+    assert stale.status_code == 409 and stale.json()["code"] == "project_impact_changed"
+    assert verify(client.get(project_path)) == project
+    fresh = {**update, "impact_sha256": current["basis_sha256"]}
+    second = verify(client.put(project_path, json=fresh))
+    assert second["revision"] == 2
+    assert verify(client.put(project_path, json=fresh)) == second
+    assert client.get(impact_path).status_code == 409
+    assert verify(client.get(project_path + "/impact?base_revision=2"))["targets"] == []
+    assert domain.chapter(chapter["id"])["content"] == chapter["content"]
+    continued = verify(client.get(completion_path))
+    assert continued["latest"]["id"] == completion["id"] and not continued["latest"]["current"]
+    assert client.get(export).content == original_package
 
 
 def test_project_brief_edits_confirmation_and_world_handoff(client, domain, settings, story):

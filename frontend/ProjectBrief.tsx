@@ -5,7 +5,14 @@ import { useLeaveGuard } from './leaveGuard'
 
 type ProjectBrief = components['schemas']['ProjectBrief']
 type ConfirmedProject = components['schemas']['ConfirmedProject']
-export type ProjectDraft = { base_revision: number; idea: string; brief: ProjectBrief; candidate_id?: string }
+type ProjectRevisionImpact = components['schemas']['ProjectRevisionImpact']
+export type ProjectDraft = {
+  base_revision: number
+  idea: string
+  brief: ProjectBrief
+  candidate_id?: string
+  impact_sha256?: string
+}
 
 const fields = [
   ['position', '核心定位'],
@@ -30,7 +37,18 @@ const blankBrief: ProjectBrief = {
   final_image: '',
 }
 
+const impactLabels = {
+  settings: 'M3 已确认设定',
+  settings_draft: 'M3 待采用设定草案',
+  outline: 'M4 已确认大纲',
+  outline_draft: 'M4 大纲草稿',
+  inspection: 'M6 体检第 01 项',
+  completion: 'M7 最近完本判定',
+  run: '自动接力',
+}
+
 export function ProjectBriefPanel({
+  branchId,
   project,
   storyRevision,
   task,
@@ -40,6 +58,7 @@ export function ProjectBriefPanel({
   onConfirm,
   onWorld,
 }: {
+  branchId: string
   project?: ConfirmedProject | null
   storyRevision: number
   task?: Task
@@ -55,6 +74,12 @@ export function ProjectBriefPanel({
   const [catalogError, setCatalogError] = useState('')
   const [candidateError, setCandidateError] = useState('')
   const [open, setOpen] = useState(false)
+  const [impactAttempt, setImpactAttempt] = useState(0)
+  const [impactReply, setImpactReply] = useState<{
+    request: string
+    value?: ProjectRevisionImpact
+    error?: string
+  }>()
   const current = {
     base_revision: project?.revision ?? 0,
     idea: project?.idea ?? '',
@@ -63,6 +88,9 @@ export function ProjectBriefPanel({
   const value = draft ?? current
   const artifactId = task?.result.artifact_id
   const stale = value.base_revision !== current.base_revision
+  const impactRevision = open && project && draft && !stale ? project.revision : undefined
+  const impactRequest = `${project?.id}/${storyRevision}/${impactAttempt}`
+  const latestImpact = impactReply?.request === impactRequest ? impactReply : undefined
   const generating = task?.status === 'queued' || task?.status === 'running'
   const candidateCurrent =
     !!candidate &&
@@ -110,6 +138,24 @@ export function ProjectBriefPanel({
     }
   }, [artifactId])
 
+  useEffect(() => {
+    if (impactRevision === undefined) return
+    let active = true
+    setImpactReply(undefined)
+    void api<ProjectRevisionImpact>(
+      `/branches/${encodeURIComponent(branchId)}/conception/project-brief/impact?base_revision=${impactRevision}`,
+    )
+      .then((value) => {
+        if (active) setImpactReply({ request: impactRequest, value })
+      })
+      .catch((failure: Error) => {
+        if (active) setImpactReply({ request: impactRequest, error: failure.message })
+      })
+    return () => {
+      active = false
+    }
+  }, [branchId, impactRequest, impactRevision])
+
   function editBrief(brief: ProjectBrief) {
     setDraft({ ...value, brief })
   }
@@ -124,7 +170,7 @@ export function ProjectBriefPanel({
   return (
     <details className="card" onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>立项台{project ? ` · 已确认修订 ${project.revision}` : ''}</summary>
-      <p className="small">确认后的定位、题材和终局作为生成设定的依据。修改立项后，请复核已有设定和草案。</p>
+      <p className="small">确认后的定位、题材和终局作为生成设定的依据。</p>
       {stale && <p role="alert">立项已在别处确认。当前编辑仍保留，请核对最新修订后重新录入。</p>}
       <fieldset disabled={busy || generating}>
         <legend>创作思路与立项卡</legend>
@@ -222,14 +268,43 @@ export function ProjectBriefPanel({
             />
           </label>
         ))}
+        {impactRevision !== undefined && (
+          <section className="notice" aria-label="立项修订影响预览">
+            <h3>确认前核对下游记录</h3>
+            {latestImpact?.error && <p role="alert">{latestImpact.error}</p>}
+            {!latestImpact && <p role="status">正在核对立项修订影响。</p>}
+            {latestImpact?.value &&
+              (latestImpact.value.targets.length ? (
+                <ul>
+                  {latestImpact.value.targets.map((target) => (
+                    <li key={`${target.kind}/${target.id}`}>
+                      {impactLabels[target.kind]}
+                      {target.title ? ` · ${target.title}` : target.scope === 'book' ? ' · 全书' : ''}
+                      {target.revision !== null &&
+                        target.revision !== undefined &&
+                        ` · 修订 ${target.revision}`}
+                      {target.status && ` · ${label(target.status)}`} · <code>{target.id}</code>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p role="status">当前立项没有需随本次修订复核的下游记录。</p>
+              ))}
+            <button type="button" onClick={() => setImpactAttempt((attempt) => attempt + 1)}>
+              重新检查立项影响
+            </button>
+          </section>
+        )}
         <div className="actions">
           <button
             className="primary"
             type="button"
-            disabled={!draft || stale || !valid}
+            disabled={!draft || stale || !valid || (!!project && !latestImpact?.value)}
             onClick={() => {
-              void onConfirm(value).then((confirmed) => {
+              const impact = latestImpact?.value?.basis_sha256
+              void onConfirm(impact ? { ...value, impact_sha256: impact } : value).then((confirmed) => {
                 if (confirmed) setDraft(undefined)
+                else if (impact) setImpactAttempt((attempt) => attempt + 1)
               })
             }}
           >

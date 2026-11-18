@@ -485,6 +485,7 @@ export function ConceptionWorkspace({
         {state && (
           <ProjectBriefPanel
             key={branch.id}
+            branchId={branch.id}
             project={state.project}
             storyRevision={state.story_revision}
             task={projectTasks[0]}

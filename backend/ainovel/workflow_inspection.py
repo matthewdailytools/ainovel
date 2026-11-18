@@ -605,6 +605,20 @@ def _latest(tx, branch_id, scope, scope_id):
     ).fetchone()
 
 
+def _same_length_inputs(report, preview):
+    historical = report["chapters"]
+    current = preview["chapters"]
+    if (report["scope"], report["scope_id"]) != (preview["scope"], preview["scope_id"]):
+        return False
+    if historical == current or len(historical) != len(current):
+        return False
+    return all(
+        {key: value for key, value in previous.items() if key != "stale"}
+        == {key: value for key, value in latest.items() if key != "stale"}
+        for previous, latest in zip(historical, current, strict=True)
+    )
+
+
 def _effective(row, preview):
     report = json.loads(row["payload"])
     current = {item["check_id"]: item for item in preview["items"]} if preview else {}
@@ -612,6 +626,9 @@ def _effective(row, preview):
     for item in report["items"]:
         latest = current.get(item["check_id"], {})
         matched = latest.get("basis_sha256") == item["basis_sha256"]
+        if not matched and item["check_id"] == "09" and preview and latest.get("basis") == item["basis"]:
+            # Continuity changes can require a new report without changing the frozen length calculation.
+            matched = _same_length_inputs(report, preview)
         allowed = item["status"] != "not_applicable" or latest.get("can_mark_not_applicable", False)
         if not allowed:
             invalid_exemption = True

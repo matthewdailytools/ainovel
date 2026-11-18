@@ -47,7 +47,7 @@ async function checkedCall(page: Page, taskId: string, stage: string, snapshotId
 }
 
 test('立项建议可修改并以确认终局交给世界设定', async ({ page }) => {
-  const { base } = await openWorkbench(page, '遗铃 · 立项交接')
+  const { base, headers } = await openWorkbench(page, '遗铃 · 立项交接')
   await page.locator('#bench-project').getByText('立项台', { exact: true }).click()
   await page.getByRole('textbox', { name: '创作思路', exact: true }).fill('学徒靠铜铃的断痕寻找师姐。')
   await page.getByRole('button', { name: 'AI 分析立项', exact: true }).click()
@@ -73,6 +73,37 @@ test('立项建议可修改并以确认终局交给世界设定', async ({ page 
     project_confirmation_id: project?.id,
   })
   await expect(page.getByText('本草案使用立项修订 1。', { exact: true })).toBeVisible()
+
+  const beforeRevision = await readWorkbench(page, base)
+  const accepted = await page.request.post(base + '/confirm', {
+    headers,
+    data: {
+      base_revision: beforeRevision.revision,
+      base_story_revision: beforeRevision.story_revision,
+      idempotency_key: 'm1-impact-e2e-setting',
+    },
+  })
+  expect(accepted.ok(), await accepted.text()).toBe(true)
+  const setting = (await accepted.json()) as ConceptionState
+  await ending.fill('师姐带着铜铃归来，再和学徒把铃挂回原处。')
+  const impact = page.getByRole('region', { name: '立项修订影响预览' })
+  await expect(impact.getByRole('listitem').filter({ hasText: 'M3 已确认设定' })).toContainText(
+    setting.confirmation!.id,
+  )
+  await expect(impact.getByRole('listitem').filter({ hasText: 'M3 待采用设定草案' })).toHaveCount(1)
+  await expect(impact.getByText('M7 最近完本判定', { exact: false })).toHaveCount(0)
+  const adoptedRevision = page.waitForResponse(
+    (reply) => reply.url().endsWith(base + '/project-brief') && reply.request().method() === 'PUT',
+  )
+  await page.getByRole('button', { name: '确认立项', exact: true }).press('Enter')
+  const revised = await adoptedRevision
+  expect(revised.ok(), await revised.text()).toBe(true)
+  expect(revised.request().postDataJSON()).toMatchObject({
+    base_revision: 1,
+    impact_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+  })
+  await expect(page.getByText('立项台 · 已确认修订 2', { exact: true })).toBeVisible()
+  expect((await readWorkbench(page, base)).confirmation?.current).toBe(false)
 })
 
 test('遗铃从确认设定到正文对账并保留过期证据', async ({ page }) => {

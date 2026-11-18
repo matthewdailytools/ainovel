@@ -3,8 +3,9 @@
 import hashlib
 import json
 from time import time
-from typing import Annotated
+from typing import Annotated, Literal
 
+from fastapi import Query
 from pydantic import Field, StringConstraints, field_validator
 
 from .db import DomainError, dumps, uid
@@ -44,6 +45,7 @@ class ConfirmProject(Input):
     idea: IdeaText
     brief: ProjectBrief
     candidate_id: Identifier | None = None
+    impact_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class ConfirmedProject(Input):
@@ -52,6 +54,22 @@ class ConfirmedProject(Input):
     idea: IdeaText
     brief: ProjectBrief
     candidate_id: Identifier | None
+
+
+class ProjectImpactTarget(Input):
+    kind: Literal["settings", "settings_draft", "outline", "outline_draft", "inspection", "completion", "run"]
+    id: Identifier
+    revision: int | None = None
+    scope: Literal["chapter", "volume", "book"] | None = None
+    title: str | None = None
+    status: str | None = None
+
+
+class ProjectRevisionImpact(Input):
+    project_id: Identifier | None
+    base_revision: int
+    basis_sha256: str
+    targets: list[ProjectImpactTarget]
 
 
 def confirmed_project_tx(tx, branch_id, identifier=None):
@@ -65,13 +83,112 @@ def confirmed_project_tx(tx, branch_id, identifier=None):
     return {**json.loads(row["payload"]), "id": row["id"]} if row else None
 
 
+def _revision_impact(tx, branch_id, project):
+    from .book_completion import KIND as COMPLETION
+    from .conception import BUNDLE, CONFIRMATION, revision_tx
+    from .seven_stage_run import KIND as SEVEN_STAGE
+    from .workflow_inspection import KIND as INSPECTION
+
+    project_id = project["id"] if project else None
+    revision = project["revision"] if project else 0
+    targets = []
+    if project_id:
+        settings = tx.execute(
+            "SELECT id,json_extract(payload,'$.revision') AS revision,"
+            "json_extract(payload,'$.project_confirmation_id') AS project_id FROM artifacts "
+            "WHERE branch_id=? AND kind=? AND status='accepted' ORDER BY created DESC,rowid DESC LIMIT 1",
+            (branch_id, CONFIRMATION),
+        ).fetchone()
+        if settings and settings["project_id"] == project_id:
+            targets.append({"kind": "settings", "id": settings["id"], "revision": settings["revision"]})
+        settings_drafts = tx.execute(
+            "SELECT a.id FROM artifacts a JOIN branches b ON b.id=a.branch_id "
+            "JOIN tasks t ON t.id=a.task_id AND json_extract(t.result,'$.artifact_id')=a.id "
+            "WHERE a.branch_id=? AND a.kind=? AND a.status='candidate' "
+            "AND json_extract(a.basis,'$.project_confirmation_id')=? "
+            "AND json_extract(a.basis,'$.conception_revision')=? "
+            "AND json_extract(a.basis,'$.story_revision')=b.story_revision ORDER BY a.created,a.id",
+            (branch_id, BUNDLE, project_id, revision_tx(tx, branch_id)),
+        )
+        targets.extend({"kind": "settings_draft", "id": row["id"]} for row in settings_drafts)
+        outlines = tx.execute(
+            "SELECT id,revision,confirmed,json_extract(setting_basis,'$.project_id') AS project_id "
+            "FROM outline_revisions WHERE branch_id=:branch AND revision IN ("
+            "SELECT MAX(revision) FROM outline_revisions WHERE branch_id=:branch UNION "
+            "SELECT MAX(revision) FROM outline_revisions WHERE branch_id=:branch AND confirmed=1) "
+            "ORDER BY confirmed DESC,revision DESC",
+            {"branch": branch_id},
+        ).fetchall()
+        for row in outlines:
+            if row["project_id"] == project_id:
+                targets.append(
+                    {
+                        "kind": "outline" if row["confirmed"] else "outline_draft",
+                        "id": row["id"],
+                        "revision": row["revision"],
+                    }
+                )
+        outline_id = next((row["id"] for row in outlines if row["confirmed"]), None)
+        inspections = tx.execute(
+            """
+            WITH reports AS (
+              SELECT id,payload,json_extract(payload,'$.scope') AS scope,
+                     json_extract(payload,'$.scope_id') AS scope_id,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY json_extract(payload,'$.scope'),json_extract(payload,'$.scope_id')
+                       ORDER BY rowid DESC
+                     ) AS latest
+              FROM artifacts WHERE branch_id=:branch AND kind=:kind AND status='accepted'
+            ), volumes AS (
+              SELECT json_extract(v.value,'$.id') AS id,json_extract(v.value,'$.title') AS title
+              FROM outline_revisions o,json_each(o.payload,'$.volumes') v WHERE o.id=:outline
+            )
+            SELECT r.id,r.scope,COALESCE(c.title,v.title) AS title FROM reports r
+            LEFT JOIN chapters c ON r.scope='chapter' AND c.id=r.scope_id
+                                   AND c.branch_id=:branch AND c.archived=0
+            LEFT JOIN volumes v ON r.scope='volume' AND v.id=r.scope_id
+            WHERE r.latest=1 AND (r.scope='book' OR c.id IS NOT NULL OR v.id IS NOT NULL)
+              AND EXISTS (
+                SELECT 1 FROM json_each(r.payload,'$.items') i
+                WHERE json_extract(i.value,'$.check_id')='01'
+                  AND json_extract(i.value,'$.basis.project.id')=:project
+              )
+            ORDER BY r.scope,r.scope_id,r.id
+            """,
+            {"branch": branch_id, "kind": INSPECTION, "outline": outline_id, "project": project_id},
+        )
+        targets.extend({"kind": "inspection", **dict(row)} for row in inspections)
+        completion = tx.execute(
+            "SELECT id,json_extract(payload,'$.manifest.project_id') AS project_id FROM artifacts "
+            "WHERE branch_id=? AND kind=? AND status='accepted' ORDER BY rowid DESC LIMIT 1",
+            (branch_id, COMPLETION),
+        ).fetchone()
+        if completion and completion["project_id"] == project_id:
+            targets.append({"kind": "completion", "id": completion["id"]})
+        runs = tx.execute(
+            "SELECT id,status FROM tasks WHERE branch_id=? AND kind=? "
+            "AND status IN ('queued','running','waiting_child','paused','needs_review','blocked_runtime') "
+            "AND json_extract(result,'$.seven_stage_run.project_id')=? ORDER BY id",
+            (branch_id, SEVEN_STAGE, project_id),
+        )
+        targets.extend({"kind": "run", **dict(row)} for row in runs)
+    return {
+        "project_id": project_id,
+        "base_revision": revision,
+        "basis_sha256": hashlib.sha256(
+            dumps([branch_id, project_id, revision, targets]).encode()
+        ).hexdigest(),
+        "targets": targets,
+    }
+
+
 def confirm(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
         return confirm_tx(tx, branch_id, data, before_write=before_write)
 
 
 def confirm_tx(tx, branch_id, data, *, before_write=None, sync_source=None, archive_source_id=None):
-    payload = data.model_dump()
+    payload = data.model_dump(exclude={"impact_sha256"})
     fingerprint = hashlib.sha256(dumps([KIND, branch_id, payload]).encode()).hexdigest()
     if before_write is not None:
         before_write(tx)
@@ -90,6 +207,8 @@ def confirm_tx(tx, branch_id, data, *, before_write=None, sync_source=None, arch
     revision = current["revision"] if current else 0
     if revision != data.base_revision:
         raise DomainError("project_brief_changed", "立项已在其他窗口确认，请核对后再提交。", 409)
+    if data.impact_sha256 and data.impact_sha256 != _revision_impact(tx, branch_id, current)["basis_sha256"]:
+        raise DomainError("project_impact_changed", "立项修订影响已变化，请重新核对下游记录再确认。", 409)
     if data.candidate_id:
         candidate = tx.execute(
             "SELECT payload,basis FROM artifacts WHERE id=? AND branch_id=? AND kind=? AND status='accepted'",
@@ -152,6 +271,19 @@ def register_routes(app, domain):
         domain.branch(branch_id)
         with domain.db.connect() as tx:
             return confirmed_project_tx(tx, branch_id)
+
+    @app.get(path + "/impact")
+    def preview_project_impact(
+        branch_id: str, base_revision: Annotated[int, Query(ge=0)]
+    ) -> ProjectRevisionImpact:
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            if not tx.execute("SELECT 1 FROM branches WHERE id=?", (branch_id,)).fetchone():
+                raise DomainError("not_found", "工作版本不存在。", 404)
+            project = confirmed_project_tx(tx, branch_id)
+            if (project["revision"] if project else 0) != base_revision:
+                raise DomainError("project_brief_changed", "立项已在其他窗口确认，请核对后再提交。", 409)
+            return _revision_impact(tx, branch_id, project)
 
     @app.put(path)
     def confirm_project(branch_id: str, data: ConfirmProject) -> ConfirmedProject:

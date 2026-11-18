@@ -1270,6 +1270,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/conception/project-brief/impact': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Preview Project Impact */
+    get: operations['preview_project_impact_api_branches__branch_id__conception_project_brief_impact_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/conception': {
     parameters: {
       query?: never
@@ -3409,6 +3426,8 @@ export interface components {
       brief: components['schemas']['ProjectBrief']
       /** Candidate Id */
       candidate_id?: string | null
+      /** Impact Sha256 */
+      impact_sha256?: string | null
     }
     /** ConfirmedProject */
     ConfirmedProject: {
@@ -4558,6 +4577,35 @@ export interface components {
       adopted_revision_id: string | null
       /** Versions */
       versions: components['schemas']['ProjectVersion'][]
+    }
+    /** ProjectImpactTarget */
+    ProjectImpactTarget: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'settings' | 'settings_draft' | 'outline' | 'outline_draft' | 'inspection' | 'completion' | 'run'
+      /** Id */
+      id: string
+      /** Revision */
+      revision?: number | null
+      /** Scope */
+      scope?: ('chapter' | 'volume' | 'book') | null
+      /** Title */
+      title?: string | null
+      /** Status */
+      status?: string | null
+    }
+    /** ProjectRevisionImpact */
+    ProjectRevisionImpact: {
+      /** Project Id */
+      project_id: string | null
+      /** Base Revision */
+      base_revision: number
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Targets */
+      targets: components['schemas']['ProjectImpactTarget'][]
     }
     /** ProjectVersion */
     ProjectVersion: {
@@ -8616,6 +8664,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ConfirmedProject']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_project_impact_api_branches__branch_id__conception_project_brief_impact_get: {
+    parameters: {
+      query: {
+        base_revision: number
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ProjectRevisionImpact']
         }
       }
       /** @description Validation Error */

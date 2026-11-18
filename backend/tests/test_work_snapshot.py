@@ -17,6 +17,7 @@ from test_outline_workspace import chapter_plan, put_and_confirm, setting_confir
 from test_project_brief import BRIEF, IDEA
 from test_reference_flow import SOURCE, reference as reference_fixture, update as update_reference
 from test_reference_sync import card
+from test_workflow_inspection import author, item, report
 
 reference = reference_fixture
 
@@ -618,6 +619,66 @@ def test_failed_restore_is_atomic_and_retry_is_idempotent(snapshot_client, domai
     assert len(verify(client.get(route(branch)))) == 2
 
 
+def test_rollback_keeps_numeric_review_but_blocks_completion_until_dependent_checks_are_repeated(
+    snapshot_client, domain, story
+):
+    client = snapshot_client
+    branch = story["branch_id"]
+    first = domain.save(story["chapter_id"], 0, "学徒打开了门。")
+    second = domain.create_chapter(branch, "归铃")
+    saved = verify(
+        client.post(route(branch), json={"scope": "chapter", "scope_id": first["id"], "label": "开门旧稿"}),
+        201,
+    )
+    domain.save(first["id"], first["revision"], "学徒绕到后门。")
+    second = domain.save(second["id"], 0, "学徒终于把铃送回给师姐。")
+    base = f"/api/branches/{branch}"
+    inspections = base + "/workflow-inspections"
+    book_preview = verify(client.get(inspections))["preview"]
+    issued = report(
+        client,
+        inspections,
+        book_preview,
+        length_targets={"expected_chapters": 2, "min_chars": 1},
+        author_reviews=[
+            author(row["check_id"], second) for row in book_preview["items"] if row["status"] == "pending"
+        ],
+    )
+    assert all(row["current_status"] == "green" for row in issued["items"])
+    completion = base + "/book-completion"
+    decision = {
+        "basis_sha256": verify(client.get(completion))["basis_sha256"],
+        "read_note": "已通读合成故事的两个章节。",
+        "ending": {"note": "铜铃归还原主。"},
+        "characters": {"note": "学徒和师姐重逢。"},
+        "promises": {"note": "归铃的承诺已经兑现。"},
+        "intro": "学徒循着线索寻找铜铃的主人。",
+        "spoiler_scope": "opening",
+        "sample_chapter_ids": [first["id"]],
+        "materials_reviewed": True,
+    }
+    delivered = verify(client.post(completion + "/confirm", json=decision), 201)
+    scope = {"scope": "chapter", "scope_id": second["id"]}
+    scoped = report(
+        client,
+        inspections,
+        verify(client.get(inspections, params=scope))["preview"],
+        length_targets={"min_chars": 1},
+    )
+
+    request_restore(client, branch, saved["id"])
+    current = verify(client.get(f"{inspections}/{scoped['id']}"))
+    assert not current["current"] and item(current, "09")["current_status"] == "green"
+    assert item(current, "08")["current_status"] == "outdated"
+    assert not verify(client.get(f"{inspections}/{issued['id']}"))["current"]
+    assert not verify(client.get(f"{completion}/history/{delivered['id']}"))["current"]
+    decision["basis_sha256"] = verify(client.get(completion))["basis_sha256"]
+    preview = verify(client.post(completion + "/preview", json=decision))
+    assert next(check for check in preview["checks"] if check["id"] == "inspection")["status"] == "red"
+    blocked = verify(client.post(completion + "/confirm", json=decision), 409)
+    assert blocked["code"] == "completion_blocked"
+
+
 @pytest.mark.parametrize("change_body", [False, True])
 def test_partial_volume_leaves_other_plan_and_manuscript_untouched(
     snapshot_client,
@@ -713,7 +774,17 @@ def test_partial_volume_leaves_other_plan_and_manuscript_untouched(
     inspection_route = f"/api/branches/{branch}/workflow-inspections"
     scope = {"scope": "volume", "scope_id": "v2"}
     preview = verify(client.get(inspection_route, params=scope))["preview"]
-    verify(client.post(inspection_route, json={**scope, "basis_sha256": preview["basis_sha256"]}), 201)
+    report = verify(
+        client.post(
+            inspection_route,
+            json={
+                **scope,
+                "basis_sha256": preview["basis_sha256"],
+                "length_targets": {"expected_chapters": 1, "min_chars": 1},
+            },
+        ),
+        201,
+    )
     request_restore(client, branch, saved["id"])
     assert domain.chapter(first["id"])["content"] == first["content"]
     assert domain.chapter(second["id"])["content"] == newer_second["content"]
@@ -722,7 +793,27 @@ def test_partial_volume_leaves_other_plan_and_manuscript_untouched(
     assert view["confirmed"]["plan"]["summary"] == "主线已有发展"
     assert view["confirmed"]["plan"]["volumes"] == [original["volumes"][0], edited["volumes"][1]]
     assert view["confirmed"]["setting_basis"]["confirmation_id"] == setting
-    assert verify(client.get(inspection_route, params=scope))["latest"]["current"] is not change_body
+    current = verify(client.get(inspection_route, params=scope))
+    historical = verify(client.get(f"{inspection_route}/{report['id']}"))
+    assert current["latest"] == historical
+    assert historical["current"] is not change_body
+    assert historical["basis_sha256"] == report["basis_sha256"]
+    assert historical["chapters"] == report["chapters"]
+    assert item(historical, "09") == item(report, "09")
+    assert item(historical, "09")["current_status"] == item(current["preview"], "09")["status"] == "green"
+    assert item(historical, "08")["current_status"] == ("outdated" if change_body else "pending")
+    revised_target = verify(
+        client.put(
+            inspection_route + "/length-targets",
+            json={
+                **scope,
+                "base_target_id": report["length_target"]["id"],
+                "targets": {"expected_chapters": 2},
+            },
+        )
+    )
+    assert item(revised_target["preview"], "09")["status"] == "red"
+    assert item(revised_target["latest"], "09") == {**item(report, "09"), "current_status": "outdated"}
     restored = graph(domain, branch)["records"][0]
     assert restored["id"] == recorded["id"]
     assert restored["revision"] > recorded["revision"]
