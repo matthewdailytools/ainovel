@@ -87,6 +87,9 @@ def test_formal_archive_is_immutable_and_pulls_into_independent_desktop_history(
     original_zip = _members(client.get(pointer))
     archive = export_manuscript(domain, branch).workflow_history
     red_entry = next(entry for entry in archive.inspections if entry.id == red["id"])
+    resolved = next(
+        entry for entry in archive.inspections if entry.report.scope == "chapter" and entry.id != red["id"]
+    )
     passing = next(entry for entry in archive.inspections if entry.id == book["id"])
     frozen = archive.completions[0]
     origin, _ = loopback
@@ -147,10 +150,11 @@ def test_formal_archive_is_immutable_and_pulls_into_independent_desktop_history(
     actual = [row for row in events if row["object_id"].startswith("workflow-")]
     assert [row["object_id"] for row in actual] == [
         f"workflow-inspection:{red['id']}",
+        f"workflow-inspection:{resolved.id}",
         f"workflow-inspection:{book['id']}",
         f"workflow-completion:{completed['id']}",
     ]
-    assert actual[1]["payload"]["entry_json"] == workflow_object(branch, passing)["entry_json"]
+    assert actual[2]["payload"]["entry_json"] == workflow_object(branch, passing)["entry_json"]
     first_source = passing.chapter_bindings[0].revision_id
     assert (
         next(row for row in events if row["object_id"] == f"revision:{first_source}")["sequence"]

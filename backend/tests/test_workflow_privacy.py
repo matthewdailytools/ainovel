@@ -35,7 +35,7 @@ def legacy(client, domain, story):
     completion = api + "/book-completion"
     chapter = domain.save(story["chapter_id"], 0, "学徒把铜铃交给师姐。")
     baseline = export_manuscript(domain, branch)
-    clean, passed = _send_reports(client, inspection, chapter)
+    _, passed = _send_reports(client, inspection, chapter)
     delivered = _complete(client, completion, chapter)
     zip_path = completion + f"/{delivered['id']}/export"
     zip_files = _members(client.get(zip_path))
@@ -99,7 +99,7 @@ def legacy(client, domain, story):
         history=history,
         document=document,
         report_id=passed["id"],
-        clean_id=clean["id"],
+        clean_ids={entry.id for entry in history.inspections if entry.id != passed["id"]},
         report_path=inspection + "/" + passed["id"],
         zip_path=zip_path,
         zip_files=zip_files,
@@ -217,12 +217,13 @@ def test_desktop_retires_unsafe_outbox_and_cloud_rejects_older_client_payloads(
     assert set(previous) <= set(deferred)
     assert all("历史体检含参考选段原句" in deferred[key] for key in previous)
     assert set(previous).isdisjoint(emitted)
-    assert f"workflow-inspection:{legacy.clean_id}" in emitted
+    assert {f"workflow-inspection:{identifier}" for identifier in legacy.clean_ids} <= set(emitted)
     with domain.db.connect() as tx:
         assert not tx.execute("SELECT 1 FROM desktop_sync_outbox WHERE branch_id=?", (branch,)).fetchone()
     right.run(branch, origin, reader)
     assert receiving_domain.chapter(changed["id"])["content"] == changed["content"]
-    assert export_manuscript(receiving_domain, branch).workflow_history.inspections[0].id == legacy.clean_id
+    received = export_manuscript(receiving_domain, branch).workflow_history.inspections
+    assert {entry.id for entry in received} == legacy.clean_ids
     assert_local_history(client, legacy)
 
     with httpx.Client(trust_env=False, headers={"Authorization": f"Bearer {writer}"}) as older:

@@ -17,8 +17,11 @@ import { captureStoryEvidence } from './storySyncModel'
 it('按 M6 同一有效字符口径排除 Markdown 标记、空白和不可见字符', () => {
   expect(bodyChars('## 排版标题\n- **铜铃** [响了](https://example.invalid)\n---\n> 入门。😀\u200b')).toBe(8)
   expect(bodyChars('٣. 甲 [乙](url) ![插图](file)\n~~~text\n戊\u200b，😀\n~~~\u0085')).toBe(5)
-  expect(bodyChars('### 排版标题\r\n   ***\r\n\u00a0\u2028\ufeff\u200b')).toBe(1)
+  expect(bodyChars('### 排版标题\r\n   ***\r\n\u00a0\u2028\ufeff\u200b')).toBe(0)
   expect(bodyChars('   ***\n\u00a0\u2028\ufeff\u200b')).toBe(0)
+  for (const newline of ['\n', '\r\n', '\r']) {
+    expect(bodyChars(['甲', '***', '> - 乙', '1. > 丙。'].join(newline))).toBe(4)
+  }
   // Chromium's newer Unicode classifies U+088F as assigned. Desktop Unicode 16 does not.
   expect(bodyChars('甲\u088f\u{1fa89}')).toBe(2)
   expect(bodyChars('甲>乙\n> 引')).toBe(4)
@@ -36,7 +39,9 @@ it.each([undefined, 'author_required'] as const)(
       const previous = (await readLocalHistory(work, id)).at(-1)!
       return saveLocalChapter(work, id, previous.id, text)
     }
-    const base = await save(first.id, '## 第一章\n- [铃](https://example.invalid)😀。')
+    const original = '## 第一章\r\n***\r> - [铃](https://example.invalid)😀。'
+    const base = await save(first.id, original)
+    expect((await readLocalHistory(work, first.id)).at(-1)?.content).toBe(original)
     expect(await readLocalRulePreview(work)).toMatchObject({
       book: { chapters: 3, chars: 3, empty: 2, stale: 0 },
       outlineRevision: undefined,

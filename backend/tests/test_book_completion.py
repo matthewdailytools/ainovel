@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import zipfile
 from zipfile import ZipFile
 
+from ainovel import workflow_inspection
 from ainovel.db import Database
 from ainovel.domain import Domain
 from ainovel.manuscript_exchange import export_manuscript, import_manuscript
@@ -18,6 +19,9 @@ from test_workflow_inspection import author
 
 
 def test_finish_requires_six_checks_and_exports_immutable_package(client, domain, story, monkeypatch):
+    current_method = workflow_inspection.COUNT_VERSION
+    previous_method = "正文有效字符/1，排除 Markdown 标题行、常见排版标记、空白和不可见字符，计入标点"
+    monkeypatch.setattr(workflow_inspection, "COUNT_VERSION", previous_method)
     branch = story["branch_id"]
     chapter = domain.save(story["chapter_id"], 0, "学徒找到师姐，归还了铜铃。")
     endpoint = f"/api/branches/{branch}/book-completion"
@@ -80,6 +84,14 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
             sha256(archive.read(name)).hexdigest() == digest for name, digest in manifest["files"].items()
         )
         assert chapter["content"] in archive.read("正文.md").decode()
+
+    monkeypatch.setattr(workflow_inspection, "COUNT_VERSION", current_method)
+    recounted = client.get(endpoint).json()
+    assert not recounted["latest"]["current"]
+    assert recounted["basis_sha256"] != data["basis_sha256"]
+    assert recounted["latest"]["checks"] == record["checks"]
+    assert client.get(export).content == response.content
+
     length = client.get(inspection).json()["preview"]["length_target"]
     changed = client.put(
         inspection + "/length-targets",
@@ -101,6 +113,35 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
     historical = client.get(export)
     assert historical.status_code == 200
     assert historical.content == response.content
+
+
+def test_m7_rejects_chapter_with_only_formatting_without_a_length_target(client, domain, story):
+    branch = story["branch_id"]
+    content = "## 第一章\r\n***\r> - "
+    chapter = domain.save(story["chapter_id"], 0, content)
+    endpoint = f"/api/branches/{branch}/book-completion"
+    state = client.get(endpoint).json()
+    data = {
+        "basis_sha256": state["basis_sha256"],
+        "read_note": "作者通读。",
+        "ending": {"note": "核对终局。"},
+        "characters": {"note": "核对人物去向。"},
+        "promises": {"note": "核对伏笔。"},
+        "intro": "故事简介。",
+        "spoiler_scope": "opening",
+        "sample_chapter_ids": [chapter["id"]],
+        "materials_reviewed": True,
+    }
+    preview = client.post(endpoint + "/preview", json=data)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["manifest"]["length_target"] is None
+    manuscript = next(row for row in preview.json()["checks"] if row["id"] == "manuscript")
+    assert manuscript["status"] == "red"
+    assert "0 个有效字符" in manuscript["detail"] and "空稿" in manuscript["detail"]
+    rejected = client.post(endpoint + "/confirm", json=data)
+    assert rejected.status_code == 409
+    assert rejected.json()["code"] == "completion_blocked"
+    assert client.get(f"/api/chapters/{chapter['id']}").json()["content"] == content
 
 
 def test_exported_catalogue_keeps_each_adopted_setting_on_its_frozen_revision(

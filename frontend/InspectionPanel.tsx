@@ -109,6 +109,44 @@ function canOpenSources(item: Item) {
   )
 }
 
+function ScopedInspectionSources({
+  item,
+  chapters,
+  branchId,
+}: {
+  item: Item
+  chapters: Preview['chapters']
+  branchId: string
+}) {
+  const rows: unknown = item.basis.scoped_findings
+  if (!Array.isArray(rows)) return null
+  const findings = rows.filter(
+    (row): row is { scope: 'chapter' | 'volume'; scope_id: string; report_id: string } =>
+      !!row &&
+      (row.scope === 'chapter' || row.scope === 'volume') &&
+      typeof row.scope_id === 'string' &&
+      typeof row.report_id === 'string',
+  )
+  if (!findings.length) return null
+  return (
+    <ul aria-label="章卷红项来源">
+      {findings.map((finding) => (
+        <li key={finding.report_id}>
+          <p className="small" style={{ overflowWrap: 'anywhere' }}>
+            {finding.scope === 'chapter'
+              ? (chapters.find((chapter) => chapter.id === finding.scope_id)?.title ?? '本章')
+              : '分卷'}{' '}
+            · 体检报告 <code>{finding.report_id}</code>
+          </p>
+          <InspectionSources
+            route={`/branches/${encodeURIComponent(branchId)}/workflow-inspections/${encodeURIComponent(finding.report_id)}/source-context/${item.check_id}`}
+          />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function StatusBadge({ status }: { status: Status }) {
   const shade = shades[status]
   return (
@@ -303,6 +341,7 @@ function CheckList({
               route={`/branches/${encodeURIComponent(branchId)}/workflow-inspections/${encodeURIComponent(reportId)}/source-context/${item.check_id}`}
             />
           )}
+          <ScopedInspectionSources item={item} chapters={chapters} branchId={branchId} />
           <details>
             <summary>对照依据</summary>
             <pre className="report">{JSON.stringify(item.basis, null, 2)}</pre>

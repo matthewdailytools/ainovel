@@ -35,6 +35,16 @@ def _send_reports(client, inspection, chapter):
         },
     )
     assert local.status_code == 201, local.text
+    resolved = client.post(
+        inspection,
+        json={
+            **scoped,
+            "basis_sha256": preview["basis_sha256"],
+            "author_reviews": [author("03", chapter, "green")],
+        },
+    )
+    assert resolved.status_code == 201, resolved.text
+    assert resolved.json()["items"][2]["current_status"] == "green"
     preview = client.get(inspection).json()["preview"]
     passed = client.post(
         inspection,
@@ -145,12 +155,15 @@ def test_restored_workflow_proofs_remain_historical_until_native_author_confirma
         assert current_m7.json()["current"] and current_m7.json()["id"] != record["id"]
 
         dual = other.get(archive_path).json()["workflow_history"]
-        assert {row["id"] for row in dual["inspections"]} == {book["id"], red["id"], current_m6.json()["id"]}
+        assert {row["id"] for row in dual["inspections"]} == {
+            *(row["id"] for row in encoded["inspections"]),
+            current_m6.json()["id"],
+        }
         assert {row["id"] for row in dual["completions"]} == {record["id"], current_m7.json()["id"]}
         third = Domain(Database(tmp_path / "workflow-third.sqlite"))
         import_manuscript(third, type(pack).model_validate(other.get(archive_path).json()))
         with third.db.connect() as tx:
-            assert tx.execute("SELECT COUNT(*) FROM manuscript_workflow_history").fetchone()[0] == 5
+            assert tx.execute("SELECT COUNT(*) FROM manuscript_workflow_history").fetchone()[0] == 6
             assert not tx.execute("SELECT 1 FROM artifacts WHERE kind='book_completion'").fetchone()
 
         target.save(chapter["id"], chapter["revision"], "后来作者重写了最后一场。")

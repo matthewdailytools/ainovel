@@ -28,7 +28,7 @@ def main():
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     if unicodedata.unidata_version != "16.0.0":
-        raise SystemExit("正文有效字符/1 uses the desktop Python Unicode 16.0.0 data.")
+        raise SystemExit(f"{COUNT_VERSION} uses the desktop Python Unicode 16.0.0 data.")
     output = (
         "\n\n".join(
             (

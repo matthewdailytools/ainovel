@@ -15,7 +15,7 @@ export { bodyCountMethod } from './bodyCountUnicode16'
 // Keep the line boundaries, decimal digits and whitespace aligned with workflow_inspection.body_chars.
 const formatLine = /^ {0,3}(?:#{1,6}[ \t]+[\s\S]*|(?:[-*_][ \t]*){3,}|(?:\x60{3,}|~{3,})[\s\S]*)$/u
 const formatPrefix = new RegExp(
-  '^ {0,3}(?:>[ \\t]*|[-+*][ \\t]+|[' + bodyCountDecimals + ']+[.)][ \\t]+)',
+  '^(?: {0,3}(?:>[ \\t]*|[-+*][ \\t]+|[' + bodyCountDecimals + ']+[.)][ \\t]+))+',
   'u',
 )
 const inlineFormat = new RegExp(
@@ -30,6 +30,7 @@ const countedChar = new RegExp('[' + bodyCountCharacters + ']', 'u')
 
 export function bodyChars(text: string) {
   const body = text
+    .replace(/\r\n?/g, '\n')
     .split('\n')
     .map((line) => (formatLine.test(line) ? '' : line))
     .join('\n')

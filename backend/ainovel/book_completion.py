@@ -65,7 +65,7 @@ def _basis(tx, branch_id):
     ]
     outline = _view(tx, branch_id)
     graph = graph_snapshot(tx, branch_id)
-    report = latest_book_inspection(tx, branch_id)
+    report = latest_book_inspection(tx, branch_id, include_current_red=True)
     project = confirmed_project_tx(tx, branch_id)
     settings = confirmed_outline_settings(tx, branch_id)
     promises = [row for row in graph["records"] if row["kind"] == "promise" and not row["archived"]]
@@ -210,15 +210,14 @@ def _evaluate(tx, branch_id, data=None):
         if outline["confirmed"]
         else []
     )
-    manuscript = bool(chapters) and all(row["content"].strip() for row in chapters)
-    manuscript = manuscript and (not expected or expected == list(by_id)) and not outline["stale"]
-    manuscript_detail = "核对目录、非空正文及大纲覆盖，并记录通读。"
     length_target = manifest["length_target"]
-    if length_target and length_target["targets"] is not None:
-        length_status, length_detail = length_result(
-            [{"chars": body_chars(row["content"])} for row in chapters], length_target["targets"]
-        )
-        manuscript = manuscript and length_status == "green"
+    targets = length_target["targets"] if length_target else None
+    length_status, length_detail = length_result(
+        [{"chars": body_chars(row["content"])} for row in chapters], targets
+    )
+    manuscript = length_status != "red" and (not expected or expected == list(by_id)) and not outline["stale"]
+    manuscript_detail = "核对目录、非空正文及大纲覆盖，并记录通读。"
+    if targets or length_status == "red":
         manuscript_detail += length_detail
     required_open = {
         row["promise_id"]: row["title"]
@@ -244,9 +243,13 @@ def _evaluate(tx, branch_id, data=None):
         and report["current"]
         and all(item["current_status"] in {"green", "not_applicable"} for item in report["items"])
     )
-    blocked = (report and any(item["current_status"] == "red" for item in report["items"])) or any(
-        row["stale"] for row in chapters
+    current_red = report and (
+        report["current_red_checks"] or any(item["current_status"] == "red" for item in report["items"])
     )
+    blocked = current_red or any(row["stale"] for row in chapters)
+    inspection_detail = "需要当前全书体检通过，且所有受影响正文都已复检。"
+    if current_red:
+        inspection_detail += "请在校验台核对本轮红项及对应的章、卷报告。"
     materials = _materials(manifest, chapters, settings, data)
     checks = [
         _check(
@@ -278,7 +281,7 @@ def _evaluate(tx, branch_id, data=None):
         _check(
             "inspection",
             "一致性与复检",
-            "需要当前全书体检通过，且所有受影响正文都已复检。",
+            inspection_detail,
             inspection_ok and not blocked,
             bool(blocked),
         ),

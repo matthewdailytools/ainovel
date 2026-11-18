@@ -111,6 +111,53 @@ test('跨章体检同时打开冲突双方的固定选区，改稿后历史与�
   await openPair(first.content.slice(2), second.content.slice(2))
 })
 
+test('全书体检汇总当前章级红项并可用键盘回到原报告的选区', async ({ page }) => {
+  const work = await createWork(page, '铜铃 · 章级红项')
+  const original = '😀渡口的学徒还未见到守铃人。'
+  const chapter = await work.chapter('渡口见面', original)
+  const route = `${work.branch}/workflow-inspections`
+  const scope = { scope: 'chapter', scope_id: chapter.id }
+  const { preview } = await checked(await page.request.get(route, { params: scope }))
+  const { id } = await checked(
+    await page.request.post(route, {
+      headers: work.headers,
+      data: {
+        ...scope,
+        basis_sha256: preview.basis_sha256,
+        author_reviews: [
+          {
+            check_id: '03',
+            status: 'red',
+            basis_note: '按已确认的人物出场关系核对。',
+            reason: '这一段与本章已确定的相见时点冲突。',
+            evidence: [
+              {
+                chapter_id: chapter.id,
+                revision: chapter.revision,
+                start: 2,
+                end: original.length,
+                quote: original.slice(2),
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  )
+  await page.setViewportSize({ width: 320, height: 900 })
+  const panel = await work.openInspection()
+  await panel.getByText('本次依据与未核查项', { exact: true }).press('Enter')
+  const sources = panel.getByRole('list', { name: '章卷红项来源', exact: true })
+  await expect(sources).toContainText(id)
+  await expect(sources).toContainText('渡口见面')
+  await sources.getByText('查看体检原文', { exact: true }).press('Enter')
+  await sources.getByText(/^打开渡口见面原文/).press('Enter')
+  await expect(sources.getByRole('region', { name: /^渡口见面原文/ }).locator('mark')).toHaveText(
+    original.slice(2),
+  )
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
+})
+
 test('全书逐条签认 31 章的软偏离，独立 Web 可验证并读回签认', async ({ page, context }) => {
   const work = await createWork(page, '遗铃 · 软设定签认')
   const chapters: { id: string; revision: number }[] = []

@@ -1,5 +1,6 @@
 import pytest
 
+from ainovel import workflow_inspection
 from ainovel.workflow_inspection import body_chars, latest_book_inspection
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 
@@ -52,6 +53,50 @@ def author(check_id, chapter, status="green"):
 
 def test_body_count_excludes_markdown_formatting_but_keeps_punctuation():
     assert body_chars("## 排版标题\n- **铜铃** [响了](https://example.invalid)\n---\n> 入门。😀\u200b") == 8
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+def test_numeric_targets_count_the_same_body_with_each_newline(client, domain, story, newline):
+    content = newline.join(("甲", "***", "> - 乙", "1. > 丙。"))
+    chapter = domain.save(story["chapter_id"], 0, content)
+    route = endpoint(story)
+    preview = read(client, route)["preview"]
+    assert preview["chapters"][0]["chars"] == 4
+    checked = report(client, route, preview, length_targets={"min_chars": 4, "max_chars": 4})
+    assert item(checked, "09")["current_status"] == "green"
+    assert item(checked, "09")["basis"]["method"].startswith("正文有效字符/2")
+    assert read(client, f"/api/chapters/{chapter['id']}")["content"] == content
+
+
+def test_new_count_method_requires_rechecking_previous_numeric_verdict(client, domain, story, monkeypatch):
+    chapter = domain.save(story["chapter_id"], 0, "取回铜铃。")
+    route = endpoint(story)
+    scope = {"scope": "chapter", "scope_id": chapter["id"]}
+    with monkeypatch.context() as legacy:
+        legacy.setattr(
+            workflow_inspection,
+            "COUNT_VERSION",
+            "正文有效字符/1，排除 Markdown 标题行、常见排版标记、空白和不可见字符，计入标点",
+        )
+        previous = report(
+            client,
+            route,
+            read(client, route, **scope)["preview"],
+            author_reviews=[author("02", chapter)],
+            length_targets={"min_chars": 5, "max_chars": 5},
+        )
+    current = read(client, route, **scope)
+    assert not current["latest"]["current"]
+    assert current["preview"]["basis_sha256"] != previous["basis_sha256"]
+    history = read(client, f"{route}/{previous['id']}")
+    assert item(history, "09")["status"] == "green"
+    assert item(history, "09")["current_status"] == "outdated"
+    assert item(history, "09")["basis"] == item(previous, "09")["basis"]
+    assert item(history, "02")["current_status"] == "green"
+    assert item(history, "02")["author_review"]["evidence"] == [source(chapter)]
+    current_report = report(client, route, current["preview"], author_reviews=[author("02", chapter)])
+    assert item(current_report, "09")["current_status"] == "green"
+    assert item(current_report, "09")["basis"]["method"] == workflow_inspection.COUNT_VERSION
 
 
 def test_only_absent_optional_material_can_be_marked_not_applicable(inspection_client, domain, story):
@@ -462,3 +507,123 @@ def test_inspection_reads_confirmed_outline_due_promise_and_rule_conflict(inspec
     )
     assert item(confirmed, "05")["status"] == "red"
     assert item(confirmed, "07")["status"] == "yellow"
+
+
+def test_scoped_red_reviews_block_book_completion_until_explicitly_rechecked(client, domain, story):
+    branch = story["branch_id"]
+    first = domain.save(story["chapter_id"], 0, "学徒拾铃入门。")
+    second = domain.create_chapter(branch, "第二章")
+    second = domain.save(second["id"], 0, "师姐接过了铜铃。")
+    outline = f"/api/branches/{branch}/outline-workspace"
+    volumes = [
+        {
+            "id": f"v{index}",
+            "title": f"第{index}卷",
+            "summary": "寻找铜铃",
+            "units": [
+                {
+                    "id": f"u{index}",
+                    "title": "线索",
+                    "summary": "找铃",
+                    "chapters": [{**chapter_plan(chapter["id"], "核对铜铃"), "setting_ids": []}],
+                }
+            ],
+        }
+        for index, chapter in enumerate((first, second), 1)
+    ]
+    put_and_confirm(
+        client, outline, {"base_revision": 0, "plan": {"summary": "归还铜铃", "volumes": volumes}}
+    )
+    route = endpoint(story)
+    completion = f"/api/branches/{branch}/book-completion"
+    decision = {
+        "read_note": "已通读当前稿件。",
+        "ending": {"note": "铜铃已归还。"},
+        "characters": {"note": "两人找到并交接铜铃。"},
+        "promises": {"note": "本稿没有单列承诺。"},
+        "intro": "学徒在门口拾得旧铜铃。",
+        "spoiler_scope": "opening",
+        "sample_chapter_ids": [first["id"]],
+        "materials_reviewed": True,
+    }
+
+    def sign_book():
+        preview = read(client, route)["preview"]
+        return report(
+            client,
+            route,
+            preview,
+            author_reviews=[author(check["check_id"], first) for check in preview["items"]],
+        )
+
+    def sign_scope(scope, check_id, chapter, status):
+        preview = read(client, route, **scope)["preview"]
+        reviews = [author(check_id, chapter, status)] if status else []
+        return report(client, route, preview, author_reviews=reviews)
+
+    book = sign_book()
+    initial = read(client, completion)
+    original = client.post(
+        completion + "/confirm", json={**decision, "basis_sha256": initial["basis_sha256"]}
+    )
+    assert original.status_code == 201, original.text
+    download = f"{completion}/{original.json()['id']}/export"
+    frozen = client.get(download).content
+    chapter_scope = {"scope": "chapter", "scope_id": first["id"]}
+    first_volume = {"scope": "volume", "scope_id": "v1"}
+    second_volume = {"scope": "volume", "scope_id": "v2"}
+
+    chapter_red = sign_scope(chapter_scope, "03", first, "red")
+    assert item(chapter_red, "03")["current_status"] == "red"
+    first_check = item(read(client, route, **first_volume)["preview"], "03")
+    assert first_check["status"] == "red"
+    assert first_check["basis"]["scoped_findings"] == [
+        {**chapter_scope, "report_id": chapter_red["id"]},
+    ]
+    assert item(read(client, route, **second_volume)["preview"], "03")["status"] != "red"
+    inherited = sign_scope(first_volume, "03", first, "green")
+    assert item(inherited, "03")["current_status"] == "red"
+    volume_red = sign_scope(second_volume, "04", second, "red")
+    sign_scope(chapter_scope, "03", first, None)
+    rolled = sign_book()
+    assert item(rolled, "03")["basis"]["scoped_findings"] == first_check["basis"]["scoped_findings"]
+    assert item(rolled, "04")["basis"]["scoped_findings"] == [
+        {**second_volume, "report_id": volume_red["id"]},
+    ]
+    assert {check["check_id"] for check in rolled["items"] if check["current_status"] == "red"} == {
+        "03",
+        "04",
+    }
+    history = read(client, f"{route}/{book['id']}")
+    assert not history["current"]
+    assert item(history, "03")["current_status"] == "outdated"
+    blocked = read(client, completion)
+    assert not blocked["latest"]["current"]
+    assert blocked["basis_sha256"] != initial["basis_sha256"]
+    assert next(check for check in blocked["checks"] if check["id"] == "inspection")["status"] == "red"
+    rejected = client.post(
+        completion + "/confirm", json={**decision, "basis_sha256": blocked["basis_sha256"]}
+    )
+    assert rejected.status_code == 409 and rejected.json()["code"] == "completion_blocked"
+    assert client.get(download).content == frozen
+    archive = read(client, f"/api/branches/{branch}/manuscript-package")["workflow_history"]
+    archived_reports = {entry["id"]: entry["report"] for entry in archive["inspections"]}
+    assert (
+        item(archived_reports[rolled["id"]], "03")["basis"]["scoped_findings"]
+        == first_check["basis"]["scoped_findings"]
+    )
+    assert item(archived_reports[chapter_red["id"]], "03")["author_review"]["evidence"] == [source(first)]
+
+    sign_scope(chapter_scope, "03", first, "green")
+    still_blocked = read(client, route)["preview"]
+    assert item(still_blocked, "03")["status"] != "red"
+    assert item(still_blocked, "04")["status"] == "red"
+    sign_scope(second_volume, "04", second, "green")
+    passed = sign_book()
+    assert all(check["current_status"] == "green" for check in passed["items"])
+    confirmed = client.post(
+        completion + "/confirm", json={**decision, "basis_sha256": read(client, completion)["basis_sha256"]}
+    )
+    assert confirmed.status_code == 201, confirmed.text
+    assert confirmed.json()["manifest"]["inspection_id"] == passed["id"]
+    assert client.get(download).content == frozen

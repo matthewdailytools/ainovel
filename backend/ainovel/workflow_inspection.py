@@ -36,7 +36,7 @@ VERSION = "m6-inspection/1"
 SOFT_DEVIATION_POLICY = "soft-deviation-review/1"
 MAX_AUTHOR_EVIDENCE = 30
 MAX_SOFT_DEVIATIONS = 1000
-COUNT_VERSION = "正文有效字符/1，排除 Markdown 标题行、常见排版标记、空白和不可见字符，计入标点"
+COUNT_VERSION = "正文有效字符/2，统一换行，排除 Markdown 标题行、常见排版标记、空白和不可见字符，计入标点"
 Scope = Literal["chapter", "volume", "book"]
 CheckId = Literal["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
@@ -196,10 +196,11 @@ def _sha(value):
 
 
 def body_chars(text):
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"(?m)^ {0,3}(?:#{1,6}[ \t]+.*|(?:[-*_][ \t]*){3,}|(?:`{3,}|~{3,}).*)$", "", text)
     text = re.sub(r"!\[[^\]\n]*\]\([^\n)]*\)", "", text)
     text = re.sub(r"\[([^\]\n]+)\]\([^\n)]*\)", r"\1", text)
-    text = re.sub(r"(?m)^ {0,3}(?:>[ \t]*|[-+*][ \t]+|\d+[.)][ \t]+)", "", text)
+    text = re.sub(r"(?m)^(?: {0,3}(?:>[ \t]*|[-+*][ \t]+|\d+[.)][ \t]+))+", "", text)
     text = re.sub(r"(\*{1,3}|_{1,3}|~~|`{1,2})(\S[^\n]*?)(?<!\s)\1", r"\2", text)
     return sum(not char.isspace() and unicodedata.category(char)[0] != "C" for char in text)
 
@@ -692,6 +693,17 @@ def _evaluate(tx, branch_id, scope, scope_id):
             {"outline": plan_basis, "scenes": scenes, "events": events},
         ),
     ]
+    findings = _scoped_red_findings(tx, branch_id, scope, ids)
+    for index, check in enumerate(items):
+        linked = findings.get(check["check_id"])
+        if not linked:
+            continue
+        items[index] = item(
+            check["check_id"],
+            check["summary"] + f" 本范围有 {len(linked)} 条章或卷红项待复检。",
+            {**check["basis"], "scoped_findings": linked},
+            "red",
+        )
     return {
         "version": VERSION,
         "scope": scope,
@@ -865,9 +877,75 @@ def _effective(row, preview):
     }
 
 
-def latest_book_inspection(tx, branch_id):
+def _scoped_red_findings(tx, branch_id, scope, chapter_ids):
+    if scope == "chapter":
+        return {}
+    affected = tx.execute(
+        """
+        SELECT DISTINCT json_extract(payload,'$.scope') AS scope,
+                        json_extract(payload,'$.scope_id') AS scope_id
+        FROM artifacts
+        WHERE branch_id=? AND kind=? AND status='accepted'
+          AND json_extract(payload,'$.scope') IN ('chapter','volume')
+          AND EXISTS (
+              SELECT 1 FROM json_each(payload,'$.items') AS check_item
+              WHERE json_extract(check_item.value,'$.status')='red'
+          )
+        ORDER BY scope,scope_id
+        """,
+        (branch_id, KIND),
+    ).fetchall()
+    findings = {}
+    for source in affected:
+        source_scope, source_id = source["scope"], source["scope_id"]
+        if scope == "volume" and (source_scope != "chapter" or source_id not in chapter_ids):
+            continue
+        try:
+            preview, _ = _evaluate(tx, branch_id, source_scope, source_id)
+        except DomainError as error:
+            if error.code != "inspection_target":
+                raise
+            continue
+        reports = tx.execute(
+            "SELECT id,payload,created FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+            "AND json_extract(payload,'$.scope')=? AND json_extract(payload,'$.scope_id')=? "
+            "ORDER BY rowid",
+            (branch_id, KIND, source_scope, source_id),
+        )
+        decisions = {}
+        for row in reports:
+            for item in _effective(row, preview)["items"]:
+                check_id = item["check_id"]
+                verdict = item["current_status"]
+                author_verdict = (item.get("author_review") or {}).get("status")
+                if verdict == "red":
+                    inherited = bool(item["basis"].get("scoped_findings"))
+                    if inherited and author_verdict != "red":
+                        # The original chapter already participates in the book's roll-up.
+                        continue
+                    decisions[check_id] = {
+                        "scope": source_scope,
+                        "scope_id": source_id,
+                        "report_id": row["id"],
+                    }
+                elif verdict in {"green", "not_applicable"} and verdict == author_verdict:
+                    decisions.pop(check_id, None)
+        for check_id, decision in decisions.items():
+            findings.setdefault(check_id, []).append(decision)
+    return findings
+
+
+def latest_book_inspection(tx, branch_id, *, include_current_red=False):
     row = _latest(tx, branch_id, "book", None)
-    return _effective(row, _evaluate(tx, branch_id, "book", None)[0]) if row else None
+    if not row:
+        return None
+    preview, _ = _evaluate(tx, branch_id, "book", None)
+    result = _effective(row, preview)
+    if include_current_red:
+        result["current_red_checks"] = [
+            item["check_id"] for item in preview["items"] if item["status"] == "red"
+        ]
+    return result
 
 
 def create_inspection(domain, branch_id, data, *, before_write=None):
