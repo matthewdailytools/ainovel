@@ -441,11 +441,10 @@ test('从作者确认的设定开始接力，冻结立项与设定并在校验�
   ).toBe(basis.project_id)
 })
 
-test('从确认大纲、保存正文和有效全书体检接力，逐段到达校验与完本停点', async ({ page }) => {
+async function relayOutline(page: Page, title: string) {
   await page.goto('/')
-  const { csrf } = await (await page.request.get('/api/session')).json()
-  const headers = { 'X-Ainovel-CSRF': csrf }
-  const created = await page.request.post('/api/novels', { headers, data: { title: '后台验证 · 七台接力' } })
+  const headers = await authorHeaders(page)
+  const created = await page.request.post('/api/novels', { headers, data: { title } })
   expect(created.ok(), await created.text()).toBe(true)
   const novel = await created.json()
   const branch = `/api/branches/${novel.branch_id}`
@@ -501,6 +500,78 @@ test('从确认大纲、保存正文和有效全书体检接力，逐段到达�
   const panel = page.getByRole('region', { name: '七台自动接力', exact: true })
   await expect(panel.getByLabel('接力起点')).toHaveValue('outline')
   await panel.getByLabel('本次接力总预算（所选账户币种）').fill('1')
+  return { branch, chapter, headers, outlineId, panel }
+}
+
+test('从确认大纲接力时可人工编辑并采纳候选，再由同一批次续至 M6', async ({ page }) => {
+  const { branch, chapter, outlineId, panel } = await relayOutline(page, '后台验证 · 作者采纳再接力')
+  await expect(panel.getByRole('checkbox', { name: '授权采纳通过检查的空章正文候选' })).not.toBeChecked()
+  const submitted = await startFromPanel(page, branch)
+  expect(submitted.ok(), await submitted.text()).toBe(true)
+  expect(submitted.request().postDataJSON()).toMatchObject({
+    start_from: 'outline',
+    source_id: outlineId,
+    auto_adopt_body: false,
+  })
+  const run = await submitted.json()
+  await expect(panel.getByRole('status')).toHaveText('写作 · 等待处理检查点', { timeout: 25_000 })
+  const {
+    result: { seven_stage_run: stopped },
+  } = await taskRecord(page, run.id)
+  expect(stopped.children).toHaveLength(1)
+  expect(stopped.completed_chapters).toEqual([])
+  const child = await taskRecord(page, stopped.children[0])
+  const candidate = child.result.artifact_id
+  const chapterUrl = `/api/chapters/${chapter.id}`
+  const readChapter = async () => (await page.request.get(chapterUrl)).json()
+  expect(await readChapter()).toMatchObject({ revision: 0, content: '' })
+
+  await page.getByRole('button', { name: '写作', exact: true }).click()
+  const comparison = page.getByRole('combobox', { name: '比较候选', exact: true })
+  await comparison.selectOption(candidate)
+  const source = await (await page.request.get('/api/artifacts/' + candidate)).json()
+  const editor = page.getByRole('textbox', { name: '候选内容', exact: true })
+  await expect(editor).toHaveValue(source.payload.text)
+  const edited = source.payload.text + '\n\n作者补记：复查刻度后，学徒把尺归还给守闸人。'
+  await editor.fill(edited)
+  await page.getByRole('button', { name: '保存候选编辑（原检查失效）', exact: true }).click()
+  const accept = page.getByRole('button', { name: '采纳到正文', exact: true })
+  const rereadMemory = page.getByRole('button', { name: '读取新版记忆并重新选择', exact: true })
+  await expect(rereadMemory).toBeEnabled()
+  await expect(accept).toBeDisabled()
+  await rereadMemory.press('Enter')
+  await expect(accept).toBeEnabled()
+  expect(await readChapter()).toMatchObject({ revision: 0, content: '' })
+  await accept.click()
+  await expect.poll(readChapter).toMatchObject({ revision: 1, content: edited })
+
+  await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  const resumed = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' && response.url().endsWith(`/seven-stage-runs/${run.id}/resume`),
+  )
+  await panel.getByRole('button', { name: '继续接力', exact: true }).press('Enter')
+  const receipt = await resumed
+  expect(receipt.ok(), await receipt.text()).toBe(true)
+  await expect(panel.getByRole('status')).toHaveText('校验 · 等待处理检查点', { timeout: 25_000 })
+  const {
+    result: { seven_stage_run: inspected },
+  } = await taskRecord(page, run.id)
+  expect(inspected).toMatchObject({
+    outline_id: outlineId,
+    completed_chapters: [{ id: chapter.id, revision: 1, artifact_id: candidate }],
+  })
+  expect(inspected.children).toHaveLength(2)
+  expect(inspected.children[0]).toBe(child.id)
+  const receipts = await remainingChildren(page, run.id)
+  expect(receipts.map(({ payload }) => payload.action)).toEqual(['writing.expand_plot', 'review.chapter'])
+  const { latest } = await (await page.request.get(branch + '/workflow-inspections')).json()
+  expect(latest).toMatchObject({ id: inspected.inspection_id, current: true, scope: 'book' })
+  expect(latest.chapters).toEqual([expect.objectContaining({ id: chapter.id, revision: 1 })])
+})
+
+test('从确认大纲、保存正文和有效全书体检接力，逐段到达校验与完本停点', async ({ page }) => {
+  const { branch, chapter, headers, outlineId, panel } = await relayOutline(page, '后台验证 · 七台接力')
   await panel.getByRole('checkbox', { name: '授权采纳通过检查的空章正文候选' }).check()
   const queued = page.waitForResponse(
     (response) => response.request().method() === 'POST' && response.url().endsWith('/seven-stage-runs'),
