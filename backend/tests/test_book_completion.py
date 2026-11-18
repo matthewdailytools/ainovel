@@ -222,3 +222,98 @@ def test_completion_preparation_uses_exact_sources_and_keeps_author_gate(client,
     assert not client.get(endpoint + "/preparation").json()["task"]["candidate"]["current"]
     data["basis_sha256"] = client.get(endpoint).json()["basis_sha256"]
     assert client.post(endpoint + "/preview", json=data).json()["code"] == "completion_preparation_stale"
+
+
+def test_prepared_introduction_cannot_be_relabelled_with_a_different_delivery_scope(
+    client, domain, settings, story
+):
+    branch = story["branch_id"]
+    opening = domain.save(story["chapter_id"], 0, "学徒从木匣里拾起铜铃。")
+    second = domain.create_chapter(branch, "揭晓")
+    ending = "末章揭晓，铃匠就是失散的师姐。"
+    second = domain.save(second["id"], 0, ending)
+    endpoint = f"/api/branches/{branch}/book-completion"
+    _send_reports(client, f"/api/branches/{branch}/workflow-inspections", opening)
+    basis = client.get(endpoint).json()["basis_sha256"]
+    queued = client.post(
+        endpoint + "/preparation",
+        json={
+            "basis_sha256": basis,
+            "account": "deepseek",
+            "client_request_id": "whole-book-intro",
+            "spoiler_scope": "whole",
+            "sample_chapters": 2,
+        },
+    )
+    assert queued.status_code == 202, queued.text
+
+    class Model:
+        async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+            task = json.loads(prompt.split("\n只返回")[0])["任务"]
+            if task["动作"] == "准备完本收束核对建议":
+                payload = {
+                    "ending": {
+                        "note": "核对末章的身份揭晓。",
+                        "source_ids": [task["正文依据"][-1]["source_id"]],
+                    },
+                    "characters": {"note": "", "source_ids": []},
+                    "promises": {"note": "", "source_ids": []},
+                }
+            else:
+                assert task["剧透范围"] == "全书" and ending in task["可用正文"]
+                payload = {"intro": ending}
+            return {"text": json.dumps(payload), "usage": {"input": 1, "output": 1}, "call_id": task["动作"]}
+
+    assert asyncio.run(Worker(settings, Model()).run_once())
+    prepared = client.get(endpoint + "/preparation").json()["task"]
+    assert prepared["status"] == "succeeded", prepared
+    candidate = prepared["candidate"]
+    assert candidate["spoiler_scope"] == "whole"
+    assert candidate["sample_chapter_ids"] == [opening["id"], second["id"]]
+    request = {
+        "basis_sha256": basis,
+        "preparation_id": prepared["artifact_id"],
+        "read_note": "作者已通读。",
+        "ending": candidate["closures"]["ending"],
+        "characters": {"note": "师姐与学徒重逢。"},
+        "promises": {"note": "铃匠身份已揭晓。"},
+        "intro": " " + candidate["intro"] + "\n",
+        "spoiler_scope": "whole",
+        "sample_chapter_ids": [opening["id"], second["id"]],
+        "materials_reviewed": True,
+    }
+    for changed in ({"spoiler_scope": "opening"}, {"sample_chapter_ids": [opening["id"]]}):
+        for route in ("preview", "confirm"):
+            refused = client.post(f"{endpoint}/{route}", json={**request, **changed})
+            assert refused.status_code == 409, refused.text
+            assert refused.json()["code"] == "completion_preparation_scope"
+    assert client.get(endpoint).json()["latest"] is None
+
+    matched = client.post(endpoint + "/confirm", json=request)
+    assert matched.status_code == 201, matched.text
+    original = matched.json()
+    original_url = f"{endpoint}/{original['id']}/export"
+    original_intro = _members(client.get(original_url))["简介.md"].decode()
+    assert "剧透范围：含全书内容" in original_intro and ending in original_intro
+
+    edited_request = {
+        **request,
+        "intro": "一名学徒带着失主留下的铜铃走出老街。",
+        "spoiler_scope": "opening",
+        "sample_chapter_ids": [opening["id"]],
+    }
+    review = client.post(endpoint + "/preview", json={**edited_request, "materials_reviewed": False})
+    assert review.status_code == 200, review.text
+    assert next(row for row in review.json()["checks"] if row["id"] == "delivery")["status"] == "pending"
+    assert (
+        client.post(endpoint + "/confirm", json={**edited_request, "materials_reviewed": False}).status_code
+        == 409
+    )
+    edited = client.post(endpoint + "/confirm", json=edited_request)
+    assert edited.status_code == 201, edited.text
+    assert edited.json()["manifest"]["ai_preparation_id"] == prepared["artifact_id"]
+    edited_url = f"{endpoint}/{edited.json()['id']}/export"
+    parts = _members(client.get(edited_url))
+    assert "剧透范围：仅开篇" in parts["简介.md"].decode()
+    assert ending not in parts["简介.md"].decode() + parts["试读.md"].decode()
+    assert _members(client.get(original_url))["简介.md"].decode() == original_intro

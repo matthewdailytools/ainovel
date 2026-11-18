@@ -37,6 +37,10 @@ type Preparation = {
     sample_chapter_ids: string[]
   }
 }
+type PreparedIntroduction = Pick<
+  NonNullable<Preparation['candidate']>,
+  'intro' | 'spoiler_scope' | 'sample_chapter_ids'
+> & { id: string }
 
 const closureFields = [
   ['ending', '主冲突与终局'],
@@ -211,7 +215,8 @@ export function CompletionPanel({
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [preparation, setPreparation] = useState<Preparation | null>(null)
-  const [preparationId, setPreparationId] = useState<string>()
+  const [closurePreparationId, setClosurePreparationId] = useState<string>()
+  const [preparedIntroduction, setPreparedIntroduction] = useState<PreparedIntroduction>()
   const [preparing, setPreparing] = useState(false)
   const pendingPreparation = useRef<{ key: string; requestId: string } | undefined>(undefined)
   const alive = useRef(true)
@@ -270,6 +275,17 @@ export function CompletionPanel({
   const ordered = [...(chapters ?? [])].sort((left, right) => left.position - right.position)
   const titles = new Map(ordered.map(({ id, title }) => [id, title]))
   const sampleIds = ordered.slice(0, openingLength).map(({ id }) => id)
+  const unchangedIntroduction =
+    preparedIntroduction && intro.trim() === preparedIntroduction.intro.trim()
+      ? preparedIntroduction
+      : undefined
+  const introScopeChanged = !!(
+    unchangedIntroduction &&
+    (spoilerScope !== unchangedIntroduction.spoiler_scope ||
+      sampleIds.length !== unchangedIntroduction.sample_chapter_ids.length ||
+      sampleIds.some((id, index) => id !== unchangedIntroduction.sample_chapter_ids[index]))
+  )
+  const linkedPreparationId = unchangedIntroduction?.id ?? closurePreparationId
   const body = {
     basis_sha256: current?.basis_sha256,
     read_note: readNote.trim(),
@@ -277,7 +293,7 @@ export function CompletionPanel({
     intro: intro.trim(),
     spoiler_scope: spoilerScope,
     sample_chapter_ids: sampleIds,
-    ...(preparationId ? { preparation_id: preparationId } : {}),
+    ...(linkedPreparationId ? { preparation_id: linkedPreparationId } : {}),
   }
   const signature = JSON.stringify(body)
   const matchingPreview = preview?.signature === signature ? preview : undefined
@@ -287,6 +303,7 @@ export function CompletionPanel({
   const draftLabel = readyPreview ? '本次交付预览的六项判定' : '本次拟确认的六项完本判定'
   const history = current?.history?.filter((entry) => entry.id !== current.latest?.id) ?? []
   const canConfirm = !!(
+    !introScopeChanged &&
     readyPreview?.materials &&
     reviewedChecks?.length === 6 &&
     reviewedChecks.every((check) => check.status === 'green')
@@ -326,26 +343,36 @@ export function CompletionPanel({
   function loadPreparation() {
     const candidate = preparation?.candidate
     if (!preparation?.artifact_id || !candidate?.current) return
-    setForm((existing) => {
-      const updated = { ...existing }
-      for (const [key] of closureFields) {
-        if (!existing[key].note && !existing[key].sources.length) updated[key] = candidate.closures[key]
+    const updated = { ...form }
+    let loadedClosure = false
+    for (const [key] of closureFields) {
+      if (!form[key].note && !form[key].sources.length && candidate.closures[key].note) {
+        updated[key] = candidate.closures[key]
+        loadedClosure = true
       }
-      return updated
-    })
+    }
+    if (loadedClosure) {
+      setForm(updated)
+      setClosurePreparationId(preparation.artifact_id)
+    }
     if (!intro.trim()) {
       setIntro(candidate.intro)
       setSpoilerScope(candidate.spoiler_scope)
       setOpeningLength(candidate.sample_chapter_ids.length)
+      setPreparedIntroduction({
+        id: preparation.artifact_id,
+        intro: candidate.intro,
+        spoiler_scope: candidate.spoiler_scope,
+        sample_chapter_ids: candidate.sample_chapter_ids,
+      })
     }
-    setPreparationId(preparation.artifact_id)
     setReviewed(false)
     setPreview(undefined)
     setMessage('已将 AI 建议载入空白项。请按原文核对并记录通读。')
   }
 
   async function submit(action: 'preview' | 'review' | 'confirm') {
-    if (!current || !chapters || busy || (action === 'confirm' && !canConfirm)) return
+    if (!current || !chapters || busy || introScopeChanged || (action === 'confirm' && !canConfirm)) return
     setBusy(action)
     setError('')
     setMessage('')
@@ -378,7 +405,8 @@ export function CompletionPanel({
         setIntro('')
         setSpoilerScope('opening')
         setOpeningLength(1)
-        setPreparationId(undefined)
+        setClosurePreparationId(undefined)
+        setPreparedIntroduction(undefined)
         setMessage('已确认完结，交付包已固定到本次稿件版本。')
       }
     } catch (failure) {
@@ -490,9 +518,9 @@ export function CompletionPanel({
           </>
         )}
       </details>
-      {preparationId && (
-        <button type="button" onClick={() => setPreparationId(undefined)}>
-          解除 AI 建议的版本关联
+      {closurePreparationId && (
+        <button type="button" onClick={() => setClosurePreparationId(undefined)}>
+          解除 AI 收束建议的版本关联
         </button>
       )}
       <fieldset disabled={!basisReady || !!busy}>
@@ -602,7 +630,13 @@ export function CompletionPanel({
             ))}
           </select>
         </label>
-        <button type="button" onClick={() => void submit('preview')}>
+        {introScopeChanged && (
+          <p role="status">
+            已载入的 AI
+            简介采用另一剧透或试读范围。请恢复原范围、改写简介，或清空简介后载入按当前范围生成的建议。
+          </p>
+        )}
+        <button type="button" disabled={introScopeChanged} onClick={() => void submit('preview')}>
           {busy === 'preview' ? '正在生成预览…' : '预览交付材料'}
         </button>
       </fieldset>

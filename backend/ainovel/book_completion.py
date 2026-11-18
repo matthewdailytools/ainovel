@@ -186,12 +186,22 @@ def _evaluate(tx, branch_id, data=None):
         from .completion_preparation import KIND as PREPARATION
 
         candidate = tx.execute(
-            "SELECT basis FROM artifacts WHERE id=? AND branch_id=? AND kind=?",
+            "SELECT basis,payload FROM artifacts WHERE id=? AND branch_id=? AND kind=?",
             (data.preparation_id, branch_id, PREPARATION),
         ).fetchone()
         if not candidate or json.loads(candidate["basis"])["completion_basis_sha256"] != basis:
             raise DomainError(
                 "completion_preparation_stale", "这份 AI 完本建议的依据已变化，请重新核对。", 409
+            )
+        prepared = json.loads(candidate["payload"])
+        if data.intro.strip() == prepared["intro"].strip() and (
+            data.spoiler_scope != prepared["spoiler_scope"]
+            or data.sample_chapter_ids != prepared["sample_chapter_ids"]
+        ):
+            raise DomainError(
+                "completion_preparation_scope",
+                "这份 AI 简介的剧透或试读范围已变化，请恢复原范围、改写简介或重新生成建议后再核对。",
+                409,
             )
         manifest["ai_preparation_id"] = data.preparation_id
     by_id = {row["id"]: row for row in chapters}

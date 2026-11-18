@@ -305,22 +305,52 @@ test('AI 完本建议载入空白项，作者通读仍待确认', async ({ page 
     data: { base_revision: 0, content: body },
   })
   expect(saved.ok(), await saved.text()).toBe(true)
+  const endingDraft = await page.request.post(`/api/branches/${branch_id}/chapters`, {
+    headers,
+    data: { title: '归还' },
+  })
+  expect(endingDraft.ok(), await endingDraft.text()).toBe(true)
+  const ending = '在末章，学徒才发现铃匠就是失散的师姐。'
+  const endingSaved = await page.request.put(`/api/chapters/${(await endingDraft.json()).id}`, {
+    headers,
+    data: { base_revision: 0, content: ending },
+  })
+  expect(endingSaved.ok(), await endingSaved.text()).toBe(true)
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(id)
   await page.getByRole('button', { name: '完本台', exact: true }).click()
   const panel = page.getByRole('region', { name: '完本与交付', exact: true })
   await panel.getByRole('textbox', { name: '关键人物与关系说明' }).fill('保留这项作者已有的看法。')
+  const spoiler = panel.getByLabel('简介与试读的剧透范围')
+  const sample = panel.getByLabel('从首章起选入的试读章数')
+  await spoiler.selectOption('whole')
+  await sample.selectOption('2')
   await panel.getByText('AI 准备完本建议', { exact: true }).press('Enter')
   await panel.getByRole('button', { name: '生成完本核对建议与简介' }).click()
   await panel.getByRole('button', { name: '载入 AI 建议到空白项' }).click()
-  await expect(panel.getByRole('textbox', { name: '简介', exact: true })).toHaveValue(
-    '学徒从铜铃的来历追起。',
-  )
+  const intro = panel.getByRole('textbox', { name: '简介', exact: true })
+  await expect(intro).toHaveValue('学徒从铜铃的来历追起。')
   await expect(panel.getByRole('textbox', { name: '关键人物与关系说明' })).toHaveValue(
     '保留这项作者已有的看法。',
   )
   await expect(panel.getByRole('textbox', { name: '通读记录', exact: true })).toHaveValue('')
-  await expect(panel.getByText(body, { exact: false }).first()).toBeVisible()
-  await panel.getByRole('button', { name: '预览交付材料' }).click()
+  await expect(panel.getByText(ending, { exact: false }).first()).toBeVisible()
+  const preview = panel.getByRole('button', { name: '预览交付材料' })
+  await spoiler.selectOption('opening')
+  await expect(panel.getByText(/已载入的 AI 简介采用另一剧透或试读范围/)).toBeVisible()
+  await expect(preview).toBeDisabled()
+  await expect(intro).toHaveValue('学徒从铜铃的来历追起。')
+  await spoiler.selectOption('whole')
+  await expect(preview).toBeEnabled()
+  await sample.selectOption('1')
+  await expect(preview).toBeDisabled()
+
+  await spoiler.selectOption('opening')
+  await intro.fill('手写简介，学徒携铃去找失主。')
+  await panel.getByRole('button', { name: '载入 AI 建议到空白项' }).click()
+  await expect(intro).toHaveValue('手写简介，学徒携铃去找失主。')
+  await expect(spoiler).toHaveValue('opening')
+  await expect(sample).toHaveValue('1')
+  await preview.click()
   await expect(panel.getByRole('button', { name: '确认完结', exact: true })).toBeDisabled()
 })
