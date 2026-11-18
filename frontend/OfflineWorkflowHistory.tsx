@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { createDeliveryZip } from './deliveryArchive'
-import { readLocalSourceRevision, readLocalWorkflowHistory, type LocalRevision } from './offlineStore'
+import {
+  manuscriptHash,
+  readLocalSourceRevision,
+  readLocalWorkflowHistory,
+  type LocalRevision,
+} from './offlineStore'
+import { inspectionSettingUses, verifyInspectionSettingUse } from './workflowArchive'
 
 const inspectionLabels = {
   green: '绿 · 已核对',
@@ -26,6 +32,7 @@ export function OfflineWorkflowHistory({
   const [selection, setSelection] = useState('')
   const [failure, setFailure] = useState('')
   const [source, setSource] = useState<LocalRevision>()
+  const [excerpt, setExcerpt] = useState<{ start: number; end: number; quote: string }>()
   const [sourceFailure, setSourceFailure] = useState('')
   const request = useRef(0)
 
@@ -65,15 +72,26 @@ export function OfflineWorkflowHistory({
   const devices = history?.sourceDevices
   const device = identifier && devices && Object.hasOwn(devices, identifier) ? devices[identifier] : undefined
 
-  async function showOriginal(binding: NonNullable<typeof record>['chapter_bindings'][number]) {
+  async function showOriginal(
+    binding: NonNullable<typeof record>['chapter_bindings'][number],
+    settingUse?: ReturnType<typeof inspectionSettingUses>[number],
+  ) {
     const token = ++request.current
     setSource(undefined)
+    setExcerpt(undefined)
     setSourceFailure('')
     try {
       const version = await readLocalSourceRevision(projectId, binding.revision_id)
       if (!version || version.chapter_id !== binding.id || version.sha256 !== binding.sha256)
         throw new Error('缺少与这份报告对应的原章稿修订。')
-      if (token === request.current) setSource(version)
+      const quote = settingUse
+        ? await verifyInspectionSettingUse(settingUse, version, manuscriptHash)
+        : undefined
+      if (token === request.current) {
+        setSource(version)
+        if (settingUse && quote)
+          setExcerpt({ start: settingUse.evidence.start, end: settingUse.evidence.end, quote })
+      }
     } catch (error) {
       if (token === request.current)
         setSourceFailure(error instanceof Error ? error.message : '无法读取来源正文。')
@@ -96,6 +114,7 @@ export function OfflineWorkflowHistory({
             request.current++
             setSelection(event.target.value)
             setSource(undefined)
+            setExcerpt(undefined)
             setSourceFailure('')
           }}
         >
@@ -115,6 +134,28 @@ export function OfflineWorkflowHistory({
                   {item.title} · {inspectionLabels[item.status]}
                 </summary>
                 <p>{item.summary}</p>
+                {item.check_id === '08' &&
+                  inspectionSettingUses(item.basis).map((use) => (
+                    <p key={use.version_id}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void showOriginal(
+                            {
+                              id: use.evidence.chapter_id,
+                              revision_id: use.evidence.revision_id,
+                              revision: use.revision,
+                              sha256: use.chapter_sha256,
+                            },
+                            use,
+                          )
+                        }
+                      >
+                        查看「{use.title}」原文 · 修订 {use.revision} · 位置 {use.evidence.start}–
+                        {use.evidence.end}
+                      </button>
+                    </p>
+                  ))}
                 {item.author_review && (
                   <section aria-label="原作者核对">
                     <p>{item.author_review.basis_note}</p>
@@ -173,7 +214,17 @@ export function OfflineWorkflowHistory({
           <p>
             来源修订 {source.id} · SHA-256 {source.sha256}
           </p>
-          <pre className="report">{source.content || '空稿'}</pre>
+          <pre className="report">
+            {excerpt ? (
+              <>
+                {source.content.slice(0, excerpt.start).slice(-240)}
+                <mark>{excerpt.quote}</mark>
+                {source.content.slice(excerpt.end, excerpt.end + 240)}
+              </>
+            ) : (
+              source.content || '空稿'
+            )}
+          </pre>
         </section>
       )}
     </details>

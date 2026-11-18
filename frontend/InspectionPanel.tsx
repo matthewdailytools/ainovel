@@ -103,7 +103,7 @@ const newReview = (id: string): Review => ({
 function canOpenSources(item: Item) {
   return (
     !!item.author_review?.evidence.length ||
-    ['records', 'events', 'knowledge', 'reports', 'scenes', 'review_blockers'].some(
+    ['records', 'events', 'knowledge', 'reports', 'scenes', 'review_blockers', 'author_setting_uses'].some(
       (key) => Array.isArray(item.basis[key]) && (item.basis[key] as unknown[]).length > 0,
     )
   )

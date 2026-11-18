@@ -900,6 +900,8 @@ class DesktopSync:
             lambda identifier: workflow_archive.read_workflow_entry(
                 tx, branch_id, workflow_archive.INSPECTION, identifier
             ),
+            setting_use=lambda identifier: setting_use_desktop.read_version(tx, branch_id, identifier),
+            settings=lambda identifier: settings_sync.read_settings_version(tx, branch_id, identifier),
             hydrate=hydrate,
         )
 

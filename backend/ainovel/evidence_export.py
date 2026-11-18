@@ -19,7 +19,7 @@ def _seven_stage_evidence(domain, entry, folder):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from . import book_completion, workflow_inspection
+    from . import book_completion, setting_use_desktop, settings_sync, workflow_inspection
     from .conception import CONFIRMATION
     from .manuscript_exchange import native_revision, source_revision
     from .project_brief import KIND as PROJECT
@@ -136,7 +136,12 @@ def _seven_stage_evidence(domain, entry, folder):
                         "acceptance_evidence", f"缺少接力所引用的全书体检单 {identifier}。", 409
                     )
                 inspections[identifier] = validate_workflow_object(
-                    record, branch, lambda key: source_revision(tx, branch, key), None
+                    record,
+                    branch,
+                    lambda key: source_revision(tx, branch, key),
+                    None,
+                    setting_use=lambda key: setting_use_desktop.read_version(tx, branch, key),
+                    settings=lambda key: settings_sync.read_settings_version(tx, branch, key),
                 )
             return inspections[identifier]
 

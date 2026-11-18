@@ -737,6 +737,16 @@ class SyncStore:
                 return RevisionObject.model_validate_json(row["payload"]).revision
             return None
 
+        def setting_use(identifier):
+            if row := source(f"setting-use-version:{identifier}"):
+                return SettingUseVersionObject.model_validate_json(row["payload"]).version
+            return None
+
+        def settings(identifier):
+            if row := source(f"settings-version:{identifier}"):
+                return SettingsVersionObject.model_validate_json(row["payload"]).version
+            return None
+
         other = "workflow-completion" if isinstance(entry, ArchivedInspection) else "workflow-inspection"
         if source(f"{other}:{entry.id}"):
             raise DomainError("sync_workflow", "体检和交付记录共用了同一来源编号。", 409)
@@ -751,7 +761,9 @@ class SyncStore:
             if not base or base["object_id"] != data.object_id:
                 raise DomainError("sync_parent_unknown", "父修订不属于该历史记录。", 409)
         try:
-            validate_workflow_object(entry, work, revision, inspection)
+            validate_workflow_object(
+                entry, work, revision, inspection, setting_use=setting_use, settings=settings
+            )
         except DomainError as error:
             if error.code in {"manuscript_workflow", "completion_integrity"}:
                 raise DomainError("sync_workflow", error.message, error.status) from error

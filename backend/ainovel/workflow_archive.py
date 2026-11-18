@@ -18,6 +18,7 @@ from .db import DomainError
 from .domain import utf16_slice
 from .models import Input
 from .project_portability import Identifier
+from .setting_use_portability import validate_version as validate_setting_use_version
 from .workflow_inspection import (
     AuthorReview,
     CheckId,
@@ -27,6 +28,8 @@ from .workflow_inspection import (
     Scope,
     _item,
     _sha,
+    inspection_setting_use_matches,
+    inspection_setting_uses,
     validate_soft_deviation_review,
 )
 from .workflow_privacy import has_reference_selection
@@ -234,7 +237,9 @@ def same_workflow_entry(left, right):
     return left == right
 
 
-def validate_workflow_object(entry, branch_id, revision, inspection, *, hydrate=False):
+def validate_workflow_object(
+    entry, branch_id, revision, inspection, *, setting_use=None, settings=None, hydrate=False
+):
     def require_revision(identifier):
         source = revision(identifier)
         if not source:
@@ -242,7 +247,20 @@ def validate_workflow_object(entry, branch_id, revision, inspection, *, hydrate=
         return source
 
     if isinstance(entry, ArchivedInspection):
-        _validate_inspection(entry, require_revision)
+
+        def require_setting_source(lookup, family, identifier):
+            source = lookup(identifier) if lookup else None
+            if not source:
+                raise DomainError("sync_workflow_dependency", f"历史记录尚缺{family} {identifier}。", 409)
+            return source
+
+        _validate_inspection(
+            entry,
+            branch_id,
+            require_revision,
+            lambda identifier: require_setting_source(setting_use, "设定使用原修订", identifier),
+            lambda identifier: require_setting_source(settings, "正式设定修订", identifier),
+        )
         return entry
     report = inspection(entry.manifest.inspection_id)
     if not isinstance(report, ArchivedInspection):
@@ -306,7 +324,71 @@ def _sources(sources, chapters):
             _bad("稿件包报告的作者核对引文与原稿不一致。")
 
 
-def validate_workflow_history(history, branch_id, revisions):
+def _setting_use_sources(item, plan_basis, manifest, branch_id, revision_for, setting_use, settings):
+    try:
+        sources = inspection_setting_uses(item.basis)
+    except ValueError as error:
+        raise DomainError("manuscript_workflow", "报告的设定正文使用依据无效。", 409) from error
+    plans = plan_basis.get("plans")
+    scoped_outline = item.basis.get("author_setting_use_outline_id")
+    if not sources or not isinstance(plans, list) or not isinstance(scoped_outline, str):
+        _bad("报告的设定正文使用依据缺少对应的冻结大纲及章纲计划。")
+    attachments = {
+        (row.get("chapter_id"), key)
+        for row in plans
+        if isinstance(row, dict)
+        and isinstance(row.get("chapter_id"), str)
+        and isinstance(row.get("setting_ids"), list)
+        for key in row["setting_ids"]
+        if isinstance(key, str)
+    }
+    used = set()
+    settings_versions = {}
+    for source in sources:
+        evidence = source.evidence
+        chapter = manifest.get(evidence.chapter_id)
+        key = (evidence.chapter_id, source.item_id)
+        if (
+            key in used
+            or key not in attachments
+            or source.outline_version_id != scoped_outline
+            or not chapter
+            or chapter.stale
+            or chapter.sha256 != source.chapter_sha256
+        ):
+            _bad("报告的设定正文使用依据不在对应章稿清单内。")
+        used.add(key)
+        version = setting_use(source.version_id) if setting_use else None
+        if not version:
+            _bad("稿件包缺少体检所引用的原设定使用证明版本。")
+        try:
+            validate_setting_use_version(branch_id, version)
+        except DomainError as error:
+            raise DomainError("manuscript_workflow", "报告的设定使用证明版本校验失败。", 409) from error
+        if source.settings_version_id not in settings_versions:
+            settings_versions[source.settings_version_id] = (
+                settings(source.settings_version_id) if settings else None
+            )
+        adopted_settings = settings_versions[source.settings_version_id]
+        if not inspection_setting_use_matches(source, version, adopted_settings):
+            _bad("报告的设定使用依据与正式证明或原设定条目不一致。")
+        original = revision_for(evidence.revision_id)
+        if (
+            not original
+            or (original.id, original.chapter_id, original.revision, original.sha256)
+            != (evidence.revision_id, evidence.chapter_id, source.revision, source.chapter_sha256)
+            or _digest(original.content) != source.chapter_sha256
+        ):
+            _bad("报告缺少确切的设定正文使用原稿修订。")
+        try:
+            quote = utf16_slice(original.content, evidence.start, evidence.end)[1]
+        except DomainError as error:
+            raise DomainError("manuscript_workflow", "报告的设定正文使用选区不合法。", 409) from error
+        if not quote.strip() or len(quote) > 4000 or _digest(quote) != evidence.quote_sha256:
+            _bad("报告的设定正文使用选区与原稿不一致。")
+
+
+def validate_workflow_history(history, branch_id, revisions, *, setting_use=None, settings=None):
     if not history:
         return
     reports = {entry.id: entry for entry in history.inspections}
@@ -314,14 +396,14 @@ def validate_workflow_history(history, branch_id, revisions):
     if len(all_ids) != len(set(all_ids)) or len(reports) != len(history.inspections):
         _bad("稿件包报告的来源编号重复。")
     for report in history.inspections:
-        _validate_inspection(report, revisions.get)
+        _validate_inspection(report, branch_id, revisions.get, setting_use, settings)
     for completion in history.completions:
         _validate_completion(
             completion, branch_id, reports.get(completion.manifest.inspection_id), revisions.get
         )
 
 
-def _validate_inspection(archived, revision_for):
+def _validate_inspection(archived, branch_id, revision_for, setting_use, settings):
     report = archived.report
     if (
         (report.scope == "book") != (report.scope_id is None)
@@ -337,9 +419,16 @@ def _validate_inspection(archived, revision_for):
     }
     chapters = _chapters(report.chapters, archived.chapter_bindings, revision_for, retain)
     manifest = [chapter.model_dump() for chapter in report.chapters]
+    chapters_by_id = {chapter.id: chapter for chapter in report.chapters}
     if [item.check_id for item in report.items] != [f"{number:02d}" for number in range(1, 11)]:
         _bad("稿件包体检单缺少十项检查或编号顺序错误。")
     for item in report.items:
+        if "author_setting_uses" in item.basis or "author_setting_use_outline_id" in item.basis:
+            if item.check_id != "08":
+                _bad("设定正文使用依据须属于第 08 项。")
+            _setting_use_sources(
+                item, report.items[1].basis, chapters_by_id, branch_id, revision_for, setting_use, settings
+            )
         if report.scope != "book" and "outline" in item.basis and not isinstance(item.basis["outline"], dict):
             _bad("稿件包分范围体检的章纲依据格式无效。")
         expected = _item(item.check_id, item.summary, item.basis, manifest=manifest, scope=report.scope)

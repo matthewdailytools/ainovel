@@ -20,7 +20,7 @@ from .reference_portability import HashId as ReferenceVersionId, ReferenceHistor
 from .setting_use_portability import SettingUseHistory
 from .settings_portability import SettingsHistory
 from .story_portability import PortableStoryArchive
-from .workflow_archive import WorkflowHistory
+from .workflow_archive import WorkflowHistory, validate_workflow_history
 from .workflow_privacy import REFERENCE_SCOPE, evidence_has_reference_selection
 
 FORMAT = "ainovel-manuscript/1"
@@ -253,12 +253,25 @@ def _index(package):
         validate_story_archive(
             package.story_history, package.branch.id, revisions, {row.id: row for row in package.revisions}
         )
+    setting_uses = _validate_setting_uses(package, revisions)
     if package.workflow_history:
-        from .workflow_archive import validate_workflow_history
-
-        validate_workflow_history(package.workflow_history, package.branch.id, revisions)
-    _validate_setting_uses(package, revisions)
+        _validate_report_history(package, revisions, setting_uses)
     return histories
+
+
+def _validate_report_history(package, revisions, setting_uses):
+    settings = (
+        {version.id: version for version in package.settings_history.versions}
+        if package.settings_history
+        else {}
+    )
+    validate_workflow_history(
+        package.workflow_history,
+        package.branch.id,
+        revisions,
+        setting_use=setting_uses.get,
+        settings=settings.get,
+    )
 
 
 def _validate_setting_uses(package, revisions):
@@ -274,6 +287,8 @@ def _validate_setting_uses(package, revisions):
             package.outline_history,
             native_revisions={row.id: row for row in package.revisions},
         )
+        return {entry.version.id: entry.version for entry in package.setting_use_history.versions}
+    return {}
 
 
 def _evidence(tx, branch_id):
@@ -388,7 +403,6 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), b
     from .workflow_archive import (
         export_workflow_history,
         has_frozen_reference_selection,
-        validate_workflow_history,
     )
 
     with domain.db.connect() as tx:
@@ -463,9 +477,9 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), b
             revisions = {**native, **{row.id: row for row in package.source_revisions}}
             if package.story_history:
                 validate_story_archive(package.story_history, branch_id, revisions, native)
+            setting_uses = _validate_setting_uses(package, revisions)
             if package.workflow_history:
-                validate_workflow_history(package.workflow_history, branch_id, revisions)
-            _validate_setting_uses(package, revisions)
+                _validate_report_history(package, revisions, setting_uses)
         return package
 
 

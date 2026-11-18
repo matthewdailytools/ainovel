@@ -81,6 +81,7 @@ import {
   validateSettingUseSyncObject,
   type SettingUseHistory,
   type SettingUseSyncObject,
+  type SettingUseVersion,
 } from './settingUseSyncModel'
 
 const DATABASE = 'ainovel-offline-workspace'
@@ -1887,23 +1888,37 @@ async function applyWorkflowObject(
   options: ApplyOptions,
 ) {
   const data = workflowSyncEntry(object.branch_id, objectId, object)
-  const stores = [...manuscriptStores, ...workflowStores]
-  const { revisions, report } = await transact(stores, 'readonly', async (tx) => {
+  const stores = [
+    ...manuscriptStores,
+    ...workflowStores,
+    'settingsVersions',
+    'settingUseVersions',
+  ] satisfies Store[]
+  const { revisions, report, proofs } = await transact(stores, 'readonly', async (tx) => {
     const branchId = (await readProject(tx, projectId)).branch.id
     if (branchId !== object.branch_id) invalid('云端历史报告的工作版本不一致。')
     const revisions = new Map<string, LocalRevision>()
-    for (const id of new Set(data.revisionIds)) {
+    for (const id of data.revisionIds) {
       const revision = await sourceRevision(tx, branchId, id)
       if (revision) revisions.set(id, revision)
+    }
+    const proofs = new Map<string, { version: SettingUseVersion; settings: SettingsVersion }>()
+    for (const id of data.proofIds) {
+      const proof = await settingUseStore.readSettingUseVersionTx(tx, branchId, id)
+      if (!proof) throw new OfflineStoreError('missing', '等待原作者确认的设定使用版本。')
+      const { version } = proof.entry
+      const settings = await getSettingsVersion(tx, branchId, version.settings_version_id)
+      if (!settings) throw new OfflineStoreError('missing', '等待该设定使用对应的正式设定。')
+      proofs.set(id, { version, settings: settings.version })
     }
     const saved = data.report
       ? await result<LocalWorkflowEntry<ArchivedInspection> | undefined>(
           tx.objectStore('workflowInspections').get([branchId, data.report]),
         )
       : undefined
-    return { revisions, report: saved?.entry }
+    return { revisions, report: saved?.entry, proofs }
   })
-  const verified = await validateWorkflowSyncEntry(data, report, revisions, manuscriptHash)
+  const verified = await validateWorkflowSyncEntry(data, report, revisions, manuscriptHash, proofs)
   return transact(stores, 'readwrite', async (tx) => {
     const branchId = (await readProject(tx, projectId)).branch.id
     if (branchId !== object.branch_id) invalid('云端历史报告的工作版本不一致。')
@@ -1937,6 +1952,9 @@ async function applyWorkflowObject(
       if (saved?.chapter_id !== revision.chapter_id || saved.sha256 !== revision.sha256)
         throw new OfflineStoreError('missing', '该报告的原章稿尚未到齐。')
     }
+    for (const id of proofs.keys())
+      if (!(await settingUseStore.readSettingUseVersionTx(tx, branchId, id)))
+        throw new OfflineStoreError('missing', '等待原作者确认的设定使用版本。')
     await result(
       store.add({
         branchId,
@@ -2158,14 +2176,6 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
       invalid(error instanceof Error ? error.message : '大纲历史格式无效。')
     }
   }
-  let workflow_history: WorkflowHistory | undefined
-  if (pack.workflow_history != null) {
-    try {
-      workflow_history = await validateWorkflowHistory(pack.workflow_history, branch.id, byId, manuscriptHash)
-    } catch (error) {
-      invalid(error instanceof Error ? error.message : '历史体检或完本档案无法读取。')
-    }
-  }
   let story_history: StoryHistory | undefined
   if (pack.story_history != null) {
     try {
@@ -2178,9 +2188,9 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     }
   }
   let setting_use_history: SettingUseHistory | undefined
+  const settingsById = new Map(settings_history?.versions.map((version) => [version.id, version]))
   if (pack.setting_use_history != null) {
     try {
-      const settings = new Map(settings_history?.versions.map((version) => [version.id, version]))
       const outlines = new Map(outline_history?.versions.map((version) => [version.id, version]))
       const nativeRevisions = new Map(revisions.map((revision) => [revision.id, revision]))
       setting_use_history = await validateSettingUseHistory(
@@ -2189,13 +2199,32 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
         {
           revision: (id) => byId.get(id),
           nativeRevision: (id) => nativeRevisions.get(id),
-          settings: (id) => settings.get(id),
+          settings: (id) => settingsById.get(id),
           outline: (id) => outlines.get(id),
         },
         manuscriptHash,
       )
     } catch (error) {
       invalid(error instanceof Error ? error.message : '设定使用证据无法读取。')
+    }
+  }
+  let workflow_history: WorkflowHistory | undefined
+  if (pack.workflow_history != null) {
+    try {
+      const proofs = new Map<string, { version: SettingUseVersion; settings: SettingsVersion }>()
+      for (const { version } of setting_use_history?.versions ?? []) {
+        const settings = settingsById.get(version.settings_version_id)
+        if (settings) proofs.set(version.id, { version, settings })
+      }
+      workflow_history = await validateWorkflowHistory(
+        pack.workflow_history,
+        branch.id,
+        byId,
+        manuscriptHash,
+        proofs,
+      )
+    } catch (error) {
+      invalid(error instanceof Error ? error.message : '历史体检或完本档案无法读取。')
     }
   }
   return {

@@ -453,9 +453,10 @@ function storyPublicationSources(object: SyncedObject | null, current: StoryVers
 
 function workflowPublicationSources(id: string, object: SyncedObject | null): string[] {
   if (object?.kind !== 'workflow-inspection' && object?.kind !== 'workflow-completion') return []
-  const { report, revisionIds } = workflowSyncEntry(object.branch_id, id, object)
+  const { report, revisionIds, proofIds } = workflowSyncEntry(object.branch_id, id, object)
   return [
-    ...revisionIds.map((revisionId) => `revision:${revisionId}`),
+    ...Array.from(revisionIds, (revisionId) => `revision:${revisionId}`),
+    ...Array.from(proofIds, (proofId) => `setting-use-version:${proofId}`),
     ...(report ? [`workflow-inspection:${report}`] : []),
   ]
 }

@@ -553,6 +553,7 @@ export function createSettingUseOfflineStore(access: Access) {
     readLocalOutlineSettingUse,
     confirmLocalSettingUse,
     withdrawLocalSettingUse,
+    readSettingUseVersionTx: entry,
     readSettingUseHistoryTx,
     restoreSettingUseHistoryTx,
     applySettingUseObject,

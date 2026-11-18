@@ -25,7 +25,9 @@ from .models import Input
 from .outline_workspace import _chapter_plans, _view
 from .project_brief import confirmed_project_tx
 from .scene_time import SceneTime, event_basis_valid
-from .setting_review import confirmed_world_basis
+from .setting_review import confirmed_world_basis, outline_setting_items
+from .setting_use_portability import Digest, Identifier
+from .settings_portability import SettingsEvidence
 from .story_graph import Source, graph_snapshot, sources
 
 KIND = "workflow_inspection"
@@ -113,6 +115,80 @@ class InspectionInput(Input):
     basis_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     author_reviews: list[AuthorReview] = Field(default_factory=list, max_length=10)
     length_targets: LengthTargets | None = None
+
+
+class InspectionSettingUse(Input):
+    version_id: Digest
+    outline_version_id: Identifier
+    settings_version_id: Identifier
+    item_id: Identifier
+    title: str = Field(min_length=1, max_length=200)
+    revision: int = Field(ge=0, strict=True)
+    chapter_sha256: Digest
+    evidence: SettingsEvidence
+
+
+def inspection_setting_uses(basis):
+    rows = basis.get("author_setting_uses", [])
+    if not isinstance(rows, list):
+        raise ValueError("设定正文使用依据格式无效。")
+    return [InspectionSettingUse.model_validate(row) for row in rows]
+
+
+def inspection_setting_use_matches(source, version, settings):
+    return bool(
+        version
+        and settings
+        and version.action == "confirmed"
+        and version.id == source.version_id
+        and version.outline_version_id == source.outline_version_id
+        and version.settings_version_id == settings.id == source.settings_version_id
+        and version.item_id == source.item_id
+        and version.chapter_sha256 == source.chapter_sha256
+        and version.evidence == source.evidence
+        and any(
+            item["id"] == source.item_id and item["title"] == source.title and item.get("category_id")
+            for item in outline_setting_items(
+                [category.model_dump() for category in settings.categories],
+                {item_id for item_id, origin in settings.origins.items() if origin.evidence},
+            )
+        )
+    )
+
+
+def _setting_uses(tx, branch_id, outline, ids):
+    from .manuscript_exchange import source_revision
+
+    selected = []
+    originals = {}
+    for row in outline["settings"]:
+        if row["chapter_id"] not in ids or not (proof := row.get("author_evidence")):
+            continue
+        version = proof["version"]
+        evidence = version["evidence"]
+        source_id = evidence["revision_id"]
+        if source_id not in originals:
+            originals[source_id] = source_revision(tx, branch_id, source_id)
+        original = originals[source_id]
+        if (
+            not original
+            or original.chapter_id != row["chapter_id"]
+            or original.sha256 != version["chapter_sha256"]
+        ):
+            continue
+        selected.append(
+            InspectionSettingUse(
+                version_id=version["id"],
+                outline_version_id=version["outline_version_id"],
+                settings_version_id=version["settings_version_id"],
+                item_id=version["item_id"],
+                title=row["setting"]["title"],
+                revision=original.revision,
+                chapter_sha256=version["chapter_sha256"],
+                evidence=evidence,
+            ).model_dump()
+        )
+    return selected
 
 
 def _sha(value):
@@ -503,6 +579,7 @@ def _evaluate(tx, branch_id, scope, scope_id):
     ]
     impacted = [row["id"] for row in manifest if row["stale"]]
     planned_references, references = _card_references(tx, branch_id, chapters, plans)
+    setting_uses = _setting_uses(tx, branch_id, outline, ids)
     broken_cards = [row for row in [*planned_references, *references] if not row["source"]]
     length_revision = current_length_target(tx, branch_id, scope, scope_id, include_cleared=True)
     length_target = length_revision if length_revision and length_revision["targets"] is not None else None
@@ -579,7 +656,8 @@ def _evaluate(tx, branch_id, scope, scope_id):
             "08",
             f"待复检章节 {len(impacted)} 章，失效记录 {len(invalid)} 条，"
             f"当前严重意见 {len(issues)} 条，章纲计划手法卡 {len(planned_references)} 条，"
-            f"已采用稿依据 {len(references)} 条。",
+            f"已采用稿依据 {len(references)} 条。"
+            + (f"已确认设定使用 {len(setting_uses)} 条。" if setting_uses else ""),
             {
                 "impacted_chapters": impacted,
                 "invalid_records": invalid,
@@ -587,6 +665,14 @@ def _evaluate(tx, branch_id, scope, scope_id):
                 "outline_id": plan_basis["outline_id"],
                 **({"planned_card_references": planned_references} if planned_references else {}),
                 "card_references": references,
+                **(
+                    {
+                        "author_setting_use_outline_id": setting_uses[0]["outline_version_id"],
+                        "author_setting_uses": setting_uses,
+                    }
+                    if setting_uses
+                    else {}
+                ),
             },
             "red" if issues else "outdated" if impacted or invalid or broken_cards else "pending",
         ),

@@ -5,6 +5,9 @@ import {
   softDeviationPolicy,
   softDeviations,
 } from './inspectionEvidence'
+import type { SettingUseVersion } from './settingUseSyncModel'
+import { parseSettingsEvidence, type SettingsVersion } from './settingsSyncModel'
+import { compactJSON, verifyStoryEvidence } from './storySyncModel'
 
 type FrozenRevision = { id: string; chapter_id: string; revision: number; sha256: string; content: string }
 type Digest = (text: string) => Promise<string>
@@ -64,6 +67,53 @@ function integer(value: unknown, minimum = 0) {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum)
     return invalid('稿件包历史记录包含无效的数字。')
   return value
+}
+
+export function inspectionSettingUses(basis: Record<string, unknown>) {
+  if (!Object.hasOwn(basis, 'author_setting_uses')) return []
+  return list(basis.author_setting_uses, 200000).map((entry) => {
+    const row = record(entry, [
+      'version_id',
+      'outline_version_id',
+      'settings_version_id',
+      'item_id',
+      'title',
+      'revision',
+      'chapter_sha256',
+      'evidence',
+    ])
+    return {
+      version_id: hash(row.version_id),
+      outline_version_id: id(row.outline_version_id),
+      settings_version_id: id(row.settings_version_id),
+      item_id: id(row.item_id),
+      title: text(row.title, 200, 1),
+      revision: integer(row.revision),
+      chapter_sha256: hash(row.chapter_sha256),
+      evidence: parseSettingsEvidence(row.evidence),
+    }
+  })
+}
+
+type InspectionSettingUse = ReturnType<typeof inspectionSettingUses>[number]
+type InspectionProofs = ReadonlyMap<string, { version: SettingUseVersion; settings: SettingsVersion }>
+
+export async function verifyInspectionSettingUse(
+  use: InspectionSettingUse,
+  original: FrozenRevision | undefined,
+  digest: Digest,
+) {
+  if (
+    original?.id !== use.evidence.revision_id ||
+    original.chapter_id !== use.evidence.chapter_id ||
+    original.revision !== use.revision ||
+    original.sha256 !== use.chapter_sha256 ||
+    (await digest(original.content)) !== use.chapter_sha256
+  )
+    return invalid('缺少确切的设定正文使用原稿修订。')
+  const quote = await verifyStoryEvidence(use.evidence, original)
+  if (!trimArchiveText(quote)) invalid('报告的设定正文使用选区与原稿不一致。')
+  return quote
 }
 
 function stamp(value: unknown) {
@@ -212,6 +262,7 @@ async function parseInspection(
   value: unknown,
   revisions: ReadonlyMap<string, FrozenRevision>,
   digest: Digest,
+  proofs: InspectionProofs,
 ) {
   const entry = record(value, ['id', 'created', 'chapter_bindings', 'report'])
   const chapter_bindings = list(entry.chapter_bindings, 5000).map(parseBinding)
@@ -287,6 +338,53 @@ async function parseInspection(
       ...(author_review ? { author_review } : {}),
     }
   })
+  const relevant = new Map(chapters.map((chapter) => [chapter.id, chapter]))
+  const used = new Set<string>()
+  for (const item of items) {
+    if (
+      !Object.hasOwn(item.basis, 'author_setting_uses') &&
+      !Object.hasOwn(item.basis, 'author_setting_use_outline_id')
+    )
+      continue
+    if (item.check_id !== '08') invalid('设定正文使用依据须属于第 08 项。')
+    const references = inspectionSettingUses(item.basis)
+    if (!references.length) invalid('报告的设定正文使用依据缺少对应的冻结大纲及章纲计划。')
+    const outlineId = id(item.basis.author_setting_use_outline_id)
+    const plans = new Map(
+      list(items[1].basis.plans, 5000).map((row) => {
+        const plan = record(row)
+        return [id(plan.chapter_id), new Set(list(plan.setting_ids, 200000).map(id))] as const
+      }),
+    )
+    for (const use of references) {
+      const chapter = relevant.get(use.evidence.chapter_id)
+      const key = `${use.evidence.chapter_id}/${use.item_id}`
+      if (used.has(key) || !chapter || chapter.stale || chapter.sha256 !== use.chapter_sha256)
+        invalid('报告的设定正文使用依据不在对应章稿清单内。')
+      used.add(key)
+      const proof = proofs.get(use.version_id)
+      if (!proof) return invalid('报告缺少原作者确认的设定使用版本。')
+      const { version, settings } = proof
+      const title = settings.categories
+        .flatMap(({ items }) => items)
+        .find(({ id }) => id === version.item_id)?.title
+      if (
+        version.id !== use.version_id ||
+        version.action !== 'confirmed' ||
+        use.outline_version_id !== outlineId ||
+        !plans.get(use.evidence.chapter_id)?.has(use.item_id) ||
+        version.outline_version_id !== use.outline_version_id ||
+        version.settings_version_id !== use.settings_version_id ||
+        settings.id !== use.settings_version_id ||
+        version.item_id !== use.item_id ||
+        version.chapter_sha256 !== use.chapter_sha256 ||
+        compactJSON(version.evidence) !== compactJSON(use.evidence) ||
+        title !== use.title
+      )
+        invalid('报告的设定正文使用依据与原作者确认不一致。')
+      await verifyInspectionSettingUse(use, revisions.get(use.evidence.revision_id), digest)
+    }
+  }
   const basis_sha256 = hash(report.basis_sha256)
   if (
     basis_sha256 !== (await digest(JSON.stringify([scope, scope_id, items.map((item) => item.basis_sha256)])))
@@ -583,14 +681,24 @@ export function workflowSyncEntry(branchId: string, objectId: string, input: unk
   const entry = record(decoded)
   if (objectId !== `${kind}:${id(entry.id)}`) return invalid('云端历史报告的来源编号不一致。')
   const report = kind === 'workflow-completion' ? id(record(entry.manifest).inspection_id) : undefined
-  const revisionIds = list(entry.chapter_bindings, 5000).map((item) => parseBinding(item).revision_id)
+  const references =
+    kind === 'workflow-inspection'
+      ? list(record(entry.report).items, 10, 10).flatMap((item) =>
+          inspectionSettingUses(record(record(item).basis)),
+        )
+      : []
+  const revisionIds = new Set([
+    ...list(entry.chapter_bindings, 5000).map((item) => parseBinding(item).revision_id),
+    ...references.map(({ evidence }) => evidence.revision_id),
+  ])
+  const proofIds = new Set(references.map(({ version_id }) => version_id))
   const object: WorkflowSyncObject = {
     format: 'ainovel-manuscript-sync/1',
     kind,
     branch_id: branchId,
     entry_json,
   }
-  return { object, entry, report, revisionIds }
+  return { object, entry, report, revisionIds, proofIds }
 }
 
 export async function validateWorkflowSyncEntry(
@@ -598,11 +706,12 @@ export async function validateWorkflowSyncEntry(
   report: ArchivedInspection | undefined,
   revisions: ReadonlyMap<string, FrozenRevision>,
   digest: Digest,
+  proofs: InspectionProofs,
 ) {
   if (data.object.kind === 'workflow-inspection')
     return {
       kind: 'workflow-inspection' as const,
-      entry: await parseInspection(data.entry, revisions, digest),
+      entry: await parseInspection(data.entry, revisions, digest, proofs),
     }
   if (!report || report.id !== data.report) invalid('等待历史完本绑定的全书体检。')
   return {
@@ -623,13 +732,14 @@ export async function validateWorkflowHistory(
   branchId: string,
   revisions: ReadonlyMap<string, FrozenRevision>,
   digest: Digest,
+  proofs: InspectionProofs,
 ): Promise<WorkflowHistory> {
   const history = record(value, ['inspections', 'completions'])
   const inspections: ArchivedInspection[] = []
   const completions: ArchivedCompletion[] = []
   const used = new Set<string>()
   for (const value of list(history.inspections ?? [], 1000)) {
-    const entry = await parseInspection(value, revisions, digest)
+    const entry = await parseInspection(value, revisions, digest, proofs)
     if (used.has(entry.id)) invalid('稿件包的历史报告编号重复。')
     used.add(entry.id)
     inspections.push(entry)
