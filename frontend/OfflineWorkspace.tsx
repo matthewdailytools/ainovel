@@ -6,7 +6,9 @@ import {
   confirmLocalStory,
   createLocalChapter,
   createLocalProject,
+  exportLocalBackup,
   exportLocalManuscript,
+  importLocalBackup,
   importLocalManuscript,
   listLocalChapters,
   listLocalProjects,
@@ -219,6 +221,21 @@ export function OfflineWorkspace() {
     setDraftNotice('')
     setPreview(undefined)
     setIncludedExcerpts([])
+  }
+
+  function restoreFile(
+    file: File | undefined,
+    restore: (file: Blob) => Promise<LocalProject>,
+    message: string,
+  ) {
+    if (!file || !mayLeave(true)) return
+    void run(async () => {
+      setStatus('正在校验稿件及历史…')
+      const project = await restore(file)
+      setProjects((rows) => [...rows, project])
+      await openProject(project)
+      setStatus(message)
+    })
   }
 
   async function openChapter(chapter: LocalChapter) {
@@ -610,7 +627,8 @@ export function OfflineWorkspace() {
             void run(async () => {
               const pack = await exportLocalManuscript(selected.novel.id, includedExcerpts)
               const file = new Blob([JSON.stringify(pack)], { type: 'application/json' })
-              if (file.size > maxManuscriptBytes) throw new Error('稿件交换包超过 24 MiB 导入上限。')
+              if (file.size > maxManuscriptBytes)
+                throw new Error('稿件交换包超过 24 MiB。可在下方下载独立备份。')
               download('ainovel-稿件交换.json', file)
               setIncludedExcerpts([])
               setStatus('已下载已保存稿件与历史。')
@@ -628,13 +646,40 @@ export function OfflineWorkspace() {
             onChange={(event) => {
               const file = event.target.files?.[0]
               event.target.value = ''
-              if (!file || !mayLeave(true)) return
-              void run(async () => {
-                const project = await importLocalManuscript(file)
-                setProjects((rows) => [...rows, project])
-                await openProject(project)
-                setStatus('已校验并导入稿件及历史。')
-              })
+              restoreFile(file, importLocalManuscript, '已校验并导入稿件及历史。')
+            }}
+          />
+        </label>
+      </section>
+      <section className="offline-transfer" aria-label="独立作品备份">
+        <h2>独立作品备份</h2>
+        <p>备份此工作版本的已保存稿件、历史和依据。可在独立 Web 恢复，手法卡原句沿用上方的选择。</p>
+        <button
+          type="button"
+          disabled={!selected || busy}
+          onClick={() => {
+            if (!selected) return
+            void run(async () => {
+              setStatus('正在准备独立作品备份…')
+              const file = await exportLocalBackup(selected.novel.id, includedExcerpts)
+              download('ainovel-独立作品备份.ainovel-backup', file)
+              setIncludedExcerpts([])
+              setStatus('已下载独立作品备份。')
+            })
+          }}
+        >
+          下载独立作品备份
+        </button>
+        <label>
+          从独立备份恢复作品
+          <input
+            type="file"
+            accept=".ainovel-backup,application/x-ainovel-web-backup"
+            disabled={busy || !ready}
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              event.target.value = ''
+              restoreFile(file, importLocalBackup, '已校验并恢复独立作品备份。')
             }}
           />
         </label>

@@ -69,6 +69,7 @@ import {
   type StoryHistory,
   type StoryVersionObject,
 } from './storySyncModel'
+import { decodeWebManuscriptBackup, encodeWebManuscriptBackup } from './webManuscriptBackup'
 
 const DATABASE = 'ainovel-offline-workspace'
 const FORMAT = 'ainovel-manuscript/1'
@@ -722,6 +723,14 @@ export async function exportLocalManuscript(
     invalid(inspectionExcerptTransferReason)
   }
   return pack
+}
+
+export async function exportLocalBackup(
+  projectId: string,
+  includeReferenceEvidenceFor: readonly string[] = [],
+) {
+  const pack = await exportLocalManuscript(projectId, includeReferenceEvidenceFor)
+  return encodeWebManuscriptBackup(pack, manuscriptHash)
 }
 
 async function readReferenceHistory(tx: IDBTransaction, branchId: string) {
@@ -1850,6 +1859,10 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
     invalid('无法读取稿件交换包 JSON。')
   }
   return writeLocalManuscript(await validateManuscript(value))
+}
+
+export async function importLocalBackup(file: Blob): Promise<LocalProject> {
+  return writeLocalManuscript(await validateManuscript(await decodeWebManuscriptBackup(file, manuscriptHash)))
 }
 
 export async function forkLocalManuscript(

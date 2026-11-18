@@ -5,7 +5,12 @@ import { writeFile } from 'node:fs/promises'
 const cloud = 'http://127.0.0.1:8888'
 test.skip(process.env.AINOVEL_SYNC_E2E !== '1', '使用隔离云端进程验收大体积交付')
 
-test('长篇交付只同步冻结清单和来源，空白 Web 恢复后 ZIP 四份材料逐件一致', async ({ page }, testInfo) => {
+test('长篇交付以清单和来源同步，从独立 Web 备份恢复后四件交付逐件一致', async ({
+  page,
+  context,
+  browser,
+  baseURL,
+}, testInfo) => {
   await page.goto('/')
   const { csrf } = await (await page.request.get('/api/session')).json()
   const headers = { 'X-Ainovel-CSRF': csrf }
@@ -49,6 +54,7 @@ test('长篇交付只同步冻结清单和来源，空白 Web 恢复后 ZIP 四�
     },
   })
   expect(inspection.ok(), await inspection.text()).toBe(true)
+  const { id: inspectionId } = await inspection.json()
   const { basis_sha256 } = await (await page.request.get(`${branch}/book-completion`)).json()
   const completion = await page.request.post(`${branch}/book-completion/confirm`, {
     headers,
@@ -121,17 +127,53 @@ test('长篇交付只同步冻结清单和来源，空白 Web 恢复后 ZIP 四�
   await archive.getByRole('button', { name: '下载历史交付 ZIP' }).click()
   const downloaded = testInfo.outputPath('large-web.zip')
   await (await transfer).saveAs(downloaded)
+
+  await expect(page.getByText('离线页面就绪', { exact: true })).toBeVisible()
+  await context.setOffline(true)
+  const backupTransfer = page.waitForEvent('download')
+  await page.getByRole('button', { name: '下载独立作品备份', exact: true }).click()
+  const backup = testInfo.outputPath('large-workflow.ainovel-backup')
+  await (await backupTransfer).saveAs(backup)
+  const recoveredZip = testInfo.outputPath('large-recovered.zip')
+  const recovery = await browser.newContext({ baseURL })
+  try {
+    const restored = await recovery.newPage()
+    await restored.goto('/offline/')
+    await expect(restored.getByText('离线页面就绪', { exact: true })).toBeVisible()
+    await expect.poll(() => restored.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+    await recovery.setOffline(true)
+    await restored.reload()
+    await restored.getByLabel('从独立备份恢复作品', { exact: true }).setInputFiles(backup)
+    await expect(restored.getByText('已校验并恢复独立作品备份。', { exact: true })).toBeVisible()
+    const history = restored.getByLabel('历次体检与完本交付')
+    await history.getByText('历次体检与完本交付', { exact: true }).click()
+    await history.getByLabel('选择历史报告').selectOption(inspectionId)
+    await expect(history.getByRole('list', { name: '十处对账' }).locator(':scope > li')).toHaveCount(10)
+    await history.getByLabel('选择历史报告').selectOption(delivery)
+    await expect(history.getByRole('region', { name: '历史完本清单' })).toContainText(
+      inspectionId.slice(0, 8),
+    )
+    const recoveredTransfer = restored.waitForEvent('download')
+    await history.getByRole('button', { name: '下载历史交付 ZIP' }).click()
+    await (await recoveredTransfer).saveAs(recoveredZip)
+  } finally {
+    await recovery.close()
+  }
+
   execFileSync(process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python', [
     '-c',
     [
       'import json, sys, zipfile',
-      'with zipfile.ZipFile(sys.argv[1]) as source, zipfile.ZipFile(sys.argv[2]) as received:',
-      '    assert received.testzip() is None and set(source.namelist()) == set(received.namelist())',
+      'with zipfile.ZipFile(sys.argv[1]) as source:',
       '    assert source.getinfo("正文.md").file_size > 1024 * 1024',
-      '    assert json.loads(source.read("manifest.json")) == json.loads(received.read("manifest.json"))',
-      '    assert all(source.read(name) == received.read(name) for name in source.namelist() if name != "manifest.json")',
+      '    for path in sys.argv[2:]:',
+      '        with zipfile.ZipFile(path) as received:',
+      '            assert received.testzip() is None and set(source.namelist()) == set(received.namelist())',
+      '            assert json.loads(source.read("manifest.json")) == json.loads(received.read("manifest.json"))',
+      '            assert all(source.read(name) == received.read(name) for name in source.namelist() if name != "manifest.json")',
     ].join('\n'),
     originalFile,
     downloaded,
+    recoveredZip,
   ])
 })

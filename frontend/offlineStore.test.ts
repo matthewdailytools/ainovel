@@ -5,7 +5,9 @@ import {
   createLocalProject,
   confirmLocalProjectBrief,
   applySyncedObject,
+  exportLocalBackup,
   exportLocalManuscript,
+  importLocalBackup,
   importLocalManuscript,
   listLocalProjects,
   manuscriptHash,
@@ -16,6 +18,7 @@ import {
   validateManuscript,
   validateSyncedObject,
 } from './offlineStore'
+import { encodeWebManuscriptBackup } from './webManuscriptBackup'
 
 beforeEach(() => vi.stubGlobal('indexedDB', new IDBFactory()))
 
@@ -73,6 +76,41 @@ test('exchange retains stable IDs and exact UTF-8 text and checks hashes and dan
   await importLocalManuscript(bundle(pack))
   expect(await listLocalProjects()).toEqual([{ novel: pack.novel, branch: pack.branch }])
   expect(await exportLocalManuscript(a.novel.id)).toEqual(pack)
+})
+
+test('independent backup rejects truncation, corruption and broken references before any work is installed', async () => {
+  const initial = await createLocalProject('遗铃独立备份')
+  const chapter = await createLocalChapter(initial.novel.id, '过桥')
+  const [base] = await readLocalHistory(initial.novel.id, chapter.id)
+  const latest = await saveLocalChapter(
+    initial.novel.id,
+    chapter.id,
+    base.id,
+    '她收起铜铃。𠮷😀\r\n再去寻找。',
+  )
+  const original = await exportLocalManuscript(initial.novel.id)
+  const archive = await exportLocalBackup(initial.novel.id)
+  const text = await archive.text()
+  const [header, first, second, ...rest] = text.split('\n')
+  const reordered = new Blob([[header, second, first, ...rest].join('\n')])
+  const corrupted = new Blob([text.replace('她收起铜铃', '她放下铜铃')])
+  const brokenSource = structuredClone(original)
+  brokenSource.revisions[1].parent_id = 'missing-revision'
+  const rehashed = await encodeWebManuscriptBackup(brokenSource, manuscriptHash)
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  const other = await createLocalProject('其他已保存作品')
+  for (const invalid of [archive.slice(0, -5), reordered, corrupted, rehashed]) {
+    await expect(importLocalBackup(invalid)).rejects.toThrow()
+    expect(await listLocalProjects()).toEqual([other])
+  }
+  await expect(importLocalBackup(archive)).resolves.toEqual({
+    novel: original.novel,
+    branch: original.branch,
+  })
+  expect(await exportLocalManuscript(initial.novel.id)).toEqual(original)
+  expect((await readLocalHistory(initial.novel.id, chapter.id)).at(-1)).toEqual(latest)
+  await expect(importLocalBackup(archive)).rejects.toMatchObject({ code: 'conflict' })
+  expect(await exportLocalManuscript(initial.novel.id)).toEqual(original)
 })
 
 test('quota failure aborts the whole browser write and preserves existing formal versions', async () => {
