@@ -6,6 +6,26 @@ export const softDeviationPolicy = 'soft-deviation-review/1'
 export const maxAuthorEvidence = 30
 export const maxSoftDeviations = 1000
 
+type ScopedInspectionFinding = { scope: 'chapter' | 'volume'; scope_id: string; report_id: string }
+
+export function scopedInspectionFindings(basis: Record<string, unknown>): ScopedInspectionFinding[] {
+  if (!Array.isArray(basis.scoped_findings)) return []
+  const findings: ScopedInspectionFinding[] = []
+  for (const value of basis.scoped_findings as unknown[]) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const { scope, scope_id, report_id } = value as Record<string, unknown>
+    if (
+      (scope === 'chapter' || scope === 'volume') &&
+      typeof scope_id === 'string' &&
+      scope_id &&
+      typeof report_id === 'string' &&
+      report_id
+    )
+      findings.push({ scope, scope_id, report_id })
+  }
+  return findings
+}
+
 export function softDeviations(basis: Record<string, unknown>): SoftDeviation[] | undefined {
   if (basis.soft_deviation_policy !== softDeviationPolicy) return []
   if (!Array.isArray(basis.reports)) return

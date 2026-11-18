@@ -8,6 +8,7 @@ import {
   coversInspectionExcerpt,
   maxAuthorEvidence,
   maxSoftDeviations,
+  scopedInspectionFindings,
   softDeviations,
   type InspectionExcerpt,
   type SoftDeviation,
@@ -118,15 +119,7 @@ function ScopedInspectionSources({
   chapters: Preview['chapters']
   branchId: string
 }) {
-  const rows: unknown = item.basis.scoped_findings
-  if (!Array.isArray(rows)) return null
-  const findings = rows.filter(
-    (row): row is { scope: 'chapter' | 'volume'; scope_id: string; report_id: string } =>
-      !!row &&
-      (row.scope === 'chapter' || row.scope === 'volume') &&
-      typeof row.scope_id === 'string' &&
-      typeof row.report_id === 'string',
-  )
+  const findings = scopedInspectionFindings(item.basis)
   if (!findings.length) return null
   return (
     <ul aria-label="章卷红项来源">

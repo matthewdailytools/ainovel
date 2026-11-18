@@ -208,3 +208,143 @@ test('M6-08 经真实云同步回读精确原文，撤回后新设备仍能查�
     exported.setting_use_history.versions.map(({ version }: { version: { id: string } }) => version.id),
   ).toContain(proof.id)
 })
+
+test('章级红项经云同步和独立备份往返，可在离线历史从全书体检打开原选区', async ({ page, browser }) => {
+  test.skip(process.env.AINOVEL_SYNC_E2E !== '1', '此用例使用隔离的真实同步账本')
+  const { novel, branch, chapter, original, headers } = await authorSettingPlan(page, '跨端汇总 · 归还赤钥')
+  const cloud = process.env.AINOVEL_TEST_SYNC_URL ?? 'http://127.0.0.1:8888'
+  const devices = `${cloud}/api/sync/works/${novel.branch_id}/devices`
+  const inspections = `${branch}/workflow-inspections`
+  const baseline = await accepted(await page.request.get(`${branch}/manuscript-package`))
+  const position = { start: 2, end: original.length - 1 }
+  const quote = original.slice(position.start, position.end)
+  const scope = { scope: 'chapter', scope_id: chapter.id }
+  const { preview } = await accepted(await page.request.get(inspections, { params: scope }))
+  const { revision } = preview.chapters[0]
+  const red = await accepted(
+    await page.request.post(inspections, {
+      headers,
+      data: {
+        ...scope,
+        basis_sha256: preview.basis_sha256,
+        author_reviews: [
+          {
+            check_id: '03',
+            status: 'red',
+            basis_note: '对照守铃人的已确认身份。',
+            reason: '原章把访客误认为守铃人。',
+            evidence: [{ chapter_id: chapter.id, revision, ...position, quote }],
+          },
+        ],
+      },
+    }),
+  )
+  const all = await accepted(await page.request.get(inspections))
+  const combined = await accepted(
+    await page.request.post(inspections, {
+      headers,
+      data: { basis_sha256: all.preview.basis_sha256 },
+    }),
+  )
+  expect(combined.items[2].basis.scoped_findings).toEqual([{ ...scope, report_id: red.id }])
+  const replacement = '作者改写了后来交还钥匙的经过。'
+  await accepted(
+    await page.request.put(`/api/chapters/${chapter.id}`, {
+      headers,
+      data: { base_revision: revision, content: replacement },
+    }),
+  )
+
+  async function grant(device_id: string) {
+    const { token } = await accepted(
+      await page.request.post(devices, {
+        headers: { Authorization: 'Bearer e2e-test-only-provisioning-token' },
+        data: { device_id },
+      }),
+    )
+    return token as string
+  }
+
+  const token = await grant('desktop-scoped-reports')
+  for (const action of ['enable', 'run']) {
+    const state = await accepted(
+      await page.request.post(`${branch}/desktop-sync/${action}`, {
+        headers,
+        data: { origin: cloud, token },
+      }),
+    )
+    expect(state.conflicts).toHaveLength(0)
+    expect(state.deferred).toHaveLength(0)
+  }
+
+  const offlineURL = new URL('/offline/', page.url()).href
+  async function startWeb(workspace: Page) {
+    await workspace.goto(offlineURL)
+    await expect(workspace.getByText('离线页面就绪', { exact: true })).toBeVisible()
+    await expect.poll(() => workspace.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+  }
+
+  async function verifySource(workspace: Page) {
+    const archive = workspace.getByLabel('历次体检与完本交付')
+    await archive.getByText('历次体检与完本交付', { exact: true }).press('Enter')
+    const history = archive.getByRole('combobox', { name: '选择历史报告' })
+    await history.selectOption(combined.id)
+    await archive.getByText(/^人物身份、关系与状态 · 红/).press('Enter')
+    const originalReport = archive.getByRole('button', { name: /查看章级来源报告/ })
+    await expect(originalReport).toContainText(red.id.slice(0, 8))
+    await originalReport.press('Enter')
+    await expect(history).toHaveValue(red.id)
+    await expect(history).toBeFocused()
+    const check = archive.getByText(/^人物身份、关系与状态 · 红/)
+    if ((await check.locator('..').getAttribute('open')) === null) await check.press('Enter')
+    await archive.getByRole('button', { name: /查看核对原文/ }).press('Enter')
+    const located = archive.getByRole('region', { name: '历史报告引用正文' })
+    await expect(located.locator('mark')).toHaveText(quote)
+    await expect(located.locator('pre')).toHaveText(original)
+    await expect(located).toContainText(createHash('sha256').update(original).digest('hex'))
+  }
+
+  const receiving = await browser.newContext({ viewport: { width: 320, height: 900 } })
+  const restored = await browser.newContext()
+  try {
+    const web = await receiving.newPage()
+    await startWeb(web)
+    const importBaseline = web.getByLabel('导入新离线作品')
+    await expect(importBaseline).toBeEnabled()
+    await importBaseline.setInputFiles({
+      name: '红项云同步基线.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(baseline)),
+    })
+    await web.getByRole('combobox', { name: '离线作品' }).selectOption(novel.id)
+    await web.getByText('作品云同步', { exact: true }).click()
+    await web.getByLabel('同步服务地址').fill(cloud)
+    await web.getByLabel('设备编号').fill('web-scoped-reports')
+    await web.getByLabel('设备凭据').fill(await grant('web-scoped-reports'))
+    await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
+    await web.getByRole('button', { name: '同步当前工作版本', exact: true }).click()
+    await expect(web.getByLabel('历次体检与完本交付')).toBeVisible()
+    const download = web.getByRole('button', { name: '下载独立作品备份', exact: true })
+    await expect(download).toBeEnabled()
+    await receiving.setOffline(true)
+    await verifySource(web)
+    expect(await web.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
+    const [saved] = await Promise.all([
+      web.waitForEvent('download', { timeout: 10_000 }),
+      download.press('Enter'),
+    ])
+    const path = await saved.path()
+    if (!path) throw new Error('隔离作品备份没有生成。')
+    const fresh = await restored.newPage()
+    await startWeb(fresh)
+    await restored.setOffline(true)
+    const restore = fresh.getByLabel('从独立备份恢复作品')
+    await expect(restore).toBeEnabled()
+    await restore.setInputFiles(path)
+    await fresh.getByRole('combobox', { name: '离线作品' }).selectOption(novel.id)
+    await verifySource(fresh)
+  } finally {
+    await restored.close()
+    await receiving.close()
+  }
+})

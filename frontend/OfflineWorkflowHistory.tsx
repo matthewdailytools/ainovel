@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createDeliveryZip } from './deliveryArchive'
+import { scopedInspectionFindings, type InspectionExcerpt } from './inspectionEvidence'
 import {
   manuscriptHash,
   readLocalSourceRevision,
@@ -18,6 +19,8 @@ const inspectionLabels = {
 }
 const scopeNames = { book: '全书体检', volume: '卷体检', chapter: '章体检' }
 const date = (stamp: number) => new Date(stamp * 1000).toLocaleString('zh-CN')
+type ExcerptTarget =
+  { settingUse: ReturnType<typeof inspectionSettingUses>[number] } | { evidence: InspectionExcerpt }
 
 export function OfflineWorkflowHistory({
   projectId,
@@ -35,6 +38,7 @@ export function OfflineWorkflowHistory({
   const [excerpt, setExcerpt] = useState<{ start: number; end: number; quote: string }>()
   const [sourceFailure, setSourceFailure] = useState('')
   const request = useRef(0)
+  const historySelect = useRef<HTMLSelectElement>(null)
 
   useEffect(() => {
     let active = true
@@ -57,6 +61,7 @@ export function OfflineWorkflowHistory({
 
   const inspections = history?.inspections ?? []
   const completions = history?.completions ?? []
+  const reports = new Map(inspections.map((entry) => [entry.id, entry]))
   const options = [
     ...inspections.map(({ id, report, created }) => ({
       id,
@@ -66,31 +71,55 @@ export function OfflineWorkflowHistory({
     ...completions.map(({ id, created }) => ({ id, created, title: '完本交付' })),
   ].sort((left, right) => right.created - left.created || left.id.localeCompare(right.id))
   const identifier = options.find(({ id }) => id === selection)?.id ?? options[0]?.id
-  const inspection = inspections.find(({ id }) => id === identifier)
+  const inspection = reports.get(identifier ?? '')
   const completion = completions.find(({ id }) => id === identifier)
   const record = inspection ?? completion
   const devices = history?.sourceDevices
   const device = identifier && devices && Object.hasOwn(devices, identifier) ? devices[identifier] : undefined
 
-  async function showOriginal(
-    binding: NonNullable<typeof record>['chapter_bindings'][number],
-    settingUse?: ReturnType<typeof inspectionSettingUses>[number],
-  ) {
-    const token = ++request.current
+  function clearOriginal() {
+    request.current++
     setSource(undefined)
     setExcerpt(undefined)
     setSourceFailure('')
+  }
+
+  function selectReport(id: string) {
+    setSelection(id)
+    clearOriginal()
+  }
+
+  async function showOriginal(
+    binding: NonNullable<typeof record>['chapter_bindings'][number],
+    target?: ExcerptTarget,
+  ) {
+    clearOriginal()
+    const token = request.current
     try {
       const version = await readLocalSourceRevision(projectId, binding.revision_id)
       if (!version || version.chapter_id !== binding.id || version.sha256 !== binding.sha256)
         throw new Error('缺少与这份报告对应的原章稿修订。')
-      const quote = settingUse
-        ? await verifyInspectionSettingUse(settingUse, version, manuscriptHash)
-        : undefined
+      let originalExcerpt: typeof excerpt
+      if (target && 'settingUse' in target) {
+        const use = target.settingUse
+        const quote = await verifyInspectionSettingUse(use, version, manuscriptHash)
+        originalExcerpt = { start: use.evidence.start, end: use.evidence.end, quote }
+      } else if (target) {
+        const { chapter_id, revision, start, end, quote } = target.evidence
+        if (
+          chapter_id !== binding.id ||
+          revision !== binding.revision ||
+          start < 0 ||
+          end > version.content.length ||
+          start >= end ||
+          version.content.slice(start, end) !== quote
+        )
+          throw new Error('原章稿与这处作者核对选区不一致。')
+        originalExcerpt = { start, end, quote }
+      }
       if (token === request.current) {
         setSource(version)
-        if (settingUse && quote)
-          setExcerpt({ start: settingUse.evidence.start, end: settingUse.evidence.end, quote })
+        setExcerpt(originalExcerpt)
       }
     } catch (error) {
       if (token === request.current)
@@ -108,16 +137,7 @@ export function OfflineWorkflowHistory({
       </p>
       <label>
         选择历史报告
-        <select
-          value={identifier}
-          onChange={(event) => {
-            request.current++
-            setSelection(event.target.value)
-            setSource(undefined)
-            setExcerpt(undefined)
-            setSourceFailure('')
-          }}
-        >
+        <select ref={historySelect} value={identifier} onChange={(event) => selectReport(event.target.value)}>
           {options.map(({ id, title, created }) => (
             <option key={id} value={id}>
               {title} · {date(created)} · {id.slice(0, 8)}
@@ -134,6 +154,31 @@ export function OfflineWorkflowHistory({
                   {item.title} · {inspectionLabels[item.status]}
                 </summary>
                 <p>{item.summary}</p>
+                {scopedInspectionFindings(item.basis).map((finding) => {
+                  const related = reports.get(finding.report_id)?.report
+                  const original =
+                    related?.scope === finding.scope &&
+                    related.scope_id === finding.scope_id &&
+                    related.items.some((check) => check.check_id === item.check_id && check.status === 'red')
+                  const scope = finding.scope === 'chapter' ? '章级' : '卷级'
+                  return (
+                    <p key={finding.report_id}>
+                      {original ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            selectReport(finding.report_id)
+                            historySelect.current?.focus()
+                          }}
+                        >
+                          查看{scope}来源报告 · {finding.report_id.slice(0, 8)}
+                        </button>
+                      ) : (
+                        `${scope}来源报告 ${finding.report_id.slice(0, 8)} 待获取。`
+                      )}
+                    </p>
+                  )
+                })}
                 {item.check_id === '08' &&
                   inspectionSettingUses(item.basis).map((use) => (
                     <p key={use.version_id}>
@@ -147,7 +192,7 @@ export function OfflineWorkflowHistory({
                               revision: use.revision,
                               sha256: use.chapter_sha256,
                             },
-                            use,
+                            { settingUse: use },
                           )
                         }
                       >
@@ -162,15 +207,28 @@ export function OfflineWorkflowHistory({
                     <p>{item.author_review.reason}</p>
                     {!!item.author_review.evidence.length && (
                       <ul aria-label="核对原文引用">
-                        {item.author_review.evidence.map((source, index) => (
-                          <li key={index}>
-                            <blockquote>{source.quote}</blockquote>
-                            <p className="small">
-                              章节 {source.chapter_id} · 修订 {source.revision} · 选区 {source.start}–
-                              {source.end}
-                            </p>
-                          </li>
-                        ))}
+                        {item.author_review.evidence.map((evidence, index) => {
+                          const binding = inspection.chapter_bindings.find(
+                            (row) => row.id === evidence.chapter_id && row.revision === evidence.revision,
+                          )
+                          const chapter = inspection.report.chapters.find(
+                            (row) => row.id === evidence.chapter_id,
+                          )
+                          return (
+                            <li key={index}>
+                              <blockquote>{evidence.quote}</blockquote>
+                              {binding && (
+                                <button
+                                  type="button"
+                                  onClick={() => void showOriginal(binding, { evidence })}
+                                >
+                                  查看核对原文 · {chapter?.title ?? '来源章'} · 修订 {evidence.revision} ·
+                                  选区 {evidence.start}–{evidence.end}
+                                </button>
+                              )}
+                            </li>
+                          )
+                        })}
                       </ul>
                     )}
                   </section>

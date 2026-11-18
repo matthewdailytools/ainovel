@@ -487,7 +487,7 @@ def _scene_rows(tx, branch_id, chapters, graph):
     return result
 
 
-def _evaluate(tx, branch_id, scope, scope_id):
+def _evaluate(tx, branch_id, scope, scope_id, *, roll_up=True):
     outline = _view(tx, branch_id)
     chapters = _scope(tx, branch_id, outline, scope, scope_id)
     graph = graph_snapshot(tx, branch_id)
@@ -693,7 +693,7 @@ def _evaluate(tx, branch_id, scope, scope_id):
             {"outline": plan_basis, "scenes": scenes, "events": events},
         ),
     ]
-    findings = _scoped_red_findings(tx, branch_id, scope, ids)
+    findings = _scoped_red_findings(tx, branch_id, scope, ids) if roll_up else {}
     for index, check in enumerate(items):
         linked = findings.get(check["check_id"])
         if not linked:
@@ -844,16 +844,54 @@ def _same_exemption_scope(report, preview):
     ] == [row["id"] for row in preview["chapters"]]
 
 
-def _effective(row, preview):
+def _direct_check_basis(check, report):
+    basis = check["basis"]
+    if "scoped_findings" not in basis:
+        return basis, check["basis_sha256"]
+    direct = {key: value for key, value in basis.items() if key != "scoped_findings"}
+    digest = _item(
+        check["check_id"], check["summary"], direct, manifest=report["chapters"], scope=report["scope"]
+    )["basis_sha256"]
+    return direct, digest
+
+
+def _matching_check(item, latest, report, preview, *, direct=False):
+    if not latest:
+        return False
+    if direct:
+        if report["version"] != preview["version"]:
+            return False
+        old_basis, old_digest = _direct_check_basis(item, report)
+        new_basis, new_digest = _direct_check_basis(latest, preview)
+    else:
+        old_basis, old_digest = item["basis"], item["basis_sha256"]
+        new_basis, new_digest = latest["basis"], latest["basis_sha256"]
+    # Continuity changes can require a new report without changing the frozen length calculation.
+    return old_digest == new_digest or (
+        item["check_id"] == "09" and old_basis == new_basis and _same_length_inputs(report, preview)
+    )
+
+
+def _effective(row, preview, *, direct_only=False):
     report = json.loads(row["payload"])
     current = {item["check_id"]: item for item in preview["items"]} if preview else {}
     invalid_exemption = False
     for item in report["items"]:
         latest = current.get(item["check_id"], {})
-        matched = latest.get("basis_sha256") == item["basis_sha256"]
-        if not matched and item["check_id"] == "09" and preview and latest.get("basis") == item["basis"]:
-            # Continuity changes can require a new report without changing the frozen length calculation.
-            matched = _same_length_inputs(report, preview)
+        verdict = item["status"]
+        inherited = bool(item["basis"].get("scoped_findings"))
+        author_verdict = (item.get("author_review") or {}).get("status")
+        if direct_only and inherited and author_verdict != "red" and latest.get("status") != "red":
+            # A signed local pass can close a direct finding while the chapter finding stays red.
+            verdict = (
+                "green"
+                if author_verdict == "green" and latest.get("status") in {"green", "pending"}
+                else "outdated"
+            )
+        direct_red = (
+            report["scope"] == "volume" and verdict == "red" and (not inherited or author_verdict == "red")
+        )
+        matched = _matching_check(item, latest, report, preview, direct=direct_only or direct_red)
         allowed = item["status"] != "not_applicable" or latest.get("can_mark_not_applicable", False)
         if (
             not matched
@@ -866,7 +904,7 @@ def _effective(row, preview):
             matched = _same_exemption_scope(report, preview)
         if not allowed:
             invalid_exemption = True
-        item["current_status"] = item["status"] if matched and allowed else "outdated"
+        item["current_status"] = verdict if matched and allowed else "outdated"
     return {
         **report,
         "id": row["id"],
@@ -901,7 +939,7 @@ def _scoped_red_findings(tx, branch_id, scope, chapter_ids):
         if scope == "volume" and (source_scope != "chapter" or source_id not in chapter_ids):
             continue
         try:
-            preview, _ = _evaluate(tx, branch_id, source_scope, source_id)
+            preview, _ = _evaluate(tx, branch_id, source_scope, source_id, roll_up=False)
         except DomainError as error:
             if error.code != "inspection_target":
                 raise
@@ -914,15 +952,11 @@ def _scoped_red_findings(tx, branch_id, scope, chapter_ids):
         )
         decisions = {}
         for row in reports:
-            for item in _effective(row, preview)["items"]:
+            for item in _effective(row, preview, direct_only=True)["items"]:
                 check_id = item["check_id"]
                 verdict = item["current_status"]
                 author_verdict = (item.get("author_review") or {}).get("status")
                 if verdict == "red":
-                    inherited = bool(item["basis"].get("scoped_findings"))
-                    if inherited and author_verdict != "red":
-                        # The original chapter already participates in the book's roll-up.
-                        continue
                     decisions[check_id] = {
                         "scope": source_scope,
                         "scope_id": source_id,

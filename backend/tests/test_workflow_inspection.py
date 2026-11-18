@@ -627,3 +627,133 @@ def test_scoped_red_reviews_block_book_completion_until_explicitly_rechecked(cli
     assert confirmed.status_code == 201, confirmed.text
     assert confirmed.json()["manifest"]["inspection_id"] == passed["id"]
     assert client.get(download).content == frozen
+
+
+def test_same_check_keeps_independent_volume_red_when_chapter_findings_change(client, story):
+    branch = f"/api/branches/{story['branch_id']}"
+    second = client.post(branch + "/chapters", json={"title": "第二章"})
+    assert second.status_code == 201, second.text
+    chapters = []
+    for identifier, content in (
+        (story["chapter_id"], "学徒拾铃入门。"),
+        (second.json()["id"], "师姐认出另一枚旧铃。"),
+    ):
+        saved = client.put(f"/api/chapters/{identifier}", json={"base_revision": 0, "content": content})
+        assert saved.status_code == 200, saved.text
+        chapters.append(saved.json())
+    first, second = chapters
+    put_and_confirm(
+        client,
+        branch + "/outline-workspace",
+        {
+            "base_revision": 0,
+            "plan": {
+                "summary": "核对两枚旧铃的来历。",
+                "volumes": [
+                    {
+                        "id": "v1",
+                        "title": "归铃卷",
+                        "summary": "核对铜铃。",
+                        "units": [
+                            {
+                                "id": "u1",
+                                "title": "线索",
+                                "summary": "核对持铃人。",
+                                "chapters": [
+                                    {**chapter_plan(chapter["id"], "核对持铃人"), "setting_ids": []}
+                                    for chapter in chapters
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        },
+    )
+    route = endpoint(story)
+    completion = branch + "/book-completion"
+    chapter_scope = {"scope": "chapter", "scope_id": first["id"]}
+    volume_scope = {"scope": "volume", "scope_id": "v1"}
+
+    def sign(scope, status, chapter, reason):
+        preview = read(client, route, **scope)["preview"]
+        evidence = {**author("03", chapter, status), "reason": reason}
+        return report(client, route, preview, author_reviews=[evidence])
+
+    def sign_book():
+        preview = read(client, route)["preview"]
+        return report(
+            client,
+            route,
+            preview,
+            author_reviews=[author(row["check_id"], first) for row in preview["items"]],
+        )
+
+    def findings():
+        return item(read(client, route)["preview"], "03")["basis"].get("scoped_findings", [])
+
+    def complete():
+        return client.post(
+            completion + "/confirm",
+            json={
+                "basis_sha256": read(client, completion)["basis_sha256"],
+                "read_note": "两章已通读。",
+                "ending": {"note": "铃已交还。"},
+                "characters": {"note": "学徒与师姐完成交接。"},
+                "promises": {"note": "没有单列伏笔。"},
+                "intro": "学徒发现两枚旧铃。",
+                "spoiler_scope": "opening",
+                "sample_chapter_ids": [first["id"]],
+                "materials_reviewed": True,
+            },
+        )
+
+    sign_book()
+    chapter_red = sign(chapter_scope, "red", first, "第一章持铃人称谓冲突。")
+    volume_red = sign(volume_scope, "red", second, "第二章另有持铃人身份冲突。")
+    volume_finding = {**volume_scope, "report_id": volume_red["id"]}
+    assert findings() == [{**chapter_scope, "report_id": chapter_red["id"]}, volume_finding]
+
+    sign(chapter_scope, "green", first, "已核实第一章使用的是同一称谓。")
+    assert findings() == [volume_finding]
+    old_volume = read(client, f"{route}/{volume_red['id']}")
+    assert not old_volume["current"]
+    assert item(old_volume, "03")["current_status"] == "red"
+    assert item(old_volume, "03")["author_review"]["evidence"] == [source(second)]
+    assert item(old_volume, "03")["basis_sha256"] == item(volume_red, "03")["basis_sha256"]
+    assert (
+        next(check for check in read(client, completion)["checks"] if check["id"] == "inspection")["status"]
+        == "red"
+    )
+    rejected = complete()
+    assert rejected.status_code == 409 and rejected.json()["code"] == "completion_blocked"
+
+    next_chapter_red = sign(chapter_scope, "red", first, "第一章另有身份疑点。")
+    chapter_finding = {**chapter_scope, "report_id": next_chapter_red["id"]}
+    assert findings() == [chapter_finding, volume_finding]
+    passed_volume = sign(volume_scope, "green", second, "已核实第二章的人物身份。")
+    assert item(passed_volume, "03")["current_status"] == "red"
+    assert findings() == [chapter_finding]
+
+    sign(chapter_scope, "green", first, "第一章的身份疑点也已核实。")
+    assert findings() == []
+    passed_book = sign_book()
+    finished = complete()
+    assert finished.status_code == 201, finished.text
+    assert finished.json()["manifest"]["inspection_id"] == passed_book["id"]
+    history = read(client, branch + "/manuscript-package")["workflow_history"]["inspections"]
+    frozen = next(entry["report"] for entry in history if entry["id"] == volume_red["id"])
+    assert item(frozen, "03")["status"] == "red"
+    assert item(frozen, "03")["author_review"]["evidence"] == [source(second)]
+
+    updated_volume_red = sign(volume_scope, "red", second, "第二章有待核对的另一处身份问题。")
+    assert findings() == [{**volume_scope, "report_id": updated_volume_red["id"]}]
+    updated = client.put(
+        f"/api/chapters/{second['id']}",
+        json={"base_revision": second["revision"], "content": "师姐认出故人的铜铃，确认了铃主。"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert findings() == []
+    changed_volume = read(client, f"{route}/{updated_volume_red['id']}")
+    assert item(changed_volume, "03")["current_status"] == "outdated"
+    assert complete().status_code == 409
