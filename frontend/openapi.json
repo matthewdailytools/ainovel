@@ -310,6 +310,38 @@
         }
       }
     },
+    "/api/branches/{branch_id}/book-completion/history/{identifier}": {
+      "get": {
+        "summary": "Completion History",
+        "operationId": "completion_history_api_branches__branch_id__book_completion_history__identifier__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/workflow-inspections": {
       "get": {
         "summary": "Inspections",
@@ -455,6 +487,24 @@
             "in": "path",
             "required": true,
             "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "include_reference_evidence_for",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                  "maxItems": 100
+                },
+                { "type": "null" }
+              ],
+              "description": "明确选带原文证据的手法卡修订 ID。默认只导出手法卡来源地址。",
+              "title": "Include Reference Evidence For"
+            },
+            "description": "明确选带原文证据的手法卡修订 ID。默认只导出手法卡来源地址。"
           }
         ],
         "responses": {
@@ -4393,6 +4443,98 @@
         }
       }
     },
+    "/api/branches/{branch_id}/reference-cards": {
+      "get": {
+        "summary": "Saved Card History",
+        "operationId": "saved_card_history_api_branches__branch_id__reference_cards_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+                { "type": "null" }
+              ],
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ReferenceCardHistoryEntry" },
+                  "title": "Response Saved Card History Api Branches  Branch Id  Reference Cards Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/reference-cards/{version_id}/evidence": {
+      "get": {
+        "summary": "Card Evidence",
+        "operationId": "card_evidence_api_branches__branch_id__reference_cards__version_id__evidence_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Version Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ReferenceCardEvidence" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/reference-sessions": {
       "get": {
         "summary": "References",
@@ -5287,6 +5429,117 @@
         "required": ["base_revision", "archived"],
         "title": "ArchiveInput"
       },
+      "ArchivedAuthorReview": {
+        "properties": {
+          "check_id": {
+            "type": "string",
+            "enum": ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"],
+            "title": "Check Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["green", "yellow", "red", "not_applicable"],
+            "title": "Status"
+          },
+          "basis_note": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Basis Note" },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" },
+          "evidence": {
+            "items": { "$ref": "#/components/schemas/Source" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Evidence"
+          },
+          "source_candidate_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Source Candidate Id"
+          },
+          "author_overrides_candidate": {
+            "type": "boolean",
+            "title": "Author Overrides Candidate",
+            "default": false
+          },
+          "candidate_result": {
+            "anyOf": [{ "type": "string", "enum": ["pass", "fail", "unknown"] }, { "type": "null" }],
+            "title": "Candidate Result"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["check_id", "status", "basis_note", "reason"],
+        "title": "ArchivedAuthorReview"
+      },
+      "ArchivedCompletion": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "created": { "type": "number", "minimum": 0, "title": "Created" },
+          "chapter_bindings": {
+            "items": { "$ref": "#/components/schemas/ChapterBinding" },
+            "type": "array",
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Chapter Bindings"
+          },
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" },
+          "checks": {
+            "items": { "$ref": "#/components/schemas/CompletionCheck" },
+            "type": "array",
+            "maxItems": 6,
+            "minItems": 6,
+            "title": "Checks"
+          },
+          "manifest": { "$ref": "#/components/schemas/DeliveryManifest" },
+          "materials": {
+            "additionalProperties": { "type": "string" },
+            "type": "object",
+            "maxProperties": 4,
+            "minProperties": 4,
+            "title": "Materials"
+          },
+          "review": { "$ref": "#/components/schemas/CompletionRequest" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created",
+          "chapter_bindings",
+          "basis_sha256",
+          "checks",
+          "manifest",
+          "materials",
+          "review"
+        ],
+        "title": "ArchivedCompletion"
+      },
+      "ArchivedInspection": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "created": { "type": "number", "minimum": 0, "title": "Created" },
+          "chapter_bindings": {
+            "items": { "$ref": "#/components/schemas/ChapterBinding" },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Chapter Bindings"
+          },
+          "report": { "$ref": "#/components/schemas/InspectionReport" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "created", "chapter_bindings", "report"],
+        "title": "ArchivedInspection"
+      },
       "AssessmentInput": {
         "properties": {
           "branch_id": { "type": "string", "title": "Branch Id" },
@@ -5609,12 +5862,112 @@
         "type": "object",
         "title": "CandidateVersionInput"
       },
+      "CardCitation": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Book Id"
+          },
+          "unit_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Unit Id"
+          },
+          "file_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "File Sha256" },
+          "title": { "type": "string", "maxLength": 1000, "minLength": 1, "title": "Title" },
+          "selection_start": {
+            "type": "integer",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Selection Start"
+          },
+          "selection_end": {
+            "type": "integer",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Selection End"
+          },
+          "selection_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Selection Sha256" },
+          "evidence_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Evidence Sha256" },
+          "evidence_start": {
+            "anyOf": [{ "type": "integer", "maximum": 9007199254740991, "minimum": 0 }, { "type": "null" }],
+            "title": "Evidence Start"
+          },
+          "evidence_end": {
+            "anyOf": [{ "type": "integer", "maximum": 9007199254740991, "minimum": 0 }, { "type": "null" }],
+            "title": "Evidence End"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "unit_id",
+          "file_sha256",
+          "title",
+          "selection_start",
+          "selection_end",
+          "selection_sha256",
+          "evidence_sha256",
+          "evidence_start",
+          "evidence_end"
+        ],
+        "title": "CardCitation"
+      },
+      "ChapterBinding": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "revision_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Revision Id"
+          },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "revision", "revision_id", "sha256"],
+        "title": "ChapterBinding"
+      },
       "ChapterInput": {
         "properties": { "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" } },
         "additionalProperties": false,
         "type": "object",
         "required": ["title"],
         "title": "ChapterInput"
+      },
+      "ChapterManifest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "position": { "type": "integer", "minimum": 1, "title": "Position" },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title", "position", "revision", "sha256"],
+        "title": "ChapterManifest"
       },
       "ChapterPlan": {
         "properties": {
@@ -5701,6 +6054,22 @@
         "type": "object",
         "required": ["started_from", "started_before"],
         "title": "Cohort"
+      },
+      "CompletionCheck": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": ["manuscript", "ending", "characters", "promises", "inspection", "delivery"],
+            "title": "Id"
+          },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "status": { "type": "string", "enum": ["green", "red", "pending"], "title": "Status" },
+          "detail": { "type": "string", "title": "Detail" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title", "status", "detail"],
+        "title": "CompletionCheck"
       },
       "CompletionRequest": {
         "properties": {
@@ -6268,6 +6637,109 @@
         "required": ["kind", "text", "base_story_revision"],
         "title": "DefinitionInput"
       },
+      "DeliveryManifest": {
+        "properties": {
+          "format": { "type": "string", "const": "book-completion/1", "title": "Format" },
+          "branch_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Branch Id"
+          },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "story_revision": { "type": "integer", "minimum": 0, "title": "Story Revision" },
+          "chapters": {
+            "items": { "$ref": "#/components/schemas/ChapterManifest" },
+            "type": "array",
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Chapters"
+          },
+          "project_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Project Id"
+          },
+          "setting_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Setting Id"
+          },
+          "outline_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Outline Id"
+          },
+          "inspection_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Inspection Id"
+          },
+          "length_target": {
+            "anyOf": [
+              { "additionalProperties": { "$ref": "#/components/schemas/JsonValue" }, "type": "object" },
+              { "type": "null" }
+            ],
+            "title": "Length Target"
+          },
+          "promises": {
+            "items": { "$ref": "#/components/schemas/PromiseManifest" },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Promises"
+          },
+          "ai_preparation_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Ai Preparation Id"
+          },
+          "files": {
+            "additionalProperties": { "type": "string" },
+            "type": "object",
+            "maxProperties": 4,
+            "minProperties": 4,
+            "title": "Files"
+          },
+          "spoiler_scope": { "type": "string", "enum": ["opening", "whole"], "title": "Spoiler Scope" },
+          "sample_chapter_ids": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Sample Chapter Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "format",
+          "branch_id",
+          "title",
+          "story_revision",
+          "chapters",
+          "project_id",
+          "setting_id",
+          "outline_id",
+          "inspection_id",
+          "length_target",
+          "promises",
+          "files",
+          "spoiler_scope",
+          "sample_chapter_ids"
+        ],
+        "title": "DeliveryManifest"
+      },
       "DownloadInput": {
         "properties": {
           "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
@@ -6511,6 +6983,24 @@
         "required": ["issue_id", "decision", "reason"],
         "title": "FinalizationDisposition"
       },
+      "FormalCard": {
+        "properties": {
+          "observation": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Observation" },
+          "interpretation": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Interpretation"
+          },
+          "technique": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Technique" },
+          "conditions": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Conditions" },
+          "exceptions": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Exceptions" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["observation", "interpretation", "technique", "conditions", "exceptions"],
+        "title": "FormalCard"
+      },
       "GenerateInspectionCandidate": {
         "properties": {
           "scope": {
@@ -6695,6 +7185,27 @@
         "required": ["id", "status", "error", "created", "artifact_id"],
         "title": "InspectionCandidateTask"
       },
+      "InspectionChapter": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "position": { "type": "integer", "minimum": 1, "title": "Position" },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Sha256" },
+          "chars": { "type": "integer", "minimum": 0, "title": "Chars" },
+          "stale": { "type": "boolean", "title": "Stale" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "position", "title", "revision", "sha256", "chars", "stale"],
+        "title": "InspectionChapter"
+      },
       "InspectionInput": {
         "properties": {
           "scope": {
@@ -6723,6 +7234,86 @@
         "required": ["basis_sha256"],
         "title": "InspectionInput"
       },
+      "InspectionItem": {
+        "properties": {
+          "check_id": {
+            "type": "string",
+            "enum": ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"],
+            "title": "Check Id"
+          },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "status": {
+            "type": "string",
+            "enum": ["green", "yellow", "red", "pending", "not_applicable", "outdated"],
+            "title": "Status"
+          },
+          "summary": { "type": "string", "maxLength": 4000, "title": "Summary" },
+          "basis": {
+            "additionalProperties": { "$ref": "#/components/schemas/JsonValue" },
+            "type": "object",
+            "title": "Basis"
+          },
+          "can_mark_not_applicable": { "type": "boolean", "title": "Can Mark Not Applicable" },
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" },
+          "author_review": {
+            "anyOf": [{ "$ref": "#/components/schemas/ArchivedAuthorReview" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "check_id",
+          "title",
+          "status",
+          "summary",
+          "basis",
+          "can_mark_not_applicable",
+          "basis_sha256"
+        ],
+        "title": "InspectionItem"
+      },
+      "InspectionReport": {
+        "properties": {
+          "version": { "type": "string", "const": "m6-inspection/1", "title": "Version" },
+          "scope": { "type": "string", "enum": ["chapter", "volume", "book"], "title": "Scope" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "chapters": {
+            "items": { "$ref": "#/components/schemas/InspectionChapter" },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Chapters"
+          },
+          "length_target": {
+            "anyOf": [
+              { "additionalProperties": { "$ref": "#/components/schemas/JsonValue" }, "type": "object" },
+              { "type": "null" }
+            ],
+            "title": "Length Target"
+          },
+          "items": {
+            "items": { "$ref": "#/components/schemas/InspectionItem" },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 10,
+            "title": "Items"
+          },
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" },
+          "length_targets": {
+            "anyOf": [{ "$ref": "#/components/schemas/LengthTargets" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["version", "scope", "scope_id", "chapters", "length_target", "items", "basis_sha256"],
+        "title": "InspectionReport"
+      },
+      "JsonValue": {},
       "LengthTargets": {
         "properties": {
           "min_chars": {
@@ -6809,6 +7400,15 @@
           },
           "outline_history": {
             "anyOf": [{ "$ref": "#/components/schemas/OutlineHistory" }, { "type": "null" }]
+          },
+          "story_history": {
+            "anyOf": [{ "$ref": "#/components/schemas/PortableStoryArchive" }, { "type": "null" }]
+          },
+          "workflow_history": {
+            "anyOf": [{ "$ref": "#/components/schemas/WorkflowHistory" }, { "type": "null" }]
+          },
+          "reference_history": {
+            "anyOf": [{ "$ref": "#/components/schemas/ReferenceHistory" }, { "type": "null" }]
           }
         },
         "additionalProperties": false,
@@ -7014,6 +7614,47 @@
         "type": "object",
         "required": ["name", "definition", "value", "unit"],
         "title": "NativeMetric"
+      },
+      "NativeStoryEvidence": {
+        "properties": {
+          "record": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Record"
+          },
+          "stages": {
+            "items": {
+              "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              "type": "array"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Stages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "NativeStoryEvidence"
+      },
+      "NativeStoryRevision": {
+        "properties": {
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "version_id": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Version Id" },
+          "created": { "type": "number", "minimum": 0, "title": "Created" },
+          "dependencies": {
+            "patternProperties": { "^[a-zA-Z0-9_-]+$": { "type": "integer", "minimum": 0 } },
+            "propertyNames": { "maxLength": 128, "minLength": 1 },
+            "type": "object",
+            "maxProperties": 200,
+            "title": "Dependencies"
+          },
+          "evidence": { "$ref": "#/components/schemas/NativeStoryEvidence" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["revision", "version_id", "created", "dependencies", "evidence"],
+        "title": "NativeStoryRevision"
       },
       "NewPromisePlan": {
         "properties": {
@@ -7411,6 +8052,46 @@
         "required": ["id", "chapter_id", "revision", "parent_id", "content", "sha256", "cause", "created"],
         "title": "PortableRevision"
       },
+      "PortableStoryArchive": {
+        "properties": {
+          "adopted_heads": {
+            "patternProperties": { "^[a-zA-Z0-9_-]+$": { "type": "string", "pattern": "^[a-f0-9]{64}$" } },
+            "propertyNames": { "maxLength": 128, "minLength": 1 },
+            "type": "object",
+            "maxProperties": 20000,
+            "title": "Adopted Heads"
+          },
+          "versions": {
+            "items": { "$ref": "#/components/schemas/StoryVersion" },
+            "type": "array",
+            "maxItems": 20000,
+            "minItems": 1,
+            "title": "Versions"
+          },
+          "source_devices": {
+            "patternProperties": { "^[a-f0-9]{64}$": { "type": "string", "maxLength": 128, "minLength": 1 } },
+            "type": "object",
+            "maxProperties": 20000,
+            "title": "Source Devices"
+          },
+          "native_history": {
+            "patternProperties": {
+              "^[a-zA-Z0-9_-]+$": {
+                "items": { "$ref": "#/components/schemas/NativeStoryRevision" },
+                "type": "array"
+              }
+            },
+            "propertyNames": { "maxLength": 128, "minLength": 1 },
+            "type": "object",
+            "maxProperties": 20000,
+            "title": "Native History"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["adopted_heads", "versions", "native_history"],
+        "title": "PortableStoryArchive"
+      },
       "PortableWork": {
         "properties": {
           "id": {
@@ -7584,6 +8265,22 @@
         "type": "object",
         "required": ["title", "kind", "stages"],
         "title": "Promise"
+      },
+      "PromiseManifest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "revision"],
+        "title": "PromiseManifest"
       },
       "PromiseStage": {
         "properties": {
@@ -7965,6 +8662,108 @@
         "required": ["observation", "interpretation", "technique", "conditions", "evidence"],
         "title": "ReferenceCard"
       },
+      "ReferenceCardEvidence": {
+        "properties": {
+          "version_id": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Version Id" },
+          "source_state": {
+            "type": "string",
+            "enum": ["local", "included_excerpt", "metadata_only", "no_evidence"],
+            "title": "Source State"
+          },
+          "excerpt": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Excerpt" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["version_id", "source_state"],
+        "title": "ReferenceCardEvidence"
+      },
+      "ReferenceCardHead": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Session Id"
+          },
+          "card_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Card Id"
+          },
+          "revision_id": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Revision Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["session_id", "card_id", "revision_id"],
+        "title": "ReferenceCardHead"
+      },
+      "ReferenceCardHistoryEntry": {
+        "properties": {
+          "version": { "$ref": "#/components/schemas/ReferenceCardVersion" },
+          "adopted": { "type": "boolean", "title": "Adopted" },
+          "source_state": {
+            "type": "string",
+            "enum": ["local", "included_excerpt", "metadata_only", "no_evidence"],
+            "title": "Source State"
+          },
+          "source_device": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Source Device"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["version", "adopted", "source_state"],
+        "title": "ReferenceCardHistoryEntry"
+      },
+      "ReferenceCardVersion": {
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Id" },
+          "parent_id": {
+            "anyOf": [{ "type": "string", "pattern": "^[a-f0-9]{64}$" }, { "type": "null" }],
+            "title": "Parent Id"
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Session Id"
+          },
+          "card_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Card Id"
+          },
+          "revision": { "type": "integer", "maximum": 9007199254740991, "minimum": 0, "title": "Revision" },
+          "assessment": {
+            "type": "string",
+            "enum": ["ready", "incomplete", "archived"],
+            "title": "Assessment"
+          },
+          "card": { "anyOf": [{ "$ref": "#/components/schemas/FormalCard" }, { "type": "null" }] },
+          "citation": { "anyOf": [{ "$ref": "#/components/schemas/CardCitation" }, { "type": "null" }] },
+          "goal": { "anyOf": [{ "type": "string", "maxLength": 3000 }, { "type": "null" }], "title": "Goal" },
+          "missing_fields": {
+            "items": {
+              "type": "string",
+              "enum": ["observation", "interpretation", "technique", "conditions", "exceptions", "evidence"]
+            },
+            "type": "array",
+            "maxItems": 6,
+            "title": "Missing Fields"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "parent_id", "session_id", "card_id", "revision", "assessment"],
+        "title": "ReferenceCardVersion"
+      },
       "ReferenceFeedback": {
         "properties": {
           "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
@@ -7975,6 +8774,41 @@
         "type": "object",
         "required": ["base_revision", "text"],
         "title": "ReferenceFeedback"
+      },
+      "ReferenceHistory": {
+        "properties": {
+          "adopted_heads": {
+            "items": { "$ref": "#/components/schemas/ReferenceCardHead" },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Adopted Heads"
+          },
+          "versions": {
+            "items": { "$ref": "#/components/schemas/ReferenceCardVersion" },
+            "type": "array",
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Versions"
+          },
+          "source_devices": {
+            "patternProperties": { "^[a-f0-9]{64}$": { "type": "string", "maxLength": 128, "minLength": 1 } },
+            "type": "object",
+            "maxProperties": 5000,
+            "title": "Source Devices"
+          },
+          "excerpts": {
+            "patternProperties": {
+              "^[a-f0-9]{64}$": { "type": "string", "maxLength": 2000, "minLength": 1 }
+            },
+            "type": "object",
+            "maxProperties": 5000,
+            "title": "Excerpts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["adopted_heads", "versions"],
+        "title": "ReferenceHistory"
       },
       "Relationship": {
         "properties": {
@@ -8776,6 +9610,74 @@
         "required": ["title", "kind", "character_id", "event_id", "category", "key", "value", "audience"],
         "title": "State"
       },
+      "StoryEvidence": {
+        "properties": {
+          "record": {
+            "items": { "$ref": "#/components/schemas/SettingsEvidence" },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Record"
+          },
+          "stages": {
+            "items": { "items": { "$ref": "#/components/schemas/SettingsEvidence" }, "type": "array" },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Stages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StoryEvidence"
+      },
+      "StoryVersion": {
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Id" },
+          "parent_id": {
+            "anyOf": [{ "type": "string", "pattern": "^[a-f0-9]{64}$" }, { "type": "null" }],
+            "title": "Parent Id"
+          },
+          "record_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Record Id"
+          },
+          "archived": { "type": "boolean", "title": "Archived" },
+          "record": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/Character" },
+              { "$ref": "#/components/schemas/Event" },
+              { "$ref": "#/components/schemas/State" },
+              { "$ref": "#/components/schemas/Promise" },
+              { "$ref": "#/components/schemas/Relationship" }
+            ],
+            "title": "Record",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "character": "#/components/schemas/Character",
+                "event": "#/components/schemas/Event",
+                "promise": "#/components/schemas/Promise",
+                "relationship": "#/components/schemas/Relationship",
+                "state": "#/components/schemas/State"
+              }
+            }
+          },
+          "evidence": { "$ref": "#/components/schemas/StoryEvidence" },
+          "dependencies": {
+            "patternProperties": { "^[a-zA-Z0-9_-]+$": { "type": "string", "pattern": "^[a-f0-9]{64}$" } },
+            "propertyNames": { "maxLength": 128, "minLength": 1 },
+            "type": "object",
+            "maxProperties": 200,
+            "title": "Dependencies"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "parent_id", "record_id", "archived", "record", "evidence", "dependencies"],
+        "title": "StoryVersion"
+      },
       "TimeEvidence": {
         "properties": {
           "chapter_id": { "type": "string", "title": "Chapter Id" },
@@ -8850,6 +9752,25 @@
         "type": "object",
         "required": ["id", "title", "summary"],
         "title": "VolumePlan"
+      },
+      "WorkflowHistory": {
+        "properties": {
+          "inspections": {
+            "items": { "$ref": "#/components/schemas/ArchivedInspection" },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Inspections"
+          },
+          "completions": {
+            "items": { "$ref": "#/components/schemas/ArchivedCompletion" },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Completions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "WorkflowHistory"
       },
       "WorkflowInput": {
         "properties": {

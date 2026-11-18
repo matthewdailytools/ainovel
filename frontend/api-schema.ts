@@ -153,6 +153,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/book-completion/history/{identifier}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Completion History */
+    get: operations['completion_history_api_branches__branch_id__book_completion_history__identifier__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/workflow-inspections': {
     parameters: {
       query?: never
@@ -2262,6 +2279,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/reference-cards': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Saved Card History */
+    get: operations['saved_card_history_api_branches__branch_id__reference_cards_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/reference-cards/{version_id}/evidence': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Card Evidence */
+    get: operations['card_evidence_api_branches__branch_id__reference_cards__version_id__evidence_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/reference-sessions': {
     parameters: {
       query?: never
@@ -2662,6 +2713,63 @@ export interface components {
       /** Archived */
       archived: boolean
     }
+    /** ArchivedAuthorReview */
+    ArchivedAuthorReview: {
+      /**
+       * Check Id
+       * @enum {string}
+       */
+      check_id: '01' | '02' | '03' | '04' | '05' | '06' | '07' | '08' | '09' | '10'
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'green' | 'yellow' | 'red' | 'not_applicable'
+      /** Basis Note */
+      basis_note: string
+      /** Reason */
+      reason: string
+      /** Evidence */
+      evidence?: components['schemas']['Source'][]
+      /** Source Candidate Id */
+      source_candidate_id?: string | null
+      /**
+       * Author Overrides Candidate
+       * @default false
+       */
+      author_overrides_candidate: boolean
+      /** Candidate Result */
+      candidate_result?: ('pass' | 'fail' | 'unknown') | null
+    }
+    /** ArchivedCompletion */
+    ArchivedCompletion: {
+      /** Id */
+      id: string
+      /** Created */
+      created: number
+      /** Chapter Bindings */
+      chapter_bindings: components['schemas']['ChapterBinding'][]
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Checks */
+      checks: components['schemas']['CompletionCheck'][]
+      manifest: components['schemas']['DeliveryManifest']
+      /** Materials */
+      materials: {
+        [key: string]: string
+      }
+      review: components['schemas']['CompletionRequest']
+    }
+    /** ArchivedInspection */
+    ArchivedInspection: {
+      /** Id */
+      id: string
+      /** Created */
+      created: number
+      /** Chapter Bindings */
+      chapter_bindings: components['schemas']['ChapterBinding'][]
+      report: components['schemas']['InspectionReport']
+    }
     /** AssessmentInput */
     AssessmentInput: {
       /** Branch Id */
@@ -2891,10 +2999,57 @@ export interface components {
        */
       candidate_revision: number
     }
+    /** CardCitation */
+    CardCitation: {
+      /** Book Id */
+      book_id: string
+      /** Unit Id */
+      unit_id: string
+      /** File Sha256 */
+      file_sha256: string
+      /** Title */
+      title: string
+      /** Selection Start */
+      selection_start: number
+      /** Selection End */
+      selection_end: number
+      /** Selection Sha256 */
+      selection_sha256: string
+      /** Evidence Sha256 */
+      evidence_sha256: string
+      /** Evidence Start */
+      evidence_start: number | null
+      /** Evidence End */
+      evidence_end: number | null
+    }
+    /** ChapterBinding */
+    ChapterBinding: {
+      /** Id */
+      id: string
+      /** Revision */
+      revision: number
+      /** Revision Id */
+      revision_id: string
+      /** Sha256 */
+      sha256: string
+    }
     /** ChapterInput */
     ChapterInput: {
       /** Title */
       title: string
+    }
+    /** ChapterManifest */
+    ChapterManifest: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Position */
+      position: number
+      /** Revision */
+      revision: number
+      /** Sha256 */
+      sha256: string
     }
     /** ChapterPlan */
     ChapterPlan: {
@@ -2965,6 +3120,23 @@ export interface components {
       started_before: string
       /** Channel */
       channel?: string | null
+    }
+    /** CompletionCheck */
+    CompletionCheck: {
+      /**
+       * Id
+       * @enum {string}
+       */
+      id: 'manuscript' | 'ending' | 'characters' | 'promises' | 'inspection' | 'delivery'
+      /** Title */
+      title: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'green' | 'red' | 'pending'
+      /** Detail */
+      detail: string
     }
     /** CompletionRequest */
     CompletionRequest: {
@@ -3300,6 +3472,49 @@ export interface components {
       /** Base Story Revision */
       base_story_revision: number
     }
+    /** DeliveryManifest */
+    DeliveryManifest: {
+      /**
+       * Format
+       * @constant
+       */
+      format: 'book-completion/1'
+      /** Branch Id */
+      branch_id: string
+      /** Title */
+      title: string
+      /** Story Revision */
+      story_revision: number
+      /** Chapters */
+      chapters: components['schemas']['ChapterManifest'][]
+      /** Project Id */
+      project_id: string | null
+      /** Setting Id */
+      setting_id: string | null
+      /** Outline Id */
+      outline_id: string | null
+      /** Inspection Id */
+      inspection_id: string
+      /** Length Target */
+      length_target: {
+        [key: string]: components['schemas']['JsonValue']
+      } | null
+      /** Promises */
+      promises: components['schemas']['PromiseManifest'][]
+      /** Ai Preparation Id */
+      ai_preparation_id?: string | null
+      /** Files */
+      files: {
+        [key: string]: string
+      }
+      /**
+       * Spoiler Scope
+       * @enum {string}
+       */
+      spoiler_scope: 'opening' | 'whole'
+      /** Sample Chapter Ids */
+      sample_chapter_ids: string[]
+    }
     /** DownloadInput */
     DownloadInput: {
       /** Title */
@@ -3509,6 +3724,19 @@ export interface components {
       /** Reason */
       reason: string
     }
+    /** FormalCard */
+    FormalCard: {
+      /** Observation */
+      observation: string
+      /** Interpretation */
+      interpretation: string
+      /** Technique */
+      technique: string
+      /** Conditions */
+      conditions: string
+      /** Exceptions */
+      exceptions: string
+    }
     /** GenerateInspectionCandidate */
     GenerateInspectionCandidate: {
       /**
@@ -3628,6 +3856,23 @@ export interface components {
       /** Artifact Id */
       artifact_id: string | null
     }
+    /** InspectionChapter */
+    InspectionChapter: {
+      /** Id */
+      id: string
+      /** Position */
+      position: number
+      /** Title */
+      title: string
+      /** Revision */
+      revision: number
+      /** Sha256 */
+      sha256: string
+      /** Chars */
+      chars: number
+      /** Stale */
+      stale: boolean
+    }
     /** InspectionInput */
     InspectionInput: {
       /**
@@ -3644,6 +3889,59 @@ export interface components {
       author_reviews?: components['schemas']['AuthorReview'][]
       length_targets?: components['schemas']['LengthTargets'] | null
     }
+    /** InspectionItem */
+    InspectionItem: {
+      /**
+       * Check Id
+       * @enum {string}
+       */
+      check_id: '01' | '02' | '03' | '04' | '05' | '06' | '07' | '08' | '09' | '10'
+      /** Title */
+      title: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'green' | 'yellow' | 'red' | 'pending' | 'not_applicable' | 'outdated'
+      /** Summary */
+      summary: string
+      /** Basis */
+      basis: {
+        [key: string]: components['schemas']['JsonValue']
+      }
+      /** Can Mark Not Applicable */
+      can_mark_not_applicable: boolean
+      /** Basis Sha256 */
+      basis_sha256: string
+      author_review?: components['schemas']['ArchivedAuthorReview'] | null
+    }
+    /** InspectionReport */
+    InspectionReport: {
+      /**
+       * Version
+       * @constant
+       */
+      version: 'm6-inspection/1'
+      /**
+       * Scope
+       * @enum {string}
+       */
+      scope: 'chapter' | 'volume' | 'book'
+      /** Scope Id */
+      scope_id: string | null
+      /** Chapters */
+      chapters: components['schemas']['InspectionChapter'][]
+      /** Length Target */
+      length_target: {
+        [key: string]: components['schemas']['JsonValue']
+      } | null
+      /** Items */
+      items: components['schemas']['InspectionItem'][]
+      /** Basis Sha256 */
+      basis_sha256: string
+      length_targets?: components['schemas']['LengthTargets'] | null
+    }
+    JsonValue: unknown
     /** LengthTargets */
     LengthTargets: {
       /** Min Chars */
@@ -3687,6 +3985,9 @@ export interface components {
       project_history?: components['schemas']['ProjectHistory'] | null
       settings_history?: components['schemas']['SettingsHistory'] | null
       outline_history?: components['schemas']['OutlineHistory'] | null
+      story_history?: components['schemas']['PortableStoryArchive'] | null
+      workflow_history?: components['schemas']['WorkflowHistory'] | null
+      reference_history?: components['schemas']['ReferenceHistory'] | null
     }
     /** Mapping */
     Mapping: {
@@ -3861,6 +4162,27 @@ export interface components {
       unit: string
       /** Chapter Id */
       chapter_id?: string | null
+    }
+    /** NativeStoryEvidence */
+    NativeStoryEvidence: {
+      /** Record */
+      record?: string[]
+      /** Stages */
+      stages?: string[][]
+    }
+    /** NativeStoryRevision */
+    NativeStoryRevision: {
+      /** Revision */
+      revision: number
+      /** Version Id */
+      version_id: string
+      /** Created */
+      created: number
+      /** Dependencies */
+      dependencies: {
+        [key: string]: number
+      }
+      evidence: components['schemas']['NativeStoryEvidence']
     }
     /** NewPromisePlan */
     NewPromisePlan: {
@@ -4085,6 +4407,23 @@ export interface components {
       /** Created */
       created: number
     }
+    /** PortableStoryArchive */
+    PortableStoryArchive: {
+      /** Adopted Heads */
+      adopted_heads: {
+        [key: string]: string
+      }
+      /** Versions */
+      versions: components['schemas']['StoryVersion'][]
+      /** Source Devices */
+      source_devices?: {
+        [key: string]: string
+      }
+      /** Native History */
+      native_history: {
+        [key: string]: components['schemas']['NativeStoryRevision'][]
+      }
+    }
     /** PortableWork */
     PortableWork: {
       /** Id */
@@ -4207,6 +4546,13 @@ export interface components {
       thread: string
       /** Stages */
       stages: components['schemas']['PromiseStage'][]
+    }
+    /** PromiseManifest */
+    PromiseManifest: {
+      /** Id */
+      id: string
+      /** Revision */
+      revision: number
     }
     /** PromiseStage */
     PromiseStage: {
@@ -4498,6 +4844,66 @@ export interface components {
       /** Evidence */
       evidence: string
     }
+    /** ReferenceCardEvidence */
+    ReferenceCardEvidence: {
+      /** Version Id */
+      version_id: string
+      /**
+       * Source State
+       * @enum {string}
+       */
+      source_state: 'local' | 'included_excerpt' | 'metadata_only' | 'no_evidence'
+      /** Excerpt */
+      excerpt?: string | null
+    }
+    /** ReferenceCardHead */
+    ReferenceCardHead: {
+      /** Session Id */
+      session_id: string
+      /** Card Id */
+      card_id: string
+      /** Revision Id */
+      revision_id: string
+    }
+    /** ReferenceCardHistoryEntry */
+    ReferenceCardHistoryEntry: {
+      version: components['schemas']['ReferenceCardVersion']
+      /** Adopted */
+      adopted: boolean
+      /**
+       * Source State
+       * @enum {string}
+       */
+      source_state: 'local' | 'included_excerpt' | 'metadata_only' | 'no_evidence'
+      /** Source Device */
+      source_device?: string | null
+    }
+    /** ReferenceCardVersion */
+    ReferenceCardVersion: {
+      /** Id */
+      id: string
+      /** Parent Id */
+      parent_id: string | null
+      /** Session Id */
+      session_id: string
+      /** Card Id */
+      card_id: string
+      /** Revision */
+      revision: number
+      /**
+       * Assessment
+       * @enum {string}
+       */
+      assessment: 'ready' | 'incomplete' | 'archived'
+      card?: components['schemas']['FormalCard'] | null
+      citation?: components['schemas']['CardCitation'] | null
+      /** Goal */
+      goal?: string | null
+      /** Missing Fields */
+      missing_fields?: (
+        'observation' | 'interpretation' | 'technique' | 'conditions' | 'exceptions' | 'evidence'
+      )[]
+    }
     /** ReferenceFeedback */
     ReferenceFeedback: {
       /** Base Revision */
@@ -4506,6 +4912,21 @@ export interface components {
       text: string
       /** Candidate Id */
       candidate_id?: string | null
+    }
+    /** ReferenceHistory */
+    ReferenceHistory: {
+      /** Adopted Heads */
+      adopted_heads: components['schemas']['ReferenceCardHead'][]
+      /** Versions */
+      versions: components['schemas']['ReferenceCardVersion'][]
+      /** Source Devices */
+      source_devices?: {
+        [key: string]: string
+      }
+      /** Excerpts */
+      excerpts?: {
+        [key: string]: string
+      }
     }
     /** Relationship */
     Relationship: {
@@ -5092,6 +5513,36 @@ export interface components {
       /** Until Event Id */
       until_event_id?: string | null
     }
+    /** StoryEvidence */
+    StoryEvidence: {
+      /** Record */
+      record?: components['schemas']['SettingsEvidence'][]
+      /** Stages */
+      stages?: components['schemas']['SettingsEvidence'][][]
+    }
+    /** StoryVersion */
+    StoryVersion: {
+      /** Id */
+      id: string
+      /** Parent Id */
+      parent_id: string | null
+      /** Record Id */
+      record_id: string
+      /** Archived */
+      archived: boolean
+      /** Record */
+      record:
+        | components['schemas']['Character']
+        | components['schemas']['Event']
+        | components['schemas']['State']
+        | components['schemas']['Promise']
+        | components['schemas']['Relationship']
+      evidence: components['schemas']['StoryEvidence']
+      /** Dependencies */
+      dependencies: {
+        [key: string]: string
+      }
+    }
     /** TimeEvidence */
     TimeEvidence: {
       /** Chapter Id */
@@ -5139,6 +5590,13 @@ export interface components {
       summary: string
       /** Units */
       units?: components['schemas']['UnitPlan'][]
+    }
+    /** WorkflowHistory */
+    WorkflowHistory: {
+      /** Inspections */
+      inspections?: components['schemas']['ArchivedInspection'][]
+      /** Completions */
+      completions?: components['schemas']['ArchivedCompletion'][]
     }
     /** WorkflowInput */
     WorkflowInput: {
@@ -5592,6 +6050,38 @@ export interface operations {
       }
     }
   }
+  completion_history_api_branches__branch_id__book_completion_history__identifier__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   inspections_api_branches__branch_id__workflow_inspections_get: {
     parameters: {
       query?: {
@@ -5730,7 +6220,10 @@ export interface operations {
   }
   get_package_api_branches__branch_id__manuscript_package_get: {
     parameters: {
-      query?: never
+      query?: {
+        /** @description 明确选带原文证据的手法卡修订 ID。默认只导出手法卡来源地址。 */
+        include_reference_evidence_for?: string[] | null
+      }
       header?: never
       path: {
         branch_id: string
@@ -10088,6 +10581,71 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  saved_card_history_api_branches__branch_id__reference_cards_get: {
+    parameters: {
+      query?: {
+        session_id?: string | null
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReferenceCardHistoryEntry'][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  card_evidence_api_branches__branch_id__reference_cards__version_id__evidence_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        version_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReferenceCardEvidence']
         }
       }
       /** @description Validation Error */

@@ -98,10 +98,13 @@ class Database:
                 raise DomainError("future_schema", "数据库版本高于当前程序，已停止写入。")
             db.execute("PRAGMA journal_mode=WAL")
             from .reference import SCHEMA as REFERENCE_SCHEMA
+            from .reference_sync import SCHEMA as REFERENCE_SYNC_SCHEMA
             from .story_graph import SCHEMA as STORY_SCHEMA
             from .manuscript_import import SCHEMA as IMPORT_SCHEMA
             from .scene_time import SCHEMA as SCENE_SCHEMA
             from .runtime import SCHEMA as RUNTIME_SCHEMA
+            from .story_sync import SCHEMA as STORY_SYNC_SCHEMA
+            from .workflow_archive import SCHEMA as WORKFLOW_ARCHIVE_SCHEMA
 
             # executescript commits an existing transaction. Begin inside this single
             # script so every extension and the subsequent backfill commit together.
@@ -109,7 +112,17 @@ class Database:
                 db.executescript(
                     "BEGIN IMMEDIATE;\n"
                     + "\n".join(
-                        (SCHEMA, REFERENCE_SCHEMA, STORY_SCHEMA, IMPORT_SCHEMA, SCENE_SCHEMA, RUNTIME_SCHEMA)
+                        (
+                            SCHEMA,
+                            REFERENCE_SCHEMA,
+                            REFERENCE_SYNC_SCHEMA,
+                            STORY_SCHEMA,
+                            IMPORT_SCHEMA,
+                            SCENE_SCHEMA,
+                            RUNTIME_SCHEMA,
+                            STORY_SYNC_SCHEMA,
+                            WORKFLOW_ARCHIVE_SCHEMA,
+                        )
                     )
                 )
                 db.execute(

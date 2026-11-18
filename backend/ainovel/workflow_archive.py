@@ -1,0 +1,526 @@
+"""Independent archives of accepted inspections and frozen completion packages."""
+
+from hashlib import sha256
+import json
+from typing import Literal
+
+from pydantic import Field, JsonValue, ValidationError
+
+from .book_completion import CompletionRequest, KIND as COMPLETION, _materials, basis_fingerprint
+from .db import DomainError
+from .domain import utf16_slice
+from .models import Input
+from .project_portability import Identifier
+from .workflow_inspection import AuthorReview, CheckId, KIND as INSPECTION, LengthTargets, Scope, _item, _sha
+
+MATERIAL_FILES = frozenset({"正文.md", "设定册.md", "简介.md", "试读.md"})
+CHECKS = ("manuscript", "ending", "characters", "promises", "inspection", "delivery")
+FORMAT = "ainovel-manuscript-sync/1"
+WORKFLOW_OBJECTS = {"workflow-inspection": INSPECTION, "workflow-completion": COMPLETION}
+WORKFLOW_PREFIXES = tuple(f"{kind}:" for kind in WORKFLOW_OBJECTS)
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS manuscript_workflow_history(
+ branch_id TEXT NOT NULL REFERENCES branches(id),kind TEXT NOT NULL,id TEXT NOT NULL,
+ payload TEXT NOT NULL,created REAL NOT NULL,PRIMARY KEY(branch_id,kind,id));
+CREATE TABLE IF NOT EXISTS manuscript_workflow_cloud_sources(
+ branch_id TEXT NOT NULL,kind TEXT NOT NULL,id TEXT NOT NULL,device_id TEXT NOT NULL,
+ change_id TEXT NOT NULL,sequence INTEGER NOT NULL,
+ PRIMARY KEY(branch_id,kind,id),FOREIGN KEY(branch_id,kind,id)
+ REFERENCES manuscript_workflow_history(branch_id,kind,id));
+"""
+
+
+class ChapterBinding(Input):
+    id: Identifier
+    revision: int = Field(ge=0, strict=True)
+    revision_id: Identifier
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class ChapterManifest(Input):
+    id: Identifier
+    title: str = Field(min_length=1, max_length=200)
+    position: int = Field(ge=1, strict=True)
+    revision: int = Field(ge=0, strict=True)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class InspectionChapter(Input):
+    id: Identifier
+    position: int = Field(ge=1, strict=True)
+    title: str = Field(min_length=1, max_length=200)
+    revision: int = Field(ge=0, strict=True)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    chars: int = Field(ge=0, strict=True)
+    stale: bool = Field(strict=True)
+
+
+class ArchivedAuthorReview(AuthorReview):
+    candidate_result: Literal["pass", "fail", "unknown"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+
+class InspectionItem(Input):
+    check_id: CheckId
+    title: str = Field(min_length=1, max_length=200)
+    status: Literal["green", "yellow", "red", "pending", "not_applicable", "outdated"]
+    summary: str = Field(max_length=4000)
+    basis: dict[str, JsonValue]
+    can_mark_not_applicable: bool = Field(strict=True)
+    basis_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    author_review: ArchivedAuthorReview | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class InspectionReport(Input):
+    version: Literal["m6-inspection/1"]
+    scope: Scope
+    scope_id: Identifier | None
+    chapters: list[InspectionChapter] = Field(max_length=5000)
+    length_target: dict[str, JsonValue] | None
+    items: list[InspectionItem] = Field(min_length=10, max_length=10)
+    basis_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    length_targets: LengthTargets | None = None
+
+
+class ArchivedInspection(Input):
+    id: Identifier
+    created: float = Field(ge=0, allow_inf_nan=False)
+    chapter_bindings: list[ChapterBinding] = Field(max_length=5000)
+    report: InspectionReport
+
+
+class PromiseManifest(Input):
+    id: Identifier
+    revision: int = Field(ge=0, strict=True)
+
+
+class DeliveryManifest(Input):
+    format: Literal["book-completion/1"]
+    branch_id: Identifier
+    title: str = Field(min_length=1, max_length=200)
+    story_revision: int = Field(ge=0, strict=True)
+    chapters: list[ChapterManifest] = Field(min_length=1, max_length=5000)
+    project_id: Identifier | None
+    setting_id: Identifier | None
+    outline_id: Identifier | None
+    inspection_id: Identifier
+    length_target: dict[str, JsonValue] | None
+    promises: list[PromiseManifest] = Field(max_length=5000)
+    ai_preparation_id: Identifier | None = Field(default=None, exclude_if=lambda value: value is None)
+    files: dict[str, str] = Field(min_length=4, max_length=4)
+    spoiler_scope: Literal["opening", "whole"]
+    sample_chapter_ids: list[Identifier] = Field(min_length=1, max_length=20)
+
+
+class CompletionCheck(Input):
+    id: Literal["manuscript", "ending", "characters", "promises", "inspection", "delivery"]
+    title: str = Field(min_length=1, max_length=200)
+    status: Literal["green", "red", "pending"]
+    detail: str
+
+
+class ArchivedCompletion(Input):
+    id: Identifier
+    created: float = Field(ge=0, allow_inf_nan=False)
+    chapter_bindings: list[ChapterBinding] = Field(min_length=1, max_length=5000)
+    basis_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    checks: list[CompletionCheck] = Field(min_length=6, max_length=6)
+    manifest: DeliveryManifest
+    materials: dict[str, str] = Field(min_length=4, max_length=4)
+    review: CompletionRequest
+
+
+class WorkflowHistory(Input):
+    inspections: list[ArchivedInspection] = Field(default_factory=list, max_length=1000)
+    completions: list[ArchivedCompletion] = Field(default_factory=list, max_length=1000)
+
+
+class WorkflowObject(Input):
+    format: Literal["ainovel-manuscript-sync/1"]
+    kind: Literal["workflow-inspection", "workflow-completion"]
+    branch_id: Identifier
+    # A string preserves the frozen order of nested inspection basis keys across transport.
+    entry_json: str = Field(min_length=2, max_length=1024 * 1024)
+
+
+def workflow_object(branch_id, entry):
+    return {
+        "format": FORMAT,
+        "kind": "workflow-inspection" if isinstance(entry, ArchivedInspection) else "workflow-completion",
+        "branch_id": branch_id,
+        "entry_json": entry.model_dump_json(),
+    }
+
+
+def parse_workflow_object(branch_id, object_id, payload, tombstone):
+    if tombstone:
+        raise DomainError("sync_workflow", "已归档的体检或交付历史不能删除。", 409)
+    try:
+        value = WorkflowObject.model_validate(payload)
+        model = ArchivedInspection if value.kind == "workflow-inspection" else ArchivedCompletion
+        entry = model.model_validate_json(value.entry_json)
+    except ValidationError as error:
+        raise DomainError("sync_workflow", "云端体检或交付历史格式无效。", 409) from error
+    if value.branch_id != branch_id or object_id != f"{value.kind}:{entry.id}":
+        raise DomainError("sync_workflow", "体检或交付历史归属不匹配。", 409)
+    return entry
+
+
+def validate_workflow_object(entry, branch_id, revision, inspection):
+    if isinstance(entry, ArchivedInspection):
+        history = WorkflowHistory(inspections=[entry])
+    else:
+        report = inspection(entry.manifest.inspection_id)
+        if not isinstance(report, ArchivedInspection):
+            raise DomainError("sync_workflow_dependency", "完本交付尚缺原全书体检单。", 409)
+        history = WorkflowHistory(inspections=[report], completions=[entry])
+    revisions = {}
+    for item in [*history.inspections, *history.completions]:
+        for binding in item.chapter_bindings:
+            if binding.revision_id not in revisions:
+                source = revision(binding.revision_id)
+                if not source:
+                    raise DomainError(
+                        "sync_workflow_dependency", f"历史记录尚缺原章稿修订 {binding.revision_id}。", 409
+                    )
+                revisions[binding.revision_id] = source
+    validate_workflow_history(history, branch_id, revisions)
+
+
+def _digest(text):
+    return sha256(text.encode()).hexdigest()
+
+
+def checked_materials(manifest, materials):
+    if set(materials) != MATERIAL_FILES or manifest["files"] != {
+        name: _digest(text) for name, text in materials.items()
+    }:
+        raise DomainError("completion_integrity", "交付材料名称或 SHA-256 校验失败。", 409)
+
+
+def _bad(message):
+    raise DomainError("manuscript_workflow", message, 409)
+
+
+def _chapters(manifest, bindings, revisions):
+    if len(manifest) != len(bindings) or len({item.id for item in bindings}) != len(bindings):
+        _bad("稿件包报告的正文清单和来源修订不一致。")
+    result = {}
+    for chapter, binding in zip(manifest, bindings, strict=True):
+        revision = revisions.get(binding.revision_id)
+        if (
+            (chapter.id, chapter.revision, chapter.sha256) != (binding.id, binding.revision, binding.sha256)
+            or not revision
+            or (revision.chapter_id, revision.revision, revision.sha256)
+            != (binding.id, binding.revision, binding.sha256)
+            or _digest(revision.content) != binding.sha256
+        ):
+            _bad(f"稿件包缺少报告所引用的准确正文修订 {binding.revision_id}。")
+        result[chapter.id] = {
+            "title": chapter.title,
+            "id": chapter.id,
+            "content": revision.content,
+            "revision": revision.revision,
+        }
+    return result
+
+
+def _sources(sources, chapters):
+    for source in sources:
+        revision = chapters.get(source.chapter_id)
+        if not revision or source.revision != revision["revision"]:
+            _bad("稿件包作者核对引用了报告范围之外的正文修订。")
+        try:
+            quote = utf16_slice(revision["content"], source.start, source.end)[1]
+        except DomainError as error:
+            raise DomainError("manuscript_workflow", "稿件包报告的作者核对原文范围无效。", 409) from error
+        if quote != source.quote or not quote.strip():
+            _bad("稿件包报告的作者核对引文与原稿不一致。")
+
+
+def validate_workflow_history(history, branch_id, revisions):
+    if not history:
+        return
+    reports = {entry.id: entry for entry in history.inspections}
+    all_ids = [*reports, *(entry.id for entry in history.completions)]
+    if len(all_ids) != len(set(all_ids)) or len(reports) != len(history.inspections):
+        _bad("稿件包报告的来源编号重复。")
+    for archived in history.inspections:
+        report = archived.report
+        if (
+            (report.scope == "book") != (report.scope_id is None)
+            or (report.scope == "chapter" and [row.id for row in report.chapters] != [report.scope_id])
+            or (report.scope == "volume" and not report.chapters)
+        ):
+            _bad("稿件包的体检范围和章稿清单不一致。")
+        chapters = _chapters(report.chapters, archived.chapter_bindings, revisions)
+        manifest = [chapter.model_dump() for chapter in report.chapters]
+        if [item.check_id for item in report.items] != [f"{number:02d}" for number in range(1, 11)]:
+            _bad("稿件包体检单缺少十项检查或编号顺序错误。")
+        for item in report.items:
+            if (
+                report.scope != "book"
+                and "outline" in item.basis
+                and not isinstance(item.basis["outline"], dict)
+            ):
+                _bad("稿件包分范围体检的章纲依据格式无效。")
+            expected = _item(item.check_id, item.summary, item.basis, manifest=manifest, scope=report.scope)
+            review = item.author_review
+            if (
+                expected["basis_sha256"] != item.basis_sha256
+                or (item.can_mark_not_applicable and item.check_id not in {"05", "07"})
+                or (item.status == "not_applicable" and not item.can_mark_not_applicable)
+                or (review and review.check_id != item.check_id)
+                or (review and review.status == "red" and item.status != "red")
+                or (
+                    item.status in {"green", "not_applicable"}
+                    and (item.check_id in {"01", "02", "08", "10"} or item.status == "not_applicable")
+                    and (not review or review.status != item.status)
+                )
+            ):
+                _bad("稿件包体检单的检查依据或作者裁定不一致。")
+            if review:
+                _sources(review.evidence, chapters)
+        if report.basis_sha256 != _sha(
+            [report.scope, report.scope_id, [item.basis_sha256 for item in report.items]]
+        ):
+            _bad("稿件包体检单的复核依据校验失败。")
+    for record in history.completions:
+        manifest = record.manifest
+        if manifest.branch_id != branch_id or record.basis_sha256 != record.review.basis_sha256:
+            _bad("稿件包完本记录归属或原作者复核依据不一致。")
+        if tuple(check.id for check in record.checks) != CHECKS or any(
+            check.status != "green" for check in record.checks
+        ):
+            _bad("稿件包的正式完本缺少原六项通过记录。")
+        chapters = _chapters(manifest.chapters, record.chapter_bindings, revisions)
+        report = reports.get(manifest.inspection_id)
+        if (
+            not report
+            or report.report.scope != "book"
+            or report.chapter_bindings != record.chapter_bindings
+            or any(item.status not in {"green", "not_applicable"} for item in report.report.items)
+        ):
+            _bad("稿件包的完本记录缺少与原章稿对应的通过体检单。")
+        declared = [chapter.model_dump(exclude={"chars", "stale"}) for chapter in report.report.chapters]
+        stale_outline = report.report.items[4].basis.get("outline_stale")
+        # The native delivery fingerprint encodes SQLite's integer stale flags.
+        stale_chapters = [int(chapter.stale) for chapter in report.report.chapters]
+        if (
+            declared != [chapter.model_dump() for chapter in manifest.chapters]
+            or not isinstance(stale_outline, list)
+            or any(not isinstance(reason, str) for reason in stale_outline)
+            or any(stale_chapters)
+            or basis_fingerprint(
+                manifest.model_dump(
+                    exclude={"ai_preparation_id", "files", "spoiler_scope", "sample_chapter_ids"}
+                ),
+                stale_chapters,
+                stale_outline,
+                [item.status for item in report.report.items],
+            )
+            != record.basis_sha256
+        ):
+            _bad("稿件包的完本清单与原体检单或冻结完本依据不一致。")
+        review = record.review
+        for closure in (review.ending, review.characters, review.promises):
+            _sources(closure.sources, chapters)
+        if (
+            not review.read_note.strip()
+            or not all(row.note.strip() for row in (review.ending, review.characters, review.promises))
+            or not review.materials_reviewed
+            or manifest.spoiler_scope != review.spoiler_scope
+            or manifest.sample_chapter_ids != review.sample_chapter_ids
+            or manifest.ai_preparation_id != review.preparation_id
+        ):
+            _bad("稿件包完本记录缺少一致的作者通读、收束及材料核对。")
+        checked_materials(manifest.model_dump(), record.materials)
+        rules = report.report.items[4].basis.get("rules")
+        if not isinstance(rules, list) or any(
+            not isinstance(item, dict)
+            or not all(isinstance(item.get(key), str) for key in ("title", "detail"))
+            for item in rules
+        ):
+            _bad("稿件包交付的设定册缺少原体检设定依据。")
+        if record.materials != _materials(
+            manifest.model_dump(), list(chapters.values()), {"items": rules}, review
+        ):
+            _bad("稿件包的交付材料与冻结稿件、设定或作者输入不一致。")
+
+
+def _bindings(tx, branch_id, chapters):
+    references = []
+    for chapter in chapters:
+        row = tx.execute(
+            "SELECT r.id,r.content FROM revisions r JOIN chapters c ON c.id=r.chapter_id "
+            "WHERE c.branch_id=? AND r.chapter_id=? AND r.revision=?",
+            (branch_id, chapter["id"], chapter["revision"]),
+        ).fetchone()
+        if not row or _digest(row["content"]) != chapter["sha256"]:
+            _bad("本机缺少历史报告原章稿，无法完整导出。")
+        references.append(
+            {**{key: chapter[key] for key in ("id", "revision", "sha256")}, "revision_id": row["id"]}
+        )
+    return references
+
+
+def current_sources_match(tx, branch_id, chapters, bindings):
+    return len(chapters) == len(bindings) and _bindings(tx, branch_id, chapters) == bindings
+
+
+def inspection_revalidation(report, preview):
+    reviews = []
+    for item in report["items"]:
+        if previous := item.get("author_review"):
+            # The source candidate is historical. A local author can reauthorize the
+            # same notes as a native manual review with today's matching basis.
+            reviews.append(
+                {
+                    key: value
+                    for key, value in previous.items()
+                    if key not in {"source_candidate_id", "candidate_result", "author_overrides_candidate"}
+                }
+            )
+    return {**{key: preview[key] for key in ("scope", "scope_id", "basis_sha256")}, "author_reviews": reviews}
+
+
+def read_archived_workflow(tx, branch_id, kind, identifier=None):
+    return tx.execute(
+        "SELECT h.id,h.payload,h.created,s.device_id AS source_device_id "
+        "FROM manuscript_workflow_history h LEFT JOIN manuscript_workflow_cloud_sources s "
+        "ON h.branch_id=s.branch_id AND h.kind=s.kind AND h.id=s.id WHERE h.branch_id=? AND h.kind=? "
+        + ("AND h.id=? " if identifier else "")
+        + "ORDER BY h.created DESC,h.id",
+        (branch_id, kind, identifier) if identifier else (branch_id, kind),
+    )
+
+
+def archived_workflow(tx, branch_id, kind, identifier):
+    return next(iter(read_archived_workflow(tx, branch_id, kind, identifier)), None)
+
+
+def archive_origin(row):
+    if device := row["source_device_id"]:
+        return {"origin": "cloud", "source_device_id": device}
+    return {"origin": "manuscript_package"}
+
+
+def list_archived_workflow(tx, branch_id, kind, limit, *, scope=None, scope_id=None):
+    args = (branch_id, kind)
+    scoped = ""
+    if scope:
+        scoped = " AND json_extract(h.payload,'$.report.scope')=? AND json_extract(h.payload,'$.report.scope_id') IS ?"
+        args += (scope, scope_id)
+    return tx.execute(
+        "SELECT h.id,h.created,json_extract(h.payload,'$.report.scope') AS scope,"
+        "json_extract(h.payload,'$.report.scope_id') AS scope_id,s.device_id AS source_device_id "
+        "FROM manuscript_workflow_history h LEFT JOIN manuscript_workflow_cloud_sources s "
+        "ON h.branch_id=s.branch_id AND h.kind=s.kind AND h.id=s.id WHERE h.branch_id=? AND h.kind=?"
+        + scoped
+        + " ORDER BY h.created DESC,h.id LIMIT ?",
+        (*args, limit),
+    )
+
+
+def _freeze_native(tx, branch_id, row):
+    value = json.loads(row["payload"])
+    common = {"id": row["id"], "created": row["created"]}
+    if row["kind"] == INSPECTION:
+        return ArchivedInspection(
+            **common, report=value, chapter_bindings=_bindings(tx, branch_id, value["chapters"])
+        )
+    return ArchivedCompletion(
+        **common,
+        **value,
+        review=json.loads(row["basis"])["review"],
+        chapter_bindings=_bindings(tx, branch_id, value["manifest"]["chapters"]),
+    )
+
+
+def _native_row(tx, branch_id, kind, identifier):
+    return tx.execute(
+        "SELECT id,kind,payload,basis,created FROM artifacts "
+        "WHERE branch_id=? AND status='accepted' AND kind=? AND id=?",
+        (branch_id, kind, identifier),
+    ).fetchone()
+
+
+def read_workflow_entry(tx, branch_id, kind, identifier):
+    if row := _native_row(tx, branch_id, kind, identifier):
+        return _freeze_native(tx, branch_id, row)
+    if row := archived_workflow(tx, branch_id, kind, identifier):
+        model = ArchivedInspection if kind == INSPECTION else ArchivedCompletion
+        return model.model_validate_json(row["payload"])
+    return None
+
+
+def workflow_ids(tx, branch_id):
+    return [
+        (sync_kind, kind, row["id"])
+        for sync_kind, kind in WORKFLOW_OBJECTS.items()
+        for row in tx.execute(
+            "SELECT id,created FROM artifacts WHERE branch_id=? AND status='accepted' AND kind=? UNION "
+            "SELECT id,created FROM manuscript_workflow_history WHERE branch_id=? AND kind=? "
+            "ORDER BY created,id",
+            (branch_id, kind, branch_id, kind),
+        )
+    ]
+
+
+def observe_workflow_object(tx, branch_id, receipt, entry):
+    kind = WORKFLOW_OBJECTS[receipt.object_id.partition(":")[0]]
+    other_kind = COMPLETION if kind == INSPECTION else INSPECTION
+    if _native_row(tx, branch_id, other_kind, entry.id) or archived_workflow(
+        tx, branch_id, other_kind, entry.id
+    ):
+        raise DomainError("sync_workflow", "体检和交付记录共用了同一来源编号。", 409)
+    if existing := read_workflow_entry(tx, branch_id, kind, entry.id):
+        if existing != entry:
+            raise DomainError("sync_workflow", "同一体检或交付记录编号不能改写。", 409)
+        if _native_row(tx, branch_id, kind, entry.id):
+            return
+    else:
+        tx.execute(
+            "INSERT INTO manuscript_workflow_history VALUES(?,?,?,?,?)",
+            (branch_id, kind, entry.id, entry.model_dump_json(), entry.created),
+        )
+    tx.execute(
+        "INSERT OR IGNORE INTO manuscript_workflow_cloud_sources VALUES(?,?,?,?,?,?)",
+        (branch_id, kind, entry.id, receipt.device_id, receipt.change_id, receipt.sequence),
+    )
+
+
+def export_workflow_history(tx, branch_id):
+    reports = {
+        row["id"]: ArchivedInspection.model_validate_json(row["payload"])
+        for row in read_archived_workflow(tx, branch_id, INSPECTION)
+    }
+    completions = {
+        row["id"]: ArchivedCompletion.model_validate_json(row["payload"])
+        for row in read_archived_workflow(tx, branch_id, COMPLETION)
+    }
+    for row in tx.execute(
+        "SELECT id,kind,payload,basis,created FROM artifacts WHERE branch_id=? AND status='accepted' "
+        "AND kind IN (?,?) ORDER BY created,id",
+        (branch_id, INSPECTION, COMPLETION),
+    ):
+        value = _freeze_native(tx, branch_id, row)
+        if row["kind"] == INSPECTION:
+            reports[value.id] = value
+        else:
+            completions[value.id] = value
+    if reports or completions:
+        return WorkflowHistory(inspections=list(reports.values()), completions=list(completions.values()))
+    return None
+
+
+def import_workflow_history(tx, branch_id, history):
+    tx.executemany(
+        "INSERT INTO manuscript_workflow_history VALUES(?,?,?,?,?)",
+        [
+            (branch_id, kind, item.id, item.model_dump_json(), item.created)
+            for kind, entries in ((INSPECTION, history.inspections), (COMPLETION, history.completions))
+            for item in entries
+        ],
+    )

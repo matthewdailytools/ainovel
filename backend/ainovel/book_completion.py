@@ -85,17 +85,17 @@ def _basis(tx, branch_id):
         "length_target": current_length_target(tx, branch_id, "book", None, include_cleared=True),
         "promises": [{"id": row["id"], "revision": row["revision"]} for row in promises],
     }
-    fingerprint = _hash(
-        dumps(
-            [
-                manifest,
-                [row["stale"] for row in chapters],
-                outline["stale"],
-                [item["current_status"] for item in report["items"]] if report else [],
-            ]
-        )
+    fingerprint = basis_fingerprint(
+        manifest,
+        [row["stale"] for row in chapters],
+        outline["stale"],
+        [item["current_status"] for item in report["items"]] if report else [],
     )
     return fingerprint, manifest, chapters, rules, outline, report, promises
+
+
+def basis_fingerprint(manifest, stale_chapters, stale_outline, inspection_statuses):
+    return _hash(dumps([manifest, stale_chapters, stale_outline, inspection_statuses]))
 
 
 def _evidence(review, chapters):
@@ -265,25 +265,32 @@ def register_routes(app, domain):
 
     @app.get(endpoint)
     def book_completion(branch_id: str):
+        from .workflow_archive import archive_origin, list_archived_workflow
+
         with domain.db.connect() as tx:
             tx.execute("BEGIN")
             value = _evaluate(tx, branch_id)
+            history = [
+                {
+                    "id": row["id"],
+                    "created": row["created"],
+                    "current": row["basis"] == value["basis_sha256"],
+                }
+                for row in tx.execute(
+                    "SELECT id,created,json_extract(basis,'$.basis_sha256') AS basis FROM artifacts "
+                    "WHERE branch_id=? AND kind=? AND status='accepted' ORDER BY rowid DESC LIMIT 25",
+                    (branch_id, KIND),
+                )
+            ] + [
+                {"id": row["id"], "created": row["created"], "current": False, **archive_origin(row)}
+                for row in list_archived_workflow(tx, branch_id, KIND, 25)
+            ]
+            history.sort(key=lambda row: -row["created"])
             return {
                 "basis_sha256": value["basis_sha256"],
                 "checks": value["checks"],
                 "latest": _latest(tx, branch_id, value["basis_sha256"]),
-                "history": [
-                    {
-                        "id": row["id"],
-                        "created": row["created"],
-                        "current": row["basis"] == value["basis_sha256"],
-                    }
-                    for row in tx.execute(
-                        "SELECT id,created,json_extract(basis,'$.basis_sha256') AS basis FROM artifacts "
-                        "WHERE branch_id=? AND kind=? AND status='accepted' ORDER BY rowid DESC LIMIT 25",
-                        (branch_id, KIND),
-                    )
-                ],
+                "history": history[:25],
             }
 
     @app.post(endpoint + "/preview")
@@ -322,14 +329,12 @@ def register_routes(app, domain):
 
     @app.get(endpoint + "/{identifier}/export")
     def export_completion(branch_id: str, identifier: str):
-        row = domain.db.one(
-            "SELECT payload FROM artifacts WHERE id=? AND branch_id=? AND kind=? AND status='accepted'",
-            (identifier, branch_id, KIND),
-        )
-        payload = json.loads(row["payload"])
+        from .workflow_archive import checked_materials
+
+        with domain.db.connect() as tx:
+            payload, _ = _completion_history(tx, branch_id, identifier)
         manifest, materials = payload["manifest"], payload["materials"]
-        if manifest["files"] != {name: _hash(text) for name, text in materials.items()}:
-            raise DomainError("completion_integrity", "交付材料校验失败，请从备份恢复并核对。", 409)
+        checked_materials(manifest, materials)
         output = BytesIO()
         with ZipFile(output, "w", ZIP_DEFLATED) as archive:
             for name, text in materials.items():
@@ -340,3 +345,55 @@ def register_routes(app, domain):
             media_type="application/zip",
             headers={"Content-Disposition": 'attachment; filename="ainovel-delivery.zip"'},
         )
+
+    @app.get(endpoint + "/history/{identifier}")
+    def completion_history(branch_id: str, identifier: str):
+        from .workflow_archive import current_sources_match
+
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            data, source = _completion_history(tx, branch_id, identifier)
+            basis, manifest, *_ = _basis(tx, branch_id)
+            source_matches = not source or current_sources_match(
+                tx, branch_id, manifest["chapters"], data["chapter_bindings"]
+            )
+            reconciles = source_matches and basis == data["basis_sha256"]
+            return {
+                "id": identifier,
+                "manifest": data["manifest"],
+                "checks": data["checks"],
+                "review": data["review"],
+                **(source or {"origin": "local"}),
+                "current": reconciles and not source,
+                "basis_reconciles": reconciles,
+                **(
+                    {
+                        "chapter_bindings": data["chapter_bindings"],
+                        "source_reconciles": source_matches,
+                        "revalidation_request": {
+                            **data["review"],
+                            "basis_sha256": basis,
+                            "preparation_id": None,
+                        }
+                        if source_matches
+                        else None,
+                    }
+                    if source
+                    else {}
+                ),
+            }
+
+
+def _completion_history(tx, branch_id, identifier):
+    from .workflow_archive import archive_origin, archived_workflow
+
+    local = tx.execute(
+        "SELECT payload,basis FROM artifacts WHERE id=? AND branch_id=? AND kind=? AND status='accepted'",
+        (identifier, branch_id, KIND),
+    ).fetchone()
+    if local:
+        return {**json.loads(local["payload"]), "review": json.loads(local["basis"])["review"]}, None
+    archived = archived_workflow(tx, branch_id, KIND, identifier)
+    if not archived:
+        raise DomainError("not_found", "完本记录不存在。", 404)
+    return json.loads(archived["payload"]), archive_origin(archived)

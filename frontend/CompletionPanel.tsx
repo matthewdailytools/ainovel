@@ -13,7 +13,13 @@ type Current = {
   basis_sha256: string
   latest: Completion | null
   checks: Check[]
-  history?: { id: string; current: boolean; created: number }[]
+  history?: {
+    id: string
+    current: boolean
+    created: number
+    origin?: 'manuscript_package' | 'cloud'
+    source_device_id?: string
+  }[]
 }
 type Preview = { checks: Check[]; manifest: Manifest; materials: Record<string, string> | null }
 type Preparation = {
@@ -412,13 +418,19 @@ export function CompletionPanel({
         <details>
           <summary>历次交付包（{history.length}）</summary>
           <ul>
-            {history.map(({ id, current: stillCurrent, created }) => (
+            {history.map(({ id, current: stillCurrent, created, origin, source_device_id: sourceDevice }) => (
               <li key={id}>
                 <a href={`/api${endpoint}/${encodeURIComponent(id)}/export`}>
                   下载 {new Date(created * 1000).toLocaleString('zh-CN')} 的交付包
                 </a>
                 {' · '}
-                {stillCurrent ? '依据仍有效' : '旧依据'}
+                {origin === 'cloud'
+                  ? `云同步原交付${sourceDevice ? ` · 来源设备 ${sourceDevice}` : ''}`
+                  : origin === 'manuscript_package'
+                    ? '稿件包原交付'
+                    : stillCurrent
+                      ? '依据仍有效'
+                      : '旧依据'}
               </li>
             ))}
           </ul>

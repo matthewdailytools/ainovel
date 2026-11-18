@@ -13,7 +13,7 @@ from fastapi import Body
 import httpx
 from pydantic import Field, SecretStr, TypeAdapter, ValidationError
 
-from . import outline_sync, settings_sync, story_sync
+from . import outline_sync, settings_sync, story_sync, workflow_archive
 from .cloud_sync import ComparedConflict, MAX_CURSOR, MAX_OBJECT_BYTES, Pulled, Receipt
 from .db import DomainError, dumps, uid
 from .manuscript_exchange import (
@@ -47,6 +47,12 @@ from .project_sync import (
 
 FORMAT = "ainovel-manuscript-sync/1"
 RESPONSE_LIMIT = 8 * 1024 * 1024
+WORKFLOW_REJECTIONS = {
+    "sync_workflow": "云端未能核对这份体检或交付历史，原记录已保留本机。",
+    "sync_workflow_dependency": "云端尚缺原章稿修订或通过的体检单，将继续等待来源。",
+    "sync_parent_unknown": "云端无法核对父修订，原记录已保留本机。",
+    "sync_object_size": "同步对象超过单次大小限制，原记录已保留本机。",
+}
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS desktop_sync(
  branch_id TEXT PRIMARY KEY REFERENCES branches(id),
@@ -68,6 +74,9 @@ CREATE TABLE IF NOT EXISTS desktop_sync_deferred(
 CREATE TABLE IF NOT EXISTS desktop_sync_story_pending(
  branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
  reason TEXT NOT NULL, PRIMARY KEY(branch_id,object_id));
+CREATE TABLE IF NOT EXISTS desktop_sync_workflow_pending(
+ branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
+ reason TEXT NOT NULL, PRIMARY KEY(branch_id,object_id));
 CREATE TABLE IF NOT EXISTS desktop_sync_dirty(
  branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
  PRIMARY KEY(branch_id,object_id));
@@ -80,6 +89,10 @@ INSERT OR IGNORE INTO desktop_sync_dirty
  SELECT branch_id,'story-bootstrap' FROM desktop_sync WHERE enabled=1
  AND NOT EXISTS(SELECT 1 FROM extension_migrations WHERE name='desktop-sync-story/1');
 INSERT OR IGNORE INTO extension_migrations VALUES('desktop-sync-story/1',unixepoch());
+INSERT OR IGNORE INTO desktop_sync_dirty
+ SELECT branch_id,'workflow-bootstrap' FROM desktop_sync WHERE enabled=1
+ AND NOT EXISTS(SELECT 1 FROM extension_migrations WHERE name='desktop-sync-workflow/1');
+INSERT OR IGNORE INTO extension_migrations VALUES('desktop-sync-workflow/1',unixepoch());
 CREATE TRIGGER IF NOT EXISTS desktop_sync_chapter_added AFTER INSERT ON chapters
  WHEN EXISTS(SELECT 1 FROM desktop_sync WHERE branch_id=NEW.branch_id AND enabled=1) BEGIN
  INSERT OR IGNORE INTO desktop_sync_dirty VALUES(NEW.branch_id,'chapter:'||NEW.id);
@@ -212,9 +225,12 @@ def _network(origin, token, method, path, payload=None):
                 result = json.loads(body)
                 if not response.is_success:
                     code = result.get("code") if isinstance(result, dict) else None
+                    if isinstance(code, str) and code in WORKFLOW_REJECTIONS:
+                        raise DomainError(code, WORKFLOW_REJECTIONS[code], response.status_code)
                     raise DomainError(
                         code
-                        if code
+                        if isinstance(code, str)
+                        and code
                         in {
                             "sync_head_changed",
                             "sync_conflict_resolved",
@@ -595,8 +611,11 @@ class DesktopSync:
                         "SELECT object_id,reason FROM desktop_sync_deferred WHERE branch_id=? UNION ALL "
                         "SELECT p.object_id,p.reason FROM desktop_sync_story_pending p WHERE p.branch_id=? "
                         "AND NOT EXISTS(SELECT 1 FROM desktop_sync_deferred d "
+                        "WHERE d.branch_id=p.branch_id AND d.object_id=p.object_id) UNION ALL "
+                        "SELECT p.object_id,p.reason FROM desktop_sync_workflow_pending p WHERE p.branch_id=? "
+                        "AND NOT EXISTS(SELECT 1 FROM desktop_sync_deferred d "
                         "WHERE d.branch_id=p.branch_id AND d.object_id=p.object_id)",
-                        (branch_id, branch_id),
+                        (branch_id, branch_id, branch_id),
                     )
                 ],
             }
@@ -659,6 +678,40 @@ class DesktopSync:
             (branch_id, object_id, reason),
         )
 
+    def _pending_workflow(self, tx, branch_id, object_id, reason):
+        tx.execute(
+            "INSERT INTO desktop_sync_workflow_pending VALUES(?,?,?) "
+            "ON CONFLICT(branch_id,object_id) DO UPDATE SET reason=excluded.reason",
+            (branch_id, object_id, reason),
+        )
+
+    def _verify_workflow(self, tx, branch_id, entry):
+        workflow_archive.validate_workflow_object(
+            entry,
+            branch_id,
+            lambda identifier: source_revision(tx, branch_id, identifier),
+            lambda identifier: workflow_archive.read_workflow_entry(
+                tx, branch_id, workflow_archive.INSPECTION, identifier
+            ),
+        )
+
+    def _consume_workflow(self, tx, branch_id, event):
+        try:
+            entry = workflow_archive.parse_workflow_object(
+                branch_id, event.object_id, event.payload, event.tombstone
+            )
+            self._verify_workflow(tx, branch_id, entry)
+            workflow_archive.observe_workflow_object(tx, branch_id, event, entry)
+        except (DomainError, ValidationError) as error:
+            reason = error.message if isinstance(error, DomainError) else "本机历史记录格式无法核对。"
+            self._defer(tx, branch_id, event, reason)
+            return
+        _remember(tx, branch_id, event, _digest(event.payload))
+        tx.execute(
+            "DELETE FROM desktop_sync_workflow_pending WHERE branch_id=? AND object_id=?",
+            (branch_id, event.object_id),
+        )
+
     def _consume(self, tx, branch_id, incoming, queued=None):
         object_id = incoming.object_id
         if incoming.status == "conflict":
@@ -682,6 +735,9 @@ class DesktopSync:
         tx.execute(
             "DELETE FROM desktop_sync_deferred WHERE branch_id=? AND object_id=?", (branch_id, object_id)
         )
+        if object_id.startswith(workflow_archive.WORKFLOW_PREFIXES):
+            self._consume_workflow(tx, branch_id, incoming)
+            return
         immutable = object_id.startswith(
             ("project-version:", "settings-version:", "outline-version:", "story-version:")
         )
@@ -852,7 +908,8 @@ class DesktopSync:
                 else f"outline:{branch_id}": value.model_dump()
                 for value in outline_sync.draft_outline_objects(tx, branch_id)
             }
-            formal = {**projects, **settings, **stories, **outlines}
+            workflows = self._prepare_workflow(tx, branch_id)
+            formal = {**projects, **settings, **stories, **outlines, **workflows}
             blocked = False
             for object_id in [f"branch:{branch_id}", *histories, *object_ids, *formal, *documents]:
                 if tx.execute(
@@ -883,6 +940,31 @@ class DesktopSync:
                 # Any newer edit made while sending opens a fresh dirty marker in its own transaction.
                 tx.execute("DELETE FROM desktop_sync_dirty WHERE branch_id=?", (branch_id,))
 
+    def _prepare_workflow(self, tx, branch_id):
+        objects = {}
+        # Chapters and source revisions enter the outbox earlier. Within this family,
+        # the verified inspection must be present before any completion that cites it.
+        for sync_kind, kind, identifier in workflow_archive.workflow_ids(tx, branch_id):
+            object_id = f"{sync_kind}:{identifier}"
+            if _shadow(tx, branch_id, object_id):
+                continue
+            try:
+                entry = workflow_archive.read_workflow_entry(tx, branch_id, kind, identifier)
+                value = workflow_archive.workflow_object(branch_id, entry)
+                if len(dumps(value).encode("utf-8")) > MAX_OBJECT_BYTES:
+                    raise DomainError("sync_object_size", "体检或交付历史超过单次同步大小，已保留本机。")
+                self._verify_workflow(tx, branch_id, entry)
+                if isinstance(entry, workflow_archive.ArchivedCompletion):
+                    prerequisite = f"workflow-inspection:{entry.manifest.inspection_id}"
+                    if prerequisite not in objects and not _shadow(tx, branch_id, prerequisite):
+                        raise DomainError("sync_workflow_dependency", "完本交付需等待其原体检单先同步。")
+            except (DomainError, ValidationError) as error:
+                reason = error.message if isinstance(error, DomainError) else "本机历史记录格式无法核对。"
+                self._pending_workflow(tx, branch_id, object_id, reason)
+                continue
+            objects[object_id] = value
+        return objects
+
     def _push(self, branch_id, origin, token):
         with self.domain.db.connect() as tx:
             todo = [
@@ -912,6 +994,17 @@ class DesktopSync:
                 }:
                     with self.domain.db.connect(True) as tx:
                         self._pending_story(tx, branch_id, row["object_id"], error.message)
+                    continue
+                if row["object_id"].startswith(workflow_archive.WORKFLOW_PREFIXES) and error.code in (
+                    WORKFLOW_REJECTIONS
+                ):
+                    with self.domain.db.connect(True) as tx:
+                        self._pending_workflow(tx, branch_id, row["object_id"], error.message)
+                        if error.code != "sync_workflow_dependency":
+                            tx.execute(
+                                "DELETE FROM desktop_sync_outbox WHERE branch_id=? AND change_id=?",
+                                (branch_id, row["change_id"]),
+                            )
                     continue
                 raise
             if result.change_id != row["change_id"] or result.object_id != row["object_id"]:

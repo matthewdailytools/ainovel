@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
+import { writeFile } from 'node:fs/promises'
 
-test('六项核对通过后确认完结，旧交付包可在改稿后下载', async ({ page }) => {
+test('六项核对通过后确认完结，改稿后仍可离线恢复并下载原交付包', async ({
+  page,
+  context,
+  browser,
+}, testInfo) => {
   await page.goto('/')
   const session = await (await page.request.get('/api/session')).json()
   const headers = { 'X-Ainovel-CSRF': session.csrf }
@@ -101,6 +107,8 @@ test('六项核对通过后确认完结，旧交付包可在改稿后下载', as
   const packageResponse = await page.request.get(url)
   expect(packageResponse.ok()).toBe(true)
   expect(packageResponse.headers()['content-type']).toBe('application/zip')
+  const originalZip = testInfo.outputPath('desktop-delivery.zip')
+  await writeFile(originalZip, await packageResponse.body())
 
   const changed = await page.request.put(`/api/chapters/${chapter.id}`, {
     headers,
@@ -111,6 +119,126 @@ test('六项核对通过后确认完结，旧交付包可在改稿后下载', as
   await expect(panel.getByRole('heading', { name: '历史完结记录 · 当前依据已变化' })).toBeVisible()
   await expect(panel.getByRole('link', { name: '下载历史交付包' })).toHaveAttribute('href', url)
   expect((await page.request.get(url)).ok()).toBe(true)
+
+  const manuscript = await page.request.get(`${branch}/manuscript-package`)
+  expect(manuscript.ok(), await manuscript.text()).toBe(true)
+  const pack = await manuscript.json()
+  const history = pack.workflow_history
+  expect(history.inspections).toHaveLength(1)
+  expect(history.completions).toHaveLength(1)
+
+  await page.goto('/offline/')
+  await expect(page.getByText('离线页面就绪', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+  await context.setOffline(true)
+  const sourceFile = page.getByLabel('导入新离线作品')
+  const corrupted = structuredClone(pack)
+  corrupted.workflow_history.completions[0].materials['简介.md'] = '被改过的交付简介'
+  await sourceFile.setInputFiles({
+    name: '校验失败的档案.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(corrupted)),
+  })
+  await expect(page.getByRole('alert').filter({ hasText: '历史交付材料' })).toBeVisible()
+  await sourceFile.setInputFiles({
+    name: '完整作品.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(pack)),
+  })
+  await expect(page.getByRole('status').filter({ hasText: '已校验并导入稿件及历史。' })).toBeVisible()
+  await page.reload()
+  await page.getByRole('combobox', { name: '离线作品', exact: true }).selectOption(novel.id)
+  const archive = page.getByLabel('历次体检与完本交付')
+  await archive.getByText('历次体检与完本交付', { exact: true }).click()
+  const historyPicker = archive.getByLabel('选择历史报告')
+  await historyPicker.selectOption(history.inspections[0].id)
+  await expect(archive.getByRole('list', { name: '十处对账' }).locator('li > details')).toHaveCount(10)
+  await archive.getByText(/立项及作者约定与正文/).click()
+  await expect(archive.getByRole('region', { name: '原作者核对' })).toContainText('铜铃经学徒和师姐查到主人')
+  await archive
+    .getByRole('button', { name: /查看来源修订/ })
+    .first()
+    .click()
+  await expect(archive.getByRole('region', { name: '历史报告引用正文' })).toContainText('他看见铃身的旧痕。')
+  await historyPicker.selectOption(history.completions[0].id)
+  await expect(archive.getByRole('region', { name: '历史完本清单' }).getByRole('listitem')).toHaveCount(6)
+  const output = page.waitForEvent('download')
+  await archive.getByRole('button', { name: '下载历史交付 ZIP' }).click()
+  const browserZip = testInfo.outputPath('browser-delivery.zip')
+  await (await output).saveAs(browserZip)
+  const python = process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python'
+  execFileSync(python, [
+    '-c',
+    [
+      'import json, sys, zipfile',
+      'with zipfile.ZipFile(sys.argv[1]) as desktop, zipfile.ZipFile(sys.argv[2]) as browser:',
+      '    assert set(desktop.namelist()) == set(browser.namelist()) and len(browser.namelist()) == 5',
+      '    assert desktop.testzip() is None and browser.testzip() is None',
+      '    assert json.loads(desktop.read("manifest.json")) == json.loads(browser.read("manifest.json"))',
+      '    assert all(desktop.read(name) == browser.read(name) for name in desktop.namelist() if name != "manifest.json")',
+    ].join('\n'),
+    originalZip,
+    browserZip,
+  ])
+
+  if (process.env.AINOVEL_SYNC_E2E === '1') {
+    await context.setOffline(false)
+    const cloud = 'http://127.0.0.1:8888'
+    async function grant(device_id: string) {
+      const response = await page.request.post(`${cloud}/api/sync/works/${novel.branch_id}/devices`, {
+        headers: { Authorization: 'Bearer e2e-test-only-provisioning-token' },
+        data: { device_id },
+      })
+      expect(response.ok(), await response.text()).toBe(true)
+      return (await response.json()).token
+    }
+    const desktopToken = await grant('desktop-workflow-history')
+    const webToken = await grant('web-workflow-history')
+    for (const action of ['enable', 'run']) {
+      const response = await page.request.post(`${branch}/desktop-sync/${action}`, {
+        headers,
+        data: { origin: cloud, token: desktopToken },
+      })
+      expect(response.ok(), await response.text()).toBe(true)
+    }
+    const fresh = await browser.newContext()
+    try {
+      const web = await fresh.newPage()
+      await web.goto('http://127.0.0.1:8877/offline/')
+      const initial = structuredClone(pack)
+      delete initial.workflow_history
+      delete initial.evidence
+      await web.getByLabel('导入新离线作品').setInputFiles({
+        name: '仅稿件基线.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(JSON.stringify(initial)),
+      })
+      await expect(web.getByLabel('历次体检与完本交付')).toHaveCount(0)
+      await web.getByText('作品云同步', { exact: true }).click()
+      await web.getByLabel('同步服务地址').fill(cloud)
+      await web.getByLabel('设备编号').fill('web-workflow-history')
+      await web.getByLabel('设备凭据').fill(webToken)
+      await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
+      await web.getByRole('button', { name: '同步当前工作版本', exact: true }).click()
+      const remoteArchive = web.getByLabel('历次体检与完本交付')
+      await remoteArchive.getByText('历次体检与完本交付', { exact: true }).click()
+      await remoteArchive.getByLabel('选择历史报告').selectOption(history.completions[0].id)
+      await expect(
+        remoteArchive.getByText('源自同步设备 desktop-workflow-history', { exact: false }),
+      ).toBeVisible()
+      await remoteArchive
+        .getByRole('button', { name: /查看来源修订/ })
+        .first()
+        .click()
+      await expect(remoteArchive.getByRole('region', { name: '历史报告引用正文' })).toContainText(
+        '他看见铃身的旧痕。',
+      )
+      await web.getByRole('button', { name: '1. 拾铃', exact: true }).click()
+      await expect(web.getByRole('textbox', { name: '章节正文' })).toHaveValue('学徒没有捡到铜铃。')
+    } finally {
+      await fresh.close()
+    }
+  }
 })
 
 test('AI 完本建议载入空白项，作者通读仍待确认', async ({ page }) => {

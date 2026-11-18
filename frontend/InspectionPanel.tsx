@@ -46,8 +46,19 @@ type Preview = {
   items: Item[]
   length_target: LengthTarget | null
 }
-type Report = Preview & { id: string; current: boolean; created: number }
-type Collection = { preview: Preview; latest: Report | null; history: { id: string; created: number }[] }
+type Report = Preview & {
+  id: string
+  current: boolean
+  created: number
+  origin?: 'manuscript_package' | 'cloud'
+  source_device_id?: string
+  revalidation_request?: { basis_sha256: string; author_reviews: Review[] } | null
+}
+type Collection = {
+  preview: Preview
+  latest: Report | null
+  history: { id: string; created: number; scope?: Scope; origin?: Report['origin'] }[]
+}
 type Outline = { confirmed: { plan: { volumes: { id: string; title: string }[] } } | null }
 
 const labels: Record<Status, string> = {
@@ -647,17 +658,21 @@ export function InspectionPanel({
               {saving ? '正在保存…' : '生成体检单'}
             </button>
           </form>
-          {data.latest && (
+          {(data.latest || data.history.length > 0) && (
             <details open>
               <summary>已保存体检单</summary>
               <label>
                 选择体检单
                 <select value={historyId} onChange={(event) => setHistoryId(event.target.value)}>
-                  <option value="">最近一次</option>
+                  <option value="" disabled={!data.latest}>
+                    {data.latest ? '最近一次' : '选择历史体检单'}
+                  </option>
                   {data.history
                     .filter((row) => row.id !== data.latest?.id)
-                    .map(({ id, created }) => (
+                    .map(({ id, created, origin, scope: historyScope }) => (
                       <option key={id} value={id}>
+                        {origin &&
+                          `${origin === 'cloud' ? '云同步' : '稿件包'} · ${historyScope === 'chapter' ? '章' : historyScope === 'volume' ? '卷' : '全书'} · `}
                         {new Date(created * 1000).toLocaleString()}
                       </option>
                     ))}
@@ -665,7 +680,28 @@ export function InspectionPanel({
               </label>
               {visible && (
                 <section aria-label="体检单结果">
-                  <p>{visible.current ? '依据仍为当前版本' : '部分依据已更新，过期项待复检'}</p>
+                  <p>
+                    {visible.origin
+                      ? `${visible.origin === 'cloud' ? '云同步' : '稿件包'}原判定 · 当前待复检`
+                      : visible.current
+                        ? '依据仍为当前版本'
+                        : '部分依据已更新，过期项待复检'}
+                  </p>
+                  {visible.source_device_id && <p>来源设备 {visible.source_device_id}</p>}
+                  {visible.revalidation_request?.basis_sha256 === data.preview.basis_sha256 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (dirty && !window.confirm('用历史核对内容替换本轮尚未保存的核对？')) return
+                        const archived = visible.revalidation_request!.author_reviews
+                        setReviews(Object.fromEntries(archived.map((row) => [row.check_id, row])))
+                        setSelected(archived[0]?.check_id ?? '')
+                        setMessage('已载入历史作者核对。请按当前依据复核后生成新体检单。')
+                      }}
+                    >
+                      载入历史作者核对
+                    </button>
+                  )}
                   <CheckList items={visible.items} />
                 </section>
               )}

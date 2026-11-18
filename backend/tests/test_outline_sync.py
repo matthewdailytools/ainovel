@@ -137,6 +137,7 @@ def test_outline_package_restores_frozen_cards_and_defers_advanced_promise_recor
         assert not tx.execute("SELECT 1 FROM reference_sessions").fetchone()
 
     changed_project = planned.model_dump()
+    changed_project.pop("story_history", None)
     prior_project = changed_project["project_history"]["versions"][0]
     changed_project["project_history"]["versions"].append(
         {
@@ -192,6 +193,14 @@ def test_outline_package_restores_frozen_cards_and_defers_advanced_promise_recor
         record(tx, branch, actual, existing=to_resolve)
     advanced = export_manuscript(domain, branch)
     assert advanced.outline_history.required_story_records == [to_resolve["id"]]
+    assert advanced.story_history
+    complete = Domain(Database(tmp_path / "outline-with-actual.sqlite"))
+    adopted = import_manuscript(complete, advanced)
+    assert adopted["outline_restore"]["status"] == "adopted"
+    complete_statuses = {
+        row["promise_id"]: row["state"] for row in read_outline(complete, branch)["promises"]
+    }
+    assert complete_statuses[to_resolve["id"]] == "resolved"
     false_seed = planned.model_dump()
     false_seed["outline_history"]["versions"][0]["promise_sources"][to_resolve["id"]] = actual
     with pytest.raises(DomainError, match="初始伏笔计划"):
@@ -199,7 +208,9 @@ def test_outline_package_restores_frozen_cards_and_defers_advanced_promise_recor
     with rejected.db.connect() as tx:
         assert not tx.execute("SELECT 1 FROM story_records").fetchone()
     deferred = Domain(Database(tmp_path / "outline-deferred.sqlite"))
-    pending = import_manuscript(deferred, advanced)["outline_restore"]
+    pending = import_manuscript(deferred, advanced.model_copy(update={"story_history": None}))[
+        "outline_restore"
+    ]
     assert pending["status"] == "deferred" and to_resolve["id"] in pending["reason"]
     assert export_manuscript(deferred, branch).outline_history == advanced.outline_history
     assert read_outline(deferred, branch)["confirmed"] is None

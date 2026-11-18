@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .db import DomainError, dumps, uid
 from .evidence import resolve_field, source_schema, source_units
+from .project_portability import Identifier
+from .reference_portability import HashId, ReferenceCardEvidence, ReferenceCardHistoryEntry
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS extension_migrations(name TEXT PRIMARY KEY,applied REAL NOT NULL);
@@ -478,6 +480,7 @@ def edit_reference(domain, identifier, data, *, before_write=None, analysis_adop
         p.setdefault("history", []).append(
             {
                 "revision": row["revision"],
+                "branch_id": p.get("branch_id"),
                 "goal": p["goal"],
                 "cards": p["cards"],
                 "application_plan": p["application_plan"],
@@ -498,6 +501,30 @@ def edit_reference(domain, identifier, data, *, before_write=None, analysis_adop
 
 
 def register_routes(app, domain, provider_ready):
+    @app.get("/api/branches/{branch_id}/reference-cards")
+    def saved_card_history(
+        branch_id: Identifier, session_id: Identifier | None = None
+    ) -> list[ReferenceCardHistoryEntry]:
+        from .reference_sync import list_reference_history
+
+        domain.branch(branch_id)
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            return list_reference_history(tx, branch_id, session_id)
+
+    @app.get("/api/branches/{branch_id}/reference-cards/{version_id}/evidence")
+    def card_evidence(branch_id: Identifier, version_id: HashId) -> ReferenceCardEvidence:
+        from .reference_sync import read_reference_version, reference_excerpt
+
+        domain.branch(branch_id)
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            version = read_reference_version(tx, branch_id, version_id)
+            if not version:
+                raise DomainError("not_found", "这个工作版本中没有该手法卡修订。", 404)
+            excerpt, state = reference_excerpt(tx, branch_id, version)
+            return ReferenceCardEvidence(version_id=version.id, source_state=state, excerpt=excerpt)
+
     @app.get("/api/reference-sessions")
     def references(branch_id: str | None = None):
         rows = domain.db.all("SELECT * FROM reference_sessions ORDER BY updated DESC LIMIT 200")

@@ -79,9 +79,9 @@ def test_two_independent_sqlite_workspaces_sync_and_keep_competing_revisions(cli
         preview = client.get(inspection).json()["preview"]
         recorded = client.post(inspection, json={"basis_sha256": preview["basis_sha256"]})
         assert recorded.status_code == 201, recorded.text
-        assert left.run(branch, origin, left_token)["cursor"] == 5
-        assert right.run(branch, origin, right_token)["cursor"] == 5
-        assert right.run(branch, origin, right_token)["cursor"] == 5
+        assert left.run(branch, origin, left_token)["cursor"] == 6
+        assert right.run(branch, origin, right_token)["cursor"] == 6
+        assert right.run(branch, origin, right_token)["cursor"] == 6
         copied = export_manuscript(other, branch).evidence
         assert copied[0].id == recorded.json()["id"]
         assert copied[0].chapters[0].revision == 1

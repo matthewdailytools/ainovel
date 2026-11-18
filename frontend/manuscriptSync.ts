@@ -1,6 +1,7 @@
 import {
   applySyncedObject,
   acknowledgeLocalPublications,
+  checkLocalStorySelection,
   manuscriptHash,
   readLocalPublications,
   readLocalSyncSnapshot,
@@ -18,6 +19,14 @@ import {
   validateOutlineVersionSources,
   type OutlineVersion,
 } from './outlineSyncModel'
+import {
+  allStoryEvidence,
+  orderStoryHeads,
+  orderStoryVersions,
+  validateStoryHeadSelection,
+  type StoryVersion,
+} from './storySyncModel'
+import { workflowSyncEntry } from './workflowArchive'
 import {
   approveSyncResolution,
   listSyncHeads,
@@ -115,6 +124,8 @@ async function localObjects(project: LocalProject) {
     brief: { versions, current },
     settings,
     outline,
+    story,
+    workflow,
     publications,
   } = await readLocalSyncSnapshot(project.novel.id)
   const objects = syncManuscriptObjects(manuscript)
@@ -138,6 +149,20 @@ async function localObjects(project: LocalProject) {
       branch_id,
       revision_id: settings.current.version.id,
     })
+  for (const version of orderStoryVersions(
+    new Map(story.versions.map(({ version }) => [version.id, version])),
+  ))
+    objects.set(`story-version:${version.id}`, { format, kind: 'story-version', branch_id, version })
+  for (const version of orderStoryHeads(
+    new Map(story.records.map(({ version }) => [version.record_id, version])),
+  ))
+    objects.set(`story:${version.record_id}`, {
+      format,
+      kind: 'story-head',
+      branch_id,
+      record_id: version.record_id,
+      revision_id: version.id,
+    })
   for (const { version } of orderVersions(outline.versions))
     objects.set(`outline-version:${version.id}`, { format, kind: 'outline-version', branch_id, version })
   if (outline.current)
@@ -147,11 +172,13 @@ async function localObjects(project: LocalProject) {
       branch_id,
       revision_id: outline.current.version.id,
     })
+  for (const [id, object] of workflow) objects.set(id, object)
   return {
     objects,
     versions,
     settings,
     outline,
+    story,
     publications: new Map(publications.map((record) => [record.objectId, record])),
   }
 }
@@ -182,9 +209,13 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
     if (id.startsWith('revision:') || id.startsWith('project-version:')) return 0
     if (id.startsWith('settings-version:')) return 2
     if (id.startsWith('settings:')) return 3
-    if (id.startsWith('outline-version:')) return 4
-    if (id.startsWith('outline:')) return 5
-    if (id.startsWith('evidence:')) return 6
+    if (id.startsWith('story-version:')) return 4
+    if (id.startsWith('story:')) return 5
+    if (id.startsWith('outline-version:')) return 6
+    if (id.startsWith('outline:')) return 7
+    if (id.startsWith('evidence:')) return 8
+    if (id.startsWith('workflow-inspection:')) return 9
+    if (id.startsWith('workflow-completion:')) return 10
     return 1
   }
   const depth = (payload: SyncPayload | null | undefined) => {
@@ -216,12 +247,19 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
       if (
         object?.kind === 'project-version' ||
         object?.kind === 'settings-version' ||
-        object?.kind === 'outline-version'
+        object?.kind === 'outline-version' ||
+        object?.kind === 'story-version' ||
+        object?.kind === 'workflow-inspection' ||
+        object?.kind === 'workflow-completion'
       ) {
         const { device_id, change_id, sequence } = head.source ?? head.receipt
-        await applySyncedObject(project.novel.id, head.id, object, signature, {
+        const saved = await applySyncedObject(project.novel.id, head.id, object, signature, {
           source: { device_id, change_id, sequence },
         })
+        if (!saved) {
+          deferred.set(head.id, '本机内容已变化，下次同步会重新核对。')
+          continue
+        }
         await markSyncBaseline(scope, head.id, {
           revision: head.revision,
           signature: target,
@@ -237,7 +275,8 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         head.id.startsWith('chapter:') ||
         head.id.startsWith('project:') ||
         head.id.startsWith('settings:') ||
-        head.id.startsWith('outline:')
+        head.id.startsWith('outline:') ||
+        head.id.startsWith('story:')
       if (
         resolution &&
         ((resolution.publicationId ?? null) !== publicationId || resolution.signature !== signature)
@@ -316,12 +355,40 @@ function outlinePublicationSources(
   ]
 }
 
+function storyPublicationSources(object: SyncedObject | null, current: StoryVersion | undefined): string[] {
+  if (object?.kind === 'story-head') {
+    return [
+      `story-version:${object.revision_id}`,
+      ...Object.keys(current?.dependencies ?? {}).map((id) => `story:${id}`),
+    ]
+  }
+  if (object?.kind !== 'story-version') return []
+  const version = object.version
+  return [
+    ...(version.parent_id ? [`story-version:${version.parent_id}`] : []),
+    ...Object.values(version.dependencies).map((id) => `story-version:${id}`),
+    ...allStoryEvidence(version).map(({ revision_id }) => `revision:${revision_id}`),
+  ]
+}
+
+function workflowPublicationSources(id: string, object: SyncedObject | null): string[] {
+  if (object?.kind !== 'workflow-inspection' && object?.kind !== 'workflow-completion') return []
+  const { report, revisionIds } = workflowSyncEntry(object.branch_id, id, object)
+  return [
+    ...revisionIds.map((revisionId) => `revision:${revisionId}`),
+    ...(report ? [`workflow-inspection:${report}`] : []),
+  ]
+}
+
 function assertOutlineSources(
   snapshot: Pick<Awaited<ReturnType<typeof localObjects>>, 'outline' | 'settings' | 'versions'>,
   version: OutlineVersion,
 ) {
   const { outline, settings, versions } = snapshot
-  const required = requiredOutlineStoryRecord(version, outline.restorePending)
+  const advanced = new Set(
+    outline.promises.filter(({ advanced, archived }) => advanced && !archived).map(({ id }) => id),
+  )
+  const required = requiredOutlineStoryRecord(version, outline.restorePending, advanced)
   if (required) throw new Error(`等待原伏笔记录 ${required} 的实际进展或历史恢复。`)
   validateOutlineActiveBasis(version, {
     projectVersionId: outline.projectVersionId,
@@ -344,7 +411,8 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
   )
   const heads = new Map((await listSyncHeads(scope)).map((head) => [head.id, head]))
   const snapshot = await localObjects(project)
-  const { objects, publications, settings, outline } = snapshot
+  const { objects, publications, settings, outline, story } = snapshot
+  const storyHeads = new Map(story.records.map(({ version }) => [version.record_id, version]))
   for (const [id, object] of objects) {
     if (object && new TextEncoder().encode(JSON.stringify(object)).length > 1024 * 1024 - 4096) {
       unsent.set(id, '本机对象超过单项同步限制，可导出稿件包供独立工作区检查。')
@@ -386,6 +454,25 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
       )
     ) {
       unsent.set(id, '立项、设定、章节或父级大纲来源尚未排到云端，当前大纲继续保留。')
+      continue
+    }
+    const storyHead = object?.kind === 'story-head' ? storyHeads.get(object.record_id) : undefined
+    if (storyHead) {
+      try {
+        validateStoryHeadSelection(storyHead, storyHeads)
+      } catch (error) {
+        unsent.set(id, error instanceof Error ? error.message : '当前故事记录待复检。')
+        continue
+      }
+    }
+    if (
+      storyPublicationSources(object, storyHead).some((source) => !heads.has(source) && !pending.has(source))
+    ) {
+      unsent.set(id, '关联记录、准确原稿或父故事修订尚未排到云端，当前记录继续保留。')
+      continue
+    }
+    if (workflowPublicationSources(id, object).some((source) => !heads.has(source) && !pending.has(source))) {
+      unsent.set(id, '历史报告引用的准确章稿或全书体检尚未排到云端。')
       continue
     }
     const acknowledged = head?.lastPublication
@@ -437,7 +524,7 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
 export async function prepareWebResolution(project: LocalProject, scope: SyncScope, id: string) {
   const compared = await readSyncConflict(scope, id)
   if (!compared?.current || compared.resolvedBy) throw new Error('冲突已变化，请再次同步。')
-  const { objects, publications, versions, settings, outline } = await localObjects(project)
+  const { objects, publications, versions, settings, outline, story } = await localObjects(project)
   const object = objects.get(compared.incoming.object_id) ?? null
   const publicationId = publications.get(compared.incoming.object_id)?.id ?? null
   return {
@@ -447,6 +534,7 @@ export async function prepareWebResolution(project: LocalProject, scope: SyncSco
     versions,
     settings,
     outline,
+    story,
     signature: syncObjectSignature(object),
     publicationId,
   }
@@ -496,6 +584,21 @@ export async function resolveWebManuscript(
     const entry = fresh.outline.versions.find(({ version }) => version.id === selection)
     if (!entry?.source) throw new Error('尚未取得所选大纲的云端来源，请先同步源修订，再比较冲突。')
     await assertOutlineSources(fresh, entry.version)
+  }
+  if (fresh.incoming.object_id.startsWith('story:')) {
+    const chosen =
+      choice === 'local'
+        ? fresh.object
+        : choice === 'current'
+          ? fresh.current.payload
+          : fresh.incoming.payload
+    if (
+      chosen?.kind !== 'story-head' ||
+      typeof chosen.record_id !== 'string' ||
+      typeof chosen.revision_id !== 'string'
+    )
+      throw new Error('无法采用未经核验的故事版本。')
+    await checkLocalStorySelection(project.novel.id, chosen.record_id, chosen.revision_id)
   }
   const resolutionId = crypto.randomUUID()
   const objectId = compared.incoming.object_id

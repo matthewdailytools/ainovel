@@ -8,6 +8,7 @@ import {
   validateOutlineActiveBasis,
   validateOutlineVersionSources,
   type OutlineArchivePending,
+  type OutlineExistingPromise,
   type OutlineHeadObject,
   type OutlineHistory,
   type OutlinePromiseSeed,
@@ -32,6 +33,9 @@ export const outlineReadStores = [
   'outlineHeads',
   'outlineVersions',
   'outlinePromiseSeeds',
+  'storyHeads',
+  'storyVersions',
+  'storyHistory',
 ] as const
 export const outlineWriteStores = [...outlineReadStores, 'projectVersions', 'publications'] as const
 type StoreName = (typeof outlineWriteStores)[number]
@@ -45,6 +49,7 @@ type Access = {
   getProjectVersion(tx: Tx, branchId: string, id: string): Promise<unknown>
   getSettingsHead(tx: Tx, branchId: string): Promise<{ versionId: string } | undefined>
   getSettingsVersion(tx: Tx, branchId: string, id: string): Promise<{ version: SettingsVersion } | undefined>
+  readStoryOutlinePromisesTx(tx: Tx, branch: string): Promise<OutlineExistingPromise[]>
   readPublication(tx: Tx, branchId: string, objectId: string): Promise<LocalPublication | undefined>
   markPublication(tx: Tx, branchId: string, ...objects: string[]): Promise<void>
   fail(code: FailCode, message: string): never
@@ -59,6 +64,7 @@ export function createOutlineOfflineStore({
   getProjectVersion,
   getSettingsHead,
   getSettingsVersion,
+  readStoryOutlinePromisesTx,
   readPublication,
   markPublication,
   fail,
@@ -72,15 +78,27 @@ export function createOutlineOfflineStore({
   const listVersions = (tx: Tx, branchId: string) =>
     result<StoredOutline[]>(tx.objectStore('outlineVersions').index('byBranch').getAll(branchId))
 
+  async function promisesTx(tx: Tx, branch: string) {
+    const [plans, formal] = await Promise.all([
+      result<StoredSeed[]>(tx.objectStore('outlinePromiseSeeds').index('byBranch').getAll(branch)),
+      readStoryOutlinePromisesTx(tx, branch),
+    ])
+    const promises = new Map<string, OutlineExistingPromise>(
+      plans.map(({ id, seed }) => [id, { id, title: seed.title, seed }]),
+    )
+    for (const row of formal) promises.set(row.id, row)
+    return promises
+  }
+
   async function readOutlineTx(tx: Tx, project: LocalProject) {
     const branch = project.branch.id
-    const [head, versions, source, settingsHead, chapters, seeds] = await Promise.all([
+    const [head, versions, source, settingsHead, chapters, promises] = await Promise.all([
       getHead(tx, branch),
       listVersions(tx, branch),
       getProjectHead(tx, branch),
       getSettingsHead(tx, branch),
       listChaptersTx(tx, branch),
-      result<StoredSeed[]>(tx.objectStore('outlinePromiseSeeds').index('byBranch').getAll(branch)),
+      promisesTx(tx, branch),
     ])
     return {
       current: versions.find(({ version }) => version.id === head?.versionId),
@@ -90,7 +108,7 @@ export function createOutlineOfflineStore({
         ? ((await getSettingsVersion(tx, branch, settingsHead.versionId))?.version ?? null)
         : null,
       chapters,
-      promises: seeds.map(({ id, seed }) => ({ id, title: seed.title, seed })),
+      promises: [...promises.values()],
       restorePending: head?.deferred,
     }
   }
@@ -103,14 +121,23 @@ export function createOutlineOfflineStore({
 
   async function readOutlineHistoryTx(tx: Tx, project: LocalProject): Promise<OutlineHistory | undefined> {
     const branch = project.branch.id
-    const [head, stored] = await Promise.all([getHead(tx, branch), listVersions(tx, branch)])
+    const [head, stored, promises] = await Promise.all([
+      getHead(tx, branch),
+      listVersions(tx, branch),
+      promisesTx(tx, branch),
+    ])
     if (!stored.length) return undefined
     const selectedId = head?.versionId ?? head?.deferred?.revisionId ?? null
     const selected = stored.find((entry) => entry.version.id === selectedId)?.version
     if (selectedId && !selected) return fail('missing', '找不到采用大纲的原始修订，无法导出。')
     const required = head?.versionId
       ? (selected?.plan.promises
-          .filter(({ promise_id }) => !Object.hasOwn(selected.promise_sources, promise_id))
+          .filter(
+            ({ promise_id }) =>
+              !Object.hasOwn(selected.promise_sources, promise_id) ||
+              promises.get(promise_id)?.advanced ||
+              promises.get(promise_id)?.archived,
+          )
           .map(({ promise_id }) => promise_id) ?? [])
       : (head?.deferred?.requiredStoryRecords ?? [])
     const source_devices = Object.fromEntries(
@@ -149,10 +176,8 @@ export function createOutlineOfflineStore({
     if (adopting) {
       const chapters = new Map((await listChaptersTx(tx, branch)).map((chapter) => [chapter.id, chapter]))
       lookup.chapter = (id) => chapters.get(id)
-      lookup.promise = async (id) => {
-        const existing = await getSeed(tx, branch, id)
-        return existing && { id, title: existing.seed.title, seed: existing.seed }
-      }
+      const promises = await promisesTx(tx, branch)
+      lookup.promise = (id) => promises.get(id)
     }
     try {
       await validateOutlineVersionSources(version, lookup)
@@ -208,8 +233,22 @@ export function createOutlineOfflineStore({
     }
   }
 
-  function checkArchivedPromises(previous: OutlineHead | undefined, version: OutlineVersion) {
-    const required = requiredOutlineStoryRecord(version, previous?.deferred)
+  async function advancedStories(tx: Tx, branch: string) {
+    return new Set(
+      (await readStoryOutlinePromisesTx(tx, branch))
+        .filter(({ advanced, archived }) => advanced && !archived)
+        .map(({ id }) => id),
+    )
+  }
+
+  async function checkArchivedPromises(
+    tx: Tx,
+    branch: string,
+    previous: OutlineHead | undefined,
+    version: OutlineVersion,
+  ) {
+    if (!previous?.deferred?.requiredStoryRecords.length) return
+    const required = requiredOutlineStoryRecord(version, previous.deferred, await advancedStories(tx, branch))
     if (required) fail('missing', `等待原伏笔记录 ${required} 的实际进展或历史恢复。`)
   }
 
@@ -237,9 +276,9 @@ export function createOutlineOfflineStore({
     const selected = history.versions.find(({ id }) => id === revisionId)
     if (!selected) return fail('missing', '稿件包缺少采用的大纲修订。')
     const requiredStoryRecords = history.required_story_records ?? []
-    let reason = requiredStoryRecords.length
-      ? `等待原伏笔记录 ${requiredStoryRecords[0]} 的实际进展或历史恢复。`
-      : ''
+    const available = requiredStoryRecords.length ? await advancedStories(tx, branchId) : new Set<string>()
+    const missing = requiredStoryRecords.find((id) => !available.has(id))
+    let reason = missing ? `等待原伏笔记录 ${missing} 的实际进展或历史恢复。` : ''
     if (!reason) {
       try {
         await assertCurrentBasis(tx, branchId, selected)
@@ -271,7 +310,7 @@ export function createOutlineOfflineStore({
       const branch = project.branch.id
       const previous = await getHead(tx, branch)
       if ((previous?.versionId ?? null) !== base) fail('conflict', '本机已有另一版确认大纲，请重新核对。')
-      checkArchivedPromises(previous, version)
+      await checkArchivedPromises(tx, branch, previous, version)
       await assertCurrentBasis(tx, branch, version)
       await validateSources(tx, branch, version, true)
       await result(
@@ -321,7 +360,7 @@ export function createOutlineOfflineStore({
         return false
       const chosen = await getVersion(tx, branch, object.revision_id)
       if (!chosen?.source) return fail('missing', '缺少云端采用的大纲来源。')
-      checkArchivedPromises(head, chosen.version)
+      await checkArchivedPromises(tx, branch, head, chosen.version)
       await assertCurrentBasis(tx, branch, chosen.version)
       await validateSources(tx, branch, chosen.version, true)
       if (head?.versionId !== chosen.version.id) await moveHead(tx, project, chosen.version, head)

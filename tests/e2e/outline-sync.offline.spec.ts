@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 const cloud = 'http://127.0.0.1:8888'
 test.skip(process.env.AINOVEL_SYNC_E2E !== '1', '使用隔离云端进程运行双端验收')
 
-test('桌面和离线 Web 比较正式大纲分歧，采用 Web 修订且保留伏笔实际进度', async ({ page, browser }) => {
+test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实际进度', async ({ page, browser }) => {
   await page.goto('/')
   const desktopOrigin = new URL(page.url()).origin
   const { csrf } = await (await page.request.get('/api/session')).json()
@@ -229,40 +229,114 @@ test('桌面和离线 Web 比较正式大纲分歧，采用 Web 修订且保留�
     await expect(panel.locator('pre')).toContainText(desktopText)
     await panel.getByRole('button', { name: '查看上一大纲修订' }).click()
     await expect(panel.locator('pre')).toContainText(commonText)
+
+    const webProgress = '浏览器核对双笔铸记后回收。'
+    const desktopProgress = '桌面补记保管人的证词。'
+    const story = web.getByLabel('离线故事记录')
+    await story.getByText('故事记录', { exact: true }).click()
+    await story.getByRole('combobox', { name: '查看故事记录', exact: true }).selectOption(promiseId)
+    await context.setOffline(true)
+    await story.getByRole('button', { name: '编辑所选故事记录', exact: true }).click()
+    await story.getByRole('button', { name: '添加伏笔阶段', exact: true }).click()
+    const resolved = story.getByRole('group', { name: '阶段 3', exact: true })
+    await resolved.getByRole('combobox', { name: '阶段状态', exact: true }).selectOption('resolved')
+    await resolved.getByRole('textbox', { name: '阶段说明', exact: true }).fill(webProgress)
+    const confirm = story.getByRole('button', { name: '确认故事记录并保存到浏览器', exact: true })
+    await confirm.click()
+    await expect(story.getByRole('alert')).toContainText('缺少原文证据')
+    await resolved.getByText('阶段原文证据 · 0 处', { exact: true }).click()
+    await resolved.getByRole('combobox', { name: '原文证据章节', exact: true }).selectOption(chapterId)
+    await resolved.getByRole('button', { name: '读取证据章保存稿', exact: true }).click()
+    await expect(resolved.getByRole('textbox', { name: '可选取的保存稿', exact: true })).toHaveValue(content)
+    await resolved.getByRole('spinbutton', { name: '选区起点', exact: true }).fill('0')
+    await resolved.getByRole('spinbutton', { name: '选区终点', exact: true }).fill(String(content.length))
+    await resolved.getByRole('button', { name: '附上所选原文', exact: true }).click()
+    await expect(resolved.getByText('阶段原文证据 · 1 处', { exact: true })).toBeVisible()
+    await confirm.click()
+    await expect(story.getByText('已确认并保存故事记录。')).toBeVisible()
+
+    const latestGraph = await (await page.request.get(graphPath)).json()
+    const currentPromise = latestGraph.records.find(({ id }: { id: string }) => id === promiseId)
+    const alternative = await page.request.put(branch + '/story-records/' + promiseId, {
+      headers,
+      data: {
+        base_story_revision: latestGraph.story_revision,
+        base_revision: currentPromise.revision,
+        record: { ...currentPromise.payload, notes: desktopProgress },
+      },
+    })
+    expect(alternative.ok(), await alternative.text()).toBe(true)
+    expect((await desktopSync('run')).conflicts).toHaveLength(0)
+    await context.setOffline(false)
+    await sync.click()
+    await web.getByRole('button', { name: /^比较冲突/ }).click()
+    for (const [label, text] of [
+      ['云端当前版', desktopProgress],
+      ['另一提交版', webProgress],
+      ['共同依据', '已埋设'],
+    ]) {
+      const side = compare.locator('details').filter({ has: web.getByText(label, { exact: true }) })
+      await side.getByText(label, { exact: true }).click()
+      await expect(side.locator('pre')).toContainText(text)
+    }
+    web.once('dialog', (dialog) => dialog.accept())
+    await compare.getByRole('button', { name: '采用另一提交版' }).click()
+    await expect(web.getByRole('button', { name: /^比较冲突/ })).toHaveCount(0)
+    expect((await desktopSync('run')).deferred).toHaveLength(0)
+    const progressed = await (await page.request.get(outlinePath)).json()
+    expect(progressed.promises[0].state).toBe('resolved')
+    expect(progressed.promises[0].stages[2].sources).toEqual([source])
   } finally {
     await context.close()
   }
 
   // The desktop package carries a dependency on the progressed story record, not a substitute.
   expect(pack.outline_history.required_story_records).toEqual([promiseId])
-  const archiveContext = await browser.newContext()
-  try {
-    const archive = await archiveContext.newPage()
-    await archive.goto(new URL('/offline/', desktopOrigin).href)
-    await expect(archive.getByText('离线页面就绪', { exact: true })).toBeVisible()
-    await expect.poll(() => archive.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
-    await archiveContext.setOffline(true)
-    await archive.getByLabel('导入新离线作品').setInputFiles({
-      name: '待恢复实际伏笔.json',
-      mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify(pack)),
-    })
-    await archive.getByRole('combobox', { name: '离线作品', exact: true }).selectOption({ label: title })
-    const pending = archive.getByLabel('离线大纲台')
-    await pending.getByText('大纲台', { exact: true }).click()
-    await expect(
-      pending.getByText(
-        `已保留稿件包的大纲修订 ${common.confirmed.id}。等待原伏笔记录 ${promiseId} 的实际进展或历史恢复。`,
-      ),
-    ).toBeVisible()
-    await expect(pending.getByText(/^已确认修订 /)).toHaveCount(0)
-    await pending.getByText('大纲版本历史', { exact: true }).click()
-    await expect(pending.locator('pre')).toContainText(commonText)
-    const download = archive.waitForEvent('download')
-    await archive.getByRole('button', { name: '导出稿件交换包', exact: true }).click()
-    const transported = JSON.parse(await readFile((await (await download).path())!, 'utf-8'))
-    expect(transported.outline_history).toEqual(pack.outline_history)
-  } finally {
-    await archiveContext.close()
+  expect(pack.story_history.adopted_heads[promiseId]).toBeTruthy()
+  const { story_history: _absent, ...missingStoryHistory } = pack
+  for (const [file, expectedAdopted] of [
+    [pack, true],
+    [missingStoryHistory, false],
+  ] as const) {
+    const archiveContext = await browser.newContext()
+    try {
+      const archive = await archiveContext.newPage()
+      await archive.goto(new URL('/offline/', desktopOrigin).href)
+      await expect(archive.getByText('离线页面就绪', { exact: true })).toBeVisible()
+      await expect.poll(() => archive.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+      await archiveContext.setOffline(true)
+      await archive.getByLabel('导入新离线作品').setInputFiles({
+        name: '已确认大纲与故事.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(JSON.stringify(file)),
+      })
+      await archive.getByRole('combobox', { name: '离线作品', exact: true }).selectOption({ label: title })
+      const pending = archive.getByLabel('离线大纲台')
+      await pending.getByText('大纲台', { exact: true }).click()
+      if (expectedAdopted) {
+        await expect(pending.getByText(`已确认修订 ${common.confirmed.id}`, { exact: true })).toBeVisible()
+        const story = archive.getByLabel('离线故事记录')
+        await story.getByText('故事记录', { exact: true }).click()
+        await story.getByRole('combobox', { name: '查看故事记录' }).selectOption(promiseId)
+        await story.getByText('故事记录历史', { exact: true }).click()
+        await expect(story.locator('pre')).toContainText('已埋设')
+      } else {
+        await expect(
+          pending.getByText(
+            `已保留稿件包的大纲修订 ${common.confirmed.id}。等待原伏笔记录 ${promiseId} 的实际进展或历史恢复。`,
+          ),
+        ).toBeVisible()
+        await expect(pending.getByText(/^已确认修订 /)).toHaveCount(0)
+      }
+      await pending.getByText('大纲版本历史', { exact: true }).click()
+      await expect(pending.locator('pre')).toContainText(commonText)
+      const download = archive.waitForEvent('download')
+      await archive.getByRole('button', { name: '导出稿件交换包', exact: true }).click()
+      const transported = JSON.parse(await readFile((await (await download).path())!, 'utf-8'))
+      expect(transported.outline_history).toEqual(pack.outline_history)
+      expect(transported.story_history).toEqual(file.story_history)
+    } finally {
+      await archiveContext.close()
+    }
   }
 })

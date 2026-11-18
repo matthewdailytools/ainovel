@@ -26,6 +26,12 @@ from .project_sync import ProjectVersionObject, parse_project_object
 from .settings_sync import SettingsVersionObject, parse_settings_object, validate_version_sources
 from .story_sync import StoryVersionObject, parse_story_object
 from .story_sync import validate_version_sources as validate_story_sources
+from .workflow_archive import (
+    ArchivedInspection,
+    WORKFLOW_PREFIXES,
+    parse_workflow_object,
+    validate_workflow_object,
+)
 
 MAX_OBJECT_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = MAX_OBJECT_BYTES * 2
@@ -355,6 +361,8 @@ class SyncStore:
                 return replay
             if data.object_id.startswith("revision:"):
                 return self._push_source_revision(tx, work, device, data, payload, fingerprint)
+            if data.object_id.startswith(WORKFLOW_PREFIXES):
+                return self._push_workflow(tx, work, device, data, payload, fingerprint)
             formal = self._validate_formal(tx, work, data.object_id, data.payload, data.tombstone)
             if isinstance(
                 formal,
@@ -468,6 +476,45 @@ class SyncStore:
             )
         return value
 
+    def _push_workflow(self, tx, work, device, data, payload, fingerprint):
+        entry = parse_workflow_object(work, data.object_id, data.payload, data.tombstone)
+
+        def source(object_id):
+            head = self._head(tx, work, object_id)
+            return self._change(tx, work, head) if head else None
+
+        def inspection(identifier):
+            object_id = f"workflow-inspection:{identifier}"
+            if row := source(object_id):
+                return parse_workflow_object(work, object_id, json.loads(row["payload"]), row["tombstone"])
+            return None
+
+        def revision(identifier):
+            if row := source(f"revision:{identifier}"):
+                return RevisionObject.model_validate_json(row["payload"]).revision
+            return None
+
+        other = "workflow-completion" if isinstance(entry, ArchivedInspection) else "workflow-inspection"
+        if source(f"{other}:{entry.id}"):
+            raise DomainError("sync_workflow", "体检和交付记录共用了同一来源编号。", 409)
+        if previous := source(data.object_id):
+            stored = parse_workflow_object(
+                work, data.object_id, json.loads(previous["payload"]), previous["tombstone"]
+            )
+            if stored != entry:
+                raise DomainError("sync_workflow", "同一体检或交付记录编号不能改写。", 409)
+        if data.parent_revision is not None:
+            base = self._change(tx, work, data.parent_revision)
+            if not base or base["object_id"] != data.object_id:
+                raise DomainError("sync_parent_unknown", "父修订不属于该历史记录。", 409)
+        try:
+            validate_workflow_object(entry, work, revision, inspection)
+        except DomainError as error:
+            if error.code in {"manuscript_workflow", "completion_integrity"}:
+                raise DomainError("sync_workflow", error.message, error.status) from error
+            raise
+        return self._append(tx, work, device, data, fingerprint, payload, data.change_id, "applied")
+
     def receipt(self, work, digest, change_id):
         with self.transaction(snapshot=True) as tx:
             device = self._authorize(tx, work, digest)
@@ -552,6 +599,8 @@ class SyncStore:
                 return replay
             incoming = self._change(tx, work, identifier)
             conflict = self._conflict(tx, work, incoming)
+            if conflict.object_id.startswith(WORKFLOW_PREFIXES):
+                raise DomainError("sync_workflow", "体检或交付历史记录不能通过冲突合并修改。", 409)
             if conflict.resolved_by:
                 raise DomainError("sync_conflict_resolved", "冲突已有处理回执。", 409)
             if conflict.head_revision != data.parent_revision:

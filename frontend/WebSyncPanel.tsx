@@ -4,6 +4,7 @@ import type { LocalProject } from './offlineStore'
 import { describeOutlineVersion } from './outlineSyncModel'
 import { describeProjectVersion } from './projectSyncModel'
 import { describeSettingsVersion } from './settingsSyncModel'
+import { describeStoryVersion } from './storySyncModel'
 import { readSyncState, setSyncEnabled, type SyncPayload } from './syncClient'
 import {
   cloudScope,
@@ -32,6 +33,12 @@ function excerpt(value: SyncPayload | null, comparison: Comparison) {
   if (value.kind === 'outline-head') {
     const source = comparison.outline.versions.find(({ version }) => version.id === value.revision_id)
     return source ? describeOutlineVersion(source.version) : '尚未取得该版本的大纲来源。'
+  }
+  if (value.kind === 'story-head') {
+    const source = comparison.story.versions.find(
+      ({ version }) => version.id === value.revision_id && version.record_id === value.record_id,
+    )
+    return source ? describeStoryVersion(source.version) : '尚未取得该版本的故事记录来源。'
   }
   const part = value.head ?? value.novel
   if (part && typeof part === 'object' && !Array.isArray(part)) {
@@ -230,13 +237,15 @@ export function WebSyncPanel({
               onClick={() => {
                 const kind = compared.current.payload?.kind
                 const history =
-                  kind === 'outline-head'
-                    ? '大纲版本'
-                    : kind === 'settings-head'
-                      ? '设定版本'
-                      : kind === 'project-head'
-                        ? '立项版本'
-                        : '原稿修订'
+                  kind === 'story-head'
+                    ? '故事记录历史'
+                    : kind === 'outline-head'
+                      ? '大纲版本'
+                      : kind === 'settings-head'
+                        ? '设定版本'
+                        : kind === 'project-head'
+                          ? '立项版本'
+                          : '原稿修订'
                 if (window.confirm(`${label}并结束冲突？${history}保留。`)) void run('choose', choice)
               }}
             >

@@ -5,6 +5,7 @@ import json
 from time import time
 from typing import Annotated, Literal
 
+from fastapi import Query
 from pydantic import Field, StringConstraints
 
 from .db import DomainError, dumps, uid
@@ -12,7 +13,10 @@ from .models import Input
 from .outline_portability import OutlineHistory
 from .project_portability import Identifier, ProjectHistory
 from .project_sync import export_project_history, restore_project_history
+from .reference_portability import HashId as ReferenceVersionId, ReferenceHistory
 from .settings_portability import SettingsHistory
+from .story_portability import PortableStoryArchive
+from .workflow_archive import WorkflowHistory
 
 FORMAT = "ainovel-manuscript/1"
 EVIDENCE = "portable_workbench_evidence"
@@ -94,6 +98,9 @@ class ManuscriptPackage(Input):
     project_history: ProjectHistory | None = Field(default=None, exclude_if=lambda value: value is None)
     settings_history: SettingsHistory | None = Field(default=None, exclude_if=lambda value: value is None)
     outline_history: OutlineHistory | None = Field(default=None, exclude_if=lambda value: value is None)
+    story_history: PortableStoryArchive | None = Field(default=None, exclude_if=lambda value: value is None)
+    workflow_history: WorkflowHistory | None = Field(default=None, exclude_if=lambda value: value is None)
+    reference_history: ReferenceHistory | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def _digest(text):
@@ -209,6 +216,10 @@ def _index(package):
                 reference.sha256,
             ):
                 raise DomainError("manuscript_evidence", "依据与包中引用的章稿修订不一致。")
+    if package.reference_history:
+        from .reference_sync import validate_reference_archive
+
+        validate_reference_archive(package.reference_history, package.branch.id)
     if package.settings_history:
         from .settings_archive import validate_settings_history
 
@@ -219,6 +230,16 @@ def _index(package):
         validate_outline_history(
             package.outline_history, package.project_history, package.settings_history, package.chapters
         )
+    if package.story_history:
+        from .story_archive import validate_story_archive
+
+        validate_story_archive(
+            package.story_history, package.branch.id, revisions, {row.id: row for row in package.revisions}
+        )
+    if package.workflow_history:
+        from .workflow_archive import validate_workflow_history
+
+        validate_workflow_history(package.workflow_history, package.branch.id, revisions)
     return histories
 
 
@@ -325,9 +346,12 @@ def store_portable_evidence(tx, branch_id, document):
     )
 
 
-def export_manuscript(domain, branch_id):
+def export_manuscript(domain, branch_id, *, include_reference_evidence_for=()):
     from .outline_archive import export_outline_history, validate_outline_history
+    from .reference_sync import export_reference_archive
     from .settings_archive import export_settings_history, validate_settings_history
+    from .story_archive import export_story_archive, validate_story_archive
+    from .workflow_archive import export_workflow_history, validate_workflow_history
 
     with domain.db.connect() as tx:
         tx.execute("BEGIN")
@@ -366,6 +390,11 @@ def export_manuscript(domain, branch_id):
                 "project_history": export_project_history(tx, branch_id),
                 "settings_history": export_settings_history(tx, branch_id),
                 "outline_history": export_outline_history(tx, branch_id),
+                "story_history": export_story_archive(tx, branch_id),
+                "workflow_history": export_workflow_history(tx, branch_id),
+                "reference_history": export_reference_archive(
+                    tx, branch_id, include_evidence_for=include_reference_evidence_for
+                ),
             }
         )
         if package.settings_history:
@@ -378,6 +407,13 @@ def export_manuscript(domain, branch_id):
             validate_outline_history(
                 package.outline_history, package.project_history, package.settings_history, package.chapters
             )
+        if package.story_history or package.workflow_history:
+            native = {row.id: row for row in package.revisions}
+            revisions = {**native, **{row.id: row for row in package.source_revisions}}
+            if package.story_history:
+                validate_story_archive(package.story_history, branch_id, revisions, native)
+            if package.workflow_history:
+                validate_workflow_history(package.workflow_history, branch_id, revisions)
         return package
 
 
@@ -441,6 +477,14 @@ def import_manuscript(domain, package):
         )
         if package.project_history:
             restore_project_history(tx, branch.id, package.project_history)
+        if package.reference_history:
+            from .reference_sync import import_reference_archive
+
+            import_reference_archive(tx, branch.id, package.reference_history)
+        if package.story_history:
+            from .story_archive import import_story_archive
+
+            import_story_archive(tx, branch.id, package.story_history)
         if package.settings_history:
             from .settings_archive import import_settings_history
 
@@ -449,6 +493,10 @@ def import_manuscript(domain, package):
             from .outline_archive import import_outline_history
 
             outline = import_outline_history(tx, branch.id, package.outline_history)
+        if package.workflow_history:
+            from .workflow_archive import import_workflow_history
+
+            import_workflow_history(tx, branch.id, package.workflow_history)
     result = {"id": novel.id, "branch_id": branch.id}
     if outline:
         result["outline_restore"] = outline
@@ -457,8 +505,16 @@ def import_manuscript(domain, package):
 
 def register_routes(app, domain):
     @app.get("/api/branches/{branch_id}/manuscript-package")
-    def get_package(branch_id: str) -> ManuscriptPackage:
-        return export_manuscript(domain, branch_id)
+    def get_package(
+        branch_id: str,
+        include_reference_evidence_for: Annotated[
+            list[ReferenceVersionId] | None,
+            Query(max_length=100, description="明确选带原文证据的手法卡修订 ID。默认只导出手法卡来源地址。"),
+        ] = None,
+    ) -> ManuscriptPackage:
+        return export_manuscript(
+            domain, branch_id, include_reference_evidence_for=include_reference_evidence_for or ()
+        )
 
     @app.post("/api/manuscript-packages/import", status_code=201)
     def import_package(data: ManuscriptPackage):

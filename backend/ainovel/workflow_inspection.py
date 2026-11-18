@@ -655,6 +655,8 @@ def register_routes(app, domain):
 
     @app.get(endpoint)
     def inspections(branch_id: str, scope: Scope = "book", scope_id: str | None = None):
+        from .workflow_archive import archive_origin, list_archived_workflow
+
         with domain.db.connect() as tx:
             tx.execute("BEGIN")
             preview, _ = _evaluate(tx, branch_id, scope, scope_id)
@@ -668,10 +670,17 @@ def register_routes(app, domain):
                     (branch_id, KIND, scope, scope_id),
                 )
             ]
+            history.extend(
+                {**{key: item[key] for key in ("id", "created", "scope", "scope_id")}, **archive_origin(item)}
+                for item in list_archived_workflow(
+                    tx, branch_id, KIND, 30, scope=None if scope == "book" else scope, scope_id=scope_id
+                )
+            )
+            history.sort(key=lambda item: -item["created"])
             return {
                 "preview": preview,
                 "latest": _effective(row, preview) if row else None,
-                "history": history,
+                "history": history[:30],
             }
 
     @app.post(endpoint, status_code=201)
@@ -695,6 +704,13 @@ def register_routes(app, domain):
 
     @app.get(endpoint + "/{inspection_id}")
     def inspection(branch_id: str, inspection_id: str):
+        from .workflow_archive import (
+            archive_origin,
+            archived_workflow,
+            current_sources_match,
+            inspection_revalidation,
+        )
+
         with domain.db.connect() as tx:
             tx.execute("BEGIN")
             row = tx.execute(
@@ -702,7 +718,17 @@ def register_routes(app, domain):
                 (branch_id, KIND, inspection_id),
             ).fetchone()
             if not row:
-                raise DomainError("not_found", "体检单不存在。", 404)
+                archived = archived_workflow(tx, branch_id, KIND, inspection_id)
+                if not archived:
+                    raise DomainError("not_found", "体检单不存在。", 404)
+                record = json.loads(archived["payload"])
+                row = {
+                    "id": archived["id"],
+                    "created": archived["created"],
+                    "payload": dumps(record["report"]),
+                }
+            else:
+                record = None
             report = json.loads(row["payload"])
             try:
                 preview, _ = _evaluate(tx, branch_id, report["scope"], report["scope_id"])
@@ -710,4 +736,19 @@ def register_routes(app, domain):
                 if error.code != "inspection_target":
                     raise
                 preview = None
-            return _effective(row, preview)
+            value = _effective(row, preview)
+            if record:
+                reconciles = bool(
+                    value["current"]
+                    and current_sources_match(tx, branch_id, preview["chapters"], record["chapter_bindings"])
+                )
+                value.update(
+                    **archive_origin(archived),
+                    chapter_bindings=record["chapter_bindings"],
+                    basis_reconciles=reconciles,
+                    revalidation_request=inspection_revalidation(report, preview) if reconciles else None,
+                    current=False,
+                )
+                for item in value["items"]:
+                    item["current_status"] = "outdated"
+            return value

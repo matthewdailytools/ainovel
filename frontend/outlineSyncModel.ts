@@ -86,6 +86,7 @@ export type OutlineExistingPromise = {
   title: string
   archived?: number | boolean
   seed?: OutlinePromiseSeed
+  advanced?: boolean
 }
 
 const invalid = (message: string): never => {
@@ -206,9 +207,14 @@ function parseWindow(value: unknown): OutlineWindow {
 export const outlineChapterPlans = (plan: OutlinePlan) =>
   plan.volumes.flatMap(({ units }) => units.flatMap(({ chapters }) => chapters))
 
-export function requiredOutlineStoryRecord(version: OutlineVersion, pending?: OutlineArchivePending) {
-  return version.plan.promises.find(({ promise_id }) => pending?.requiredStoryRecords.includes(promise_id))
-    ?.promise_id
+export function requiredOutlineStoryRecord(
+  version: OutlineVersion,
+  pending?: OutlineArchivePending,
+  available: ReadonlySet<string> = new Set(),
+) {
+  return version.plan.promises.find(
+    ({ promise_id }) => pending?.requiredStoryRecords.includes(promise_id) && !available.has(promise_id),
+  )?.promise_id
 }
 
 function parsePlan(value: unknown): OutlinePlan {

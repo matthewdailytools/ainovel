@@ -1,0 +1,544 @@
+type FrozenRevision = { id: string; chapter_id: string; revision: number; sha256: string; content: string }
+type Digest = (text: string) => Promise<string>
+type ChapterBinding = { id: string; revision: number; revision_id: string; sha256: string }
+type ChapterManifest = Omit<ChapterBinding, 'revision_id'> & { title: string; position: number }
+type Source = { chapter_id: string; revision: number; start: number; end: number; quote: string }
+
+const statuses = ['green', 'yellow', 'red', 'pending', 'not_applicable', 'outdated'] as const
+const completionChecks = ['manuscript', 'ending', 'characters', 'promises', 'inspection', 'delivery'] as const
+export const deliveryFiles = ['正文.md', '设定册.md', '简介.md', '试读.md'] as const
+type DeliveryFile = (typeof deliveryFiles)[number]
+
+function invalid(message: string): never {
+  throw new Error(message)
+}
+
+function record(value: unknown, keys?: readonly string[]) {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return invalid('稿件包历史记录的格式无效。')
+  const data = value as Record<string, unknown>
+  if (keys && Object.keys(data).some((key) => !keys.includes(key)))
+    invalid('稿件包历史记录包含无法识别的字段。')
+  return data
+}
+
+function list(value: unknown, maximum: number, minimum = 0) {
+  if (!Array.isArray(value) || value.length < minimum || value.length > maximum)
+    return invalid('稿件包历史记录列表无效。')
+  return value as unknown[]
+}
+
+function text(value: unknown, maximum: number, minimum = 0) {
+  if (typeof value !== 'string' || value.length > maximum * 2 || /\p{Surrogate}/u.test(value))
+    return invalid('稿件包历史记录文本无效。')
+  const length = Array.from(value).length
+  if (length < minimum || length > maximum) invalid('稿件包历史记录文本超出允许范围。')
+  return value
+}
+
+function id(value: unknown) {
+  const identifier = text(value, 128, 1)
+  if (!/^[a-z0-9_-]+$/i.test(identifier)) invalid('稿件包历史记录编号无效。')
+  return identifier
+}
+
+const optionalId = (value: unknown) => (value == null ? null : id(value))
+
+function hash(value: unknown) {
+  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value))
+    return invalid('稿件包历史记录的 SHA-256 无效。')
+  return value
+}
+
+function integer(value: unknown, minimum = 0) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum)
+    return invalid('稿件包历史记录包含无效的数字。')
+  return value
+}
+
+function stamp(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0)
+    return invalid('稿件包历史记录日期无效。')
+  return value
+}
+
+function flag(value: unknown) {
+  if (typeof value !== 'boolean') return invalid('稿件包历史记录状态无效。')
+  return value
+}
+
+function choice<const T extends readonly string[]>(value: unknown, values: T): T[number] {
+  if (typeof value !== 'string' || !values.includes(value))
+    return invalid('稿件包历史记录包含无效的检查类型。')
+  return value
+}
+
+function chapterManifest(value: Record<string, unknown>): ChapterManifest {
+  return {
+    id: id(value.id),
+    title: text(value.title, 200, 1),
+    position: integer(value.position, 1),
+    revision: integer(value.revision),
+    sha256: hash(value.sha256),
+  }
+}
+
+function parseBinding(value: unknown): ChapterBinding {
+  const row = record(value, ['id', 'revision', 'revision_id', 'sha256'])
+  return {
+    id: id(row.id),
+    revision: integer(row.revision),
+    revision_id: id(row.revision_id),
+    sha256: hash(row.sha256),
+  }
+}
+
+function verifyChapters(
+  chapters: ChapterManifest[],
+  bindings: ChapterBinding[],
+  revisions: ReadonlyMap<string, FrozenRevision>,
+) {
+  if (chapters.length !== bindings.length || new Set(bindings.map(({ id }) => id)).size !== bindings.length)
+    invalid('历史报告的正文清单和来源修订数量不一致。')
+  return new Map(
+    chapters.map((chapter, index) => {
+      const link = bindings[index]
+      const revision = revisions.get(link.revision_id)
+      if (
+        !revision ||
+        link.id !== chapter.id ||
+        link.revision !== chapter.revision ||
+        link.sha256 !== chapter.sha256 ||
+        revision.chapter_id !== link.id ||
+        revision.revision !== link.revision ||
+        revision.sha256 !== link.sha256
+      )
+        return invalid(`缺少历史报告所引用的准确正文修订 ${link.revision_id}。`)
+      return [chapter.id, revision]
+    }),
+  )
+}
+
+function verifySources(value: unknown, chapters: ReadonlyMap<string, FrozenRevision>): Source[] {
+  return list(value, 30).map((entry) => {
+    const row = record(entry, ['chapter_id', 'revision', 'start', 'end', 'quote'])
+    const chapter_id = id(row.chapter_id)
+    const revision = integer(row.revision)
+    const start = integer(row.start)
+    const end = integer(row.end, 1)
+    const quote = text(row.quote, 4000, 1)
+    const source = chapters.get(chapter_id)
+    if (
+      source?.revision !== revision ||
+      end <= start ||
+      end > source.content.length ||
+      source.content.slice(start, end) !== quote ||
+      !quote.trim()
+    )
+      invalid('历史报告的作者引文与原稿选区不一致。')
+    return { chapter_id, revision, start, end, quote }
+  })
+}
+
+function parseAuthorReview(value: unknown, check: string, chapters: ReadonlyMap<string, FrozenRevision>) {
+  const review = record(value, [
+    'check_id',
+    'status',
+    'basis_note',
+    'reason',
+    'evidence',
+    'source_candidate_id',
+    'author_overrides_candidate',
+    'candidate_result',
+  ])
+  const status = choice(review.status, ['green', 'yellow', 'red', 'not_applicable'])
+  const evidence = verifySources(review.evidence ?? [], chapters)
+  const author_overrides_candidate = flag(review.author_overrides_candidate ?? false)
+  const source_candidate_id = optionalId(review.source_candidate_id)
+  if (
+    review.check_id !== check ||
+    ((status === 'green' || status === 'red') && !evidence.length) ||
+    (author_overrides_candidate && (status !== 'green' || !source_candidate_id))
+  )
+    invalid('历史报告的作者裁定与原检查项不一致。')
+  return {
+    check_id: check,
+    status,
+    evidence,
+    author_overrides_candidate,
+    source_candidate_id,
+    basis_note: text(review.basis_note, 2000, 1),
+    reason: text(review.reason, 2000, 1),
+    ...(review.candidate_result != null
+      ? { candidate_result: choice(review.candidate_result, ['pass', 'fail', 'unknown']) }
+      : {}),
+  }
+}
+
+function lengthTargets(value: unknown) {
+  if (value == null) return null
+  const targets = record(value, ['min_chars', 'max_chars', 'expected_chapters'])
+  const min_chars = targets.min_chars == null ? null : integer(targets.min_chars)
+  const max_chars = targets.max_chars == null ? null : integer(targets.max_chars, 1)
+  const expected_chapters = targets.expected_chapters == null ? null : integer(targets.expected_chapters, 1)
+  if ((min_chars != null && max_chars != null && min_chars > max_chars) || (expected_chapters ?? 0) > 1000)
+    invalid('历史报告的篇幅目标无效。')
+  return { min_chars, max_chars, expected_chapters }
+}
+
+async function parseInspection(
+  value: unknown,
+  revisions: ReadonlyMap<string, FrozenRevision>,
+  digest: Digest,
+) {
+  const entry = record(value, ['id', 'created', 'chapter_bindings', 'report'])
+  const chapter_bindings = list(entry.chapter_bindings, 5000).map(parseBinding)
+  const report = record(entry.report, [
+    'version',
+    'scope',
+    'scope_id',
+    'chapters',
+    'length_target',
+    'items',
+    'basis_sha256',
+    'length_targets',
+  ])
+  const version = choice(report.version, ['m6-inspection/1'])
+  const scope = choice(report.scope, ['chapter', 'volume', 'book'])
+  const scope_id = optionalId(report.scope_id)
+  const chapters = list(report.chapters, 5000).map((entry) => {
+    const chapter = record(entry, ['id', 'title', 'position', 'revision', 'sha256', 'chars', 'stale'])
+    return { ...chapterManifest(chapter), chars: integer(chapter.chars), stale: flag(chapter.stale) }
+  })
+  if (
+    (scope === 'book') !== (scope_id === null) ||
+    (scope === 'chapter' && (chapters.length !== 1 || chapters[0].id !== scope_id)) ||
+    (scope === 'volume' && !chapters.length)
+  )
+    invalid('历史体检的范围与正文清单不一致。')
+  const originals = verifyChapters(chapters, chapter_bindings, revisions)
+  const items = list(report.items, 10, 10).map((value, index) => {
+    const item = record(value, [
+      'check_id',
+      'title',
+      'status',
+      'summary',
+      'basis',
+      'can_mark_not_applicable',
+      'basis_sha256',
+      'author_review',
+    ])
+    const check_id = String(index + 1).padStart(2, '0')
+    const status = choice(item.status, statuses)
+    const can_mark_not_applicable = flag(item.can_mark_not_applicable)
+    if (item.check_id !== check_id || (status === 'not_applicable' && !can_mark_not_applicable))
+      invalid('历史体检缺少十处检查或包含未获准的免查。')
+    return {
+      check_id,
+      status,
+      can_mark_not_applicable,
+      title: text(item.title, 200, 1),
+      summary: text(item.summary, 4000),
+      basis: record(item.basis),
+      basis_sha256: hash(item.basis_sha256),
+      ...(item.author_review != null
+        ? { author_review: parseAuthorReview(item.author_review, check_id, originals) }
+        : {}),
+    }
+  })
+  const basis_sha256 = hash(report.basis_sha256)
+  if (
+    basis_sha256 !== (await digest(JSON.stringify([scope, scope_id, items.map((item) => item.basis_sha256)])))
+  )
+    invalid('历史体检的汇总依据校验失败。')
+  return {
+    id: id(entry.id),
+    created: stamp(entry.created),
+    chapter_bindings,
+    report: {
+      version,
+      scope,
+      scope_id,
+      chapters,
+      basis_sha256,
+      items,
+      length_target: report.length_target == null ? null : record(report.length_target),
+      length_targets: lengthTargets(report.length_targets),
+    },
+  }
+}
+
+export type ArchivedInspection = Awaited<ReturnType<typeof parseInspection>>
+
+function parseDeliveryManifest(value: unknown) {
+  const row = record(value, [
+    'format',
+    'branch_id',
+    'title',
+    'story_revision',
+    'chapters',
+    'project_id',
+    'setting_id',
+    'outline_id',
+    'inspection_id',
+    'length_target',
+    'promises',
+    'ai_preparation_id',
+    'files',
+    'spoiler_scope',
+    'sample_chapter_ids',
+  ])
+  return {
+    format: choice(row.format, ['book-completion/1']),
+    branch_id: id(row.branch_id),
+    title: text(row.title, 200, 1),
+    story_revision: integer(row.story_revision),
+    chapters: list(row.chapters, 5000, 1).map((value) =>
+      chapterManifest(record(value, ['id', 'title', 'position', 'revision', 'sha256'])),
+    ),
+    project_id: optionalId(row.project_id),
+    setting_id: optionalId(row.setting_id),
+    outline_id: optionalId(row.outline_id),
+    inspection_id: id(row.inspection_id),
+    length_target: row.length_target == null ? null : record(row.length_target),
+    promises: list(row.promises, 5000).map((value) => {
+      const promise = record(value, ['id', 'revision'])
+      return { id: id(promise.id), revision: integer(promise.revision) }
+    }),
+    ...(row.ai_preparation_id != null ? { ai_preparation_id: id(row.ai_preparation_id) } : {}),
+    files: deliveryRecord(row.files, hash),
+    spoiler_scope: choice(row.spoiler_scope, ['opening', 'whole']),
+    sample_chapter_ids: list(row.sample_chapter_ids, 20, 1).map(id),
+  }
+}
+
+function deliveryRecord<T>(value: unknown, parse: (value: unknown) => T): Record<DeliveryFile, T> {
+  const files = record(value, deliveryFiles)
+  return {
+    '正文.md': parse(files['正文.md']),
+    '设定册.md': parse(files['设定册.md']),
+    '简介.md': parse(files['简介.md']),
+    '试读.md': parse(files['试读.md']),
+  }
+}
+
+function parseCompletionReview(value: unknown, chapters: ReadonlyMap<string, FrozenRevision>) {
+  const row = record(value, [
+    'basis_sha256',
+    'read_note',
+    'ending',
+    'characters',
+    'promises',
+    'intro',
+    'spoiler_scope',
+    'sample_chapter_ids',
+    'materials_reviewed',
+    'preparation_id',
+  ])
+  const closure = (value: unknown) => {
+    const note = record(value, ['note', 'sources'])
+    const source = verifySources(note.sources ?? [], chapters)
+    return { note: text(note.note, 4000, 1), sources: source }
+  }
+  return {
+    basis_sha256: hash(row.basis_sha256),
+    read_note: text(row.read_note, 4000, 1),
+    ending: closure(row.ending),
+    characters: closure(row.characters),
+    promises: closure(row.promises),
+    intro: text(row.intro, 4000, 1),
+    spoiler_scope: choice(row.spoiler_scope, ['opening', 'whole']),
+    sample_chapter_ids: list(row.sample_chapter_ids, 20, 1).map(id),
+    materials_reviewed: flag(row.materials_reviewed),
+    preparation_id: optionalId(row.preparation_id),
+  }
+}
+
+async function parseCompletion(
+  value: unknown,
+  branchId: string,
+  reports: ReadonlyMap<string, ArchivedInspection>,
+  revisions: ReadonlyMap<string, FrozenRevision>,
+  digest: Digest,
+) {
+  const entry = record(value, [
+    'id',
+    'created',
+    'chapter_bindings',
+    'basis_sha256',
+    'checks',
+    'manifest',
+    'materials',
+    'review',
+  ])
+  const chapter_bindings = list(entry.chapter_bindings, 5000, 1).map(parseBinding)
+  const basis_sha256 = hash(entry.basis_sha256)
+  const manifest = parseDeliveryManifest(entry.manifest)
+  const chapters = verifyChapters(manifest.chapters, chapter_bindings, revisions)
+  const review = parseCompletionReview(entry.review, chapters)
+  const checks = list(entry.checks, 6, 6).map((value, index) => {
+    const check = record(value, ['id', 'title', 'status', 'detail'])
+    if (check.id !== completionChecks[index] || check.status !== 'green')
+      invalid('历史完本缺少原六项通过记录。')
+    return {
+      id: completionChecks[index],
+      status: 'green' as const,
+      title: text(check.title, 200, 1),
+      detail: text(check.detail, 100_000),
+    }
+  })
+  const report = reports.get(manifest.inspection_id)
+  if (
+    manifest.branch_id !== branchId ||
+    basis_sha256 !== review.basis_sha256 ||
+    report?.report.scope !== 'book' ||
+    JSON.stringify(report.chapter_bindings) !== JSON.stringify(chapter_bindings) ||
+    report.report.items.some(({ status }) => status !== 'green' && status !== 'not_applicable')
+  )
+    return invalid('历史完本缺少与原章稿对应的通过体检单。')
+  const sample = manifest.chapters.slice(0, manifest.sample_chapter_ids.length)
+  if (
+    !review.read_note.trim() ||
+    ![review.ending, review.characters, review.promises].every(({ note }) => note.trim()) ||
+    !review.intro.trim() ||
+    !review.materials_reviewed ||
+    manifest.spoiler_scope !== review.spoiler_scope ||
+    (manifest.ai_preparation_id ?? null) !== review.preparation_id ||
+    JSON.stringify(manifest.sample_chapter_ids) !== JSON.stringify(review.sample_chapter_ids) ||
+    JSON.stringify(sample.map(({ id }) => id)) !== JSON.stringify(review.sample_chapter_ids)
+  )
+    invalid('历史完本的作者复核和试读范围不一致。')
+  const materials = deliveryRecord(entry.materials, (content) => text(content, 24 * 1024 * 1024))
+  const body = (rows: ChapterManifest[]) =>
+    rows.map(({ id, title }) => `## ${title}\n\n${chapters.get(id)?.content ?? ''}`).join('\n\n')
+  const rules = list(report.report.items[4].basis.rules, 240).map((value) => {
+    const rule = record(value)
+    return `## ${text(rule.title, 200, 1)}\n\n${text(rule.detail, 4000)}`
+  })
+  const workTitle = manifest.title
+  const spoiler = review.spoiler_scope === 'opening' ? '仅开篇' : '含全书内容'
+  const expected: Record<DeliveryFile, string> = {
+    '正文.md': `# ${workTitle}\n\n${body(manifest.chapters)}\n`,
+    '设定册.md': `# ${workTitle} · 设定册\n\n${rules.join('\n\n') || '本作没有单独确认的世界设定条目。'}\n`,
+    '简介.md': `# ${workTitle} · 简介\n\n剧透范围：${spoiler}\n\n${review.intro.trim()}\n`,
+    '试读.md': `# ${workTitle} · 试读\n\n${body(sample)}\n`,
+  }
+  for (const filename of deliveryFiles) {
+    if (
+      materials[filename] !== expected[filename] ||
+      (await digest(materials[filename])) !== manifest.files[filename]
+    )
+      invalid(`历史交付材料「${filename}」与冻结依据或校验值不符。`)
+  }
+  return {
+    id: id(entry.id),
+    created: stamp(entry.created),
+    basis_sha256,
+    chapter_bindings,
+    manifest,
+    review,
+    checks,
+    materials,
+  }
+}
+
+export type ArchivedCompletion = Awaited<ReturnType<typeof parseCompletion>>
+export type WorkflowHistory = { inspections: ArchivedInspection[]; completions: ArchivedCompletion[] }
+
+type WorkflowKind = 'workflow-inspection' | 'workflow-completion'
+export type WorkflowSyncObject = {
+  [Kind in WorkflowKind]: {
+    format: 'ainovel-manuscript-sync/1'
+    kind: Kind
+    branch_id: string
+    entry_json: string
+  }
+}[WorkflowKind]
+
+export function workflowObjectSignature(object: WorkflowSyncObject) {
+  // The signed source keeps Python's original field order. Compare its enclosing
+  // values independently from the order JSON objects arrived in each transport.
+  return JSON.stringify([object.kind, object.branch_id, JSON.parse(object.entry_json)], (_, value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, value[key]]),
+    )
+  })
+}
+
+export function workflowSyncEntry(branchId: string, objectId: string, input: unknown) {
+  const row = record(input, ['format', 'kind', 'branch_id', 'entry_json'])
+  const kind = choice(row.kind, ['workflow-inspection', 'workflow-completion'])
+  if (row.format !== 'ainovel-manuscript-sync/1' || row.branch_id !== branchId)
+    return invalid('云端历史报告与当前工作版本不符。')
+  const entry_json = text(row.entry_json, 1024 * 1024, 1)
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(entry_json)
+  } catch {
+    return invalid('云端历史报告的档案 JSON 无法读取。')
+  }
+  const entry = record(decoded)
+  if (objectId !== `${kind}:${id(entry.id)}`) return invalid('云端历史报告的来源编号不一致。')
+  const report = kind === 'workflow-completion' ? id(record(entry.manifest).inspection_id) : undefined
+  const revisionIds = list(entry.chapter_bindings, 5000).map((item) => parseBinding(item).revision_id)
+  const object: WorkflowSyncObject = {
+    format: 'ainovel-manuscript-sync/1',
+    kind,
+    branch_id: branchId,
+    entry_json,
+  }
+  return { object, entry, report, revisionIds }
+}
+
+export async function validateWorkflowSyncEntry(
+  data: ReturnType<typeof workflowSyncEntry>,
+  report: ArchivedInspection | undefined,
+  revisions: ReadonlyMap<string, FrozenRevision>,
+  digest: Digest,
+) {
+  if (data.object.kind === 'workflow-inspection')
+    return {
+      kind: 'workflow-inspection' as const,
+      entry: await parseInspection(data.entry, revisions, digest),
+    }
+  if (!report || report.id !== data.report) invalid('等待历史完本绑定的全书体检。')
+  return {
+    kind: 'workflow-completion' as const,
+    entry: await parseCompletion(
+      data.entry,
+      data.object.branch_id,
+      new Map([[report.id, report]]),
+      revisions,
+      digest,
+    ),
+  }
+}
+
+export async function validateWorkflowHistory(
+  value: unknown,
+  branchId: string,
+  revisions: ReadonlyMap<string, FrozenRevision>,
+  digest: Digest,
+): Promise<WorkflowHistory> {
+  const history = record(value, ['inspections', 'completions'])
+  const inspections: ArchivedInspection[] = []
+  const completions: ArchivedCompletion[] = []
+  const used = new Set<string>()
+  for (const value of list(history.inspections ?? [], 1000)) {
+    const entry = await parseInspection(value, revisions, digest)
+    if (used.has(entry.id)) invalid('稿件包的历史报告编号重复。')
+    used.add(entry.id)
+    inspections.push(entry)
+  }
+  const reports = new Map(inspections.map((entry) => [entry.id, entry]))
+  for (const value of list(history.completions ?? [], 1000)) {
+    const entry = await parseCompletion(value, branchId, reports, revisions, digest)
+    if (used.has(entry.id)) invalid('稿件包的历史报告编号重复。')
+    used.add(entry.id)
+    completions.push(entry)
+  }
+  return { inspections, completions }
+}

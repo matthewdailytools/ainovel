@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, label, type Book, type Excerpt, type Unit, type Branch } from './api'
 import type { Notify } from './App'
+import { ReferenceCardHistory } from './ReferenceCardHistory'
 import { ReferenceWorkspace, type ReferenceSession } from './ReferenceWorkspace'
 
 type Hit = {
@@ -209,6 +210,7 @@ export function LibraryPage({
           <p className="small muted">上限 20 MiB；原件保留，EPUB 以纯文本阅读。PDF／OCR 尚未实现。</p>
         </details>
       </div>
+      {branch && <ReferenceCardHistory key={branch.id} branchId={branch.id} notify={notify} />}
       <form
         className="search-bar"
         onSubmit={(event) => {

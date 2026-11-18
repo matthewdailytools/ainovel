@@ -7,6 +7,7 @@ import { PlotAuditDetails } from './PlotAuditDetails'
 import { SourceIdentityOption } from './sourceIdentity'
 import { readComparisonTarget, usePlotAuditTarget } from './plotAuditTarget'
 import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from './MemorySelection'
+import { ReferenceCardHistory } from './ReferenceCardHistory'
 
 type Card = {
   id: string
@@ -464,6 +465,14 @@ export function ReferenceWorkspace({
         </p>
       )}
       <p role="status">{message}</p>
+      {row.payload.branch_id && (
+        <ReferenceCardHistory
+          branchId={row.payload.branch_id}
+          sessionId={row.id}
+          revision={row.revision}
+          notify={notify}
+        />
+      )}
       <section className="card">
         <h2>1. 参考范围与学习目标</h2>
         <p>

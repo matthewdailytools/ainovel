@@ -29,6 +29,26 @@ import {
   type OutlineHistory,
   type OutlineVersionObject,
 } from './outlineSyncModel'
+import {
+  validateWorkflowSyncEntry,
+  validateWorkflowHistory,
+  workflowObjectSignature,
+  workflowSyncEntry,
+  type ArchivedCompletion,
+  type ArchivedInspection,
+  type WorkflowHistory,
+  type WorkflowSyncObject,
+} from './workflowArchive'
+import { createStoryOfflineStore, storyReadStores, storyWriteStores } from './storyOfflineStore'
+import { validateReferenceHistory, type ReferenceHistory } from './referenceArchive'
+import {
+  storyObjectSignature,
+  validateStoryHistory,
+  validateStorySyncObject,
+  type StoryHeadObject,
+  type StoryHistory,
+  type StoryVersionObject,
+} from './storySyncModel'
 
 const DATABASE = 'ainovel-offline-workspace'
 const FORMAT = 'ainovel-manuscript/1'
@@ -81,6 +101,9 @@ export type ManuscriptPack = LocalProject & {
   project_history?: ProjectHistory
   settings_history?: SettingsHistory
   outline_history?: OutlineHistory
+  workflow_history?: WorkflowHistory
+  story_history?: StoryHistory
+  reference_history?: ReferenceHistory
 }
 const SYNC_FORMAT = 'ainovel-manuscript-sync/1'
 export type SyncedObject =
@@ -94,6 +117,9 @@ export type SyncedObject =
   | SettingsVersionObject
   | OutlineHeadObject
   | OutlineVersionObject
+  | StoryHeadObject
+  | StoryVersionObject
+  | WorkflowSyncObject
 
 function revisionSignature(row: LocalRevision) {
   return [row.id, row.chapter_id, row.revision, row.parent_id, row.sha256, row.cause, row.created]
@@ -135,6 +161,9 @@ export function syncObjectSignature(object: SyncedObject | null) {
   }
   if (object?.kind === 'outline-head' || object?.kind === 'outline-version')
     return outlineObjectSignature(object)
+  if (object?.kind === 'story-head' || object?.kind === 'story-version') return storyObjectSignature(object)
+  if (object?.kind === 'workflow-inspection' || object?.kind === 'workflow-completion')
+    return workflowObjectSignature(object)
   return 'null'
 }
 
@@ -182,13 +211,27 @@ type Store =
   | 'outlineHeads'
   | 'outlineVersions'
   | 'outlinePromiseSeeds'
+  | 'workflowInspections'
+  | 'workflowCompletions'
+  | 'storyVersions'
+  | 'storyHeads'
+  | 'storyHistory'
+  | 'storyChapterAliases'
+  | 'referenceArchives'
 type LocalProjectVersion = ProjectVersionRecord & { branchId: string }
 type LocalProjectHead = { branchId: string; versionId: string }
 type LocalSettingsVersion = SettingsVersionRecord & { branchId: string }
+type LocalWorkflowEntry<Entry extends ArchivedInspection | ArchivedCompletion> = {
+  branchId: string
+  entry: Entry
+  entryJson?: string
+  source?: ProjectSource
+}
 export type LocalPublication = { branchId: string; objectId: string; id: string }
 type ApplyOptions = { source?: ProjectSource; publicationId?: string | null; consumePublication?: boolean }
 const projectStores = ['projects', 'projectHeads', 'projectVersions'] satisfies Store[]
 const manuscriptStores = ['projects', 'chapters', 'revisions', 'sourceRevisions'] satisfies Store[]
+const workflowStores = ['workflowInspections', 'workflowCompletions'] satisfies Store[]
 const settingsDependencyStores = [
   ...manuscriptStores,
   'projectHeads',
@@ -215,7 +258,7 @@ function result<T>(request: IDBRequest<T>): Promise<T> {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 6)
+    const request = indexedDB.open(DATABASE, 7)
     let blocked = false
     request.onblocked = () => {
       blocked = true
@@ -258,15 +301,35 @@ function openDatabase(): Promise<IDBDatabase> {
           'branchId',
         )
       }
-      db.createObjectStore('outlineHeads', { keyPath: 'branchId' })
-      db.createObjectStore('outlineVersions', { keyPath: ['branchId', 'version.id'] }).createIndex(
+      if (event.oldVersion < 6) {
+        db.createObjectStore('outlineHeads', { keyPath: 'branchId' })
+        db.createObjectStore('outlineVersions', { keyPath: ['branchId', 'version.id'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
+        db.createObjectStore('outlinePromiseSeeds', { keyPath: ['branchId', 'id'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
+      }
+      for (const name of workflowStores)
+        db.createObjectStore(name, { keyPath: ['branchId', 'entry.id'] }).createIndex('byBranch', 'branchId')
+      db.createObjectStore('storyVersions', { keyPath: ['branchId', 'version.id'] }).createIndex(
         'byBranch',
         'branchId',
       )
-      db.createObjectStore('outlinePromiseSeeds', { keyPath: ['branchId', 'id'] }).createIndex(
+      db.createObjectStore('storyHeads', { keyPath: ['branchId', 'recordId'] }).createIndex(
         'byBranch',
         'branchId',
       )
+      db.createObjectStore('storyHistory', { keyPath: ['branchId', 'recordId', 'revision'] }).createIndex(
+        'byBranch',
+        'branchId',
+      )
+      db.createObjectStore('storyChapterAliases', {
+        keyPath: ['branchId', 'sourceId', 'nativeId'],
+      }).createIndex('bySource', ['branchId', 'sourceId'])
+      db.createObjectStore('referenceArchives', { keyPath: 'branchId' })
     }
     request.onsuccess = () => {
       const db = request.result
@@ -545,20 +608,42 @@ async function readManuscript(tx: IDBTransaction, project: LocalProject): Promis
   }
 }
 
-export function exportLocalManuscript(projectId: string): Promise<ManuscriptPack> {
-  const stores = [...new Set([...settingsDependencyStores, ...outlineReadStores])]
+export function exportLocalManuscript(
+  projectId: string,
+  includeReferenceEvidenceFor: readonly string[] = [],
+): Promise<ManuscriptPack> {
+  const stores = [
+    ...new Set([
+      ...settingsDependencyStores,
+      ...outlineReadStores,
+      ...workflowStores,
+      ...storyReadStores,
+      'referenceArchives' as const,
+    ]),
+  ]
   return transact(stores, 'readonly', async (tx) => {
     const project = await readProject(tx, projectId)
-    const [manuscript, brief, settings, outlineHistory] = await Promise.all([
-      readManuscript(tx, project),
-      readProjectBrief(tx, project.branch.id),
-      readSettings(tx, project.branch.id),
-      outlineStore.readOutlineHistoryTx(tx, project),
-    ])
+    const [manuscript, brief, settings, outlineHistory, workflowHistory, storyHistory, referenceHistory] =
+      await Promise.all([
+        readManuscript(tx, project),
+        readProjectBrief(tx, project.branch.id),
+        readSettings(tx, project.branch.id),
+        outlineStore.readOutlineHistoryTx(tx, project),
+        readWorkflowHistory(tx, project.branch.id),
+        storyStore.readStoryHistoryTx(tx, project),
+        readReferenceHistory(tx, project.branch.id),
+      ])
     const sourceDevices = settings.versions.flatMap(({ version, source, recordedDevice }) => {
       const device = source?.device_id ?? recordedDevice
       return device ? [[version.id, device] as const] : []
     })
+    const selectedExcerpts = Object.fromEntries(
+      [...new Set(includeReferenceEvidenceFor)].map((id) => {
+        const excerpts = referenceHistory?.excerpts
+        if (!excerpts || !Object.hasOwn(excerpts, id)) invalid('选带的手法卡原文不属于当前作品。')
+        return [id, excerpts[id]]
+      }),
+    )
     return {
       ...manuscript,
       ...(brief.versions.length
@@ -579,8 +664,92 @@ export function exportLocalManuscript(projectId: string): Promise<ManuscriptPack
           }
         : {}),
       ...(outlineHistory ? { outline_history: outlineHistory } : {}),
+      ...(workflowHistory.inspections.length || workflowHistory.completions.length
+        ? {
+            workflow_history: {
+              inspections: workflowHistory.inspections,
+              completions: workflowHistory.completions,
+            },
+          }
+        : {}),
+      ...(storyHistory ? { story_history: storyHistory } : {}),
+      ...(referenceHistory
+        ? {
+            reference_history: {
+              adopted_heads: referenceHistory.adopted_heads,
+              versions: referenceHistory.versions,
+              source_devices: referenceHistory.source_devices,
+              ...(Object.keys(selectedExcerpts).length ? { excerpts: selectedExcerpts } : {}),
+            },
+          }
+        : {}),
     }
   })
+}
+
+async function readReferenceHistory(tx: IDBTransaction, branchId: string) {
+  const stored = await result<{ archive: ReferenceHistory } | undefined>(
+    tx.objectStore('referenceArchives').get(branchId),
+  )
+  return stored?.archive
+}
+
+export function readLocalReferenceHistory(projectId: string) {
+  return transact(['projects', 'referenceArchives'], 'readonly', async (tx) =>
+    readReferenceHistory(tx, (await readProject(tx, projectId)).branch.id),
+  )
+}
+
+async function workflowRows(tx: IDBTransaction, branchId: string) {
+  const [inspections, completions] = await Promise.all([
+    result<LocalWorkflowEntry<ArchivedInspection>[]>(
+      tx.objectStore('workflowInspections').index('byBranch').getAll(branchId),
+    ),
+    result<LocalWorkflowEntry<ArchivedCompletion>[]>(
+      tx.objectStore('workflowCompletions').index('byBranch').getAll(branchId),
+    ),
+  ])
+  return { inspections, completions }
+}
+
+async function readWorkflowHistory(tx: IDBTransaction, branchId: string) {
+  const { inspections, completions } = await workflowRows(tx, branchId)
+  return {
+    inspections: inspections.map(({ entry }) => entry),
+    completions: completions.map(({ entry }) => entry),
+    sourceDevices: Object.fromEntries(
+      [...inspections, ...completions].flatMap(({ entry, source }) =>
+        source ? [[entry.id, source.device_id] as const] : [],
+      ),
+    ),
+  }
+}
+
+export function readLocalWorkflowHistory(projectId: string) {
+  return transact(['projects', ...workflowStores], 'readonly', async (tx) =>
+    readWorkflowHistory(tx, (await readProject(tx, projectId)).branch.id),
+  )
+}
+
+async function readWorkflowSyncObjects(tx: IDBTransaction, branch_id: string) {
+  const { inspections, completions } = await workflowRows(tx, branch_id)
+  const format = SYNC_FORMAT
+  return [
+    ...inspections.map(
+      ({ entry, entryJson }) =>
+        [
+          `workflow-inspection:${entry.id}`,
+          { format, kind: 'workflow-inspection', branch_id, entry_json: entryJson ?? JSON.stringify(entry) },
+        ] as const,
+    ),
+    ...completions.map(
+      ({ entry, entryJson }) =>
+        [
+          `workflow-completion:${entry.id}`,
+          { format, kind: 'workflow-completion', branch_id, entry_json: entryJson ?? JSON.stringify(entry) },
+        ] as const,
+    ),
+  ]
 }
 
 async function sourceRevision(tx: IDBTransaction, branchId: string, revisionId: string) {
@@ -661,18 +830,28 @@ export function acknowledgeLocalPublications(records: LocalPublication[]) {
 }
 
 export function readLocalSyncSnapshot(projectId: string) {
-  const stores = [...new Set([...settingsDependencyStores, ...outlineReadStores, 'publications' as const])]
+  const stores = [
+    ...new Set([
+      ...settingsDependencyStores,
+      ...outlineReadStores,
+      ...storyReadStores,
+      ...workflowStores,
+      'publications' as const,
+    ]),
+  ]
   return transact(stores, 'readonly', async (tx) => {
     const project = await readProject(tx, projectId)
     const branchId = project.branch.id
-    const [manuscript, brief, settings, outline, publications] = await Promise.all([
+    const [manuscript, brief, settings, outline, story, workflow, publications] = await Promise.all([
       readManuscript(tx, project),
       readProjectBrief(tx, branchId),
       readSettings(tx, branchId),
       outlineStore.readOutlineTx(tx, project),
+      storyStore.readStoryTx(tx, project),
+      readWorkflowSyncObjects(tx, branchId),
       publicationRows(tx, branchId),
     ])
-    return { manuscript, brief, settings, outline, publications }
+    return { manuscript, brief, settings, outline, story, workflow, publications }
   })
 }
 
@@ -906,6 +1085,19 @@ function sourceLink(revision: LocalRevision, parent: LocalRevision | undefined) 
     : !!parent && parent.chapter_id === revision.chapter_id && parent.revision + 1 === revision.revision
 }
 
+const storyStore = createStoryOfflineStore({
+  transact,
+  result,
+  readProject,
+  sourceRevision,
+  readPublication,
+  markPublication,
+  fail: (code, message) => {
+    throw new OfflineStoreError(code, message)
+  },
+})
+export const { readLocalStory, confirmLocalStory, checkLocalStorySelection } = storyStore
+
 const outlineStore = createOutlineOfflineStore({
   transact,
   result,
@@ -915,6 +1107,7 @@ const outlineStore = createOutlineOfflineStore({
   getProjectVersion,
   getSettingsHead,
   getSettingsVersion,
+  readStoryOutlinePromisesTx: storyStore.readStoryOutlinePromisesTx,
   readPublication,
   markPublication,
   fail: (code, message) => {
@@ -940,6 +1133,10 @@ export async function validateSyncedObject(
     return validateSettingsSyncObject(project.branch.id, objectId, value)
   if (objectId.startsWith('outline:') || objectId.startsWith('outline-version:'))
     return validateOutlineSyncObject(project.branch.id, objectId, value)
+  if (objectId.startsWith('story:') || objectId.startsWith('story-version:'))
+    return validateStorySyncObject(project.branch.id, objectId, value)
+  if (objectId.startsWith('workflow-inspection:') || objectId.startsWith('workflow-completion:'))
+    return workflowSyncEntry(project.branch.id, objectId, value).object
   if (value === null && objectId.startsWith('chapter:')) {
     identity(objectId.slice(8))
     return null
@@ -1021,7 +1218,12 @@ export function applySyncedObject(
     return applySettingsObject(projectId, object, expected, options)
   if (object?.kind === 'outline-head' || object?.kind === 'outline-version')
     return outlineStore.applyOutlineObject(projectId, object, expected, options)
-  return transact([...manuscriptStores, 'publications'], 'readwrite', async (tx) => {
+  if (object?.kind === 'story-head' || object?.kind === 'story-version')
+    return storyStore.applyStoryObject(projectId, object, expected, options)
+  if (object?.kind === 'workflow-inspection' || object?.kind === 'workflow-completion')
+    return applyWorkflowObject(projectId, objectId, object, expected, options)
+  const stores = [...manuscriptStores, 'publications', 'storyChapterAliases'] satisfies Store[]
+  return transact(stores, 'readwrite', async (tx) => {
     const project = await readProject(tx, projectId)
     const projectStore = tx.objectStore('projects')
     const branchId = project.branch.id
@@ -1145,11 +1347,85 @@ export function applySyncedObject(
         )
       }
       await result(chapters.put({ ...object.chapter, archived: 0, stale: 0, revision }))
+      const adopted = await result<LocalRevision | undefined>(
+        versions.index('byRevision').get([chapterId, revision]),
+      )
+      if (adopted) await storyStore.rememberStoryChapterAlias(tx, branchId, object.head, adopted)
     }
     project.branch.story_revision++
     await result(projectStore.put(project))
     if (options.consumePublication && publication)
       await result(tx.objectStore('publications').delete([branchId, objectId]))
+    return true
+  })
+}
+
+async function applyWorkflowObject(
+  projectId: string,
+  objectId: string,
+  object: WorkflowSyncObject,
+  expected: string,
+  options: ApplyOptions,
+) {
+  const data = workflowSyncEntry(object.branch_id, objectId, object)
+  const stores = [...manuscriptStores, ...workflowStores]
+  const { revisions, report } = await transact(stores, 'readonly', async (tx) => {
+    const branchId = (await readProject(tx, projectId)).branch.id
+    if (branchId !== object.branch_id) invalid('云端历史报告的工作版本不一致。')
+    const revisions = new Map<string, LocalRevision>()
+    for (const id of new Set(data.revisionIds)) {
+      const revision = await sourceRevision(tx, branchId, id)
+      if (revision) revisions.set(id, revision)
+    }
+    const saved = data.report
+      ? await result<LocalWorkflowEntry<ArchivedInspection> | undefined>(
+          tx.objectStore('workflowInspections').get([branchId, data.report]),
+        )
+      : undefined
+    return { revisions, report: saved?.entry }
+  })
+  const verified = await validateWorkflowSyncEntry(data, report, revisions, manuscriptHash)
+  return transact(stores, 'readwrite', async (tx) => {
+    const branchId = (await readProject(tx, projectId)).branch.id
+    if (branchId !== object.branch_id) invalid('云端历史报告的工作版本不一致。')
+    const stores =
+      verified.kind === 'workflow-inspection'
+        ? (['workflowInspections', 'workflowCompletions'] as const)
+        : (['workflowCompletions', 'workflowInspections'] as const)
+    const store = tx.objectStore(stores[0])
+    const key = [branchId, verified.entry.id]
+    const existing = await result<LocalWorkflowEntry<ArchivedInspection | ArchivedCompletion> | undefined>(
+      store.get(key),
+    )
+    if (existing) {
+      if (
+        workflowObjectSignature({
+          ...object,
+          entry_json: existing.entryJson ?? JSON.stringify(existing.entry),
+        }) !== workflowObjectSignature(object)
+      )
+        invalid('同一历史报告编号已有不同内容。')
+      if (!existing.source && options.source)
+        await result(store.put({ ...existing, entryJson: object.entry_json, source: options.source }))
+      return true
+    }
+    if (expected !== 'null') return false
+    if (await result(tx.objectStore(stores[1]).getKey(key))) invalid('历史报告编号与本机记录重复。')
+    if (data.report && !(await result(tx.objectStore('workflowInspections').getKey([branchId, data.report]))))
+      throw new OfflineStoreError('missing', '等待历史完本绑定的全书体检。')
+    for (const [id, revision] of revisions) {
+      const saved = await sourceRevision(tx, branchId, id)
+      if (saved?.chapter_id !== revision.chapter_id || saved.sha256 !== revision.sha256)
+        throw new OfflineStoreError('missing', '该报告的原章稿尚未到齐。')
+    }
+    await result(
+      store.add({
+        branchId,
+        entry: verified.entry,
+        entryJson: object.entry_json,
+        ...(options.source ? { source: options.source } : {}),
+      } satisfies LocalWorkflowEntry<ArchivedInspection | ArchivedCompletion>),
+    )
     return true
   })
 }
@@ -1229,6 +1505,9 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     'project_history',
     'settings_history',
     'outline_history',
+    'workflow_history',
+    'story_history',
+    'reference_history',
   ])
   if (pack.format !== FORMAT) invalid('稿件交换包格式无法读取，请使用兼容版本。')
   const n = fields(pack.novel, ['id', 'title', 'brief', 'created'])
@@ -1350,6 +1629,33 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
       invalid(error instanceof Error ? error.message : '大纲历史格式无效。')
     }
   }
+  let workflow_history: WorkflowHistory | undefined
+  if (pack.workflow_history != null) {
+    try {
+      workflow_history = await validateWorkflowHistory(pack.workflow_history, branch.id, byId, manuscriptHash)
+    } catch (error) {
+      invalid(error instanceof Error ? error.message : '历史体检或完本档案无法读取。')
+    }
+  }
+  let story_history: StoryHistory | undefined
+  if (pack.story_history != null) {
+    try {
+      story_history = await validateStoryHistory(branch.id, pack.story_history, {
+        original: byId,
+        native: new Map(revisions.map((revision) => [revision.id, revision])),
+      })
+    } catch (error) {
+      invalid(error instanceof Error ? error.message : '故事档案无法读取。')
+    }
+  }
+  let reference_history: ReferenceHistory | undefined
+  if (pack.reference_history != null) {
+    try {
+      reference_history = await validateReferenceHistory(pack.reference_history, branch.id, manuscriptHash)
+    } catch (error) {
+      invalid(error instanceof Error ? error.message : '手法卡历史无法读取。')
+    }
+  }
   return {
     format: FORMAT,
     novel,
@@ -1361,6 +1667,9 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     ...(project_history ? { project_history } : {}),
     ...(settings_history ? { settings_history } : {}),
     ...(outline_history ? { outline_history } : {}),
+    ...(workflow_history ? { workflow_history } : {}),
+    ...(story_history ? { story_history } : {}),
+    ...(reference_history ? { reference_history } : {}),
   }
 }
 
@@ -1382,8 +1691,19 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
     project_history,
     settings_history,
     outline_history,
+    workflow_history,
+    story_history,
+    reference_history,
   } = await validateManuscript(value)
-  const stores = [...new Set([...settingsDependencyStores, ...outlineWriteStores])]
+  const stores = [
+    ...new Set([
+      ...settingsDependencyStores,
+      ...outlineWriteStores,
+      ...workflowStores,
+      ...storyWriteStores,
+      'referenceArchives' as const,
+    ]),
+  ]
   return transact(stores, 'readwrite', async (tx) => {
     const project = { novel, branch, ...(evidence?.length ? { evidence } : {}) }
     await result(tx.objectStore('projects').add(project))
@@ -1428,7 +1748,18 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
           } satisfies LocalProjectHead),
         )
     }
+    if (story_history) await storyStore.restoreStoryHistoryTx(tx, project, story_history)
+    if (reference_history)
+      await result(
+        tx.objectStore('referenceArchives').add({ branchId: branch.id, archive: reference_history }),
+      )
     if (outline_history) await outlineStore.restoreOutlineHistoryTx(tx, project, outline_history)
+    if (workflow_history) {
+      for (const entry of workflow_history.inspections)
+        await result(tx.objectStore('workflowInspections').add({ branchId: branch.id, entry }))
+      for (const entry of workflow_history.completions)
+        await result(tx.objectStore('workflowCompletions').add({ branchId: branch.id, entry }))
+    }
     return project
   })
 }

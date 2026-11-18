@@ -3,6 +3,7 @@ import {
   OfflineStoreError,
   confirmLocalOutline,
   confirmLocalSettings,
+  confirmLocalStory,
   createLocalChapter,
   createLocalProject,
   exportLocalManuscript,
@@ -14,6 +15,7 @@ import {
   readLocalOutline,
   readLocalSourceRevision,
   readLocalSettings,
+  readLocalStory,
   saveLocalChapter,
   type LocalChapter,
   type LocalProject,
@@ -25,6 +27,9 @@ import { PortableEvidence } from './PortableEvidence'
 import { LocalProjectBrief } from './OfflineProjectBrief'
 import { OfflineSettings } from './OfflineSettings'
 import { OfflineOutline } from './OfflineOutline'
+import { OfflineWorkflowHistory } from './OfflineWorkflowHistory'
+import { OfflineReferenceHistory } from './OfflineReferenceHistory'
+import { OfflineStory } from './OfflineStory'
 import { discardOwnDraft, readDraft, writeDraft, type Draft } from './drafts'
 
 type EditorState = {
@@ -80,6 +85,8 @@ export function OfflineWorkspace() {
   const [projectDirty, setProjectDirty] = useState(false)
   const [settingsDirty, setSettingsDirty] = useState(false)
   const [outlineDirty, setOutlineDirty] = useState(false)
+  const [storyDirty, setStoryDirty] = useState(false)
+  const [includedExcerpts, setIncludedExcerpts] = useState<string[]>([])
   const [workbenchRefresh, setWorkbenchRefresh] = useState(0)
   const busy = localBusy || syncBusy
   const [error, setError] = useState('')
@@ -95,6 +102,10 @@ export function OfflineWorkspace() {
   const loadOutline = useCallback(() => {
     if (!projectId) throw new Error('请先打开离线作品。')
     return readLocalOutline(projectId)
+  }, [projectId])
+  const loadStory = useCallback(() => {
+    if (!projectId) throw new Error('请先打开离线作品。')
+    return readLocalStory(projectId)
   }, [projectId])
   const refreshWorkbench = useCallback(() => setWorkbenchRefresh((revision) => revision + 1), [])
 
@@ -166,8 +177,8 @@ export function OfflineWorkspace() {
   function mayLeave(workChange = false) {
     if (
       workChange &&
-      (projectDirty || settingsDirty || outlineDirty) &&
-      !window.confirm('立项、设定或大纲有未确认的修改。是否离开当前作品？')
+      (projectDirty || settingsDirty || outlineDirty || storyDirty) &&
+      !window.confirm('工作台有未确认的修改。是否离开当前作品？')
     )
       return false
     return !dirty || window.confirm('这一章有未提交的输入。是否离开当前编辑区？')
@@ -198,6 +209,7 @@ export function OfflineWorkspace() {
     setRecovery(undefined)
     setDraftNotice('')
     setPreview(undefined)
+    setIncludedExcerpts([])
   }
 
   async function openChapter(chapter: LocalChapter) {
@@ -238,6 +250,7 @@ export function OfflineWorkspace() {
       setConflict(undefined)
       setPreview(undefined)
       setStatus(`本地已保存 · 修订 ${revision.revision}`)
+      refreshWorkbench()
       setRecovery(undefined)
       setDraftNotice('')
       if (draftId) void discardOwnDraft(draftId).catch(() => undefined)
@@ -336,16 +349,41 @@ export function OfflineWorkspace() {
                 onDirty={setOutlineDirty}
                 onConfirm={(base, version) => confirmLocalOutline(selected.novel.id, base, version)}
               />
+              <OfflineStory
+                key={`story-${selected.branch.id}`}
+                read={loadStory}
+                readChapter={async (id) => (await readLocalHistory(selected.novel.id, id)).at(-1)}
+                chapters={chapters}
+                refreshToken={workbenchRefresh}
+                disabled={busy}
+                onDirty={setStoryDirty}
+                onConfirm={async (draft) => {
+                  await confirmLocalStory(selected.novel.id, draft)
+                  refreshWorkbench()
+                }}
+              />
+              <OfflineReferenceHistory
+                key={`reference-${selected.branch.id}`}
+                projectId={selected.novel.id}
+                includedExcerpts={includedExcerpts}
+                setIncludedExcerpts={setIncludedExcerpts}
+              />
               <PortableEvidence
                 key={selected.branch.id}
                 docs={selected.evidence ?? []}
                 chapters={chapters}
                 readSource={(id) => readLocalSourceRevision(selected.novel.id, id)}
               />
+              <OfflineWorkflowHistory
+                key={`workflow-${selected.branch.id}`}
+                projectId={selected.novel.id}
+                refreshToken={workbenchRefresh}
+                download={download}
+              />
               <WebSyncPanel
                 key={selected.branch.id}
                 project={selected}
-                unsaved={dirty || projectDirty || settingsDirty || outlineDirty || localBusy}
+                unsaved={dirty || projectDirty || settingsDirty || outlineDirty || storyDirty || localBusy}
                 onBusy={setSyncBusy}
                 onApplied={async () => {
                   const saved = (await listLocalProjects()).find(
@@ -531,17 +569,18 @@ export function OfflineWorkspace() {
       </div>
       <section className="offline-transfer" aria-label="稿件交换">
         <h2>稿件交换</h2>
-        <p>交换包包含当前工作版本的目录、保存稿及历史。浏览器清理站点数据前可先下载备份。</p>
+        <p>导出当前工作版本及历史。手法卡原句仅随明确勾选的版本一起导出。</p>
         <button
           type="button"
           disabled={!selected || busy}
           onClick={() => {
             if (!selected) return
             void run(async () => {
-              const pack = await exportLocalManuscript(selected.novel.id)
+              const pack = await exportLocalManuscript(selected.novel.id, includedExcerpts)
               const file = new Blob([JSON.stringify(pack)], { type: 'application/json' })
               if (file.size > maxManuscriptBytes) throw new Error('稿件交换包超过 24 MiB 导入上限。')
               download('ainovel-稿件交换.json', file)
+              setIncludedExcerpts([])
               setStatus('已下载已保存稿件与历史。')
             })
           }}
