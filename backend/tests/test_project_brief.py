@@ -103,6 +103,19 @@ def test_project_brief_edits_confirmation_and_world_handoff(client, domain, sett
     assert context["已确认立项"]["brief"]["ending"] == authored_ending
     assert context["设定框架"]["primary"]["id"] == "xianxia"
     assert context["设定框架"]["secondary"][0]["id"] == "mystery"
+    adopted = client.post(
+        endpoint + "/adopt",
+        json={
+            "base_revision": current["revision"],
+            "base_story_revision": current["story_revision"],
+            "idempotency_key": uid(),
+            "artifact_id": proposed["id"],
+            "categories": proposed["payload"]["categories"],
+        },
+    )
+    assert adopted.status_code == 200, adopted.text
+    adopted_item = proposed["payload"]["categories"][0]["items"][0]["id"]
+    assert adopted.json()["project_impacts"] == []
 
     updated = client.put(
         project_path,
@@ -120,10 +133,43 @@ def test_project_brief_edits_confirmation_and_world_handoff(client, domain, sett
     current = client.get(endpoint).json()
     assert current["confirmation"]["current"] is False
     assert current["project"] == second
+    assert current["project_impacts"] == [
+        {
+            "item_id": adopted_item,
+            "category_id": "world",
+            "title": "门铃规则",
+            "source_project_id": first["id"],
+            "source_project_revision": 1,
+            "reconciled": False,
+        }
+    ]
+    decision = {
+        "base_revision": current["revision"],
+        "base_story_revision": current["story_revision"],
+        "idempotency_key": uid(),
+    }
+    missing_review = client.post(endpoint + "/confirm", json=decision)
+    assert missing_review.status_code == 409, missing_review.text
+    assert missing_review.json()["code"] == "conception_project_review"
+    retained = client.post(
+        endpoint + "/confirm", json={**decision, "reconciled_project_items": [adopted_item]}
+    )
+    assert retained.status_code == 200, retained.text
+    current = retained.json()
+    assert current["confirmation"]["current"] is True
+    assert current["project_impacts"][0]["reconciled"] is True
+    frozen = domain.artifact(current["confirmation"]["id"])["payload"]
+    assert frozen["project_confirmation_id"] == second["id"]
+    assert frozen["origins"][adopted_item]["project_confirmation_id"] == first["id"]
     assert domain.artifact(first["id"])["payload"]["brief"]["ending"] == authored_ending
     stale = client.post(
         endpoint + "/generate",
-        json={**body, "base_story_revision": current["story_revision"], "client_request_id": uid()},
+        json={
+            **body,
+            "base_revision": current["revision"],
+            "base_story_revision": current["story_revision"],
+            "client_request_id": uid(),
+        },
     )
     assert stale.status_code == 409
     stale_adoption = client.post(
@@ -141,6 +187,7 @@ def test_project_brief_edits_confirmation_and_world_handoff(client, domain, sett
         endpoint + "/generate",
         json={
             **body,
+            "base_revision": current["revision"],
             "base_story_revision": current["story_revision"],
             "project_confirmation_id": second["id"],
             "client_request_id": uid(),

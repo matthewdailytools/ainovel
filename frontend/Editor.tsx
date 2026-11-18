@@ -10,6 +10,7 @@ export function Editor({
   id,
   initial,
   cursor = 0,
+  focusRequest = 0,
   readOnly = false,
   onChange,
   onSelection,
@@ -17,6 +18,7 @@ export function Editor({
   id: string
   initial: string
   cursor?: number
+  focusRequest?: number
   readOnly?: boolean
   onChange: (text: string) => void
   onSelection: (selection: Selection) => void
@@ -80,6 +82,9 @@ export function Editor({
       ]),
     })
   }, [readOnly, id])
+  useEffect(() => {
+    if (focusRequest) instance.current?.focus()
+  }, [focusRequest])
   return <div className="editor" ref={mount} />
 }
 

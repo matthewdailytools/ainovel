@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type Chapter } from './api'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
+import { InspectionSemanticPanel, type InspectionSuggestion } from './InspectionSemanticPanel'
 
 type Scope = 'book' | 'volume' | 'chapter'
 type Status = 'green' | 'yellow' | 'red' | 'pending' | 'outdated' | 'not_applicable'
@@ -18,6 +19,9 @@ type Review = {
   basis_note: string
   reason: string
   evidence: Evidence[]
+  source_candidate_id?: string
+  author_overrides_candidate?: boolean
+  candidate_result?: InspectionSuggestion['result']
 }
 type Item = {
   check_id: string
@@ -26,7 +30,13 @@ type Item = {
   current_status?: Status
   summary: string
   basis: Record<string, unknown>
+  can_mark_not_applicable: boolean
   author_review?: Review
+}
+type LengthTarget = {
+  id: string
+  revision: number
+  targets: { min_chars: number | null; max_chars: number | null; expected_chapters: number | null }
 }
 type Preview = {
   scope: Scope
@@ -34,6 +44,7 @@ type Preview = {
   basis_sha256: string
   chapters: { id: string; title: string; revision: number; chars: number }[]
   items: Item[]
+  length_target: LengthTarget | null
 }
 type Report = Preview & { id: string; current: boolean; created: number }
 type Collection = { preview: Preview; latest: Report | null; history: { id: string; created: number }[] }
@@ -195,9 +206,13 @@ function EvidenceField({
 export function InspectionPanel({
   branchId,
   chapters,
+  account = '',
+  modelReady = false,
 }: {
   branchId: string
   chapters: Pick<Chapter, 'id' | 'title'>[]
+  account?: string
+  modelReady?: boolean
 }) {
   const [scope, setScope] = useState<Scope>('book')
   const [scopeId, setScopeId] = useState('')
@@ -216,11 +231,27 @@ export function InspectionPanel({
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const route = `/branches/${branchId}/workflow-inspections`
+  const target = data?.preview.length_target
+  const targets = {
+    min_chars: minimum === '' ? null : Number(minimum),
+    max_chars: maximum === '' ? null : Number(maximum),
+    expected_chapters: count === '' ? null : Number(count),
+  }
+  const targetDirty =
+    targets.min_chars !== (target?.targets.min_chars ?? null) ||
+    targets.max_chars !== (target?.targets.max_chars ?? null) ||
+    targets.expected_chapters !== (target?.targets.expected_chapters ?? null)
   const dirty =
     Object.values(reviews).some(
       (review) => review.status || review.reason || review.basis_note || review.evidence.length,
-    ) || !!(minimum || maximum || count)
+    ) || targetDirty
   useLeaveGuard(dirty, '尚未保存的体检核对')
+
+  function loadTargets(value?: LengthTarget | null) {
+    setMinimum(value?.targets.min_chars?.toString() ?? '')
+    setMaximum(value?.targets.max_chars?.toString() ?? '')
+    setCount(value?.targets.expected_chapters?.toString() ?? '')
+  }
 
   useEffect(() => {
     let active = true
@@ -248,7 +279,10 @@ export function InspectionPanel({
     if (scopeId) search.set('scope_id', scopeId)
     void api<Collection>(`${route}?${search}`)
       .then((next) => {
-        if (active) setData(next)
+        if (active) {
+          setData(next)
+          loadTargets(next.preview.length_target)
+        }
       })
       .catch((error: unknown) => {
         if (active) setError(error instanceof Error ? error.message : '体检依据读取失败。')
@@ -281,24 +315,80 @@ export function InspectionPanel({
   function resetDraft() {
     setSelected('')
     setReviews({})
-    setMinimum('')
-    setMaximum('')
-    setCount('')
+    loadTargets()
     setHistoryId('')
     setError('')
     setMessage('')
   }
   const choices = scope === 'volume' ? volumes : chapters
   const review = reviews[selected] ?? newReview(selected)
+  const selectedCheck = data?.preview.items.find((item) => item.check_id === selected)
+  const requiresCandidateResolution =
+    !!review.source_candidate_id && review.candidate_result !== 'pass' && review.status === 'green'
   const change = (values: Partial<Review>) =>
     setReviews((current) => ({
       ...current,
       [selected]: { ...(current[selected] ?? newReview(selected)), ...values },
     }))
   const visible = historyId ? historical : data?.latest
+  function loadSuggestion(candidateId: string, suggestion: InspectionSuggestion) {
+    const id = suggestion.check_id
+    setSelected(id)
+    setReviews((current) => {
+      const draft = current[id] ?? newReview(id)
+      const evidence = [
+        ...draft.evidence,
+        ...suggestion.evidence.filter(
+          (item) =>
+            !draft.evidence.some(
+              (old) => old.chapter_id === item.chapter_id && old.start === item.start && old.end === item.end,
+            ),
+        ),
+      ].slice(0, 30)
+      return {
+        ...current,
+        [id]: {
+          ...draft,
+          evidence,
+          basis_note:
+            draft.basis_note ||
+            suggestion.basis_excerpts
+              .map((source) => source.label)
+              .join('、')
+              .slice(0, 2000),
+          reason: draft.reason || (suggestion.result === 'pass' ? suggestion.reason : ''),
+          source_candidate_id: candidateId,
+          candidate_result: suggestion.result,
+          author_overrides_candidate: false,
+        },
+      }
+    })
+    setMessage(`已载入 ${id} 候选引用，请在作者核对中选择本次判定。`)
+  }
+  async function saveTargets() {
+    if (!data || saving) return
+    setSaving(true)
+    setError('')
+    setMessage('')
+    try {
+      const updated = await api<Pick<Collection, 'preview' | 'latest'>>(`${route}/length-targets`, 'PUT', {
+        scope,
+        scope_id: scopeId || null,
+        base_target_id: target?.id ?? null,
+        targets,
+      })
+      setData({ ...data, ...updated })
+      loadTargets(updated.preview.length_target)
+      setMessage(`已采用篇幅目标修订 ${updated.preview.length_target?.revision}，请核对当前篇幅结论。`)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '篇幅目标保存失败。')
+    } finally {
+      setSaving(false)
+    }
+  }
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!data || saving) return
+    if (!data || saving || targetDirty) return
     const validReviews = Object.values(reviews).filter(
       (review) => review.status || review.reason || review.basis_note || review.evidence.length,
     )
@@ -322,16 +412,7 @@ export function InspectionPanel({
         scope,
         scope_id: scopeId || null,
         basis_sha256: data.preview.basis_sha256,
-        author_reviews: validReviews,
-        ...(minimum || maximum || count
-          ? {
-              length_targets: {
-                min_chars: minimum === '' ? null : Number(minimum),
-                max_chars: maximum === '' ? null : Number(maximum),
-                expected_chapters: count === '' ? null : Number(count),
-              },
-            }
-          : {}),
+        author_reviews: validReviews.map(({ candidate_result: _, ...review }) => review),
       })
       setData({
         ...data,
@@ -339,6 +420,7 @@ export function InspectionPanel({
         history: [{ id: result.id, created: result.created }, ...data.history],
       })
       resetDraft()
+      loadTargets(data.preview.length_target)
       setMessage('已保存本次体检单与作者核对。')
     } catch (error) {
       setError(error instanceof Error ? error.message : '体检单保存失败。')
@@ -414,6 +496,14 @@ export function InspectionPanel({
             <summary>本次依据与未核查项</summary>
             <CheckList items={data.preview.items} onChoose={(item) => setSelected(item.check_id)} />
           </details>
+          <InspectionSemanticPanel
+            key={`${scope}/${scopeId}`}
+            route={route}
+            account={account}
+            modelReady={modelReady && !saving}
+            basis={{ scope, scope_id: scopeId || null, basis_sha256: data.preview.basis_sha256 }}
+            onLoad={loadSuggestion}
+          />
           <form onSubmit={(event) => void submit(event)}>
             <fieldset disabled={saving}>
               <legend>作者核对</legend>
@@ -434,16 +524,35 @@ export function InspectionPanel({
                     作者判定
                     <select
                       value={review.status}
-                      onChange={(event) => change({ status: event.target.value as Review['status'] })}
+                      onChange={(event) =>
+                        change({
+                          status: event.target.value as Review['status'],
+                          author_overrides_candidate: false,
+                        })
+                      }
                     >
                       <option value="">待填</option>
-                      {decisions.map((status) => (
-                        <option value={status} key={status}>
-                          {labels[status]}
-                        </option>
-                      ))}
+                      {decisions
+                        .filter(
+                          (status) => status !== 'not_applicable' || selectedCheck?.can_mark_not_applicable,
+                        )
+                        .map((status) => (
+                          <option value={status} key={status}>
+                            {labels[status]}
+                          </option>
+                        ))}
                     </select>
                   </label>
+                  {requiresCandidateResolution && (
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={!!review.author_overrides_candidate}
+                        onChange={(event) => change({ author_overrides_candidate: event.target.checked })}
+                      />
+                      已核对候选的冲突或证据缺口，并在理由中说明本次作者裁定
+                    </label>
+                  )}
                   <label>
                     对照的章纲、约定或规则
                     <textarea
@@ -492,7 +601,9 @@ export function InspectionPanel({
               )}
             </fieldset>
             <fieldset disabled={saving}>
-              <legend>本次篇幅目标</legend>
+              <legend>此范围的篇幅目标</legend>
+              <p>{target ? `当前采用修订 ${target.revision}` : '尚未采用数值目标'}</p>
+              <p>{data.preview.items.find((item) => item.check_id === '09')?.summary}</p>
               <label>
                 章数
                 <input
@@ -521,8 +632,18 @@ export function InspectionPanel({
                   onChange={(event) => setMaximum(event.target.value)}
                 />
               </label>
+              <button
+                type="button"
+                disabled={!targetDirty || (!minimum && !maximum && !count)}
+                onClick={() => void saveTargets()}
+              >
+                保存篇幅目标
+              </button>
+              {targetDirty && (
+                <p className="small">保存新目标后会重算篇幅结论。若继续沿用当前目标，请恢复原值。</p>
+              )}
             </fieldset>
-            <button className="primary" type="submit" disabled={saving}>
+            <button className="primary" type="submit" disabled={saving || targetDirty}>
               {saving ? '正在保存…' : '生成体检单'}
             </button>
           </form>

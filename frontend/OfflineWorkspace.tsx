@@ -9,6 +9,7 @@ import {
   listLocalProjects,
   maxManuscriptBytes,
   readLocalHistory,
+  readLocalSourceRevision,
   saveLocalChapter,
   type LocalChapter,
   type LocalProject,
@@ -16,6 +17,7 @@ import {
 } from './offlineStore'
 import './offlineWorkspace.css'
 import { WebSyncPanel } from './WebSyncPanel'
+import { PortableEvidence } from './PortableEvidence'
 
 type EditorState = {
   chapter: LocalChapter
@@ -164,6 +166,9 @@ export function OfflineWorkspace() {
         ? editor.history
         : [...editor.history, revision]
       setEditor({ ...editor, history, base: revision, text: revision.content })
+      setChapters((rows) =>
+        rows.map((row) => (row.id === editor.chapter.id ? { ...row, revision: revision.revision } : row)),
+      )
       setConflict(undefined)
       setPreview(undefined)
       setStatus(`本地已保存 · 修订 ${revision.revision}`)
@@ -235,6 +240,12 @@ export function OfflineWorkspace() {
           </label>
           {selected && (
             <>
+              <PortableEvidence
+                key={selected.branch.id}
+                docs={selected.evidence ?? []}
+                chapters={chapters}
+                readSource={(id) => readLocalSourceRevision(selected.novel.id, id)}
+              />
               <WebSyncPanel
                 key={selected.branch.id}
                 project={selected}

@@ -17,6 +17,19 @@ Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, ma
 Summary = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 
 
+class OutlineCardReference(Input):
+    session_id: Identifier
+    card_id: Identifier
+    revision: int = Field(ge=0, strict=True)
+
+
+class OutlineCard(OutlineCardReference):
+    technique: str
+    conditions: str
+    exceptions: str
+    source_title: str
+
+
 class ChapterPlan(Input):
     chapter_id: Identifier
     goal: Summary
@@ -24,6 +37,9 @@ class ChapterPlan(Input):
     turn: Summary
     result: Summary
     setting_ids: list[Identifier] = Field(default_factory=list, max_length=40)
+    reference_cards: list[OutlineCardReference] = Field(
+        default_factory=list, max_length=8, exclude_if=lambda value: not value
+    )
 
 
 class UnitPlan(Input):
@@ -98,6 +114,40 @@ def _settings(tx, branch_id, confirmation_id):
     return confirmed_world_basis(tx, branch_id, confirmation_id)
 
 
+def _card_key(ref):
+    return ref["session_id"], ref["card_id"], ref["revision"]
+
+
+def _outline_card(ref, session):
+    from .reference import card_version
+
+    version = card_version(session, ref["card_id"], ref["revision"])
+    if not version["card"]["exceptions"].strip():
+        raise DomainError("reference_card_incomplete", "挂载手法卡前请填写须替换内容，没有时可明确填写无。")
+    return {
+        **ref,
+        **{key: version["card"][key] for key in ("technique", "conditions", "exceptions")},
+        "source_title": version["source"]["title"],
+    }
+
+
+def _freeze_cards(tx, branch_id, references, previous):
+    cached = {_card_key(card): card for card in (previous or {}).get("reference_cards", [])}
+    frozen = {}
+    for ref in references:
+        key = _card_key(ref)
+        if key not in cached:
+            session = tx.execute(
+                "SELECT * FROM reference_sessions WHERE id=? AND json_extract(payload,'$.branch_id')=?",
+                (ref["session_id"], branch_id),
+            ).fetchone()
+            if not session:
+                raise DomainError("outline_reference", "仅可选用本工作版本的已保存手法卡。", 409)
+            cached[key] = _outline_card(ref, {**dict(session), "payload": json.loads(session["payload"])})
+        frozen[key] = cached[key]
+    return list(frozen.values())
+
+
 def _validate(graph, plan, basis, confirmed):
     chapters = {row["id"]: row for row in graph["chapters"] if not row["archived"]}
     settings = {item["id"] for item in basis["items"]}
@@ -121,6 +171,12 @@ def _validate(graph, plan, basis, confirmed):
         for chapter in planned
     ):
         raise DomainError("outline_setting", "章纲引用的设定须来自所选确认版本，且每章仅引用一次。")
+    references = {_card_key(card) for card in basis.get("reference_cards", [])}
+    for chapter in planned:
+        selected = [_card_key(ref) for ref in chapter.get("reference_cards", [])]
+        identities = {(session_id, card_id) for session_id, card_id, _ in selected}
+        if len(identities) != len(selected) or not set(selected) <= references:
+            raise DomainError("outline_reference", "每章须选用手法卡的一个已保存修订。")
     if confirmed and (
         not volumes
         or any(
@@ -158,13 +214,24 @@ def _check_base(row, base_revision):
         raise DomainError("outline_conflict", "大纲已在别处更新，请保留编辑内容并重新比较。", 409)
 
 
-def save_outline(domain, branch_id, data):
+def save_outline(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
-        _check_base(_latest(tx, branch_id), data.base_revision)
+        if before_write is not None:
+            before_write(tx)
+        previous = _decode(_latest(tx, branch_id))
+        _check_base(previous, data.base_revision)
         payload = data.plan.model_dump()
         basis = _settings(tx, branch_id, data.confirmation_id)
         project = confirmed_project_tx(tx, branch_id)
         basis["project_id"] = project["id"] if project else None
+        cards = _freeze_cards(
+            tx,
+            branch_id,
+            (ref for _, _, chapter in _chapter_plans(payload) for ref in chapter.get("reference_cards", [])),
+            previous["setting_basis"] if previous else None,
+        )
+        if cards:
+            basis["reference_cards"] = cards
         if data.source_generation_id:
             from .outline_generation import check_candidate_tx
 
@@ -175,8 +242,10 @@ def save_outline(domain, branch_id, data):
         return _view(tx, branch_id)
 
 
-def confirm_outline(domain, branch_id, data):
+def confirm_outline(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
+        if before_write is not None:
+            before_write(tx)
         row = _latest(tx, branch_id)
         _check_base(row, data.base_revision)
         if not row["confirmed"]:
@@ -313,6 +382,12 @@ def chapter_basis(tx, branch_id, chapter_id, outline_id):
     _validate(graph_snapshot(tx, branch_id), confirmed["plan"], basis, True)
     for volume, unit, chapter in _chapter_plans(confirmed["plan"]):
         if chapter["chapter_id"] == chapter_id:
+            selected = {_card_key(ref) for ref in chapter.get("reference_cards", [])}
+            cards = [
+                {key: value for key, value in ref.items() if key != "source_title"}
+                for ref in basis.get("reference_cards", [])
+                if _card_key(ref) in selected
+            ]
             return {
                 "id": outline_id,
                 "revision": confirmed["revision"],
@@ -321,6 +396,7 @@ def chapter_basis(tx, branch_id, chapter_id, outline_id):
                 "chapter": chapter,
                 "setting_confirmation_id": basis["confirmation_id"],
                 "settings": [item for item in basis["items"] if item["id"] in chapter["setting_ids"]],
+                **({"reference_cards": cards} if cards else {}),
             }
     raise DomainError("outline_chapter", "当前确认大纲未包含本章。", 409)
 
@@ -355,3 +431,24 @@ def register_routes(app, domain):
         with domain.db.connect() as tx:
             tx.execute("BEGIN")
             return confirmed_world_basis(tx, branch_id)
+
+    @app.get(endpoint + "/reference-options")
+    def reference_options(branch_id: str) -> list[OutlineCard]:
+        domain.branch(branch_id)
+        with domain.db.connect() as tx:
+            result = []
+            rows = tx.execute(
+                "SELECT * FROM reference_sessions WHERE json_extract(payload,'$.branch_id')=? "
+                "ORDER BY updated DESC LIMIT 200",
+                (branch_id,),
+            )
+            for row in rows:
+                payload = json.loads(row["payload"])
+                for card in payload["cards"]:
+                    ref = {"session_id": row["id"], "card_id": card["id"], "revision": row["revision"]}
+                    try:
+                        result.append(_outline_card(ref, {**dict(row), "payload": payload}))
+                    except DomainError as error:
+                        if error.code != "reference_card_incomplete":
+                            raise
+            return result

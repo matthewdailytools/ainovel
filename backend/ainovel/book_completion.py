@@ -17,7 +17,7 @@ from .outline_workspace import _chapter_plans, _view
 from .project_brief import confirmed_project_tx
 from .setting_review import confirmed_world_basis
 from .story_graph import Source, graph_snapshot
-from .workflow_inspection import latest_book_inspection
+from .workflow_inspection import body_chars, current_length_target, latest_book_inspection, length_result
 
 KIND = "book_completion"
 VERSION = "book-completion/1"
@@ -38,6 +38,7 @@ class CompletionRequest(Input):
     spoiler_scope: Literal["opening", "whole"]
     sample_chapter_ids: list[str] = Field(max_length=20)
     materials_reviewed: bool = Field(strict=True)
+    preparation_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 def _hash(text):
@@ -81,6 +82,7 @@ def _basis(tx, branch_id):
         "setting_id": rules["confirmation_id"],
         "outline_id": outline["confirmed"]["id"] if outline["confirmed"] else None,
         "inspection_id": report["id"] if report else None,
+        "length_target": current_length_target(tx, branch_id, "book", None, include_cleared=True),
         "promises": [{"id": row["id"], "revision": row["revision"]} for row in promises],
     }
     fingerprint = _hash(
@@ -150,6 +152,18 @@ def _evaluate(tx, branch_id, data=None):
     basis, manifest, chapters, rules, outline, report, promises = _basis(tx, branch_id)
     if data and basis != data.basis_sha256:
         raise DomainError("completion_changed", "完本依据已变化，请刷新并重新预览。", 409)
+    if data and data.preparation_id:
+        from .completion_preparation import KIND as PREPARATION
+
+        candidate = tx.execute(
+            "SELECT basis FROM artifacts WHERE id=? AND branch_id=? AND kind=?",
+            (data.preparation_id, branch_id, PREPARATION),
+        ).fetchone()
+        if not candidate or json.loads(candidate["basis"])["completion_basis_sha256"] != basis:
+            raise DomainError(
+                "completion_preparation_stale", "这份 AI 完本建议的依据已变化，请重新核对。", 409
+            )
+        manifest["ai_preparation_id"] = data.preparation_id
     by_id = {row["id"]: row for row in chapters}
     expected = (
         [chapter["chapter_id"] for _, _, chapter in _chapter_plans(outline["confirmed"]["plan"])]
@@ -158,6 +172,14 @@ def _evaluate(tx, branch_id, data=None):
     )
     manuscript = bool(chapters) and all(row["content"].strip() for row in chapters)
     manuscript = manuscript and (not expected or expected == list(by_id)) and not outline["stale"]
+    manuscript_detail = "核对目录、非空正文及大纲覆盖，并记录通读。"
+    length_target = manifest["length_target"]
+    if length_target and length_target["targets"] is not None:
+        length_status, length_detail = length_result(
+            [{"chars": body_chars(row["content"])} for row in chapters], length_target["targets"]
+        )
+        manuscript = manuscript and length_status == "green"
+        manuscript_detail += length_detail
     open_promises = [
         row["payload"]["title"]
         for row in promises
@@ -177,7 +199,7 @@ def _evaluate(tx, branch_id, data=None):
         _check(
             "manuscript",
             "稿件齐全与通读",
-            "核对目录、非空正文及大纲覆盖，并记录通读。",
+            manuscript_detail,
             bool(manuscript and data and data.read_note.strip()),
             not manuscript,
         ),

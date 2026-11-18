@@ -1,14 +1,17 @@
 """Portable manuscript and revision history for desktop and offline Web."""
 
 from hashlib import sha256
+import json
+from time import time
 from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints
 
-from .db import DomainError
+from .db import DomainError, dumps, uid
 from .models import Input
 
 FORMAT = "ainovel-manuscript/1"
+EVIDENCE = "portable_workbench_evidence"
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")]
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
@@ -50,16 +53,101 @@ class PortableRevision(Input):
     created: float = Field(ge=0, allow_inf_nan=False)
 
 
+class RevisionObject(Input):
+    format: Literal["ainovel-manuscript-sync/1"]
+    kind: Literal["revision"]
+    branch_id: Identifier
+    revision: PortableRevision
+
+
+class EvidenceChapter(Input):
+    id: Identifier
+    revision: int = Field(ge=0, strict=True)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    revision_id: Identifier | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class PortableEvidence(Input):
+    id: Identifier
+    kind: Literal["project", "settings", "outline", "inspection", "completion"]
+    title: Title
+    body: str = Field(min_length=1, max_length=250_000)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    chapters: list[EvidenceChapter] = Field(default_factory=list, max_length=5000)
+
+
 class ManuscriptPackage(Input):
     format: Literal["ainovel-manuscript/1"]
     novel: PortableWork
     branch: PortableBranch
     chapters: list[PortableChapter] = Field(max_length=5000)
     revisions: list[PortableRevision] = Field(max_length=50_000)
+    evidence: list[PortableEvidence] = Field(
+        default_factory=list, max_length=100, exclude_if=lambda value: not value
+    )
+    source_revisions: list[PortableRevision] = Field(
+        default_factory=list, max_length=50_000, exclude_if=lambda value: not value
+    )
 
 
 def _digest(text):
     return sha256(text.encode("utf-8")).hexdigest()
+
+
+def native_revision(tx, branch_id, revision_id):
+    row = tx.execute(
+        "SELECT r.*, p.id AS parent_id FROM revisions r JOIN chapters c ON c.id=r.chapter_id "
+        "LEFT JOIN revisions p ON p.chapter_id=r.chapter_id AND p.revision=r.revision-1 "
+        "WHERE c.branch_id=? AND r.id=?",
+        (branch_id, revision_id),
+    ).fetchone()
+    return PortableRevision(**dict(row), sha256=_digest(row["content"])) if row else None
+
+
+def source_revision(tx, branch_id, revision_id):
+    row = tx.execute(
+        "SELECT payload FROM manuscript_revision_sources WHERE branch_id=? AND id=?",
+        (branch_id, revision_id),
+    ).fetchone()
+    return (
+        PortableRevision.model_validate_json(row["payload"])
+        if row
+        else native_revision(tx, branch_id, revision_id)
+    )
+
+
+def source_revisions(tx, branch_id):
+    return [
+        PortableRevision.model_validate_json(row["payload"])
+        for row in tx.execute(
+            "SELECT payload FROM manuscript_revision_sources WHERE branch_id=? ORDER BY rowid", (branch_id,)
+        )
+    ]
+
+
+def _source_link(row, parent):
+    return (
+        row.parent_id is None
+        if row.revision == 0
+        else parent is not None
+        and parent.chapter_id == row.chapter_id
+        and parent.revision + 1 == row.revision
+    )
+
+
+def store_source_revision(tx, branch_id, row):
+    existing = source_revision(tx, branch_id, row.id)
+    chapter = tx.execute("SELECT branch_id FROM chapters WHERE id=?", (row.chapter_id,)).fetchone()
+    if (existing and existing != row) or (chapter and chapter["branch_id"] != branch_id):
+        raise DomainError("sync_history", "相同来源修订编号的内容或归属不一致。", 409)
+    parent = source_revision(tx, branch_id, row.parent_id) if row.parent_id else None
+    if _digest(row.content) != row.sha256 or not _source_link(row, parent):
+        raise DomainError("sync_history", "来源稿件哈希无效或缺少连续父修订。", 409)
+    if not existing:
+        tx.execute(
+            "INSERT INTO manuscript_revision_sources VALUES(?,?,?,?)",
+            (branch_id, row.id, row.chapter_id, row.model_dump_json()),
+        )
 
 
 def _index(package):
@@ -88,7 +176,137 @@ def _index(package):
         for index, row in enumerate(rows):
             if row.revision != index or row.parent_id != (rows[index - 1].id if index else None):
                 raise DomainError("manuscript_history", "章稿修订须从零开始完整连接。")
+    for row in package.source_revisions:
+        if row.id in revisions or _digest(row.content) != row.sha256:
+            raise DomainError("manuscript_integrity", "来源修订编号重复或正文校验值无效。")
+        revisions[row.id] = row
+    for row in package.source_revisions:
+        if not _source_link(row, revisions.get(row.parent_id)):
+            raise DomainError("manuscript_history", "来源稿件缺少连续父修订。")
+    seen = set()
+    for document in package.evidence:
+        if document.id in seen or _digest(document.body) != document.sha256:
+            raise DomainError("manuscript_evidence", "依据编号重复或内容校验值无效。")
+        seen.add(document.id)
+        for reference in document.chapters:
+            chapter = histories.get(reference.id, [])
+            target = (
+                revisions.get(reference.revision_id)
+                if reference.revision_id
+                else chapter[reference.revision]
+                if reference.revision < len(chapter)
+                else None
+            )
+            if not target or (target.chapter_id, target.revision, target.sha256) != (
+                reference.id,
+                reference.revision,
+                reference.sha256,
+            ):
+                raise DomainError("manuscript_evidence", "依据与包中引用的章稿修订不一致。")
     return histories
+
+
+def _evidence(tx, branch_id):
+    documents = {}
+    for row in tx.execute(
+        "SELECT payload FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' ORDER BY rowid",
+        (branch_id, EVIDENCE),
+    ):
+        document = json.loads(row["payload"])
+        documents[document["id"]] = document
+
+    def add(identifier, kind, title, value, chapters=()):
+        body = json.dumps(value, ensure_ascii=False, indent=2)
+        if len(body) > 250_000:
+            return
+        references = []
+        for row in chapters:
+            reference = {key: row[key] for key in ("id", "revision", "sha256")}
+            version = tx.execute(
+                "SELECT r.id,r.content FROM revisions r JOIN chapters c ON c.id=r.chapter_id "
+                "WHERE c.branch_id=? AND r.chapter_id=? AND r.revision=?",
+                (branch_id, row["id"], row["revision"]),
+            ).fetchone()
+            if version and _digest(version["content"]) == row["sha256"]:
+                reference["revision_id"] = version["id"]
+            references.append(reference)
+        documents[identifier] = {
+            "id": identifier,
+            "kind": kind,
+            "title": title,
+            "body": body,
+            "sha256": _digest(body),
+            "chapters": references,
+        }
+
+    for kind, title, artifact_kind in (
+        ("project", "立项卡", "project_brief"),
+        ("settings", "作者确认的设定", "conception_completion"),
+        ("inspection", "十处对账体检", "workflow_inspection"),
+        ("completion", "完本交付清单", "book_completion"),
+    ):
+        row = tx.execute(
+            "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+            "ORDER BY rowid DESC LIMIT 1",
+            (branch_id, artifact_kind),
+        ).fetchone()
+        if not row:
+            continue
+        payload = json.loads(row["payload"])
+        chapters = ()
+        if kind == "settings":
+            payload = {"revision": payload["revision"], "categories": payload["categories"]}
+        if kind == "inspection":
+            chapters = payload["chapters"]
+            payload = {"scope": payload["scope"], "items": payload["items"]}
+        if kind == "completion":
+            chapters = payload["manifest"]["chapters"]
+            payload = {key: payload[key] for key in ("manifest", "checks")}
+        add(row["id"], kind, title, payload, chapters)
+
+    outline = tx.execute(
+        "SELECT id,revision,payload FROM outline_revisions WHERE branch_id=? AND confirmed=1 "
+        "ORDER BY revision DESC LIMIT 1",
+        (branch_id,),
+    ).fetchone()
+    if outline:
+        add(
+            outline["id"], "outline", f"确认大纲 · 修订 {outline['revision']}", json.loads(outline["payload"])
+        )
+    return list(documents.values())[-100:]
+
+
+def store_portable_evidence(tx, branch_id, document):
+    if _digest(document.body) != document.sha256:
+        raise DomainError("manuscript_evidence", "依据内容校验失败。", 409)
+    for reference in document.chapters:
+        if reference.revision_id:
+            row = source_revision(tx, branch_id, reference.revision_id)
+            exact = row and (row.chapter_id, row.revision, row.sha256) == (
+                reference.id,
+                reference.revision,
+                reference.sha256,
+            )
+        else:
+            local = tx.execute(
+                "SELECT r.content FROM revisions r JOIN chapters c ON c.id=r.chapter_id "
+                "WHERE c.branch_id=? AND r.chapter_id=? AND r.revision=?",
+                (branch_id, reference.id, reference.revision),
+            ).fetchone()
+            exact = local and _digest(local["content"]) == reference.sha256
+        if not exact:
+            raise DomainError("manuscript_evidence", "需要原始稿件包中的准确来源修订，先保留云端依据。", 409)
+    existing = next((entry for entry in _evidence(tx, branch_id) if entry["id"] == document.id), None)
+    data = document.model_dump()
+    if existing == data:
+        return
+    if existing:
+        raise DomainError("manuscript_evidence", "相同来源编号已有不同的只读依据。", 409)
+    tx.execute(
+        "INSERT INTO artifacts(id,novel_id,branch_id,kind,payload,basis,status,created) "
+        "SELECT ?,novel_id,id,?,?,'{}','accepted',? FROM branches WHERE id=?",
+        (uid(), EVIDENCE, dumps(data), time(), branch_id),
+    )
 
 
 def export_manuscript(domain, branch_id):
@@ -124,6 +342,8 @@ def export_manuscript(domain, branch_id):
                 "branch": dict(branch),
                 "chapters": chapters,
                 "revisions": revisions,
+                "evidence": _evidence(tx, branch_id),
+                "source_revisions": source_revisions(tx, branch_id),
             }
         )
 
@@ -173,6 +393,18 @@ def import_manuscript(domain, package):
                 for row in package.revisions
             ],
         )
+        tx.executemany(
+            "INSERT INTO manuscript_revision_sources VALUES(?,?,?,?)",
+            [(branch.id, row.id, row.chapter_id, row.model_dump_json()) for row in package.source_revisions],
+        )
+        tx.executemany(
+            "INSERT INTO artifacts(id,novel_id,branch_id,kind,payload,basis,status,created) "
+            "VALUES(?,?,?,?,?,'{}','accepted',?)",
+            [
+                (uid(), novel.id, branch.id, EVIDENCE, dumps(document.model_dump()), time())
+                for document in package.evidence
+            ],
+        )
     return {"id": novel.id, "branch_id": branch.id}
 
 
@@ -184,3 +416,18 @@ def register_routes(app, domain):
     @app.post("/api/manuscript-packages/import", status_code=201)
     def import_package(data: ManuscriptPackage):
         return import_manuscript(domain, data)
+
+    @app.get("/api/branches/{branch_id}/manuscript-evidence")
+    def get_evidence(branch_id: str) -> list[PortableEvidence]:
+        domain.branch(branch_id)
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            return _evidence(tx, branch_id)
+
+    @app.get("/api/branches/{branch_id}/manuscript-sources/{revision_id}")
+    def get_source(branch_id: str, revision_id: Identifier) -> PortableRevision:
+        with domain.db.connect() as tx:
+            row = source_revision(tx, branch_id, revision_id)
+            if not row:
+                raise DomainError("not_found", "这个工作版本中没有该来源修订。", 404)
+            return row

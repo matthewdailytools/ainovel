@@ -80,6 +80,7 @@ test('从作者确认的大纲接力写作，在体检检查点等待处理', as
   expect(saved.content).toContain('先把公开刻度抄进本子')
   const task = await (await page.request.get(`/api/tasks/${run.id}`)).json()
   expect(task.result.seven_stage_run).toMatchObject({ stage: 'inspection', outline_id: outlineId })
-  expect(task.result.seven_stage_run.children).toHaveLength(1)
+  expect(task.result.seven_stage_run.children).toHaveLength(2)
+  expect(task.result.seven_stage_run.inspection_candidate_id).toBeTruthy()
   await expect(panel.getByRole('button', { name: '继续接力' })).toBeVisible()
 })

@@ -365,6 +365,7 @@ class Worker:
         if action in {
             "conception.extract.world",
             "对照单条已确认设定与保存稿",
+            "起草完本交付简介",
             "仅依据作者原话整理本场景情节",
             "逐项对照作者情节解释与本次正文",
             "只从本次正文独立提取物品与信息流向",
@@ -498,7 +499,10 @@ class Worker:
         if previous:
             saved = json.loads(previous[0]["result"])
             return await validated(saved)
-        if self.task["kind"] in RETAIN_UNCERTAIN_STEPS:
+        retain_uncertain = self.task["kind"] in RETAIN_UNCERTAIN_STEPS or bool(
+            payload.get("seven_stage_run_id")
+        )
+        if retain_uncertain:
             dispatched = self.db.all(
                 "SELECT id FROM task_events WHERE task_id=? AND kind='step_dispatched' "
                 "AND json_extract(payload,'$.fingerprint')=? ORDER BY id DESC LIMIT 1",
@@ -515,7 +519,7 @@ class Worker:
                     "unknown_result",
                     "该构思步骤已派发但缺少完整回执，已保留缓存与费用；请先核对账本，再决定是否创建新任务。"
                     if self.task["kind"] == "conception_generate"
-                    else "该来源核对步骤已派发但缺少完整回执，保留旧缓存与费用，未盲目重发。",
+                    else "该步骤已派发但缺少完整回执，保留旧缓存与费用，未盲目重发。",
                     409,
                 )
         if replay_owner is not None:
@@ -746,7 +750,7 @@ class Worker:
             from .providers import RequestNotSent
 
             if (
-                self.task["kind"] in RETAIN_UNCERTAIN_STEPS
+                retain_uncertain
                 and isinstance(error, RequestNotSent)
                 and error.task_id == self.task["id"]
                 and error.account == payload["account"]
@@ -934,6 +938,16 @@ class Worker:
             from .outline_generation import run
 
             await run(self, request, outline_generation)
+            return
+        if semantic_inspection := self.task["result"].get("inspection_semantic"):
+            from .inspection_semantic import run
+
+            await run(self, request, semantic_inspection)
+            return
+        if completion_preparation := self.task["result"].get("completion_preparation"):
+            from .completion_preparation import run
+
+            await run(self, request, completion_preparation)
             return
         if rule := self.task["result"].get("setting_rule"):
             from .setting_review import run

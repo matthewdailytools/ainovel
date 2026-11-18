@@ -48,7 +48,7 @@ async function checkedCall(page: Page, taskId: string, stage: string, snapshotId
 
 test('立项建议可修改并以确认终局交给世界设定', async ({ page }) => {
   const { base } = await openWorkbench(page, '遗铃 · 立项交接')
-  await page.getByText('立项台', { exact: true }).click()
+  await page.locator('#bench-project').getByText('立项台', { exact: true }).click()
   await page.getByRole('textbox', { name: '创作思路', exact: true }).fill('学徒靠铜铃的断痕寻找师姐。')
   await page.getByRole('button', { name: 'AI 分析立项', exact: true }).click()
   await page.getByRole('button', { name: '载入 AI 立项建议', exact: true }).click()

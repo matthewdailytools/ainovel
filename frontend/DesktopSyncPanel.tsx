@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
 import type { Notify } from './App'
+import { CloudAttachments } from './CloudAttachments'
 
 type Conflict = { id: string; object_id: string }
 type SyncStatus = {
@@ -17,6 +18,7 @@ type Comparison = {
   local: Side
   remote: {
     head_revision: string
+    parent_revision: string | null
     current: { payload: Side }
     incoming: { payload: Side }
     base?: { payload: Side } | null
@@ -43,6 +45,7 @@ export function DesktopSyncPanel({
   const [status, setStatus] = useState<SyncStatus>()
   const [comparison, setComparison] = useState<{ id: string; value: Comparison; key: string }>()
   const [busy, setBusy] = useState(false)
+  const [attachmentBusy, setAttachmentBusy] = useState(false)
   const credential = { origin: origin.trim(), token: token.trim() }
   const ready = !!credential.origin && !!credential.token
   useEffect(() => {
@@ -81,11 +84,11 @@ export function DesktopSyncPanel({
   return (
     <section className="card" aria-label="作品云同步">
       <h2>作品云同步</h2>
-      <p>同步当前工作版本的目录、章稿与基本信息。启用前请确认云服务及作品范围。</p>
+      <p>同步当前工作版本的目录、章稿、基本信息和随稿依据。启用前请确认云服务及作品范围。</p>
       <p>
         工作版本编号 <code>{branchId}</code>
       </p>
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy || attachmentBusy}>
         <legend>设备连接</legend>
         <label>
           同步服务地址
@@ -160,6 +163,14 @@ export function DesktopSyncPanel({
           ))}
         </>
       )}
+      <CloudAttachments
+        key={credential.origin}
+        workId={branchId}
+        service={credential.origin}
+        token={credential.token}
+        inactive={!status?.enabled || busy}
+        onBusy={setAttachmentBusy}
+      />
       {comparison && (
         <section aria-label="云同步冲突比较">
           <h3>比较候选版本</h3>
@@ -173,7 +184,13 @@ export function DesktopSyncPanel({
           ).map(([label, side]) => (
             <details key={label}>
               <summary>{label}</summary>
-              <pre className="report">{readable(side)}</pre>
+              <pre className="report">
+                {label === '共同依据' && !comparison.value.remote.base
+                  ? comparison.value.remote.parent_revision
+                    ? '尚未取得共同基线修订。'
+                    : '没有已记录的共同基线。'
+                  : readable(side)}
+              </pre>
             </details>
           ))}
           {(

@@ -7,6 +7,10 @@ import { OutlineGenerationPanel } from './OutlineGenerationPanel'
 
 type OutlinePlan = components['schemas']['OutlinePlan']
 type ChapterPlan = components['schemas']['ChapterPlan']
+type OutlineCard = components['schemas']['OutlineCard']
+type OutlineCardReference = components['schemas']['OutlineCardReference']
+export type FrozenCard = Omit<OutlineCard, 'source_title'> & { source_title?: string }
+type SavedReferenceCard = components['schemas']['SavedReferenceCard']
 type Setting = { id: string; title: string; detail: string }
 export type ConfirmedWorldRules = { confirmation_id: string | null; revision?: number; items: Setting[] }
 type OutlineRevision = {
@@ -14,7 +18,7 @@ type OutlineRevision = {
   revision: number
   confirmed: boolean
   plan: OutlinePlan
-  setting_basis: ConfirmedWorldRules
+  setting_basis: ConfirmedWorldRules & { reference_cards?: OutlineCard[] }
 }
 export type OutlineView = {
   draft: OutlineRevision | null
@@ -65,6 +69,57 @@ export function findChapterPlan(outline: OutlineRevision | null | undefined, cha
     .find(({ chapter }) => chapter.chapter_id === chapterId)
 }
 
+function cardKey(card: OutlineCardReference) {
+  return `${card.session_id}/${card.card_id}/${card.revision}`
+}
+
+export function OutlineCardSource({ card, notify }: { card: FrozenCard; notify: Notify }) {
+  const [source, setSource] = useState<SavedReferenceCard>()
+  const [loading, setLoading] = useState(false)
+  async function readSource() {
+    if (loading) return
+    setLoading(true)
+    try {
+      const session = encodeURIComponent(card.session_id)
+      const identifier = encodeURIComponent(card.card_id)
+      setSource(
+        await api<SavedReferenceCard>(
+          `/reference-sessions/${session}/cards/${identifier}/revisions/${card.revision}`,
+        ),
+      )
+    } catch (error) {
+      notify(error)
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <details>
+      <summary>
+        {card.technique} · 手法卡修订 {card.revision}
+      </summary>
+      <p>适用条件 · {card.conditions}</p>
+      <p>须替换 · {card.exceptions}</p>
+      {card.source_title && <p>来源 · {card.source_title}</p>}
+      {source ? (
+        <>
+          <p>卡片所引 · {source.card.evidence}</p>
+          {typeof source.source.quote === 'string' && <blockquote>{source.source.quote}</blockquote>}
+        </>
+      ) : (
+        <button type="button" disabled={loading} onClick={() => void readSource()}>
+          {loading ? '正在读取手法卡原文…' : '查看手法卡原文依据'}
+        </button>
+      )}
+    </details>
+  )
+}
+
+export function chapterCards(outline: OutlineRevision | null | undefined, chapter: ChapterPlan) {
+  const selected = new Set((chapter.reference_cards ?? []).map(cardKey))
+  return (outline?.setting_basis.reference_cards ?? []).filter((card) => selected.has(cardKey(card)))
+}
+
 export function OutlineWorkspace({
   branchId,
   account,
@@ -81,6 +136,7 @@ export function OutlineWorkspace({
   const root = `/branches/${branchId}/outline-workspace`
   const [view, setView] = useState<OutlineView>()
   const [settings, setSettings] = useState<ConfirmedWorldRules>()
+  const [cards, setCards] = useState<OutlineCard[]>([])
   const [editing, setEditing] = useState<OutlinePlan>()
   const [settingId, setSettingId] = useState<string | null>(null)
   const [generationId, setGenerationId] = useState<string>()
@@ -97,11 +153,16 @@ export function OutlineWorkspace({
   useLeaveGuard(dirty, '大纲草稿')
   useEffect(() => {
     let active = true
-    void Promise.all([api<OutlineView>(root), api<ConfirmedWorldRules>(root + '/setting-options')])
-      .then(([data, available]) => {
+    void Promise.all([
+      api<OutlineView>(root),
+      api<ConfirmedWorldRules>(root + '/setting-options'),
+      api<OutlineCard[]>(root + '/reference-options'),
+    ])
+      .then(([data, available, referenceCards]) => {
         if (!active) return
         setView(data)
         setSettings(available)
+        setCards(referenceCards)
         setEditing(data.draft?.plan ?? { summary: '', volumes: [], promises: [] })
         setSettingId(data.draft?.setting_basis.confirmation_id ?? null)
       })
@@ -127,6 +188,9 @@ export function OutlineWorkspace({
       : view.draft?.setting_basis.confirmation_id === settingId
         ? view.draft.setting_basis
         : undefined
+  const availableCards = new Map(
+    [...(view.draft?.setting_basis.reference_cards ?? []), ...cards].map((card) => [cardKey(card), card]),
+  )
   async function run(action: () => Promise<void>) {
     if (busy) return
     setBusy(true)
@@ -338,6 +402,68 @@ export function OutlineWorkspace({
                                     {item.title}
                                   </label>
                                 ))}
+                              </fieldset>
+                            )}
+                            {(availableCards.size > 0 || !!chapter.reference_cards?.length) && (
+                              <fieldset>
+                                <legend>计划引用的手法卡</legend>
+                                {(chapter.reference_cards ?? []).map((ref) => {
+                                  const key = cardKey(ref)
+                                  const card = availableCards.get(key)
+                                  return (
+                                    <div key={key}>
+                                      {card ? (
+                                        <OutlineCardSource card={card} notify={notify} />
+                                      ) : (
+                                        <p>手法卡 {ref.card_id}</p>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          changeChapter((row) => {
+                                            row.reference_cards = row.reference_cards?.filter(
+                                              (item) => cardKey(item) !== key,
+                                            )
+                                          })
+                                        }
+                                      >
+                                        移除这张手法卡
+                                      </button>
+                                    </div>
+                                  )
+                                })}
+                                <label>
+                                  加入手法卡
+                                  <select
+                                    value=""
+                                    onChange={(event) => {
+                                      const card = availableCards.get(event.target.value)
+                                      if (!card) return
+                                      const { session_id, card_id, revision } = card
+                                      changeChapter((row) => {
+                                        row.reference_cards = [
+                                          ...(row.reference_cards ?? []).filter(
+                                            (ref) => ref.session_id !== session_id || ref.card_id !== card_id,
+                                          ),
+                                          { session_id, card_id, revision },
+                                        ]
+                                      })
+                                    }}
+                                  >
+                                    <option value="">选择已保存的手法卡</option>
+                                    {Array.from(availableCards, ([key, card]) => (
+                                      <option
+                                        key={key}
+                                        value={key}
+                                        disabled={chapter.reference_cards?.some(
+                                          (ref) => cardKey(ref) === key,
+                                        )}
+                                      >
+                                        {card.technique} · {card.source_title} · 修订 {card.revision}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
                               </fieldset>
                             )}
                             <button
@@ -573,10 +699,15 @@ export function OutlineWorkspace({
                         <h4>{unit.title}</h4>
                         <p>{unit.summary}</p>
                         {unit.chapters?.map((chapter) => (
-                          <p key={chapter.chapter_id}>
-                            {chapterName(chapter.chapter_id)} · {chapter.goal} · {chapter.obstacle} ·{' '}
-                            {chapter.turn} · {chapter.result}
-                          </p>
+                          <div key={chapter.chapter_id}>
+                            <p>
+                              {chapterName(chapter.chapter_id)} · {chapter.goal} · {chapter.obstacle} ·{' '}
+                              {chapter.turn} · {chapter.result}
+                            </p>
+                            {chapterCards(previous, chapter).map((card) => (
+                              <OutlineCardSource key={cardKey(card)} card={card} notify={notify} />
+                            ))}
+                          </div>
                         ))}
                       </div>
                     ))}

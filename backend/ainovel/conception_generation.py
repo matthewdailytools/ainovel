@@ -190,8 +190,22 @@ def freeze(domain, payload):
         if not project or project["id"] != identifier:
             raise DomainError("project_brief_changed", "已确认立项已更新，请读取最新修订。", 409)
     categories = current["categories"]
+    requested = payload.get("target_category_ids")
+    if requested is not None and (
+        payload["category_id"] is not None
+        or not isinstance(requested, list)
+        or not requested
+        or any(not isinstance(identifier, str) for identifier in requested)
+        or len(set(requested)) != len(requested)
+        or not set(requested) <= {section["id"] for section in categories}
+    ):
+        raise DomainError("conception_scope", "接力分类必须是当前工作版本内互不重复的类别。", 409)
     if payload["category_id"] is None:
-        targets = [section["id"] for section in categories if not section["skipped"]]
+        targets = [
+            section["id"]
+            for section in categories
+            if not section["skipped"] and (requested is None or section["id"] in requested)
+        ]
     else:
         targets = [section["id"] for section in categories if section["id"] == payload["category_id"]]
     if not targets:

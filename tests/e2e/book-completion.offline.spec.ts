@@ -112,3 +112,42 @@ test('六项核对通过后确认完结，旧交付包可在改稿后下载', as
   await expect(panel.getByRole('link', { name: '下载历史交付包' })).toHaveAttribute('href', url)
   expect((await page.request.get(url)).ok()).toBe(true)
 })
+
+test('AI 完本建议载入空白项，作者通读仍待确认', async ({ page }) => {
+  await page.goto('/')
+  const { csrf } = await (await page.request.get('/api/session')).json()
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const novel = await page.request.post('/api/novels', { headers, data: { title: '遗铃 · 完本建议' } })
+  expect(novel.ok(), await novel.text()).toBe(true)
+  const { id, branch_id } = await novel.json()
+  const draft = await page.request.post(`/api/branches/${branch_id}/chapters`, {
+    headers,
+    data: { title: '寻铃' },
+  })
+  expect(draft.ok(), await draft.text()).toBe(true)
+  const chapter = await draft.json()
+  const body = '学徒将铜铃交回主人。'
+  const saved = await page.request.put(`/api/chapters/${chapter.id}`, {
+    headers,
+    data: { base_revision: 0, content: body },
+  })
+  expect(saved.ok(), await saved.text()).toBe(true)
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(id)
+  await page.getByRole('button', { name: '完本台', exact: true }).click()
+  const panel = page.getByRole('region', { name: '完本与交付', exact: true })
+  await panel.getByRole('textbox', { name: '关键人物与关系说明' }).fill('保留这项作者已有的看法。')
+  await panel.getByText('AI 准备完本建议', { exact: true }).press('Enter')
+  await panel.getByRole('button', { name: '生成完本核对建议与简介' }).click()
+  await panel.getByRole('button', { name: '载入 AI 建议到空白项' }).click()
+  await expect(panel.getByRole('textbox', { name: '简介', exact: true })).toHaveValue(
+    '学徒从铜铃的来历追起。',
+  )
+  await expect(panel.getByRole('textbox', { name: '关键人物与关系说明' })).toHaveValue(
+    '保留这项作者已有的看法。',
+  )
+  await expect(panel.getByRole('textbox', { name: '通读记录', exact: true })).toHaveValue('')
+  await expect(panel.getByText(body, { exact: false }).first()).toBeVisible()
+  await panel.getByRole('button', { name: '预览交付材料' }).click()
+  await expect(panel.getByRole('button', { name: '确认完结', exact: true })).toBeDisabled()
+})

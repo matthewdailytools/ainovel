@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { CloudAttachments } from './CloudAttachments'
 import type { LocalProject } from './offlineStore'
 import { readSyncState, setSyncEnabled, type SyncPayload } from './syncClient'
 import {
@@ -9,7 +10,9 @@ import {
   syncWebManuscript,
 } from './manuscriptSync'
 
-type State = Awaited<ReturnType<typeof readSyncState>> & { deferred?: string[] }
+type State = Awaited<ReturnType<typeof readSyncState>> & {
+  deferred?: { object_id: string; reason: string }[]
+}
 type Comparison = Awaited<ReturnType<typeof prepareWebResolution>>
 
 function excerpt(value: SyncPayload | null) {
@@ -39,6 +42,7 @@ export function WebSyncPanel({
   const [status, setStatus] = useState<State>()
   const [compared, setCompared] = useState<Comparison>()
   const [busy, setBusy] = useState(false)
+  const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [message, setMessage] = useState('')
   const ready = !!service.trim() && !!device.trim()
   useEffect(() => {
@@ -112,11 +116,11 @@ export function WebSyncPanel({
   return (
     <details>
       <summary>作品云同步</summary>
-      <p>同步目录、章稿和基本信息。设备凭据仅用于本次页面。</p>
+      <p>同步目录、章稿、基本信息和随稿依据。设备凭据仅用于本次页面。</p>
       <p>
         工作版本编号 <code>{project.branch.id}</code>
       </p>
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy || attachmentBusy}>
         <legend>设备连接</legend>
         <label>
           同步服务地址
@@ -160,7 +164,15 @@ export function WebSyncPanel({
           条待发送或确认
         </p>
       )}
-      {!!status?.deferred?.length && <p>待处理云端对象 {status.deferred.join('、')}</p>}
+      {!!status?.deferred?.length && (
+        <ul>
+          {status.deferred.map(({ object_id, reason }) => (
+            <li key={object_id}>
+              {object_id} · {reason}
+            </li>
+          ))}
+        </ul>
+      )}
       {status?.conflicts.map((id) => (
         <button key={id} type="button" disabled={busy} onClick={() => void run('compare', id)}>
           比较冲突 {id}
@@ -178,7 +190,13 @@ export function WebSyncPanel({
           ).map(([label, side]) => (
             <details key={label}>
               <summary>{label}</summary>
-              <pre>{excerpt(side as SyncPayload | null)}</pre>
+              <pre>
+                {label === '共同依据' && !compared.base
+                  ? compared.incoming.parent_revision
+                    ? '本机尚未取得共同基线修订。'
+                    : '没有已记录的共同基线。'
+                  : excerpt(side as SyncPayload | null)}
+              </pre>
             </details>
           ))}
           {(
@@ -201,6 +219,14 @@ export function WebSyncPanel({
           ))}
         </section>
       )}
+      <CloudAttachments
+        key={service}
+        workId={project.branch.id}
+        service={service}
+        token={token}
+        inactive={!status?.enabled || busy}
+        onBusy={setAttachmentBusy}
+      />
     </details>
   )
 }

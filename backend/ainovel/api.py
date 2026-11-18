@@ -189,7 +189,7 @@ def create_app(settings=None, schema_only=False):
         response.headers["Cache-Control"] = "no-store"
         sync_sources = (
             f" {offline_sync_origins}"
-            if request.url.path.startswith("/offline/") and offline_sync_origins
+            if (request.url.path == "/" or request.url.path.startswith("/offline/")) and offline_sync_origins
             else ""
         )
         response.headers["Content-Security-Policy"] = (
@@ -723,6 +723,10 @@ def create_app(settings=None, schema_only=False):
     @app.post("/api/tasks/{task_id}/resume")
     def resume(task_id: str, data: ResumeInput):
         current = domain.task(task_id)
+        if current["kind"] == "seven_stage_run":
+            raise DomainError(
+                "seven_stage_resume", "请从七台自动接力的专用入口恢复，以核对同一工作版本的执行状态。", 409
+            )
         if data.pause_after_maintenance and (current["kind"] != "workflow" or data.regenerate_pending):
             raise DomainError(
                 "pause_after_maintenance",
@@ -920,7 +924,8 @@ def create_app(settings=None, schema_only=False):
             "SELECT id FROM artifacts WHERE branch_id=?"
             " AND kind NOT IN ('conception_workspace','conception_completion','conception_handoff',"
             "'conception_bundle','reading_metrics','project_brief','project_brief_draft','outline_generation_candidate',"
-            "'workflow_inspection','book_completion','work_snapshot')"
+            "'workflow_inspection','book_completion','work_snapshot','portable_workbench_evidence',"
+            "'inspection_length_target','inspection_semantic_candidate','completion_preparation_candidate')"
             + (" AND chapter_id=?" if chapter_id else "")
             + " ORDER BY created DESC LIMIT 50",
             (branch_id, chapter_id) if chapter_id else (branch_id,),
@@ -1311,8 +1316,12 @@ def create_app(settings=None, schema_only=False):
     register_reference_routes(app, domain, provider_ready)
     register_extraction_routes(app, domain, provider_ready)
     from .outline_generation import register_routes as register_outline_generation_routes
+    from .inspection_semantic import register_routes as register_inspection_semantic_routes
+    from .completion_preparation import register_routes as register_completion_preparation_routes
 
     register_outline_generation_routes(app, domain, provider_ready)
+    register_inspection_semantic_routes(app, domain, provider_ready)
+    register_completion_preparation_routes(app, domain, provider_ready)
     from .seven_stage_run import register_routes as register_seven_stage_run_routes
 
     register_seven_stage_run_routes(app, domain, provider_ready)

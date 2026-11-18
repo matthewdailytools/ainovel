@@ -48,6 +48,41 @@ def select(report, kind, chapter, target=None):
     )
 
 
+def test_diagnosis_uses_comparable_transitions_and_explicit_release_changes():
+    data = {
+        **source("events"),
+        "window_hours": 24,
+        "events": [
+            *(event("one", reader, 1) for reader in ("a", "b", "c")),
+            *(event("two", reader, 5) for reader in ("a", "b", "c")),
+            event("three", "a", 13),
+        ],
+        "publication_changes": [
+            {
+                "chapter_id": "three",
+                "kind": "access",
+                "at": "2026-11-13T00:00:00+08:00",
+                "note": "第三章改为订阅读者可读。",
+            },
+            {
+                "chapter_id": "three",
+                "kind": "revision",
+                "at": "2026-11-14T01:00:00+08:00",
+                "note": "观察结束后才更新。",
+            },
+        ],
+    }
+    report = calculate_report(parse(data))
+    [diagnosis] = report.diagnostics
+    assert (diagnosis.chapter_id, diagnosis.target_chapter_id) == ("two", "three")
+    assert (diagnosis.numerator, diagnosis.denominator, diagnosis.baseline_pairs) == (1, 3, 2)
+    assert diagnosis.rate == pytest.approx(1 / 3)
+    assert diagnosis.baseline_rate == pytest.approx(2 / 3)
+    assert (diagnosis.publication_gap_hours, diagnosis.median_publication_gap_hours) == (192, 144)
+    assert [change.kind for change in diagnosis.changes] == ["access"]
+    assert not calculate_report(parse({**data, "window_hours": 48})).diagnostics
+
+
 def test_dedup_prior_reader_late_release_and_incomplete_window():
     data = {
         **source("events"),
@@ -177,12 +212,15 @@ def test_file_route_saves_only_summary_and_checks_publication_scope(domain, sett
         imported = response.json()
         assert "pseudonym-test-only" not in response.text and "events" not in imported["report"]
         assert client.get(route).json() == {"latest": imported}
+        assert client.get(route + "/history").json()[0]["id"] == imported["id"]
+        assert client.get(route + "/history/" + imported["id"]).json() == imported
         artifact = domain.artifact(imported["id"])
         assert artifact["status"] == "accepted"
         assert "pseudonym-test-only" not in json.dumps(artifact)
         assert len(artifact["basis"]["source_sha256"]) == 64
         other = domain.create_novel("另一部测试作品")
         foreign_route = f"/api/branches/{other['branch_id']}/reading-metrics"
+        assert client.get(foreign_route + "/history/" + imported["id"]).status_code == 404
         response = client.post(f"{foreign_route}/import", files={"file": ("reading.json", json.dumps(data))})
         assert response.status_code == 409
         response = client.post(f"{route}/import", files={"file": ("reading.json", "{invalid")})

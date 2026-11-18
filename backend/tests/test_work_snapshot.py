@@ -12,6 +12,9 @@ from ainovel.work_snapshot import RestoreInput, register_routes, restore
 from test_conception_workbench import confirm, path, save
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 from test_project_brief import BRIEF, IDEA
+from test_reference_flow import SOURCE, reference as reference_fixture, update as update_reference
+
+reference = reference_fixture
 
 
 @pytest.fixture
@@ -67,6 +70,140 @@ def request_restore(client, branch, snapshot_id, mode="in_place", **fields):
         ),
         201,
     )
+
+
+def test_snapshot_rebinds_project_and_keeps_card_addresses_and_length_targets(
+    snapshot_client, domain, story, reference
+):
+    client = snapshot_client
+    branch, chapter_id = story["branch_id"], story["chapter_id"]
+    domain.save(chapter_id, 0, "师姐在门内接过铜铃。")
+    project = save_project(client, branch, 0, "铃归师姐。")
+    endpoint = path(branch)
+    state = verify(client.get(endpoint))
+    authored_setting = {"id": "bell", "title": "门铃", "detail": "铜铃只在门内响。", "links": []}
+    selected = [{"id": "world", "items": [authored_setting]}]
+    candidate = domain.stage(
+        {"novel_id": story["id"], "branch_id": branch},
+        "conception_bundle",
+        {"categories": selected},
+        {
+            "conception_revision": state["revision"],
+            "story_revision": state["story_revision"],
+            "project_confirmation_id": project["id"],
+            "project_revision": project["revision"],
+        },
+    )
+    adopted = verify(
+        client.post(
+            endpoint + "/adopt",
+            json={
+                "base_revision": state["revision"],
+                "base_story_revision": state["story_revision"],
+                "idempotency_key": uid(),
+                "artifact_id": candidate["id"],
+                "categories": selected,
+            },
+        )
+    )
+    setting = confirm(client, endpoint, adopted)["confirmation"]["id"]
+    card = {
+        "id": "pivot",
+        "observation": "先给一部分信息",
+        "interpretation": "留下要验证的缺口",
+        "technique": "用局部收获触发第二步行动",
+        "conditions": "下一步行动必须依赖已获得的部分线索",
+        "exceptions": "换掉人物、地图和原场景",
+        "evidence": SOURCE,
+    }
+    saved = update_reference(client, domain, reference, cards=[card], selected_ids=["pivot"])
+    address = {"session_id": saved["id"], "card_id": "pivot", "revision": saved["revision"]}
+    put_and_confirm(
+        client,
+        outline(branch),
+        {
+            "base_revision": 0,
+            "confirmation_id": setting,
+            "plan": {
+                "summary": "门内归还",
+                "volumes": [
+                    {
+                        "id": "v1",
+                        "title": "遗铃",
+                        "summary": "完成归还",
+                        "units": [
+                            {
+                                "id": "u1",
+                                "title": "师姐",
+                                "summary": "找到主人",
+                                "chapters": [
+                                    {
+                                        **chapter_plan(chapter_id, "验证门铃"),
+                                        "reference_cards": [address],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        },
+    )
+
+    def length(branch_id, scope, identifier=None, minimum=None, prior=None):
+        url = f"/api/branches/{branch_id}/workflow-inspections"
+        scope_fields = {"scope": scope, **({"scope_id": identifier} if identifier else {})}
+        if minimum is None:
+            return verify(client.get(url, params=scope_fields))["preview"]["length_target"]
+        return verify(
+            client.put(
+                url + "/length-targets",
+                json={
+                    **scope_fields,
+                    "base_target_id": prior,
+                    "targets": {"min_chars": minimum},
+                },
+            )
+        )["preview"]["length_target"]
+
+    initial_target = length(branch, "chapter", chapter_id, 1)
+    snapshot = verify(
+        client.post(
+            route(branch),
+            json={"scope": "book", "label": "归铃"},
+        ),
+        201,
+    )
+    later_target = length(branch, "chapter", chapter_id, 100, initial_target["id"])
+    length(branch, "book", minimum=100)
+    save_project(client, branch, project["revision"], "铜铃留在铺子里。")
+    update_reference(client, domain, saved, cards=[{**card, "technique": "另一写法"}], selected_ids=["pivot"])
+
+    restored = request_restore(client, branch, snapshot["id"])
+    status = verify(client.get(endpoint))
+    assert status["project"]["id"] == restored["project_id"] != project["id"]
+    assert not status["project_impacts"]
+    assert status["confirmation"]["current"]
+    confirmed = verify(client.get(outline(branch)))["confirmed"]
+    assert confirmed["setting_basis"]["reference_cards"] == [
+        {
+            **address,
+            **{key: card[key] for key in ("technique", "conditions", "exceptions")},
+            "source_title": "自拟参考.txt",
+        }
+    ]
+    current_target = length(branch, "chapter", chapter_id)
+    assert current_target["targets"]["min_chars"] == 1
+    assert current_target["revision"] > later_target["revision"]
+    assert length(branch, "book") is None
+    assert length(branch, "book", minimum=1)["revision"] == 3
+
+    fork = request_restore(client, branch, snapshot["id"], "new_branch", branch_name="归铃复本")
+    assert (
+        length(fork["branch_id"], "chapter", fork["chapters"][chapter_id]["id"])["targets"]["min_chars"] == 1
+    )
+    forked = verify(client.get(outline(fork["branch_id"])))["confirmed"]
+    assert forked["setting_basis"]["reference_cards"] == confirmed["setting_basis"]["reference_cards"]
 
 
 def test_volume_checkpoint_restores_manuscript_setting_outline_and_promise_in_both_modes(
@@ -190,8 +327,10 @@ def test_volume_checkpoint_restores_manuscript_setting_outline_and_promise_in_bo
     assert stale.status_code == 409
     snapshots = verify(client.get(route(branch)))
     assert any(row["id"] == checkpoint["id"] for row in snapshots)
-    assert sum(row["purpose"] == "milestone" for row in snapshots) == 2
-    assert all(row["purpose"] != "before_restore" for row in snapshots)
+    milestones = [row["label"] for row in snapshots if row["purpose"] == "milestone"]
+    assert milestones.count("确认四级大纲") == 2
+    assert milestones.count("确认立项") == 2
+    assert all(row["purpose"] != "pre_restore" for row in snapshots)
     restored = request_restore(client, branch, checkpoint["id"])
     current = domain.chapter(chapter_id)
     assert current["revision"] > changed["revision"]

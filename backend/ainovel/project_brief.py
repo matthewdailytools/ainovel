@@ -65,10 +65,12 @@ def confirmed_project_tx(tx, branch_id, identifier=None):
     return {**json.loads(row["payload"]), "id": row["id"]} if row else None
 
 
-def confirm(domain, branch_id, data):
+def confirm(domain, branch_id, data, *, before_write=None):
     payload = data.model_dump()
     fingerprint = hashlib.sha256(dumps([KIND, branch_id, payload]).encode()).hexdigest()
     with domain.db.connect(True) as tx:
+        if before_write is not None:
+            before_write(tx)
         branch = tx.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
         if not branch:
             raise DomainError("not_found", "工作版本不存在。", 404)
@@ -128,6 +130,9 @@ def confirm(domain, branch_id, data):
             "INSERT INTO receipts VALUES(?,?,?)",
             (data.idempotency_key, identifier, dumps({"project_brief": fingerprint})),
         )
+        from .work_snapshot import checkpoint_tx
+
+        checkpoint_tx(tx, branch_id, "确认立项")
         return {**saved, "id": identifier}
 
 

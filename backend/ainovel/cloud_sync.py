@@ -14,9 +14,11 @@ from fastapi import FastAPI, Header, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from pydantic import Field, JsonValue, StringConstraints, model_validator
+from pydantic import Field, JsonValue, StringConstraints, ValidationError, model_validator
 
 from .db import DomainError
+from .cloud_attachments import SCHEMA as ATTACHMENT_SCHEMA, register_routes as register_attachments
+from .manuscript_exchange import RevisionObject, _source_link
 from .models import Input
 
 MAX_OBJECT_BYTES = 1024 * 1024
@@ -237,7 +239,8 @@ class SyncStore:
                 raise DomainError("sync_schema", "请选择独立的同步数据库。")
             tx.execute("PRAGMA journal_mode=WAL")
             tx.executescript(
-                f"BEGIN IMMEDIATE;\n{SCHEMA}\nPRAGMA application_id={APP_ID};\nPRAGMA user_version=1;\nCOMMIT;"
+                f"BEGIN IMMEDIATE;\n{SCHEMA}\n{ATTACHMENT_SCHEMA}\n"
+                f"PRAGMA application_id={APP_ID};\nPRAGMA user_version=1;\nCOMMIT;"
             )
 
     @contextmanager
@@ -344,6 +347,8 @@ class SyncStore:
             fingerprint = _digest(_encoded(["push", device, data.model_dump()]))
             if replay := self._replay(tx, work, data.change_id, fingerprint):
                 return replay
+            if data.object_id.startswith("revision:"):
+                return self._push_source_revision(tx, work, device, data, payload, fingerprint)
             if data.parent_revision is not None:
                 parent = self._change(tx, work, data.parent_revision)
                 if not parent or parent["object_id"] != data.object_id:
@@ -354,6 +359,37 @@ class SyncStore:
             return self._append(
                 tx, work, device, data, fingerprint, payload, head, "conflict", data.change_id
             )
+
+    def _push_source_revision(self, tx, work, device, data, payload, fingerprint):
+        try:
+            source = RevisionObject.model_validate(data.payload)
+        except ValidationError as error:
+            raise DomainError("sync_history", "来源修订格式无效。", 409) from error
+        row = source.revision
+        if (
+            source.branch_id != work
+            or data.object_id != f"revision:{row.id}"
+            or _digest(row.content) != row.sha256
+        ):
+            raise DomainError("sync_history", "来源修订归属或正文哈希无效。", 409)
+        head = self._head(tx, work, data.object_id)
+        if head:
+            existing = self._change(tx, work, head)
+            if RevisionObject.model_validate_json(existing["payload"]) != source:
+                raise DomainError("sync_history", "同一来源修订编号不能修改。", 409)
+        if data.parent_revision is not None:
+            base = self._change(tx, work, data.parent_revision)
+            if not base or base["object_id"] != data.object_id:
+                raise DomainError("sync_parent_unknown", "父修订不属于该对象。", 409)
+        parent_id = self._head(tx, work, f"revision:{row.parent_id}") if row.parent_id else None
+        parent = (
+            RevisionObject.model_validate_json(self._change(tx, work, parent_id)["payload"]).revision
+            if parent_id
+            else None
+        )
+        if not _source_link(row, parent):
+            raise DomainError("sync_history", "来源修订须等待同一章的连续父稿入库。", 409)
+        return self._append(tx, work, device, data, fingerprint, payload, data.change_id, "applied")
 
     def receipt(self, work, digest, change_id):
         with self.transaction(snapshot=True) as tx:
@@ -588,6 +624,7 @@ def create_sync_app(database_path: Path, provisioning_token: str, browser_origin
     ) -> Receipt:
         return store.resolve(work_id, _credential(authorization), conflict_id, data)
 
+    register_attachments(app, store, _credential)
     return app
 
 

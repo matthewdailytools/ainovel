@@ -63,6 +63,7 @@ export function ConceptionWorkspace({
   const [instruction, setInstruction] = useState('')
   const [budget, setBudget] = useState('')
   const [completionNote, setCompletionNote] = useState('')
+  const [projectReview, setProjectReview] = useState<{ key: string; itemIds: string[] }>()
   const [storyOpen, setStoryOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [tasks, setTasks] = useState<GenerationTask[]>([])
@@ -100,6 +101,12 @@ export function ConceptionWorkspace({
   const dirty = !!draft
   const confirmation = state?.confirmation
   const readyHandoff = confirmation?.current && !dirty ? confirmation : undefined
+  const projectImpacts = state?.project_impacts ?? []
+  const projectReviewKey = `${branch.id}/${state?.project?.id}/${state?.revision}/${state?.story_revision}`
+  const checkedProjectItems = projectReview?.key === projectReviewKey ? projectReview.itemIds : []
+  const reconciledProjectItems = projectImpacts
+    .filter((item) => item.reconciled || checkedProjectItems.includes(item.item_id))
+    .map((item) => item.item_id)
   const panel = useRef<HTMLElement>(null)
   useLeaveGuard(dirty, '未保存的构思设定')
 
@@ -352,7 +359,11 @@ export function ConceptionWorkspace({
     if (!state || draft) return
     const updated = await post<ConceptionState>(
       'confirm',
-      { ...baseRevision(state), note: completionNote.trim() },
+      {
+        ...baseRevision(state),
+        note: completionNote.trim(),
+        reconciled_project_items: reconciledProjectItems,
+      },
       'idempotency_key',
     )
     if (!alive.current) return
@@ -870,6 +881,32 @@ export function ConceptionWorkspace({
         <p className="small">提示供你决定是否继续完善。保留待办也可以确认。</p>
         {state && (
           <>
+            {!!projectImpacts.length && (
+              <fieldset disabled={busy || dirty}>
+                <legend>立项修订影响</legend>
+                {projectImpacts.map((item) => (
+                  <label key={item.item_id}>
+                    <input
+                      type="checkbox"
+                      checked={reconciledProjectItems.includes(item.item_id)}
+                      disabled={item.reconciled}
+                      onChange={(event) =>
+                        setProjectReview({
+                          key: projectReviewKey,
+                          itemIds: event.target.checked
+                            ? [...checkedProjectItems, item.item_id]
+                            : checkedProjectItems.filter((id) => id !== item.item_id),
+                        })
+                      }
+                    />
+                    已按当前立项核对「{item.title}」 · 原依据{' '}
+                    {item.source_project_revision === null || item.source_project_revision === undefined
+                      ? item.source_project_id
+                      : `立项修订 ${item.source_project_revision}`}
+                  </label>
+                ))}
+              </fieldset>
+            )}
             {state.issues.length ? (
               <ul className="conception-issues">
                 {state.issues.map(({ category_id, message }, index) => (
@@ -919,7 +956,7 @@ export function ConceptionWorkspace({
               <button
                 className="primary"
                 type="button"
-                disabled={busy || dirty}
+                disabled={busy || dirty || reconciledProjectItems.length !== projectImpacts.length}
                 onClick={() => void perform(confirm, 'confirmation')}
               >
                 确认当前构思

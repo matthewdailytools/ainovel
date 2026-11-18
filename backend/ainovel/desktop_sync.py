@@ -13,9 +13,21 @@ from fastapi import Body
 import httpx
 from pydantic import Field, SecretStr, TypeAdapter, ValidationError
 
-from .cloud_sync import ComparedConflict, MAX_CURSOR, Pulled, Receipt
+from .cloud_sync import ComparedConflict, MAX_CURSOR, MAX_OBJECT_BYTES, Pulled, Receipt
 from .db import DomainError, dumps, uid
-from .manuscript_exchange import PortableBranch, PortableChapter, PortableRevision, PortableWork
+from .manuscript_exchange import (
+    PortableBranch,
+    PortableChapter,
+    PortableEvidence,
+    PortableRevision,
+    PortableWork,
+    RevisionObject,
+    _evidence,
+    source_revision,
+    source_revisions,
+    store_portable_evidence,
+    store_source_revision,
+)
 from .models import Input
 
 FORMAT = "ainovel-manuscript-sync/1"
@@ -67,12 +79,18 @@ class ChapterObject(Input):
     head: PortableRevision
 
 
+class EvidenceObject(Input):
+    format: Literal["ainovel-manuscript-sync/1"]
+    kind: Literal["evidence"]
+    document: PortableEvidence
+
+
 def _sha(text):
     return sha256(text.encode("utf-8")).hexdigest()
 
 
 def _digest(value):
-    if value:
+    if value and value["kind"] in {"branch", "chapter"}:
         # Scope the identity to author-visible fields and avoid echoing derived stale/counter updates.
         value = {**value}
         field, derived = ("branch", "story_revision") if value["kind"] == "branch" else ("chapter", "stale")
@@ -144,6 +162,15 @@ def _parse(cls, value):
 
 
 def _local(tx, branch_id, object_id):
+    if object_id.startswith("revision:"):
+        row = source_revision(tx, branch_id, object_id.removeprefix("revision:"))
+        return _revision_object(branch_id, row) if row else None
+    if object_id.startswith("evidence:"):
+        document_id = object_id.removeprefix("evidence:")
+        for document in _evidence(tx, branch_id):
+            if document["id"] == document_id:
+                return {"format": FORMAT, "kind": "evidence", "document": document}
+        return None
     if object_id == f"branch:{branch_id}":
         branch = tx.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
         novel = tx.execute("SELECT * FROM novels WHERE id=?", (branch["novel_id"],)).fetchone()
@@ -172,6 +199,10 @@ def _local(tx, branch_id, object_id):
     ).model_dump()
 
 
+def _revision_object(branch_id, row):
+    return RevisionObject(format=FORMAT, kind="revision", branch_id=branch_id, revision=row).model_dump()
+
+
 def _shadow(tx, branch_id, object_id):
     return tx.execute(
         "SELECT * FROM desktop_sync_objects WHERE branch_id=? AND object_id=?", (branch_id, object_id)
@@ -184,6 +215,26 @@ def _remember(tx, branch_id, event, local_digest):
         "remote_revision=excluded.remote_revision,sequence=excluded.sequence,local_sha256=excluded.local_sha256 "
         "WHERE excluded.sequence>=desktop_sync_objects.sequence",
         (branch_id, event.object_id, event.head_revision, event.sequence, local_digest),
+    )
+
+
+def _source_extension(tx, branch_id, head, local):
+    history = []
+    row = source_revision(tx, branch_id, head.id)
+    if row != head:
+        return history
+    while row != local:
+        if not row or tx.execute("SELECT 1 FROM revisions WHERE id=?", (row.id,)).fetchone():
+            return []
+        history.append(row)
+        row = source_revision(tx, branch_id, row.parent_id) if row.parent_id else None
+    return list(reversed(history))
+
+
+def _remove_source_copies(tx, branch_id, history):
+    tx.executemany(
+        "DELETE FROM manuscript_revision_sources WHERE branch_id=? AND id=?",
+        [(branch_id, revision.id) for revision in history],
     )
 
 
@@ -219,21 +270,49 @@ def _apply_chapter(tx, domain, branch_id, event):
     if collision:
         raise DomainError("sync_order", "远端章位与本机另一章冲突。调整章序后可重新拉取。", 409)
     if not row:
-        identifier = (
-            head.id if not tx.execute("SELECT 1 FROM revisions WHERE id=?", (head.id,)).fetchone() else uid()
-        )
+        history = _source_extension(tx, branch_id, head, None)
+        if len(history) != head.revision + 1:
+            history = [
+                head.model_copy(
+                    update={
+                        "id": uid(),
+                        "revision": 0,
+                        "parent_id": None,
+                        "cause": f"云同步初始稿，来源修订 {head.id}",
+                    }
+                )
+            ]
         tx.execute(
             "INSERT INTO chapters VALUES(?,?,?,?,?,?,0,0)",
-            (chapter_id, branch_id, info.position, info.title, 0, head.content),
+            (chapter_id, branch_id, info.position, info.title, history[-1].revision, head.content),
         )
-        tx.execute(
+        tx.executemany(
             "INSERT INTO revisions VALUES(?,?,?,?,?,?)",
-            (identifier, chapter_id, 0, head.content, f"云同步初始稿，来源修订 {head.id}", head.created),
+            [(r.id, chapter_id, r.revision, r.content, r.cause, r.created) for r in history],
         )
+        _remove_source_copies(tx, branch_id, history)
         tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
         return
-    current = _local(tx, branch_id, event.object_id)
-    if row["content"] != head.content or (current and current["head"]["id"] != head.id):
+    local = tx.execute(
+        "SELECT id FROM revisions WHERE chapter_id=? AND revision=?",
+        (chapter_id, row["revision"]),
+    ).fetchone()
+    if not local:
+        raise DomainError("sync_history", "本机当前章稿缺少修订记录。", 409)
+    history = _source_extension(tx, branch_id, head, source_revision(tx, branch_id, local["id"]))
+    if history:
+        chapter = dict(row)
+        for revision in history:
+            chapter["revision"] = domain.revise_tx(
+                tx,
+                chapter,
+                revision.content,
+                revision.cause,
+                revision_id=revision.id,
+                created=revision.created,
+            )
+        _remove_source_copies(tx, branch_id, history)
+    elif row["content"] != head.content:
         domain.revise_tx(tx, dict(row), head.content, f"云同步，来源修订 {head.id}")
     tx.execute(
         "UPDATE chapters SET position=?,title=?,archived=0 WHERE id=?",
@@ -243,6 +322,28 @@ def _apply_chapter(tx, domain, branch_id, event):
 
 
 def _apply(tx, domain, branch_id, event):
+    if event.object_id.startswith("revision:"):
+        try:
+            value = RevisionObject.model_validate(event.payload)
+        except ValidationError as error:
+            raise DomainError("sync_history", "来源修订格式无效。", 409) from error
+        if (
+            event.tombstone
+            or value.branch_id != branch_id
+            or event.object_id != f"revision:{value.revision.id}"
+        ):
+            raise DomainError("sync_scope", "来源稿件与工作版本或同步编号不符。", 409)
+        store_source_revision(tx, branch_id, value.revision)
+        return
+    if event.object_id.startswith("evidence:"):
+        try:
+            wrapped = EvidenceObject.model_validate(event.payload)
+        except ValidationError as error:
+            raise DomainError("sync_format", "收到不可读取的只读依据。", 409) from error
+        if event.tombstone or event.object_id != f"evidence:{wrapped.document.id}":
+            raise DomainError("sync_scope", "云端依据与编号不匹配。", 409)
+        store_portable_evidence(tx, branch_id, wrapped.document)
+        return
     if event.object_id.startswith("chapter:"):
         _apply_chapter(tx, domain, branch_id, event)
         return
@@ -271,7 +372,15 @@ def _apply(tx, domain, branch_id, event):
 def _verified_digest(event):
     if event.tombstone and event.payload is None and event.object_id.startswith("chapter:"):
         return _digest(None)
-    schema = ChapterObject if event.object_id.startswith("chapter:") else BranchObject
+    schema = (
+        ChapterObject
+        if event.object_id.startswith("chapter:")
+        else RevisionObject
+        if event.object_id.startswith("revision:")
+        else EvidenceObject
+        if event.object_id.startswith("evidence:")
+        else BranchObject
+    )
     try:
         payload = schema.model_validate(event.payload).model_dump()
     except ValidationError as error:
@@ -444,29 +553,48 @@ class DesktopSync:
                             (branch_id, row.change_id),
                         )
                 tx.execute("UPDATE desktop_sync SET cursor=? WHERE branch_id=?", (page.cursor, branch_id))
+                for deferred in list(
+                    tx.execute("SELECT receipt FROM desktop_sync_deferred WHERE branch_id=?", (branch_id,))
+                ):
+                    self._consume(tx, branch_id, Receipt.model_validate_json(deferred["receipt"]))
             if not page.has_more:
-                break
+                return
+        raise DomainError("sync_pages", "尚有云端历史待读取，已保留游标，请再次同步。", 409)
 
     def _prepare(self, branch_id):
         with self.domain.db.connect(True) as tx:
-            for row in list(
-                tx.execute("SELECT receipt FROM desktop_sync_deferred WHERE branch_id=?", (branch_id,))
-            ):
-                self._consume(tx, branch_id, Receipt.model_validate_json(row["receipt"]))
-            object_ids = [f"branch:{branch_id}"] + [
+            object_ids = [
                 f"chapter:{row['id']}"
                 for row in tx.execute(
                     "SELECT id FROM chapters WHERE branch_id=? ORDER BY position,id", (branch_id,)
                 )
             ]
-            for object_id in object_ids:
+            native_ids = [
+                (row["revision"], row["id"])
+                for row in tx.execute(
+                    "SELECT r.id,r.revision FROM revisions r JOIN chapters c ON c.id=r.chapter_id "
+                    "WHERE c.branch_id=?",
+                    (branch_id,),
+                )
+            ]
+            sources = source_revisions(tx, branch_id)
+            histories = [
+                f"revision:{identifier}"
+                for _, identifier in sorted([*native_ids, *((row.revision, row.id) for row in sources)])
+            ]
+            documents = {
+                f"evidence:{doc['id']}": {"format": FORMAT, "kind": "evidence", "document": doc}
+                for doc in _evidence(tx, branch_id)
+                if len(dumps(doc).encode("utf-8")) <= MAX_OBJECT_BYTES - 4096
+            }
+            for object_id in [f"branch:{branch_id}", *histories, *object_ids, *documents]:
                 if tx.execute(
                     "SELECT 1 FROM desktop_sync_outbox WHERE branch_id=? AND object_id=? UNION ALL "
                     "SELECT 1 FROM desktop_sync_conflicts WHERE branch_id=? AND object_id=? LIMIT 1",
                     (branch_id, object_id, branch_id, object_id),
                 ).fetchone():
                     continue
-                value = _local(tx, branch_id, object_id)
+                value = documents.get(object_id) or _local(tx, branch_id, object_id)
                 known = _shadow(tx, branch_id, object_id)
                 current = _digest(value)
                 if (value is None and not known) or (known and current == known["local_sha256"]):

@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 from pydantic import Field, StringConstraints, model_validator
 
 from .author_contract import assemble_contract
+from .conception import CONFIRMATION, _latest as latest_conception_revision, _read_payload, _workspace
 from .db import DomainError, dumps, uid
 from .domain import utf16_slice
 from .manual_finalization import _known_issues, _manifest
@@ -23,6 +24,7 @@ from .setting_review import confirmed_world_basis
 from .story_graph import Source, graph_snapshot, sources
 
 KIND = "workflow_inspection"
+LENGTH_TARGET_KIND = "inspection_length_target"
 VERSION = "m6-inspection/1"
 COUNT_VERSION = "正文有效字符/1，排除 Markdown 标题行、常见排版标记、空白和不可见字符，计入标点"
 Scope = Literal["chapter", "volume", "book"]
@@ -48,11 +50,15 @@ class AuthorReview(Input):
     basis_note: Text
     reason: Text
     evidence: list[Source] = Field(default_factory=list, max_length=30)
+    source_candidate_id: str | None = Field(default=None, min_length=1, max_length=128)
+    author_overrides_candidate: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def needs_evidence(self):
         if self.status in {"green", "red"} and not self.evidence:
             raise ValueError("确认通过或冲突时须引用所查正文。")
+        if self.author_overrides_candidate and (self.source_candidate_id is None or self.status != "green"):
+            raise ValueError("作者裁定须引用候选，并明确给出本次通过结论。")
         return self
 
 
@@ -65,6 +71,19 @@ class LengthTargets(Input):
     def ordered_range(self):
         if self.min_chars is not None and self.max_chars is not None and self.min_chars > self.max_chars:
             raise ValueError("篇幅下限不能高于上限。")
+        return self
+
+
+class SaveLengthTargets(Input):
+    scope: Scope = "book"
+    scope_id: str | None = Field(default=None, max_length=128)
+    base_target_id: str | None = Field(default=None, max_length=128)
+    targets: LengthTargets
+
+    @model_validator(mode="after")
+    def require_constraint(self):
+        if all(value is None for value in self.targets.model_dump().values()):
+            raise ValueError("至少填写一项数值篇幅目标。")
         return self
 
 
@@ -112,7 +131,7 @@ def _scope(tx, branch_id, outline, scope, scope_id):
     return selected
 
 
-def _item(check_id, summary, basis, status="pending", *, manifest, scope):
+def _item(check_id, summary, basis, status="pending", *, manifest, scope, can_mark_not_applicable=False):
     digest_basis = basis
     if scope != "book":
         # Keep the original ID for provenance while comparing scoped plan content.
@@ -127,6 +146,7 @@ def _item(check_id, summary, basis, status="pending", *, manifest, scope):
         "status": status,
         "summary": summary,
         "basis": basis,
+        "can_mark_not_applicable": can_mark_not_applicable,
         "basis_sha256": _sha([VERSION, check_id, manifest, digest_basis]),
     }
 
@@ -190,32 +210,38 @@ def _card_references(tx, branch_id, chapters):
     for row in tx.execute(
         "SELECT a.id,a.chapter_id,a.basis,r.result FROM artifacts a JOIN receipts r ON a.id=r.artifact_id "
         "WHERE a.branch_id=? AND a.kind='chapter_draft' AND a.status='accepted' "
-        "AND json_type(a.basis,'$.reference_session.card_references')='array' ORDER BY a.rowid,r.rowid",
+        "AND (json_type(a.basis,'$.reference_session.card_references')='array' "
+        "OR json_type(a.basis,'$.outline.reference_cards')='array') ORDER BY a.rowid,r.rowid",
         (branch_id,),
     ):
         chapter = indexed.get(row["chapter_id"])
         revision = json.loads(row["result"]).get("revision")
         if not chapter or revision != chapter["revision"]:
             continue
-        selected = json.loads(row["basis"])["reference_session"]["card_references"]
-        for ref in selected:
-            session = tx.execute(
-                "SELECT * FROM reference_sessions WHERE id=?", (ref["session_id"],)
-            ).fetchone()
+        basis = json.loads(row["basis"])
+        selected = (basis.get("reference_session") or {}).get("card_references", [])
+        planned = (basis.get("outline") or {}).get("reference_cards", [])
+        addresses = dict.fromkeys(
+            (ref["session_id"], ref["card_id"], ref["revision"]) for ref in [*selected, *planned]
+        )
+        for session_id, card_id, card_revision in addresses:
+            session = tx.execute("SELECT * FROM reference_sessions WHERE id=?", (session_id,)).fetchone()
             resolved = None
             if session:
                 try:
                     resolved = card_version(
                         {**dict(session), "payload": json.loads(session["payload"])},
-                        ref["card_id"],
-                        ref["revision"],
+                        card_id,
+                        card_revision,
                     )
                 except DomainError as error:
                     if error.code not in {"reference_card", "reference_card_incomplete"}:
                         raise
             result.append(
                 {
-                    **ref,
+                    "session_id": session_id,
+                    "card_id": card_id,
+                    "revision": card_revision,
                     "artifact_id": row["id"],
                     "chapter_id": chapter["id"],
                     "chapter_revision": revision,
@@ -225,24 +251,68 @@ def _card_references(tx, branch_id, chapters):
     return result
 
 
-def _length(manifest, targets):
+def current_length_target(tx, branch_id, scope, scope_id, *, include_cleared=False):
+    row = tx.execute(
+        "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+        "AND json_extract(payload,'$.scope')=? AND json_extract(payload,'$.scope_id') IS ? ORDER BY rowid DESC LIMIT 1",
+        (branch_id, LENGTH_TARGET_KIND, scope, scope_id),
+    ).fetchone()
+    if not row:
+        return None
+    stored = json.loads(row["payload"])
+    if stored["targets"] is None and not include_cleared:
+        return None
+    return {"id": row["id"], "revision": stored["revision"], "targets": stored["targets"]}
+
+
+def _save_length_target(tx, branch_id, scope, scope_id, current, targets):
+    identifier = uid()
+    revision = current["revision"] + 1 if current else 1
+    payload = {"scope": scope, "scope_id": scope_id, "revision": revision, "targets": targets}
+    tx.execute(
+        "INSERT INTO artifacts(id,novel_id,branch_id,kind,payload,basis,status,created) "
+        "SELECT ?,novel_id,id,?,?,?,'accepted',? FROM branches WHERE id=?",
+        (
+            identifier,
+            LENGTH_TARGET_KIND,
+            dumps(payload),
+            dumps({"previous_target_id": current["id"] if current else None}),
+            time(),
+            branch_id,
+        ),
+    )
+
+
+def length_result(manifest, targets):
     count = sum(row["chars"] for row in manifest)
     problems = []
     if not manifest or any(not row["chars"] for row in manifest):
         problems.append("所查范围有缺章或空稿")
     if targets:
-        if targets.expected_chapters is not None and len(manifest) != targets.expected_chapters:
+        if targets["expected_chapters"] is not None and len(manifest) != targets["expected_chapters"]:
             problems.append("章数偏离冻结目标")
-        if (targets.min_chars is not None and count < targets.min_chars) or (
-            targets.max_chars is not None and count > targets.max_chars
+        if (targets["min_chars"] is not None and count < targets["min_chars"]) or (
+            targets["max_chars"] is not None and count > targets["max_chars"]
         ):
             problems.append("正文字符数超出冻结目标")
     measured = f"{len(manifest)} 章、{count} 个有效字符。"
     if problems:
         return "red", measured + "；".join(problems) + "。"
-    if targets and any(value is not None for value in targets.model_dump().values()):
+    if targets:
         return "green", measured + "符合本次配置目标。"
     return "pending", measured + "请对照采用的篇幅目标。"
+
+
+def _world_needs_confirmation(tx, branch_id):
+    previous = latest_conception_revision(tx, branch_id, CONFIRMATION)
+    versions = [_workspace(tx, branch_id), *([_read_payload(previous)] if previous else [])]
+    return any(
+        item["detail"].strip()
+        for version in versions
+        for category in version["categories"]
+        if category["id"] == "world" and not category["skipped"]
+        for item in category["items"]
+    )
 
 
 def _scene_rows(tx, branch_id, chapters, graph):
@@ -275,7 +345,7 @@ def _scene_rows(tx, branch_id, chapters, graph):
     return result
 
 
-def _evaluate(tx, branch_id, scope, scope_id, targets=None):
+def _evaluate(tx, branch_id, scope, scope_id):
     outline = _view(tx, branch_id)
     chapters = _scope(tx, branch_id, outline, scope, scope_id)
     graph = graph_snapshot(tx, branch_id)
@@ -314,13 +384,14 @@ def _evaluate(tx, branch_id, scope, scope_id, targets=None):
         "plans": plans,
     }
     world = confirmed_world_basis(tx, branch_id)
+    world_needs_confirmation = not world["confirmation_id"] and _world_needs_confirmation(tx, branch_id)
     reviews = _rule_reports(tx, branch_id, chapters, world["confirmation_id"])
     covered = {(row["chapter_id"], row["rule"]["id"]) for row in reviews if row["result"] == "pass"}
     rules = {(row["chapter_id"], key) for row in plans for key in row["setting_ids"]}
     failures = [row for row in reviews if row["result"] == "fail"]
     if any(row["rule"].get("setting_policy", {}).get("strength") != "soft" for row in failures):
         rule_status = "red"
-    elif outline["stale"]:
+    elif outline["stale"] or world_needs_confirmation:
         rule_status = "outdated"
     elif failures:
         rule_status = "pending"
@@ -356,7 +427,11 @@ def _evaluate(tx, branch_id, scope, scope_id, targets=None):
     impacted = [row["id"] for row in manifest if row["stale"]]
     references = _card_references(tx, branch_id, chapters)
     broken_cards = [row for row in references if not row["source"]]
-    length_status, length_summary = _length(manifest, targets)
+    length_revision = current_length_target(tx, branch_id, scope, scope_id, include_cleared=True)
+    length_target = length_revision if length_revision and length_revision["targets"] is not None else None
+    length_status, length_summary = length_result(
+        manifest, length_target["targets"] if length_target else None
+    )
     item = partial(_item, manifest=manifest, scope=scope)
     items = [
         item(
@@ -393,8 +468,16 @@ def _evaluate(tx, branch_id, scope, scope_id, targets=None):
                 "tracked": sorted(rules),
                 "outline_id": plan_basis["outline_id"],
                 "outline_stale": outline["stale"],
+                "world_needs_confirmation": world_needs_confirmation,
             },
             rule_status,
+            can_mark_not_applicable=(
+                not world["items"]
+                and not rules
+                and not reviews
+                and not outline["stale"]
+                and not world_needs_confirmation
+            ),
         ),
         item(
             "06",
@@ -407,6 +490,7 @@ def _evaluate(tx, branch_id, scope, scope_id, targets=None):
             f"当前范围关联 {len(promises)} 条已维护承诺，按埋设、回收窗口与阶段记录核对。",
             {"records": promises, "windows": windows, "outline_id": plan_basis["outline_id"]},
             promise_status,
+            can_mark_not_applicable=not promises and not windows and not outline["stale"],
         ),
         item(
             "08",
@@ -424,7 +508,11 @@ def _evaluate(tx, branch_id, scope, scope_id, targets=None):
         item(
             "09",
             length_summary,
-            {"method": COUNT_VERSION, "project_length": (project or {}).get("brief", {}).get("length")},
+            {
+                "method": COUNT_VERSION,
+                "project_length": (project or {}).get("brief", {}).get("length"),
+                "length_target": length_revision,
+            },
             length_status,
         ),
         item(
@@ -438,19 +526,23 @@ def _evaluate(tx, branch_id, scope, scope_id, targets=None):
         "scope": scope,
         "scope_id": scope_id,
         "chapters": manifest,
+        "length_target": length_target,
         "items": items,
         "basis_sha256": _sha([scope, scope_id, [item["basis_sha256"] for item in items]]),
     }, chapters
 
 
-def _apply_author_reviews(items, reviews, chapters):
+def _apply_author_reviews(tx, branch_id, report, reviews, chapters):
     indexed = {row["id"]: row for row in chapters}
-    checks = {row["check_id"]: row for row in items}
+    checks = {row["check_id"]: row for row in report["items"]}
     seen = set()
     for review in reviews:
         if review.check_id in seen:
             raise DomainError("inspection_duplicate", "同一检查只能提交一份本轮作者核对。")
         seen.add(review.check_id)
+        item = checks[review.check_id]
+        if review.status == "not_applicable" and not item["can_mark_not_applicable"]:
+            raise DomainError("inspection_required", f"{item['title']}须核对，不能标为不适用。")
         for evidence in review.evidence:
             chapter = indexed.get(evidence.chapter_id)
             if not chapter or chapter["revision"] != evidence.revision:
@@ -460,8 +552,24 @@ def _apply_author_reviews(items, reviews, chapters):
                 or utf16_slice(chapter["content"], evidence.start, evidence.end)[1] != evidence.quote
             ):
                 raise DomainError("inspection_evidence", "作者核对引文与冻结正文范围不一致。", 409)
-        item = checks[review.check_id]
-        item["author_review"] = review.model_dump()
+        recorded = review.model_dump()
+        if review.source_candidate_id:
+            from .inspection_semantic import candidate_for_review_tx
+
+            candidate = candidate_for_review_tx(
+                tx, branch_id, review.source_candidate_id, report, review.check_id
+            )
+            if (
+                review.status == "green"
+                and candidate["result"] != "pass"
+                and (not review.author_overrides_candidate or review.reason == candidate["reason"])
+            ):
+                raise DomainError(
+                    "inspection_candidate_override",
+                    "候选指出冲突或证据不足；确认通过前须填写作者自己的裁定理由。",
+                )
+            recorded["candidate_result"] = candidate["result"]
+        item["author_review"] = recorded
         if item["status"] == "pending" or review.status == "red":
             item["status"] = review.status
         elif item["status"] == "green" and review.status == "yellow":
@@ -479,15 +587,22 @@ def _latest(tx, branch_id, scope, scope_id):
 
 def _effective(row, preview):
     report = json.loads(row["payload"])
-    current = {item["check_id"]: item["basis_sha256"] for item in preview["items"]} if preview else {}
+    current = {item["check_id"]: item for item in preview["items"]} if preview else {}
+    invalid_exemption = False
     for item in report["items"]:
-        matched = current.get(item["check_id"]) == item["basis_sha256"]
-        item["current_status"] = item["status"] if matched else "outdated"
+        latest = current.get(item["check_id"], {})
+        matched = latest.get("basis_sha256") == item["basis_sha256"]
+        allowed = item["status"] != "not_applicable" or latest.get("can_mark_not_applicable", False)
+        if not allowed:
+            invalid_exemption = True
+        item["current_status"] = item["status"] if matched and allowed else "outdated"
     return {
         **report,
         "id": row["id"],
         "created": row["created"],
-        "current": bool(preview and report["basis_sha256"] == preview["basis_sha256"]),
+        "current": bool(
+            preview and not invalid_exemption and report["basis_sha256"] == preview["basis_sha256"]
+        ),
     }
 
 
@@ -496,13 +611,28 @@ def latest_book_inspection(tx, branch_id):
     return _effective(row, _evaluate(tx, branch_id, "book", None)[0]) if row else None
 
 
-def create_inspection(domain, branch_id, data):
+def create_inspection(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
-        report, chapters = _evaluate(tx, branch_id, data.scope, data.scope_id, data.length_targets)
+        if before_write is not None:
+            before_write(tx)
+        report, chapters = _evaluate(tx, branch_id, data.scope, data.scope_id)
         if report["basis_sha256"] != data.basis_sha256:
             raise DomainError("inspection_changed", "对账依据已变化，请重新读取当前范围。", 409)
-        _apply_author_reviews(report["items"], data.author_reviews, chapters)
-        report["length_targets"] = data.length_targets.model_dump() if data.length_targets else None
+        target = report["length_target"]
+        if data.length_targets:
+            requested = data.length_targets.model_dump()
+            if target and requested != target["targets"]:
+                raise DomainError("inspection_length_changed", "请先保存新的篇幅目标，再生成体检单。", 409)
+            if not target and any(value is not None for value in requested.values()):
+                # Initial numeric targets and the first report may be saved together.
+                current = current_length_target(
+                    tx, branch_id, data.scope, data.scope_id, include_cleared=True
+                )
+                _save_length_target(tx, branch_id, data.scope, data.scope_id, current, requested)
+                report, chapters = _evaluate(tx, branch_id, data.scope, data.scope_id)
+                target = report["length_target"]
+        _apply_author_reviews(tx, branch_id, report, data.author_reviews, chapters)
+        report["length_targets"] = target["targets"] if target else None
         identifier = uid()
         created = time()
         tx.execute(
@@ -547,6 +677,21 @@ def register_routes(app, domain):
     @app.post(endpoint, status_code=201)
     def inspect(branch_id: str, data: InspectionInput):
         return create_inspection(domain, branch_id, data)
+
+    @app.put(endpoint + "/length-targets")
+    def save_length_targets(branch_id: str, data: SaveLengthTargets):
+        with domain.db.connect(True) as tx:
+            _scope(tx, branch_id, _view(tx, branch_id), data.scope, data.scope_id)
+            current = current_length_target(tx, branch_id, data.scope, data.scope_id, include_cleared=True)
+            active = current if current and current["targets"] is not None else None
+            if data.base_target_id != (active["id"] if active else None):
+                raise DomainError("inspection_length_changed", "篇幅目标已在别处更新，请重新读取。", 409)
+            targets = data.targets.model_dump()
+            if not active or active["targets"] != targets:
+                _save_length_target(tx, branch_id, data.scope, data.scope_id, current, targets)
+            preview, _ = _evaluate(tx, branch_id, data.scope, data.scope_id)
+            row = _latest(tx, branch_id, data.scope, data.scope_id)
+            return {"preview": preview, "latest": _effective(row, preview) if row else None}
 
     @app.get(endpoint + "/{inspection_id}")
     def inspection(branch_id: str, inspection_id: str):

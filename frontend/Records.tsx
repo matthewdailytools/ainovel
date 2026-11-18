@@ -9,6 +9,7 @@ import { InspectionPanel } from './InspectionPanel'
 import { CompletionPanel } from './CompletionPanel'
 import { WorkSnapshotPanel } from './WorkSnapshotPanel'
 import { DesktopSyncPanel } from './DesktopSyncPanel'
+import { LocalPortableEvidence } from './PortableEvidence'
 import { StoryGraph } from './StoryGraph'
 import { type FeedbackHandoff } from './feedbackRevision'
 
@@ -536,7 +537,13 @@ export function Records({
         </section>
       )}
       <div id="bench-inspection" tabIndex={-1}>
-        <InspectionPanel key={branch.id} branchId={branch.id} chapters={chapters} />
+        <InspectionPanel
+          key={branch.id}
+          branchId={branch.id}
+          chapters={chapters}
+          account={account}
+          modelReady={modelReady}
+        />
       </div>
       <WorkSnapshotPanel
         key={`snapshot-${branch.id}`}
@@ -552,11 +559,14 @@ export function Records({
           key={`completion-${branch.id}`}
           branchId={branch.id}
           chapters={chapters}
+          account={account}
+          modelReady={modelReady}
           notify={notify}
         />
       </div>
       <ReadingMetricsPanel key={`reading-${branch.id}`} branchId={branch.id} chapters={chapters} />
       <DesktopSyncPanel key={`sync-${branch.id}`} branchId={branch.id} notify={notify} refresh={refresh} />
+      <LocalPortableEvidence key={`evidence-${branch.id}`} branchId={branch.id} chapters={chapters} />
       <FinalizationPanel
         branchId={branch.id}
         refreshVersion={storyRevision}

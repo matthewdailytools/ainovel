@@ -53,9 +53,12 @@ import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff 
 import type { ConceptionHandoff } from './conception'
 import { SettingReviewReport } from './SettingReviewReport'
 import {
+  chapterCards,
   findChapterPlan,
+  OutlineCardSource,
   outlineFields,
   type ConfirmedWorldRules,
+  type FrozenCard,
   type OutlineView,
 } from './OutlineWorkspace'
 import {
@@ -109,6 +112,7 @@ export function Writing({
   onConceptionSettings,
   outlineHandoff,
   onOutline,
+  onInspection,
 }: {
   novel: Novel
   branch: Branch
@@ -122,6 +126,7 @@ export function Writing({
   onConceptionSettings: () => void
   outlineHandoff?: { chapterId: string; reportId?: string }
   onOutline: () => void
+  onInspection: () => void
 }) {
   const [importOpen, setImportOpen] = useState(false)
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -132,6 +137,7 @@ export function Writing({
   const [archiveConfirmed, setArchiveConfirmed] = useState(false)
   const [chapter, setChapter] = useState<Chapter>()
   const [editorKey, setEditorKey] = useState('')
+  const [editorFocus, setEditorFocus] = useState(0)
   const [text, setText] = useState('')
   const [saved, setSaved] = useState('未打开章节')
   const [dirty, setDirty] = useState(0)
@@ -665,6 +671,66 @@ export function Writing({
       setCandidateId(target.id)
     })
   }
+  const byId = new Map(chapters.map((entry) => [entry.id, entry]))
+  const arrangedChapters = new Set<string>()
+  const volumes = (outline?.confirmed?.plan.volumes ?? [])
+    .map((volume) => ({
+      ...volume,
+      units: (volume.units ?? [])
+        .map((unit) => ({
+          ...unit,
+          entries: (unit.chapters ?? []).flatMap(({ chapter_id }) => {
+            const entry = byId.get(chapter_id)
+            if (!entry) return []
+            arrangedChapters.add(entry.id)
+            return [entry]
+          }),
+        }))
+        .filter((unit) => unit.entries.length),
+    }))
+    .filter((volume) => volume.units.length)
+  const unplanned = chapters.filter((entry) => !arrangedChapters.has(entry.id))
+  const nextChapter = chapters.find((entry) =>
+    entry.id === chapter?.id ? !text.trim() : !(entry.chars ?? entry.content?.trim().length ?? 0),
+  )
+  const duePromises = outline?.promises.filter(({ due }) => !!due) ?? []
+  const cards = plannedChapter ? chapterCards(outline?.confirmed, plannedChapter.chapter) : []
+
+  function openChapter(id: string) {
+    if (id === current.current?.id) {
+      setEditorFocus((request) => request + 1)
+      return
+    }
+    void doAction(async () => {
+      if (current.current) await save()
+      await loadChapter(id)
+    })
+  }
+
+  function chapterList(entries: Chapter[]) {
+    return (
+      <ol className="chapter-list">
+        {entries.map((entry) => (
+          <li key={entry.id}>
+            <button
+              type="button"
+              aria-current={entry.id === chapter?.id ? 'true' : undefined}
+              onClick={() => openChapter(entry.id)}
+            >
+              <span className="chapter-number">{String(entry.position).padStart(2, '0')}</span>
+              <span>
+                {entry.title}
+                <small>
+                  {entry.chars || 0} 字符（含空白）{entry.stale ? ' · 前文变更，待复检' : ''}
+                </small>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ol>
+    )
+  }
+
   return (
     <div className="writing-layout" id="bench-writing" tabIndex={-1}>
       <aside className="chapter-sidebar">
@@ -680,29 +746,25 @@ export function Writing({
             ? '正在读取章节…'
             : `${chapters.length} 章 · ${chapters.filter((c) => c.stale).length} 章待复检`}
         </p>
-        <ol className="chapter-list">
-          {chapters.map((c) => (
-            <li key={c.id}>
-              <button
-                aria-current={c.id === chapter?.id ? 'true' : undefined}
-                onClick={() =>
-                  void doAction(async () => {
-                    if (current.current) await save()
-                    await loadChapter(c.id)
-                  })
-                }
-              >
-                <span className="chapter-number">{String(c.position).padStart(2, '0')}</span>
-                <span>
-                  {c.title}
-                  <small>
-                    {c.chars || 0} 字符（含空白）{c.stale ? ' · 前文变更，待复检' : ''}
-                  </small>
-                </span>
-              </button>
-            </li>
+        <nav aria-label="全书目录">
+          {volumes.map((volume) => (
+            <details
+              className="chapter-volume"
+              key={volume.id}
+              open={volume.units.some((unit) => unit.entries.some((entry) => entry.id === chapter?.id))}
+            >
+              <summary>{volume.title}</summary>
+              {volume.units.map((unit) => (
+                <section className="chapter-unit" key={unit.id} aria-label={unit.title}>
+                  <h3>{unit.title}</h3>
+                  {chapterList(unit.entries)}
+                </section>
+              ))}
+            </details>
           ))}
-        </ol>
+          {volumes.length > 0 && unplanned.length > 0 && <h3 className="chapter-unit-title">未编入大纲</h3>}
+          {unplanned.length > 0 && chapterList(unplanned)}
+        </nav>
         <div className="sidebar-bottom">
           <label>
             下次从这里继续
@@ -983,6 +1045,7 @@ export function Writing({
               id={editorKey}
               initial={text}
               cursor={cursor}
+              focusRequest={editorFocus}
               readOnly={busy || opening}
               onChange={change}
               onSelection={setSelection}
@@ -995,14 +1058,32 @@ export function Writing({
               </span>
               <button onClick={downloadDraft}>下载当前草稿</button>
             </div>
-            {!!outline?.promises.some((promise) => !!promise.due) && (
+            {(nextChapter || duePromises.length > 0 || chapter.stale) && (
               <div className="editor-footer" aria-label="今日事项">
-                <span>
-                  {outline.promises.filter((promise) => !!promise.due).length} 条伏笔处于回收窗口或已到期
-                </span>
-                <button type="button" onClick={onOutline}>
-                  查看伏笔窗口
-                </button>
+                {nextChapter && (
+                  <button type="button" onClick={() => openChapter(nextChapter.id)}>
+                    继续写作 · {nextChapter.title}
+                  </button>
+                )}
+                {duePromises.length > 0 && (
+                  <details>
+                    <summary>{duePromises.length} 条伏笔处于回收窗口或已到期</summary>
+                    <ul>
+                      {duePromises.map((item) => (
+                        <li key={item.promise_id}>
+                          <button type="button" onClick={() => openChapter(item.closes_chapter_id)}>
+                            {item.title} · {item.due === 'due' ? '已到期' : '在回收窗口'}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+                {!!chapter.stale && (
+                  <button type="button" onClick={onInspection}>
+                    查看本章待复检事项
+                  </button>
+                )}
               </div>
             )}
           </>
@@ -1082,6 +1163,18 @@ export function Writing({
                   <p>{item.detail}</p>
                 </details>
               ))}
+          </details>
+        )}
+        {!!cards.length && (
+          <details className="notice">
+            <summary>本章章纲引用的手法卡</summary>
+            {cards.map((card) => (
+              <OutlineCardSource
+                key={`${card.session_id}/${card.card_id}/${card.revision}`}
+                card={card}
+                notify={notify}
+              />
+            ))}
           </details>
         )}
         {conception && (
@@ -1651,7 +1744,13 @@ function Candidate({
   onUpdate: () => Promise<void>
 }) {
   const outlineBasis = artifact.basis.outline as
-    { id: string; revision: number; chapter: Record<keyof typeof outlineFields, string> } | undefined
+    | {
+        id: string
+        revision: number
+        chapter: Record<keyof typeof outlineFields, string>
+        reference_cards?: FrozenCard[]
+      }
+    | undefined
   const [edit, setEdit] = useState(artifact.payload.text || '')
   const [editRevision, setEditRevision] = useState(artifact.candidate_revision)
   const candidateChanged = editRevision !== artifact.candidate_revision
@@ -1734,6 +1833,13 @@ function Candidate({
             <p key={key}>
               {label} · {outlineBasis.chapter[key as keyof typeof outlineFields]}
             </p>
+          ))}
+          {outlineBasis.reference_cards?.map((card) => (
+            <OutlineCardSource
+              key={`${card.session_id}/${card.card_id}/${card.revision}`}
+              card={card}
+              notify={notify}
+            />
           ))}
         </details>
       )}

@@ -481,6 +481,12 @@ export function App() {
                     onConceptionSettings={openConceptionWorkspace}
                     outlineHandoff={outlineHandoff?.branchId === branch.id ? outlineHandoff : undefined}
                     onOutline={() => navigate('outline')}
+                    onInspection={() => {
+                      if (!confirmLeave()) return
+                      setOutlineHandoff(undefined)
+                      setBench({ id: 'inspection' })
+                      setPage('records')
+                    }}
                   />
                 )}
                 {page === 'outline' && branch && (

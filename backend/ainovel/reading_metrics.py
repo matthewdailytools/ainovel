@@ -4,6 +4,7 @@ from bisect import bisect_left
 from collections import defaultdict
 from datetime import timedelta
 from hashlib import sha256
+from statistics import median
 from typing import Annotated, Literal
 
 from fastapi import File, UploadFile
@@ -26,6 +27,13 @@ class PublishedChapter(Input):
     published_at: AwareDatetime
 
 
+class PublicationChange(Input):
+    chapter_id: Label
+    kind: Literal["access", "recommendation", "revision"]
+    at: AwareDatetime
+    note: Definition
+
+
 class ReadingImport(Input):
     format: Literal["ainovel-reading/1"]
     source: Label
@@ -35,6 +43,7 @@ class ReadingImport(Input):
     observed_from: AwareDatetime
     observed_until: AwareDatetime
     chapters: list[PublishedChapter] = Field(min_length=1, max_length=1000)
+    publication_changes: list[PublicationChange] = Field(default_factory=list, max_length=2000)
 
     @model_validator(mode="after")
     def validate_period(self):
@@ -42,6 +51,13 @@ class ReadingImport(Input):
             raise ValueError("观察起点、截止点和提取时间顺序无效。")
         if len({chapter.chapter_id for chapter in self.chapters}) != len(self.chapters):
             raise ValueError("同一发布版本的章节标识须唯一。")
+        publication = {chapter.chapter_id: chapter.published_at for chapter in self.chapters}
+        if any(
+            change.chapter_id not in publication
+            or not publication[change.chapter_id] <= change.at <= self.extracted_at
+            for change in self.publication_changes
+        ):
+            raise ValueError("发布变化须关联本次清单，时间须在该章发布后、数据提取前。")
         return self
 
 
@@ -134,6 +150,19 @@ class Metric(Input):
     excluded_prior_or_tied: int = 0
 
 
+class ReadingDiagnosis(Input):
+    chapter_id: str
+    target_chapter_id: str
+    rate: float
+    numerator: int
+    denominator: int
+    baseline_rate: float
+    baseline_pairs: int
+    publication_gap_hours: float
+    median_publication_gap_hours: float
+    changes: list[PublicationChange]
+
+
 class ReadingReport(Input):
     format: Literal["ainovel-reading/1"]
     mode: Literal["events", "aggregate"]
@@ -144,6 +173,7 @@ class ReadingReport(Input):
     observed_from: AwareDatetime
     observed_until: AwareDatetime
     chapters: list[PublishedChapter]
+    publication_changes: list[PublicationChange] = Field(default_factory=list)
     read_definition: str
     completion_definition: str | None = None
     cohort: Cohort | None = None
@@ -154,6 +184,7 @@ class ReadingReport(Input):
     counts: list[AggregateCount] = Field(default_factory=list)
     native_metrics: list[NativeMetric] = Field(default_factory=list)
     metrics: list[Metric]
+    diagnostics: list[ReadingDiagnosis] = Field(default_factory=list)
     notes: list[str]
 
 
@@ -164,6 +195,13 @@ class ImportedReport(Input):
 
 class ReadingMetricsState(Input):
     latest: ImportedReport | None
+
+
+class ReadingHistoryEntry(Input):
+    id: str
+    release_version: str
+    mode: Literal["events", "aggregate"]
+    extracted_at: AwareDatetime
 
 
 def _metric(kind, chapter_id, numerator, denominator, *, target=None, incomplete=0, prior=0):
@@ -245,15 +283,53 @@ def _completion(data, starts, finishes, chapter_id, window, covered):
     )
 
 
+def _diagnose(data, transitions):
+    measured = [row for row in transitions if row.rate is not None]
+    if len(measured) < 2:
+        return []
+    times = {chapter.chapter_id: chapter.published_at for chapter in data.chapters}
+    gaps = {
+        (row.chapter_id, row.target_chapter_id): (
+            times[row.target_chapter_id] - times[row.chapter_id]
+        ).total_seconds()
+        / 3600
+        for row in measured
+    }
+    baseline = median(row.rate for row in measured)
+    usual_gap = median(gaps.values())
+    changes = defaultdict(list)
+    for change in data.publication_changes:
+        if change.at <= data.observed_until:
+            changes[change.chapter_id].append(change)
+    return [
+        ReadingDiagnosis(
+            chapter_id=row.chapter_id,
+            target_chapter_id=row.target_chapter_id,
+            rate=row.rate,
+            numerator=row.numerator,
+            denominator=row.denominator,
+            baseline_rate=baseline,
+            baseline_pairs=len(measured),
+            publication_gap_hours=gaps[row.chapter_id, row.target_chapter_id],
+            median_publication_gap_hours=usual_gap,
+            changes=sorted(
+                [*changes[row.chapter_id], *changes[row.target_chapter_id]], key=lambda change: change.at
+            ),
+        )
+        for row in sorted(measured, key=lambda row: row.rate)
+        if row.rate < baseline
+    ]
+
+
 def _event_report(data):
     reads, starts, finishes = _walk(data)
     window = timedelta(hours=data.window_hours)
     first = data.chapters[0]
-    metrics = [
+    adjacent = [
         _transition(data, reads, left, right, "adjacent_follow", window)
         for left, right in zip(data.chapters, data.chapters[1:])
     ]
-    metrics += [
+    metrics = adjacent + [
         _transition(data, reads, first, target, "first_chapter_retention", window)
         for target in data.chapters[1:]
     ]
@@ -284,6 +360,7 @@ def _event_report(data):
         "distinct_readers": len({event.reader_key for event in data.events}),
         "event_channels": sorted({event.channel for event in data.events}),
         "metrics": metrics,
+        "diagnostics": _diagnose(data, adjacent),
         "notes": notes,
     }
 
@@ -365,6 +442,24 @@ def register_routes(app, domain):
                 ),
             )
         return ReadingMetricsState(latest=None)
+
+    @app.get("/api/branches/{branch_id}/reading-metrics/history")
+    def reading_history(branch_id: str) -> list[ReadingHistoryEntry]:
+        domain.branch(branch_id)
+        return domain.db.all(
+            "SELECT id,json_extract(payload,'$.release_version') AS release_version, "
+            "json_extract(payload,'$.mode') AS mode,json_extract(payload,'$.extracted_at') AS extracted_at "
+            "FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' ORDER BY rowid DESC LIMIT 50",
+            (branch_id, REPORT),
+        )
+
+    @app.get("/api/branches/{branch_id}/reading-metrics/history/{identifier}")
+    def read_saved_report(branch_id: str, identifier: str) -> ImportedReport:
+        row = domain.db.one(
+            "SELECT id,payload FROM artifacts WHERE branch_id=? AND id=? AND kind=? AND status='accepted'",
+            (branch_id, identifier, REPORT),
+        )
+        return ImportedReport(id=row["id"], report=ReadingReport.model_validate_json(row["payload"]))
 
     @app.post("/api/branches/{branch_id}/reading-metrics/import", status_code=201)
     async def import_reading_metrics(branch_id: str, file: Annotated[UploadFile, File()]) -> ImportedReport:

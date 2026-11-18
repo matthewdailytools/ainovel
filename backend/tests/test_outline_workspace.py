@@ -3,6 +3,9 @@ import json
 
 from ainovel.worker import Worker
 from test_conception_workbench import confirm, path, save
+from test_reference_flow import SOURCE, reference as reference_fixture, update
+
+reference = reference_fixture
 
 
 def setting_confirmation(client, branch):
@@ -126,12 +129,26 @@ def test_outline_versions_and_graph_ledger_track_saved_proof(client, domain, sto
 
 
 def test_writing_task_freezes_outline_and_rejects_adoption_after_new_confirmation(
-    client, domain, settings, story
+    client, domain, settings, story, reference
 ):
     branch = story["branch_id"]
     chapter = domain.save(story["chapter_id"], 0, "铜铃一动不动。")
     setting_id = setting_confirmation(client, branch)
     endpoint = f"/api/branches/{branch}/outline-workspace"
+    card = {
+        "id": "partial-gain",
+        "observation": "交涉只兑现部分信息。",
+        "interpretation": "角色仍然能继续行动。",
+        "technique": "用部分证据明确下一步。",
+        "conditions": "仍有其他证据可查。",
+        "exceptions": "替换原场景、道具和动作。",
+        "evidence": SOURCE,
+    }
+    incomplete = update(client, domain, reference, cards=[{**card, "exceptions": ""}])
+    assert client.get(endpoint + "/reference-options").json() == []
+    ready = update(client, domain, incomplete, cards=[card])
+    saved_ref = {"session_id": ready["id"], "card_id": card["id"], "revision": ready["revision"]}
+    assert client.get(endpoint + "/reference-options").json()[0]["technique"] == card["technique"]
     data = {
         "base_revision": 0,
         "confirmation_id": setting_id,
@@ -147,7 +164,9 @@ def test_writing_task_freezes_outline_and_rejects_adoption_after_new_confirmatio
                             "id": "u",
                             "title": "追索",
                             "summary": "第一步",
-                            "chapters": [chapter_plan(chapter["id"], "验证铃声")],
+                            "chapters": [
+                                {**chapter_plan(chapter["id"], "验证铃声"), "reference_cards": [saved_ref]}
+                            ],
                         }
                     ],
                 }
@@ -155,6 +174,15 @@ def test_writing_task_freezes_outline_and_rejects_adoption_after_new_confirmatio
         },
     }
     initial = put_and_confirm(client, endpoint, data)["confirmed"]
+    update(client, domain, ready, cards=[{**card, "technique": "改成选择导致新的阻碍。"}])
+    historical = client.get(
+        f"/api/reference-sessions/{ready['id']}/cards/{card['id']}/revisions/{ready['revision']}"
+    ).json()
+    assert historical["card"]["evidence"] == SOURCE
+    assert (
+        client.get(endpoint).json()["confirmed"]["setting_basis"]["reference_cards"][0]["technique"]
+        == card["technique"]
+    )
     request = {
         "novel_id": story["id"],
         "branch_id": branch,
@@ -180,6 +208,9 @@ def test_writing_task_freezes_outline_and_rejects_adoption_after_new_confirmatio
             basis = frame["上下文"]["采用章纲"]
             assert basis["chapter"]["goal"] == "验证铃声"
             assert basis["settings"][0]["detail"] == "铜铃只在门内响。"
+            assert basis["reference_cards"][0]["technique"] == card["technique"]
+            assert basis["reference_cards"][0]["revision"] == ready["revision"]
+            assert SOURCE not in prompt
             put_and_confirm(client, endpoint, data)
             return {
                 "text": "铜铃在风中安静地垂着。",

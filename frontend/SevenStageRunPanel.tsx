@@ -10,21 +10,32 @@ type OutlineState = {
   stale: string[]
   chapters: { id: string }[]
 }
-type Stage = 'project' | 'settings' | 'outline' | 'writing' | 'inspection' | 'completion' | 'done'
+type ReferenceOption = {
+  id: string
+  revision: number
+  payload: { goal: string; source: { title: string; quote: string } }
+}
+type Stage =
+  'project' | 'reference' | 'settings' | 'outline' | 'writing' | 'inspection' | 'completion' | 'done'
 type Run = Task & {
   result: {
     seven_stage_run: {
       stage: Stage
       child_id?: string
+      child_recovery?: { state: string; dispatch_event_ids: number[] }
       completed_chapters: { id: string; revision: number; existing?: boolean }[]
       outline_id?: string
       inspection_id?: string
       completion_id?: string
+      reference_analysis_id?: string
+      reference_basis?: { revision: number; goal: string; source: { title: string } }
+      reference_references?: { card_id: string; revision: number }[]
     }
   }
 }
 const stageLabels: Record<Stage, string> = {
   project: '立项',
+  reference: '拆解',
   settings: '设定',
   outline: '大纲',
   writing: '写作',
@@ -55,6 +66,7 @@ export function SevenStageRunPanel({
   const endpoint = `${prefix}/seven-stage-runs`
   const [outline, setOutline] = useState<OutlineState>()
   const [settings, setSettings] = useState<ConceptionState>()
+  const [references, setReferences] = useState<ReferenceOption[]>([])
   const [runs, setRuns] = useState<Run[]>([])
   const [runId, setRunId] = useState('')
   const [from, setFrom] = useState<StartFrom>()
@@ -63,6 +75,8 @@ export function SevenStageRunPanel({
   const [budget, setBudget] = useState('')
   const [autoConfirm, setAutoConfirm] = useState(false)
   const [autoAdopt, setAutoAdopt] = useState(false)
+  const [referenceChoice, setReferenceChoice] = useState('')
+  const [autoReference, setAutoReference] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [pollError, setPollError] = useState('')
@@ -70,14 +84,18 @@ export function SevenStageRunPanel({
   const pending = useRef<{ signature: string; key: string } | undefined>(undefined)
 
   const refreshSources = useCallback(async () => {
-    const [concept, plan] = await Promise.all([
+    const [concept, plan, savedReferences] = await Promise.all([
       api<ConceptionState>(`${prefix}/conception`),
       api<OutlineState>(`${prefix}/outline-workspace`),
+      api<ReferenceOption[]>(`/reference-sessions?branch_id=${encodeURIComponent(branchId)}`),
     ])
     if (!alive.current) return
     setSettings(concept)
     setOutline(plan)
-  }, [prefix])
+    setReferences(
+      savedReferences.filter((entry) => entry.payload.goal.trim() && entry.payload.source.quote.trim()),
+    )
+  }, [branchId, prefix])
 
   useEffect(() => {
     alive.current = true
@@ -118,6 +136,11 @@ export function SevenStageRunPanel({
   const origin = from ?? (validOutline ? 'outline' : validSettings ? 'settings' : 'idea')
   const chapterCount = origin === 'idea' || (origin === 'settings' && !outline?.chapters.length)
   const run = runs.find((entry) => entry.id === runId) ?? runs[0]
+  const reference =
+    origin === 'outline'
+      ? undefined
+      : references.find((entry) => `${entry.id}/${entry.revision}` === referenceChoice)
+  const referenceChanged = origin !== 'outline' && !!referenceChoice && !reference
   const activeRun = runs.some((entry) => unresolved.includes(entry.status))
   const status = run?.result.seven_stage_run
   const permitted =
@@ -125,6 +148,7 @@ export function SevenStageRunPanel({
   const ready =
     permitted &&
     modelReady &&
+    !referenceChanged &&
     Number.isFinite(Number(budget)) &&
     Number(budget) > 0 &&
     (!chapterCount ||
@@ -164,6 +188,11 @@ export function SevenStageRunPanel({
       budget_limit: Number(budget),
       auto_confirm_planning: autoConfirm,
       auto_adopt_body: autoAdopt,
+      ...(reference && {
+        reference_session_id: reference.id,
+        reference_revision: reference.revision,
+        auto_adopt_reference: autoReference,
+      }),
     }
     const signature = JSON.stringify(body)
     if (pending.current?.signature !== signature) pending.current = { signature, key: crypto.randomUUID() }
@@ -183,7 +212,12 @@ export function SevenStageRunPanel({
   return (
     <section className="card" aria-label="七台自动接力">
       <h2>七台自动接力</h2>
-      <p>从创意或采用版本启动。拆解仍可按需单独使用。遇到需作者判定的体检或完本事项时，运行会在该处等待。</p>
+      <p>
+        从创意或采用版本启动。可先拆解明确选中的资料。遇到需作者判定的体检或完本事项时，运行会在该处等待。
+      </p>
+      <p className="small">
+        按阶段把选定资料和保存稿发送给当前账户。开篇简介只参考首章，最终完本由作者确认。
+      </p>
       <div className="actions">
         <button type="button" disabled={busy} onClick={() => void execute(refreshSources)}>
           核对接力起点
@@ -233,6 +267,44 @@ export function SevenStageRunPanel({
               onChange={(event) => setChapters(event.target.value)}
             />
           </label>
+        )}
+        {origin !== 'outline' && (
+          <div>
+            <label>
+              自动拆解的保存选段（可选）
+              <select
+                value={referenceChoice}
+                onChange={(event) => {
+                  setReferenceChoice(event.target.value)
+                  setAutoReference(false)
+                }}
+              >
+                <option value="">跳过拆解</option>
+                {referenceChanged && <option value={referenceChoice}>所选拆解修订已更新，请重新选择</option>}
+                {references.map(({ id, revision, payload }) => (
+                  <option key={id} value={`${id}/${revision}`}>
+                    {payload.source.title} · {payload.goal} · 修订 {revision}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {reference && (
+              <>
+                <details>
+                  <summary>查看本次发送的原文选段</summary>
+                  <blockquote>{reference.payload.source.quote}</blockquote>
+                </details>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={autoReference}
+                    onChange={(event) => setAutoReference(event.target.checked)}
+                  />
+                  授权保存并选用写法、适用条件和须替换内容齐全的手法卡
+                </label>
+              </>
+            )}
+          </div>
         )}
         <label>
           本次接力总预算（所选账户币种）
@@ -286,11 +358,31 @@ export function SevenStageRunPanel({
             {stageLabels[status.stage]} · {runStatus[run.status] ?? label(run.status)}
           </p>
           {run.error && <p>{run.error}</p>}
+          {status.reference_basis && (
+            <p>
+              拆解依据 {status.reference_basis.source.title} · 修订 {status.reference_basis.revision} ·{' '}
+              {status.reference_basis.goal}
+              {status.reference_references && ` · 已采用 ${status.reference_references.length} 张手法卡`}
+            </p>
+          )}
           {!!status.completed_chapters.length && (
             <p>本次范围已核对 {status.completed_chapters.length} 章，原有正文保留。</p>
           )}
           {status.child_id && (
             <p className="small">子任务 {status.child_id.slice(0, 8)}，可在对应工作台查阅产物。</p>
+          )}
+          {status.child_id && status.child_recovery?.state === 'unknown' && (
+            <p className="notice">
+              暂缺派发回执 {status.child_recovery.dispatch_event_ids.join('、')}。请核对账本与
+              <a
+                href={`/api/tasks/${encodeURIComponent(status.child_id)}/transcript`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                已完成步骤及保留片段
+              </a>
+              。
+            </p>
           )}
           <div className="actions">
             {live.includes(run.status) && (

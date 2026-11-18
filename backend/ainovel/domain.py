@@ -131,14 +131,21 @@ class Domain:
         return {**self.chapter(chapter_id), "story_revision": story_revision}
 
     @staticmethod
-    def revise_tx(db, chapter, content, cause):
+    def revise_tx(db, chapter, content, cause, *, revision_id=None, created=None):
         revision = chapter["revision"] + 1
         db.execute(
             "UPDATE chapters SET revision=?,content=?,stale=0 WHERE id=?", (revision, content, chapter["id"])
         )
         db.execute(
             "INSERT INTO revisions VALUES(?,?,?,?,?,?)",
-            (uid(), chapter["id"], revision, content, cause, time()),
+            (
+                revision_id or uid(),
+                chapter["id"],
+                revision,
+                content,
+                cause,
+                time() if created is None else created,
+            ),
         )
         db.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (chapter["branch_id"],))
         db.execute(
@@ -301,10 +308,14 @@ class Domain:
         memory_fact_indices=None,
         memory_selection_reason="",
         memory_facts_sha256=None,
+        *,
+        before_write=None,
     ):
         from .memory_selection import check_replay, selection
 
         with self.db.connect(True) as db:
+            if before_write is not None:
+                before_write(db)
             row = db.execute("SELECT * FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
             if not row:
                 raise DomainError("not_found", "候选不存在。", 404)
@@ -842,6 +853,14 @@ class Domain:
                 from .outline_generation import freeze_tx
 
                 initial["outline_generation"] = freeze_tx(db, branch_id, outline_request)
+            if semantic_request := payload.get("inspection_semantic"):
+                from .inspection_semantic import freeze_tx as freeze_inspection
+
+                initial["inspection_semantic"] = freeze_inspection(db, branch_id, semantic_request)
+            if completion_request := payload.get("completion_preparation"):
+                from .completion_preparation import freeze_tx as freeze_completion
+
+                initial["completion_preparation"] = freeze_completion(db, branch_id, completion_request)
             reader = db.execute(
                 "SELECT id FROM artifacts WHERE branch_id=? AND kind='reader' "
                 "AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1",

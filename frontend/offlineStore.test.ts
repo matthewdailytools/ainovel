@@ -3,6 +3,7 @@ import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import {
   createLocalChapter,
   createLocalProject,
+  applySyncedObject,
   exportLocalManuscript,
   importLocalManuscript,
   listLocalProjects,
@@ -10,6 +11,7 @@ import {
   readLocalHistory,
   saveLocalChapter,
   validateManuscript,
+  validateSyncedObject,
 } from './offlineStore'
 
 beforeEach(() => vi.stubGlobal('indexedDB', new IDBFactory()))
@@ -96,7 +98,7 @@ test('quota failure aborts the whole browser write and preserves existing formal
 
 test('an unsupported newer database opens read-only from this app’s perspective and keeps records intact', async () => {
   await new Promise<void>((resolve, reject) => {
-    const opening = indexedDB.open('ainovel-offline-workspace', 2)
+    const opening = indexedDB.open('ainovel-offline-workspace', 3)
     opening.onupgradeneeded = () => opening.result.createObjectStore('v2').add('保留新版数据', 'data')
     opening.onsuccess = () => {
       opening.result.close()
@@ -106,7 +108,7 @@ test('an unsupported newer database opens read-only from this app’s perspectiv
   })
   await expect(listLocalProjects()).rejects.toMatchObject({ code: 'database' })
   const record = await new Promise((resolve, reject) => {
-    const opening = indexedDB.open('ainovel-offline-workspace', 2)
+    const opening = indexedDB.open('ainovel-offline-workspace', 3)
     opening.onsuccess = () => {
       const tx = opening.result.transaction('v2')
       const read = tx.objectStore('v2').get('data')
@@ -116,4 +118,49 @@ test('an unsupported newer database opens read-only from this app’s perspectiv
     opening.onerror = () => reject(opening.error)
   })
   expect(record).toBe('保留新版数据')
+})
+
+test('source histories recover exact evidence without replacing any locally numbered revision', async () => {
+  const project = await createLocalProject('两地修订')
+  const localId = project.novel.id
+  const chapter = await createLocalChapter(localId, '拾铃')
+  const [base] = await readLocalHistory(localId, chapter.id)
+  const authorRevision = await saveLocalChapter(localId, chapter.id, base.id, '两份不同原稿。')
+  const source = { ...authorRevision, id: 'remote-original', content: '远端作者原稿。' }
+  source.sha256 = await manuscriptHash(source.content)
+  const format = 'ainovel-manuscript-sync/1'
+  const body = '以远端作者修订为依据。'
+  const evidence = {
+    format,
+    kind: 'evidence',
+    document: {
+      id: 'linked-evidence',
+      kind: 'inspection',
+      title: '来源记录',
+      body,
+      sha256: await manuscriptHash(body),
+      chapters: [{ id: chapter.id, revision: 1, revision_id: source.id, sha256: source.sha256 }],
+    },
+  }
+  await expect(validateSyncedObject(project, 'evidence:linked-evidence', evidence)).rejects.toMatchObject({
+    code: 'missing',
+  })
+  const sourceId = `revision:${source.id}`
+  const sourceObject = await validateSyncedObject(project, sourceId, {
+    format,
+    kind: 'revision',
+    branch_id: project.branch.id,
+    revision: source,
+  })
+  await expect(applySyncedObject(localId, sourceId, sourceObject, 'null')).resolves.toBe(true)
+  await expect(applySyncedObject(localId, sourceId, sourceObject, 'null')).resolves.toBe(true)
+  const verified = await validateSyncedObject(project, 'evidence:linked-evidence', evidence)
+  await expect(applySyncedObject(localId, 'evidence:linked-evidence', verified, 'null')).resolves.toBe(true)
+  const pack = await exportLocalManuscript(localId)
+  expect(pack.source_revisions).toEqual([source])
+  expect(pack.revisions).toEqual([base, authorRevision])
+  expect(pack.evidence).toEqual([evidence.document])
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  await importLocalManuscript(bundle(pack))
+  expect(await exportLocalManuscript(localId)).toEqual(pack)
 })

@@ -21,11 +21,12 @@ from .conception import (
 )
 from .db import DomainError, dumps, uid
 from .models import Input
-from .outline_workspace import _chapter_plans, _decode, _latest as latest_outline, _validate
+from .outline_workspace import _card_key, _chapter_plans, _decode, _latest as latest_outline, _validate
 from .project_brief import KIND as PROJECT, confirmed_project_tx
 from .setting_review import confirmed_world_basis
 from .story_extraction import rewrite_references
 from .story_graph import graph_snapshot, sources
+from .workflow_inspection import LENGTH_TARGET_KIND, _save_length_target, current_length_target
 
 KIND = "work_snapshot"
 RESTORE_KIND = "work_snapshot_restore"
@@ -145,6 +146,16 @@ def _capture(tx, branch_id):
     ).fetchone()
     if finalization:
         reports["author_finalization"] = finalization["id"]
+    length_targets = [
+        {**json.loads(row["payload"]), "id": row["id"]}
+        for row in tx.execute(
+            "SELECT id,payload FROM (SELECT id,payload,ROW_NUMBER() OVER("
+            "PARTITION BY json_extract(payload,'$.scope'),json_extract(payload,'$.scope_id') "
+            "ORDER BY rowid DESC) AS rank FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted') "
+            "WHERE rank=1 ORDER BY id",
+            (branch_id, LENGTH_TARGET_KIND),
+        )
+    ]
     definitions = {kind: _latest(tx, branch_id, kind) for kind in DEFINITIONS}
     project_id = (definitions[PROJECT] or {}).get("id")
     setting = confirmed_world_basis(tx, branch_id)
@@ -175,6 +186,7 @@ def _capture(tx, branch_id):
         "facts": facts,
         "scene_spans": scene_spans,
         "reports": reports,
+        "length_targets": length_targets,
     }
 
 
@@ -216,10 +228,10 @@ def _save_snapshot(tx, branch, label, scope, scope_id, state, purpose="manual"):
     return _artifact(tx, branch, KIND, payload, {"story_revision": state["story_revision"]})
 
 
-def checkpoint_tx(tx, branch_id, label, *, purpose="milestone"):
+def checkpoint_tx(tx, branch_id, label, *, purpose="milestone", scope="book", scope_id=None):
     """Create a checkpoint in the caller's transaction."""
     branch = _branch(tx, branch_id)
-    return _save_snapshot(tx, branch, label, "book", None, _capture(tx, branch_id), purpose)
+    return _save_snapshot(tx, branch, label, scope, scope_id, _capture(tx, branch_id), purpose)
 
 
 def _read_snapshot(tx, branch_id, identifier):
@@ -359,6 +371,8 @@ def _preview(snapshot, current):
         cautions.append("整书恢复和新分支保留当时另行保存的大纲草案。")
     if snapshot["scope"] != "book" and not shared:
         cautions.append("原位恢复含选区章稿、卷纲和可确定归属的故事记录，共用或跨区记录需按新依据复检。")
+    if "length_targets" in historical and historical["length_targets"] != current["length_targets"]:
+        cautions.append("本次恢复范围内的篇幅目标将随快照恢复，旧修订仍可追溯。")
     return {
         "snapshot": _summary(snapshot),
         "basis_sha256": _hash(dumps(current)),
@@ -606,9 +620,15 @@ def _restore_setup(tx, source, target, chapters, snapshot_id):
     )
     if before or revision_tx(tx, target["id"]):
         workspace["revision"] = revision_tx(tx, target["id"]) + 1
+        captured_project_id = (source["definitions"][PROJECT] or {}).get("id")
         for value in workspace["origins"].values():
             if evidence := value.get("evidence"):
                 _remap_source(evidence, chapters)
+            if captured_project_id and captured_project_id in {
+                value.get("project_confirmation_id"),
+                value.get("equivalent_project_confirmation_id"),
+            }:
+                value["equivalent_project_confirmation_id"] = definition_ids[PROJECT]
         _artifact(
             tx,
             target,
@@ -635,6 +655,9 @@ def _restore_setup(tx, source, target, chapters, snapshot_id):
                 "note": setting["payload"]["note"],
                 "planning_brief": setting["payload"]["planning_brief"],
                 "project_confirmation_id": definition_ids.get(PROJECT),
+                "reconciled_project_items": setting["payload"].get("reconciled_project_items", []),
+                "setting_findings": setting["payload"].get("setting_findings", []),
+                "reviewed_setting_findings": setting["payload"].get("reviewed_setting_findings", []),
             },
             {**origin, "source_artifact_id": setting["id"]},
         )
@@ -684,7 +707,9 @@ def _restore_outline(tx, snapshot, current, target, chapters, records, setting_i
     identifier = None
     if saved:
         plan = deepcopy(saved["plan"])
+        sources = [saved["setting_basis"]]
         if not whole:
+            sources.append(current["confirmed_outline"]["setting_basis"])
             active = deepcopy(current["confirmed_outline"]["plan"])
             volume_id = snapshot["scope_id"]
             volume = next(row for row in plan["volumes"] if row["id"] == volume_id)
@@ -701,6 +726,9 @@ def _restore_outline(tx, snapshot, current, target, chapters, records, setting_i
             if saved["setting_basis"]["confirmation_id"]
             else {**basis, "confirmation_id": None, "items": []}
         )
+        cards = _restored_cards(plan, sources)
+        if cards:
+            adopted = {**adopted, "reference_cards": cards}
         live = source["outline_live"]
         if live:
             _validate(graph_snapshot(tx, target["id"]), plan, adopted, True)
@@ -709,9 +737,59 @@ def _restore_outline(tx, snapshot, current, target, chapters, records, setting_i
     if whole and draft and (not saved or draft["id"] != saved["id"]):
         plan = deepcopy(draft["plan"])
         _rebase_outline(plan, chapters, records)
-        draft_id = _append_outline(tx, target, plan, {**basis, "restored_outline_id": draft["id"]}, False)
+        draft_basis = {**basis, "restored_outline_id": draft["id"]}
+        if cards := _restored_cards(plan, [draft["setting_basis"]]):
+            draft_basis["reference_cards"] = cards
+        draft_id = _append_outline(tx, target, plan, draft_basis, False)
         identifier = identifier or draft_id
     return identifier
+
+
+def _restored_cards(plan, sources):
+    selected = {
+        _card_key(ref) for _, _, chapter in _chapter_plans(plan) for ref in chapter.get("reference_cards", [])
+    }
+    cards = {
+        _card_key(card): card
+        for basis in sources
+        for card in basis.get("reference_cards", [])
+        if _card_key(card) in selected
+    }
+    return list(cards.values())
+
+
+def _restore_length_targets(tx, snapshot, current, target, chapters, chapter_ids, is_new):
+    historical = snapshot["manifest"]
+    if "length_targets" not in historical:
+        return
+    scope, scope_id = snapshot["scope"], snapshot["scope_id"]
+
+    def in_scope(row):
+        return (
+            is_new
+            or scope == "book"
+            or (row["scope"], row["scope_id"]) == (scope, scope_id)
+            or row["scope"] == "chapter"
+            and row["scope_id"] in chapter_ids
+        )
+
+    desired = {}
+    for row in historical["length_targets"]:
+        if in_scope(row):
+            identifier = row["scope_id"]
+            if is_new and row["scope"] == "chapter":
+                if identifier not in chapters:
+                    continue
+                identifier = chapters[identifier]["id"]
+            desired[(row["scope"], identifier)] = row["targets"]
+    if not is_new:
+        for row in current["length_targets"]:
+            if in_scope(row):
+                desired.setdefault((row["scope"], row["scope_id"]), None)
+    for (kind, identifier), targets in desired.items():
+        active = current_length_target(tx, target["id"], kind, identifier, include_cleared=True)
+        if (active["targets"] if active else None) != targets:
+            _save_length_target(tx, target["id"], kind, identifier, active, targets)
 
 
 def _execute_restore(tx, domain, origin, snapshot, current, data):
@@ -751,6 +829,7 @@ def _execute_restore(tx, domain, origin, snapshot, current, data):
         outline_id = _restore_outline(
             tx, snapshot, current, target, chapters, records, setting_id, project_id, is_new or shared
         )
+    _restore_length_targets(tx, snapshot, current, target, chapters, set(wanted) | set(scoped), is_new)
     return {
         "branch_id": target["id"],
         "story_revision": target["story_revision"],

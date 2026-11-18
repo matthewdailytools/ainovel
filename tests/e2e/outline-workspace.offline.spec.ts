@@ -12,6 +12,45 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
     data: { title: '门外寻铃' },
   })
   expect(chapter.ok(), await chapter.text()).toBe(true)
+  const { id: chapterId } = await chapter.json()
+  const quote = '守夜人只认出一段绳结，随后沿岸寻访系结者。'
+  const imported = await page.request.post('/api/library/import', {
+    headers,
+    multipart: { file: { name: '遗铃写法样例.txt', mimeType: 'text/plain', buffer: Buffer.from(quote) } },
+  })
+  expect(imported.ok(), await imported.text()).toBe(true)
+  const { id: bookId } = await imported.json()
+  const [source] = await (await page.request.get(`/api/library/books/${bookId}/units`)).json()
+  const created = await page.request.post('/api/reference-sessions', {
+    headers,
+    data: {
+      unit_id: source.id,
+      start: 0,
+      end: quote.length,
+      quote,
+      goal: '观察局部进展',
+      branch_id,
+      chapter_id: chapterId,
+    },
+  })
+  expect(created.ok(), await created.text()).toBe(true)
+  const { id: sessionId } = await created.json()
+  const referencePath = `/api/reference-sessions/${sessionId}`
+  const card = {
+    id: 'follow-evidence',
+    observation: '只认出部分物件特征',
+    interpretation: '部分线索能改变下一步行动',
+    technique: '用少量线索引出下一步',
+    conditions: '角色仍有可行动的选择',
+    exceptions: '替换人物、地理和具体道具',
+    evidence: quote,
+  }
+  const cardEdit = { goal: '观察局部进展', cards: [card], branch_id, chapter_id: chapterId }
+  const cardSaved = await page.request.patch(referencePath, {
+    headers,
+    data: { ...cardEdit, base_revision: 0 },
+  })
+  expect(cardSaved.ok(), await cardSaved.text()).toBe(true)
   const graph = await (await page.request.get(`/api/branches/${branch_id}/story-graph`)).json()
   const promise = await page.request.post(`/api/branches/${branch_id}/story-records`, {
     headers,
@@ -40,6 +79,9 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   })) {
     await page.getByLabel(field, { exact: true }).fill(value)
   }
+  await page.getByRole('combobox', { name: '加入手法卡', exact: true }).selectOption({
+    label: '用少量线索引出下一步 · 遗铃写法样例.txt · 修订 1',
+  })
   await page.getByRole('button', { name: '新增伏笔窗口' }).click()
   await page.getByRole('combobox', { name: '伏笔', exact: true }).selectOption({ label: '铃声为何消失' })
   for (const field of ['埋设章', '开始回收', '最迟回收']) {
@@ -49,9 +91,21 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   await page.getByRole('button', { name: '确认已保存大纲' }).click()
   await expect(page.getByText('已确认大纲修订 2', { exact: true })).toBeVisible()
   await expect(page.getByText(/铃声为何消失 · 计划/)).toBeVisible()
+  const redesigned = await page.request.patch(referencePath, {
+    headers,
+    data: { ...cardEdit, base_revision: 1, cards: [{ ...card, technique: '让新线索改变选择' }] },
+  })
+  expect(redesigned.ok(), await redesigned.text()).toBe(true)
   await page.getByRole('button', { name: '门外寻铃', exact: true }).click()
   await expect(page.getByText('本章章纲 · 修订 2')).toBeVisible()
   await expect(page.getByText('发现铃身的断痕', { exact: true })).toBeVisible()
+  const directory = page.getByRole('navigation', { name: '全书目录' })
+  await expect(directory.getByText('拾铃卷', { exact: true })).toBeVisible()
+  await expect(directory.getByRole('region', { name: '辨铃', exact: true })).toBeVisible()
+  await page.getByText('本章章纲引用的手法卡', { exact: true }).press('Enter')
+  await page.getByText('用少量线索引出下一步 · 手法卡修订 1', { exact: true }).press('Enter')
+  await page.getByRole('button', { name: '查看手法卡原文依据' }).press('Enter')
+  await expect(page.locator('blockquote').getByText(quote, { exact: true })).toBeVisible()
   await page.locator('.cm-content[contenteditable=true]').focus()
   await page.keyboard.insertText('学徒迈过门槛，铜铃响了。')
   await expect(page.getByLabel('今日事项')).toContainText('1 条伏笔处于回收窗口或已到期')

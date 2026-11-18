@@ -86,6 +86,72 @@
         }
       }
     },
+    "/api/branches/{branch_id}/reading-metrics/history": {
+      "get": {
+        "summary": "Reading History",
+        "operationId": "reading_history_api_branches__branch_id__reading_metrics_history_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ReadingHistoryEntry" },
+                  "title": "Response Reading History Api Branches  Branch Id  Reading Metrics History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/reading-metrics/history/{identifier}": {
+      "get": {
+        "summary": "Read Saved Report",
+        "operationId": "read_saved_report_api_branches__branch_id__reading_metrics_history__identifier__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImportedReport" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/reading-metrics/import": {
       "post": {
         "summary": "Import Reading Metrics",
@@ -315,6 +381,38 @@
         }
       }
     },
+    "/api/branches/{branch_id}/workflow-inspections/length-targets": {
+      "put": {
+        "summary": "Save Length Targets",
+        "operationId": "save_length_targets_api_branches__branch_id__workflow_inspections_length_targets_put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/SaveLengthTargets" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/workflow-inspections/{inspection_id}": {
       "get": {
         "summary": "Inspection",
@@ -389,6 +487,80 @@
           "201": {
             "description": "Successful Response",
             "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/manuscript-evidence": {
+      "get": {
+        "summary": "Get Evidence",
+        "operationId": "get_evidence_api_branches__branch_id__manuscript_evidence_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/PortableEvidence" },
+                  "title": "Response Get Evidence Api Branches  Branch Id  Manuscript Evidence Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/manuscript-sources/{revision_id}": {
+      "get": {
+        "summary": "Get Source",
+        "operationId": "get_source_api_branches__branch_id__manuscript_sources__revision_id__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/PortableRevision" } }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -1573,6 +1745,40 @@
           "200": {
             "description": "Successful Response",
             "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/outline-workspace/reference-options": {
+      "get": {
+        "summary": "Reference Options",
+        "operationId": "reference_options_api_branches__branch_id__outline_workspace_reference_options_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/OutlineCard" },
+                  "title": "Response Reference Options Api Branches  Branch Id  Outline Workspace Reference Options Get"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -4100,8 +4306,8 @@
         }
       },
       "patch": {
-        "summary": "Edit Reference",
-        "operationId": "edit_reference_api_reference_sessions__identifier__patch",
+        "summary": "Edit Saved Reference",
+        "operationId": "edit_saved_reference_api_reference_sessions__identifier__patch",
         "parameters": [
           {
             "name": "identifier",
@@ -4434,6 +4640,181 @@
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/OutlineProposal" } }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/workflow-inspections/semantic": {
+      "post": {
+        "summary": "Start",
+        "operationId": "start_api_branches__branch_id__workflow_inspections_semantic_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/GenerateInspectionCandidate" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/InspectionCandidateTask" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/workflow-inspections/semantic/tasks": {
+      "get": {
+        "summary": "History",
+        "operationId": "history_api_branches__branch_id__workflow_inspections_semantic_tasks_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": ["chapter", "volume", "book"],
+              "type": "string",
+              "default": "book",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Scope Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/InspectionCandidateTask" },
+                  "title": "Response History Api Branches  Branch Id  Workflow Inspections Semantic Tasks Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/workflow-inspections/semantic/{identifier}": {
+      "get": {
+        "summary": "Candidate",
+        "operationId": "candidate_api_branches__branch_id__workflow_inspections_semantic__identifier__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/InspectionCandidate" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/book-completion/preparation": {
+      "post": {
+        "summary": "Prepare",
+        "operationId": "prepare_api_branches__branch_id__book_completion_preparation_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PrepareCompletion" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Latest Preparation",
+        "operationId": "latest_preparation_api_branches__branch_id__book_completion_preparation_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
           },
           "422": {
             "description": "Validation Error",
@@ -4886,12 +5267,32 @@
             "type": "array",
             "maxItems": 30,
             "title": "Evidence"
+          },
+          "source_candidate_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Source Candidate Id"
+          },
+          "author_overrides_candidate": {
+            "type": "boolean",
+            "title": "Author Overrides Candidate",
+            "default": false
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": ["check_id", "status", "basis_note", "reason"],
         "title": "AuthorReview"
+      },
+      "BasisExcerpt": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "label": { "type": "string", "title": "Label" },
+          "text": { "type": "string", "title": "Text" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "label", "text"],
+        "title": "BasisExcerpt"
       },
       "Body_import_book_api_library_import_post": {
         "properties": {
@@ -4941,6 +5342,27 @@
         "type": "object",
         "required": ["text"],
         "title": "CandidateEdit"
+      },
+      "CandidateItem": {
+        "properties": {
+          "check_id": { "type": "string", "enum": ["01", "02", "10"], "title": "Check Id" },
+          "result": { "type": "string", "enum": ["pass", "fail", "unknown"], "title": "Result" },
+          "reason": { "type": "string", "title": "Reason" },
+          "evidence": {
+            "items": { "$ref": "#/components/schemas/Source" },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "basis_excerpts": {
+            "items": { "$ref": "#/components/schemas/BasisExcerpt" },
+            "type": "array",
+            "title": "Basis Excerpts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["check_id", "result", "reason", "evidence", "basis_excerpts"],
+        "title": "CandidateItem"
       },
       "CandidateRecheckInput": {
         "properties": {
@@ -5027,6 +5449,12 @@
             "type": "array",
             "maxItems": 40,
             "title": "Setting Ids"
+          },
+          "reference_cards": {
+            "items": { "$ref": "#/components/schemas/OutlineCardReference" },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Reference Cards"
           }
         },
         "additionalProperties": false,
@@ -5104,7 +5532,11 @@
             "maxItems": 20,
             "title": "Sample Chapter Ids"
           },
-          "materials_reviewed": { "type": "boolean", "title": "Materials Reviewed" }
+          "materials_reviewed": { "type": "boolean", "title": "Materials Reviewed" },
+          "preparation_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Preparation Id"
+          }
         },
         "additionalProperties": false,
         "type": "object",
@@ -5260,6 +5692,41 @@
         "required": ["id", "category_id", "title", "revision", "description"],
         "title": "ConceptionObserved"
       },
+      "ConceptionProjectImpact": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Item Id"
+          },
+          "category_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Category Id"
+          },
+          "title": { "type": "string", "title": "Title" },
+          "source_project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Source Project Id"
+          },
+          "source_project_revision": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Source Project Revision"
+          },
+          "reconciled": { "type": "boolean", "title": "Reconciled" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["item_id", "category_id", "title", "source_project_id", "reconciled"],
+        "title": "ConceptionProjectImpact"
+      },
       "ConceptionSource": {
         "properties": {
           "item_id": {
@@ -5305,7 +5772,12 @@
             "type": "array",
             "title": "Sources"
           },
-          "project": { "anyOf": [{ "$ref": "#/components/schemas/ConfirmedProject" }, { "type": "null" }] }
+          "project": { "anyOf": [{ "$ref": "#/components/schemas/ConfirmedProject" }, { "type": "null" }] },
+          "project_impacts": {
+            "items": { "$ref": "#/components/schemas/ConceptionProjectImpact" },
+            "type": "array",
+            "title": "Project Impacts"
+          }
         },
         "additionalProperties": false,
         "type": "object",
@@ -5403,7 +5875,13 @@
             "minLength": 8,
             "title": "Idempotency Key"
           },
-          "note": { "type": "string", "maxLength": 4000, "title": "Note", "default": "" }
+          "note": { "type": "string", "maxLength": 4000, "title": "Note", "default": "" },
+          "reconciled_project_items": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+            "type": "array",
+            "maxItems": 240,
+            "title": "Reconciled Project Items"
+          }
         },
         "additionalProperties": false,
         "type": "object",
@@ -5714,6 +6192,30 @@
         "required": ["ref", "event_id", "record_sha256"],
         "title": "EventWitness"
       },
+      "EvidenceChapter": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Sha256" },
+          "revision_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Revision Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "revision", "sha256"],
+        "title": "EvidenceChapter"
+      },
       "ExcerptInput": {
         "properties": {
           "unit_id": { "type": "string", "title": "Unit Id" },
@@ -5813,6 +6315,36 @@
         "required": ["issue_id", "decision", "reason"],
         "title": "FinalizationDisposition"
       },
+      "GenerateInspectionCandidate": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": ["chapter", "volume", "book"],
+            "title": "Scope",
+            "default": "book"
+          },
+          "scope_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }],
+            "title": "Scope Id"
+          },
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" },
+          "account": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["basis_sha256", "account", "client_request_id"],
+        "title": "GenerateInspectionCandidate"
+      },
       "GenerateOutline": {
         "properties": {
           "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
@@ -5840,6 +6372,12 @@
           "budget_limit": {
             "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
             "title": "Budget Limit"
+          },
+          "reference_cards": {
+            "items": { "$ref": "#/components/schemas/OutlineCardReference" },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Reference Cards"
           }
         },
         "additionalProperties": false,
@@ -5912,6 +6450,54 @@
         "type": "object",
         "required": ["id", "report"],
         "title": "ImportedReport"
+      },
+      "InspectedChapter": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "title": { "type": "string", "title": "Title" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "sha256": { "type": "string", "title": "Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title", "revision", "sha256"],
+        "title": "InspectedChapter"
+      },
+      "InspectionCandidate": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "scope": { "type": "string", "enum": ["chapter", "volume", "book"], "title": "Scope" },
+          "scope_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Scope Id" },
+          "basis_sha256": { "type": "string", "title": "Basis Sha256" },
+          "current": { "type": "boolean", "title": "Current" },
+          "chapters": {
+            "items": { "$ref": "#/components/schemas/InspectedChapter" },
+            "type": "array",
+            "title": "Chapters"
+          },
+          "items": {
+            "items": { "$ref": "#/components/schemas/CandidateItem" },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "scope", "scope_id", "basis_sha256", "current", "chapters", "items"],
+        "title": "InspectionCandidate"
+      },
+      "InspectionCandidateTask": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "status": { "type": "string", "title": "Status" },
+          "error": { "type": "string", "title": "Error" },
+          "created": { "type": "number", "title": "Created" },
+          "artifact_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Artifact Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "status", "error", "created", "artifact_id"],
+        "title": "InspectionCandidateTask"
       },
       "InspectionInput": {
         "properties": {
@@ -6006,6 +6592,18 @@
             "type": "array",
             "maxItems": 50000,
             "title": "Revisions"
+          },
+          "evidence": {
+            "items": { "$ref": "#/components/schemas/PortableEvidence" },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Evidence"
+          },
+          "source_revisions": {
+            "items": { "$ref": "#/components/schemas/PortableRevision" },
+            "type": "array",
+            "maxItems": 50000,
+            "title": "Source Revisions"
           }
         },
         "additionalProperties": false,
@@ -6222,6 +6820,64 @@
         "required": ["title"],
         "title": "NovelInput"
       },
+      "OutlineCard": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Session Id"
+          },
+          "card_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Card Id"
+          },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "technique": { "type": "string", "title": "Technique" },
+          "conditions": { "type": "string", "title": "Conditions" },
+          "exceptions": { "type": "string", "title": "Exceptions" },
+          "source_title": { "type": "string", "title": "Source Title" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id",
+          "card_id",
+          "revision",
+          "technique",
+          "conditions",
+          "exceptions",
+          "source_title"
+        ],
+        "title": "OutlineCard"
+      },
+      "OutlineCardReference": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Session Id"
+          },
+          "card_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Card Id"
+          },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["session_id", "card_id", "revision"],
+        "title": "OutlineCardReference"
+      },
       "OutlineGenerationTask": {
         "properties": {
           "id": { "type": "string", "title": "Id" },
@@ -6363,6 +7019,35 @@
         "required": ["id", "branch_id", "position", "title", "revision", "archived", "stale"],
         "title": "PortableChapter"
       },
+      "PortableEvidence": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["project", "settings", "outline", "inspection", "completion"],
+            "title": "Kind"
+          },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "body": { "type": "string", "maxLength": 250000, "minLength": 1, "title": "Body" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Sha256" },
+          "chapters": {
+            "items": { "$ref": "#/components/schemas/EvidenceChapter" },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Chapters"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "kind", "title", "body", "sha256"],
+        "title": "PortableEvidence"
+      },
       "PortableRevision": {
         "properties": {
           "id": {
@@ -6414,6 +7099,39 @@
         "type": "object",
         "required": ["id", "title", "brief", "created"],
         "title": "PortableWork"
+      },
+      "PrepareCompletion": {
+        "properties": {
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" },
+          "spoiler_scope": {
+            "type": "string",
+            "enum": ["opening", "whole"],
+            "title": "Spoiler Scope",
+            "default": "opening"
+          },
+          "sample_chapters": {
+            "type": "integer",
+            "maximum": 20,
+            "minimum": 1,
+            "title": "Sample Chapters",
+            "default": 1
+          },
+          "account": { "type": "string", "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["basis_sha256", "account", "client_request_id"],
+        "title": "PrepareCompletion"
       },
       "ProjectBrief": {
         "properties": {
@@ -6549,6 +7267,18 @@
         "required": ["promise_id", "plant_chapter_id", "opens_chapter_id", "closes_chapter_id"],
         "title": "PromiseWindow"
       },
+      "PublicationChange": {
+        "properties": {
+          "chapter_id": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Chapter Id" },
+          "kind": { "type": "string", "enum": ["access", "recommendation", "revision"], "title": "Kind" },
+          "at": { "type": "string", "format": "date-time", "title": "At" },
+          "note": { "type": "string", "maxLength": 1000, "minLength": 1, "title": "Note" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "kind", "at", "note"],
+        "title": "PublicationChange"
+      },
       "PublishedChapter": {
         "properties": {
           "chapter_id": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Chapter Id" },
@@ -6558,6 +7288,51 @@
         "type": "object",
         "required": ["chapter_id", "published_at"],
         "title": "PublishedChapter"
+      },
+      "ReadingDiagnosis": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "target_chapter_id": { "type": "string", "title": "Target Chapter Id" },
+          "rate": { "type": "number", "title": "Rate" },
+          "numerator": { "type": "integer", "title": "Numerator" },
+          "denominator": { "type": "integer", "title": "Denominator" },
+          "baseline_rate": { "type": "number", "title": "Baseline Rate" },
+          "baseline_pairs": { "type": "integer", "title": "Baseline Pairs" },
+          "publication_gap_hours": { "type": "number", "title": "Publication Gap Hours" },
+          "median_publication_gap_hours": { "type": "number", "title": "Median Publication Gap Hours" },
+          "changes": {
+            "items": { "$ref": "#/components/schemas/PublicationChange" },
+            "type": "array",
+            "title": "Changes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chapter_id",
+          "target_chapter_id",
+          "rate",
+          "numerator",
+          "denominator",
+          "baseline_rate",
+          "baseline_pairs",
+          "publication_gap_hours",
+          "median_publication_gap_hours",
+          "changes"
+        ],
+        "title": "ReadingDiagnosis"
+      },
+      "ReadingHistoryEntry": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "release_version": { "type": "string", "title": "Release Version" },
+          "mode": { "type": "string", "enum": ["events", "aggregate"], "title": "Mode" },
+          "extracted_at": { "type": "string", "format": "date-time", "title": "Extracted At" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "release_version", "mode", "extracted_at"],
+        "title": "ReadingHistoryEntry"
       },
       "ReadingInput": {
         "properties": {
@@ -6595,6 +7370,11 @@
             "type": "array",
             "title": "Chapters"
           },
+          "publication_changes": {
+            "items": { "$ref": "#/components/schemas/PublicationChange" },
+            "type": "array",
+            "title": "Publication Changes"
+          },
           "read_definition": { "type": "string", "title": "Read Definition" },
           "completion_definition": {
             "anyOf": [{ "type": "string" }, { "type": "null" }],
@@ -6622,6 +7402,11 @@
             "items": { "$ref": "#/components/schemas/Metric" },
             "type": "array",
             "title": "Metrics"
+          },
+          "diagnostics": {
+            "items": { "$ref": "#/components/schemas/ReadingDiagnosis" },
+            "type": "array",
+            "title": "Diagnostics"
           },
           "notes": { "items": { "type": "string" }, "type": "array", "title": "Notes" }
         },
@@ -6906,6 +7691,29 @@
         "required": ["base_revision", "content"],
         "title": "SaveInput"
       },
+      "SaveLengthTargets": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": ["chapter", "volume", "book"],
+            "title": "Scope",
+            "default": "book"
+          },
+          "scope_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }],
+            "title": "Scope Id"
+          },
+          "base_target_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }],
+            "title": "Base Target Id"
+          },
+          "targets": { "$ref": "#/components/schemas/LengthTargets" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["targets"],
+        "title": "SaveLengthTargets"
+      },
       "SaveOutline": {
         "properties": {
           "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
@@ -7161,7 +7969,16 @@
             "title": "Client Request Id"
           },
           "auto_confirm_planning": { "type": "boolean", "title": "Auto Confirm Planning", "default": false },
-          "auto_adopt_body": { "type": "boolean", "title": "Auto Adopt Body", "default": false }
+          "auto_adopt_body": { "type": "boolean", "title": "Auto Adopt Body", "default": false },
+          "reference_session_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Reference Session Id"
+          },
+          "reference_revision": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Reference Revision"
+          },
+          "auto_adopt_reference": { "type": "boolean", "title": "Auto Adopt Reference", "default": false }
         },
         "additionalProperties": false,
         "type": "object",

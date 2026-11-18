@@ -641,6 +641,18 @@ details > label {
   margin-top: 4px;
   color: #57665b;
 }
+.chapter-volume {
+  overflow-wrap: anywhere;
+  margin: 12px 0;
+}
+.chapter-volume .chapter-list {
+  margin: 4px 0 12px;
+}
+.chapter-unit h3,
+.chapter-unit-title {
+  font-size: 13px;
+  margin: 8px 0 0;
+}
 .chapter-number {
   font-family: Georgia, serif;
   font-size: 12px;
@@ -724,6 +736,7 @@ details > label {
   border-top: 1px solid var(--line);
   padding: 10px 20px;
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
   justify-content: space-between;

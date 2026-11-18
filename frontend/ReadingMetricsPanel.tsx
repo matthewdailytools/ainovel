@@ -2,6 +2,24 @@ import { useEffect, useState } from 'react'
 import { api, type Chapter } from './api'
 
 type PublishedChapter = { chapter_id: string; published_at: string }
+type PublicationChange = {
+  chapter_id: string
+  kind: 'access' | 'recommendation' | 'revision'
+  at: string
+  note: string
+}
+type Diagnosis = {
+  chapter_id: string
+  target_chapter_id: string
+  rate: number
+  numerator: number
+  denominator: number
+  baseline_rate: number
+  baseline_pairs: number
+  publication_gap_hours: number
+  median_publication_gap_hours: number
+  changes: PublicationChange[]
+}
 type MetricKind = 'adjacent_follow' | 'first_chapter_retention' | 'chapter_completion' | 'aggregate_ratio'
 type Metric = {
   kind: MetricKind
@@ -39,8 +57,10 @@ type ReadingReport = {
   }[]
   metrics: Metric[]
   notes: string[]
+  diagnostics?: Diagnosis[]
 }
 type ImportedReport = { id: string; report: ReadingReport }
+type HistoryEntry = Pick<ReadingReport, 'mode' | 'release_version' | 'extracted_at'> & { id: string }
 type ChapterOption = Pick<Chapter, 'id' | 'title' | 'position'>
 
 const eventsKinds = ['adjacent_follow', 'first_chapter_retention', 'chapter_completion'] as const
@@ -53,6 +73,7 @@ const metricLabels = {
 const percent = new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFractionDigits: 2 })
 const number = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 6 })
 const missing = '无可计算数据'
+const changeName = { access: '可读范围', recommendation: '推荐', revision: '发布稿修订' }
 
 function downloadTemplate(mode: ReadingReport['mode'], chapters: ChapterOption[]) {
   const ordered = [...chapters].sort((left, right) => left.position - right.position)
@@ -66,6 +87,7 @@ function downloadTemplate(mode: ReadingReport['mode'], chapters: ChapterOption[]
     observed_until: '',
     extracted_at: '',
     chapters: ordered.map(({ id }) => ({ chapter_id: id, published_at: '' })),
+    publication_changes: [],
     read_definition: '',
     ...(mode === 'events'
       ? { window_hours: 168, completion_definition: null, events: [] }
@@ -88,14 +110,6 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
   const chapterTitle = (id: string) => titleById.get(id) ?? id
   const rows = report.metrics.filter((metric) => metric.kind === kind)
   const showCoverage = report.mode === 'events'
-  const comparable = report.metrics.filter(
-    (metric) => metric.kind === 'adjacent_follow' && metric.rate !== null,
-  )
-  const lowest = comparable.reduce<Metric | undefined>((low, row) => {
-    if (row.rate !== null && (low?.rate == null || row.rate < low.rate)) return row
-    return low
-  }, undefined)
-  const hasDifference = lowest && comparable.some((row) => row.rate !== lowest.rate)
   return (
     <section aria-label="追读报告">
       <h3>
@@ -214,12 +228,39 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
           </dl>
         </details>
       )}
-      {hasDifference && lowest.target_chapter_id && lowest.rate !== null && (
-        <p className="notice">
-          待验证线索 · {chapterTitle(lowest.chapter_id)} → {chapterTitle(lowest.target_chapter_id)}
-          的追读率在本次可计算章对中最低，为 {percent.format(lowest.rate)}（{lowest.numerator}/
-          {lowest.denominator} 人）。可对照两章的衔接、更新间隔、推荐来源与可读范围。
-        </p>
+      {!!report.diagnostics?.length && (
+        <section aria-label="追读待验证线索">
+          <h4>待验证线索</h4>
+          <ul>
+            {report.diagnostics.map((item) => (
+              <li key={`${item.chapter_id}/${item.target_chapter_id}`}>
+                <strong>
+                  {chapterTitle(item.chapter_id)} → {chapterTitle(item.target_chapter_id)}
+                </strong>
+                <p>
+                  追读 {percent.format(item.rate)}（{item.numerator}/{item.denominator} 人）。同口径的{' '}
+                  {item.baseline_pairs} 组相邻章中位数为 {percent.format(item.baseline_rate)}。
+                </p>
+                <p>
+                  两章发布相隔 {number.format(item.publication_gap_hours)} 小时，本次可计算章对的中位间隔为{' '}
+                  {number.format(item.median_publication_gap_hours)} 小时。
+                </p>
+                {item.changes.length ? (
+                  <ul>
+                    {item.changes.map((change, index) => (
+                      <li key={index}>
+                        {chapterTitle(change.chapter_id)} · {changeName[change.kind]} ·{' '}
+                        <time dateTime={change.at}>{change.at}</time> · {change.note}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>来源未提供这两章的可读范围、推荐或稿件变化记录。</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
       <details>
         <summary>覆盖范围与解释</summary>
@@ -235,6 +276,7 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
 
 export function ReadingMetricsPanel({ branchId, chapters }: { branchId: string; chapters: ChapterOption[] }) {
   const [latest, setLatest] = useState<ImportedReport | null>()
+  const [history, setHistory] = useState<HistoryEntry[]>([])
   const [file, setFile] = useState<File>()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -247,9 +289,12 @@ export function ReadingMetricsPanel({ branchId, chapters }: { branchId: string; 
     let active = true
     setLoading(true)
     setLoadError('')
-    void api<{ latest: ImportedReport | null }>(route)
-      .then((payload) => {
-        if (active) setLatest(payload.latest)
+    void Promise.all([api<{ latest: ImportedReport | null }>(route), api<HistoryEntry[]>(`${route}/history`)])
+      .then(([payload, reports]) => {
+        if (active) {
+          setLatest(payload.latest)
+          setHistory(reports)
+        }
       })
       .catch((error: unknown) => {
         if (active) setLoadError(error instanceof Error ? error.message : '报告读取失败。')
@@ -272,7 +317,10 @@ export function ReadingMetricsPanel({ branchId, chapters }: { branchId: string; 
     setImportError('')
     setSubmitting(true)
     try {
-      setLatest(await api<ImportedReport>(`${route}/import`, 'POST', upload))
+      const imported = await api<ImportedReport>(`${route}/import`, 'POST', upload)
+      const { release_version, mode, extracted_at } = imported.report
+      setLatest(imported)
+      setHistory((current) => [{ id: imported.id, release_version, mode, extracted_at }, ...current])
       setFile(undefined)
       form.reset()
       setLoadError('')
@@ -281,6 +329,18 @@ export function ReadingMetricsPanel({ branchId, chapters }: { branchId: string; 
       setImportError(error instanceof Error ? error.message : '文件导入失败。')
     } finally {
       setSubmitting(false)
+    }
+  }
+  async function selectReport(id: string) {
+    if (!id || id === latest?.id) return
+    setLoading(true)
+    setLoadError('')
+    try {
+      setLatest(await api<ImportedReport>(`${route}/history/${encodeURIComponent(id)}`))
+    } catch (failure) {
+      setLoadError(failure instanceof Error ? failure.message : '历史报告读取失败。')
+    } finally {
+      setLoading(false)
     }
   }
   return (
@@ -305,6 +365,10 @@ export function ReadingMetricsPanel({ branchId, chapters }: { branchId: string; 
           <li>
             汇总文件的 counts 每条包含 chapter_id 和 unique_readers。空缺使用 null。原生指标可填
             name、definition、value 和 unit。
+          </li>
+          <li>
+            已知发布变化可选填 publication_changes，每条含 chapter_id、at、note，kind 使用
+            access、recommendation 或 revision。
           </li>
         </ul>
         <div className="actions">
@@ -353,6 +417,22 @@ export function ReadingMetricsPanel({ branchId, chapters }: { branchId: string; 
       )}
       {importError && <p role="alert">{importError}</p>}
       {status && <p role="status">{status}</p>}
+      {history.length > 1 && (
+        <label>
+          发布报告
+          <select
+            value={latest?.id ?? ''}
+            disabled={loading || submitting}
+            onChange={(event) => void selectReport(event.target.value)}
+          >
+            {history.map((entry) => (
+              <option value={entry.id} key={entry.id}>
+                {entry.release_version} · {entry.mode === 'events' ? '事件' : '汇总'} · {entry.extracted_at}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {latest && <ReportDetails key={latest.id} report={latest.report} chapters={chapters} />}
       {latest === null && !loading && <p className="muted">暂无追读报告。导入发布数据后可查看统计。</p>}
     </section>

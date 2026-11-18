@@ -82,8 +82,24 @@ async function pull(scope: SyncScope, transport: SyncTransport) {
 async function reconcile(project: LocalProject, scope: SyncScope) {
   const { blockedObjects } = await readSyncState(scope)
   const local = syncManuscriptObjects(await exportLocalManuscript(project.novel.id))
-  const deferred: string[] = []
-  for (const head of await listSyncHeads(scope)) {
+  const deferred = new Map<string, string>()
+  const priority = (id: string) => (id.startsWith('revision:') ? 0 : id.startsWith('evidence:') ? 2 : 1)
+  const depth = (payload: SyncPayload | null | undefined) => {
+    const revision = payload?.revision
+    return revision &&
+      typeof revision === 'object' &&
+      !Array.isArray(revision) &&
+      typeof revision.revision === 'number'
+      ? revision.revision
+      : 0
+  }
+  const heads = (await listSyncHeads(scope)).sort(
+    (left, right) =>
+      priority(left.id) - priority(right.id) ||
+      depth(left.receipt?.payload) - depth(right.receipt?.payload) ||
+      (left.receipt?.sequence ?? 0) - (right.receipt?.sequence ?? 0),
+  )
+  for (const head of heads) {
     if (!head.receipt || head.baseline?.revision === head.revision || blockedObjects.includes(head.id))
       continue
     try {
@@ -92,23 +108,30 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
       const signature = syncObjectSignature(local.get(head.id) ?? null)
       const resolution = head.approval?.changeId === head.revision ? head.approval : undefined
       const safeBase = resolution?.signature ?? head.baseline?.signature ?? 'null'
+      if (object?.kind === 'revision' && signature !== 'null' && signature !== target) {
+        deferred.set(head.id, '云端和本机以同一来源编号保存了不同修订，待人工核查。')
+        continue
+      }
       if (signature !== target && signature === safeBase) {
         if (!(await applySyncedObject(project.novel.id, head.id, object, signature))) {
-          deferred.push(head.id)
+          deferred.set(head.id, '本机内容已变化，下次同步会重新核对。')
           continue
         }
-      } else if (signature !== target && head.receipt.device_id !== scope.deviceId) {
+      } else if (signature !== target && (resolution || head.receipt.device_id !== scope.deviceId)) {
+        // A resolution acknowledges exactly the local version compared by its author.
+        // If the author kept writing, submit their newer version against its prior baseline.
         continue
       }
       await markSyncBaseline(scope, head.id, { revision: head.revision, signature: target })
-    } catch {
-      deferred.push(head.id)
+    } catch (error) {
+      deferred.set(head.id, error instanceof Error ? error.message : '云端对象待核对。')
     }
   }
   return deferred
 }
 
-async function draftChanges(project: LocalProject, scope: SyncScope, deferred: string[]) {
+async function draftChanges(project: LocalProject, scope: SyncScope, deferred: Map<string, string>) {
+  const unsent = new Map<string, string>()
   const state = await readSyncState(scope)
   const pending = new Set(
     state.pending.map((entry) => (entry.kind === 'push' ? entry.request.object_id : entry.object_id)),
@@ -116,12 +139,16 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: s
   const heads = new Map((await listSyncHeads(scope)).map((head) => [head.id, head]))
   const objects = syncManuscriptObjects(await exportLocalManuscript(project.novel.id))
   for (const [id, object] of objects) {
+    if (object && new TextEncoder().encode(JSON.stringify(object)).length > 1024 * 1024 - 4096) {
+      unsent.set(id, '本机对象超过单项同步限制，可导出稿件包供独立工作区检查。')
+      continue
+    }
     const base = heads.get(id)?.baseline
     const signature = syncObjectSignature(object)
     if (
       signature === (base?.signature ?? 'null') ||
       pending.has(id) ||
-      deferred.includes(id) ||
+      deferred.has(id) ||
       state.blockedObjects.includes(id)
     )
       continue
@@ -132,17 +159,22 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: s
       tombstone: object === null,
     })
   }
+  return unsent
 }
 
 export async function syncWebManuscript(project: LocalProject, scope: SyncScope, transport: SyncTransport) {
   if (scope.workId !== project.branch.id) throw new Error('同步范围与当前工作版本不一致。')
   async function exchange() {
     await pull(scope, transport)
-    await draftChanges(project, scope, await reconcile(project, scope))
+    const deferred = await reconcile(project, scope)
+    const unsent = await draftChanges(project, scope, deferred)
     await pushSyncPending(scope, transport)
     await pull(scope, transport)
-    const deferred = await reconcile(project, scope)
-    return { ...(await readSyncState(scope)), deferred }
+    const remaining = await reconcile(project, scope)
+    return {
+      ...(await readSyncState(scope)),
+      deferred: [...new Map([...unsent, ...remaining])].map(([object_id, reason]) => ({ object_id, reason })),
+    }
   }
   if (typeof navigator !== 'undefined' && navigator.locks) {
     return navigator.locks.request(`ainovel-sync/${scope.workId}`, { ifAvailable: true }, (lock) => {

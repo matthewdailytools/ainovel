@@ -11,7 +11,17 @@ export type LocalBranch = {
   story_revision: number
   created: number
 }
-export type LocalProject = { novel: LocalNovel; branch: LocalBranch }
+const evidenceKinds = ['project', 'settings', 'outline', 'inspection', 'completion'] as const
+type EvidenceKind = (typeof evidenceKinds)[number]
+export type LocalEvidence = {
+  id: string
+  kind: EvidenceKind
+  title: string
+  body: string
+  sha256: string
+  chapters: { id: string; revision: number; sha256: string; revision_id?: string }[]
+}
+export type LocalProject = { novel: LocalNovel; branch: LocalBranch; evidence?: LocalEvidence[] }
 export type LocalChapter = {
   id: string
   branch_id: string
@@ -35,11 +45,18 @@ export type ManuscriptPack = LocalProject & {
   format: typeof FORMAT
   chapters: LocalChapter[]
   revisions: LocalRevision[]
+  source_revisions?: LocalRevision[]
 }
 const SYNC_FORMAT = 'ainovel-manuscript-sync/1'
 export type SyncedObject =
   | (LocalProject & { format: typeof SYNC_FORMAT; kind: 'branch' })
   | { format: typeof SYNC_FORMAT; kind: 'chapter'; chapter: LocalChapter; head: LocalRevision }
+  | { format: typeof SYNC_FORMAT; kind: 'revision'; branch_id: string; revision: LocalRevision }
+  | { format: typeof SYNC_FORMAT; kind: 'evidence'; document: LocalEvidence }
+
+function revisionSignature(row: LocalRevision) {
+  return [row.id, row.chapter_id, row.revision, row.parent_id, row.sha256, row.cause, row.created]
+}
 
 export function syncObjectSignature(object: SyncedObject | null) {
   if (object?.kind === 'branch') {
@@ -57,6 +74,13 @@ export function syncObjectSignature(object: SyncedObject | null) {
       head.sha256,
     ])
   }
+  if (object?.kind === 'evidence') {
+    const doc = object.document
+    return JSON.stringify(['evidence', doc.id, doc.kind, doc.title, doc.sha256, doc.chapters])
+  }
+  if (object?.kind === 'revision') {
+    return JSON.stringify(['revision', object.branch_id, ...revisionSignature(object.revision)])
+  }
   return 'null'
 }
 
@@ -67,6 +91,16 @@ export function syncManuscriptObjects(pack: ManuscriptPack): Map<string, SyncedO
       { format: SYNC_FORMAT, kind: 'branch', novel: pack.novel, branch: pack.branch },
     ],
   ])
+  for (const revision of [...pack.revisions, ...(pack.source_revisions ?? [])].sort(
+    (left, right) => left.revision - right.revision,
+  )) {
+    objects.set(`revision:${revision.id}`, {
+      format: SYNC_FORMAT,
+      kind: 'revision',
+      branch_id: pack.branch.id,
+      revision,
+    })
+  }
   const heads = new Map(pack.revisions.map((revision) => [revision.chapter_id, revision]))
   for (const chapter of pack.chapters) {
     const head = heads.get(chapter.id)
@@ -76,9 +110,12 @@ export function syncManuscriptObjects(pack: ManuscriptPack): Map<string, SyncedO
       chapter.archived ? null : { format: SYNC_FORMAT, kind: 'chapter', chapter, head },
     )
   }
+  for (const document of pack.evidence ?? []) {
+    objects.set(`evidence:${document.id}`, { format: SYNC_FORMAT, kind: 'evidence', document })
+  }
   return objects
 }
-type Store = 'projects' | 'chapters' | 'revisions'
+type Store = 'projects' | 'chapters' | 'revisions' | 'sourceRevisions'
 
 export class OfflineStoreError extends Error {
   constructor(
@@ -98,21 +135,27 @@ function result<T>(request: IDBRequest<T>): Promise<T> {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 1)
+    const request = indexedDB.open(DATABASE, 2)
     let blocked = false
     request.onblocked = () => {
       blocked = true
       reject(new OfflineStoreError('database', '已有窗口占用浏览器存储，请关闭其他离线写作窗口后重试。'))
     }
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result
-      db.createObjectStore('projects', { keyPath: 'novel.id' }).createIndex('byBranch', 'branch.id', {
-        unique: true,
-      })
-      db.createObjectStore('chapters', { keyPath: 'id' }).createIndex('byBranch', 'branch_id')
-      const revisions = db.createObjectStore('revisions', { keyPath: 'id' })
-      revisions.createIndex('byChapter', 'chapter_id')
-      revisions.createIndex('byRevision', ['chapter_id', 'revision'], { unique: true })
+      if (event.oldVersion < 1) {
+        db.createObjectStore('projects', { keyPath: 'novel.id' }).createIndex('byBranch', 'branch.id', {
+          unique: true,
+        })
+        db.createObjectStore('chapters', { keyPath: 'id' }).createIndex('byBranch', 'branch_id')
+        const revisions = db.createObjectStore('revisions', { keyPath: 'id' })
+        revisions.createIndex('byChapter', 'chapter_id')
+        revisions.createIndex('byRevision', ['chapter_id', 'revision'], { unique: true })
+      }
+      db.createObjectStore('sourceRevisions', { keyPath: ['branchId', 'revision.id'] }).createIndex(
+        'byBranch',
+        'branchId',
+      )
     }
     request.onsuccess = () => {
       const db = request.result
@@ -375,12 +418,51 @@ export async function saveLocalChapter(
 }
 
 export function exportLocalManuscript(projectId: string): Promise<ManuscriptPack> {
-  return transact(['projects', 'chapters', 'revisions'], 'readonly', async (tx) => {
+  return transact(['projects', 'chapters', 'revisions', 'sourceRevisions'], 'readonly', async (tx) => {
     const project = await readProject(tx, projectId)
     const chapters = await listChaptersTx(tx, project.branch.id)
     const revisions = (await Promise.all(chapters.map((chapter) => historyTx(tx, chapter.id)))).flat()
-    return { format: FORMAT, ...project, chapters, revisions }
+    const sources = await result<{ revision: LocalRevision }[]>(
+      tx.objectStore('sourceRevisions').index('byBranch').getAll(project.branch.id),
+    )
+    return {
+      format: FORMAT,
+      ...project,
+      chapters,
+      revisions,
+      ...(sources.length ? { source_revisions: sources.map(({ revision }) => revision) } : {}),
+    }
   })
+}
+
+async function sourceRevision(tx: IDBTransaction, branchId: string, revisionId: string) {
+  const source = await result<{ revision: LocalRevision } | undefined>(
+    tx.objectStore('sourceRevisions').get([branchId, revisionId]),
+  )
+  if (source) return source.revision
+  const local = await result<LocalRevision | undefined>(tx.objectStore('revisions').get(revisionId))
+  if (!local) return undefined
+  const chapter = await result<LocalChapter | undefined>(tx.objectStore('chapters').get(local.chapter_id))
+  return chapter?.branch_id === branchId ? local : undefined
+}
+
+export function readLocalSourceRevision(projectId: string, revisionId: string) {
+  return transact(['projects', 'chapters', 'revisions', 'sourceRevisions'], 'readonly', async (tx) => {
+    const project = await readProject(tx, projectId)
+    return sourceRevision(tx, project.branch.id, revisionId)
+  })
+}
+
+function sourceLink(revision: LocalRevision, parent: LocalRevision | undefined) {
+  return revision.revision === 0
+    ? revision.parent_id === null
+    : !!parent && parent.chapter_id === revision.chapter_id && parent.revision + 1 === revision.revision
+}
+
+function evidenceMatches(source: LocalEvidence['chapters'][number], target: LocalRevision | undefined) {
+  return (
+    target?.chapter_id === source.id && target.revision === source.revision && target.sha256 === source.sha256
+  )
 }
 
 export async function validateSyncedObject(
@@ -394,6 +476,25 @@ export async function validateSyncedObject(
   }
   const object = row(value)
   if (object.format !== SYNC_FORMAT) invalid('云端对象格式不支持当前稿件。')
+  if (object.kind === 'revision') {
+    fields(value, ['format', 'kind', 'branch_id', 'revision'])
+    const revision = await validateRevision(object.revision)
+    if (object.branch_id !== project.branch.id || objectId !== `revision:${revision.id}`)
+      invalid('来源修订与当前工作版本不符。')
+    return { format: SYNC_FORMAT, kind: 'revision', branch_id: project.branch.id, revision }
+  }
+  if (object.kind === 'evidence') {
+    const pack = await exportLocalManuscript(project.novel.id)
+    const histories = new Map<string, LocalRevision[]>()
+    for (const revision of pack.revisions) {
+      if (!histories.has(revision.chapter_id)) histories.set(revision.chapter_id, [])
+      histories.get(revision.chapter_id)!.push(revision)
+    }
+    const byId = new Map([...pack.revisions, ...(pack.source_revisions ?? [])].map((item) => [item.id, item]))
+    const document = await validateEvidence(object.document, histories, byId)
+    if (objectId !== `evidence:${document.id}`) invalid('云端依据编号无效。')
+    return { format: SYNC_FORMAT, kind: 'evidence', document }
+  }
   if (object.kind === 'branch') {
     const normalized = await validateManuscript({
       format: FORMAT,
@@ -424,7 +525,8 @@ export async function validateSyncedObject(
   const parent = head.parent_id === null ? null : identity(head.parent_id)
   const checked = await validateManuscript({
     format: FORMAT,
-    ...project,
+    novel: project.novel,
+    branch: project.branch,
     chapters: [{ ...chapter, revision: 0 }],
     revisions: [{ ...head, revision: 0, parent_id: null }],
   })
@@ -442,9 +544,52 @@ export function applySyncedObject(
   object: SyncedObject | null,
   expected: string,
 ) {
-  return transact(['projects', 'chapters', 'revisions'], 'readwrite', async (tx) => {
+  return transact(['projects', 'chapters', 'revisions', 'sourceRevisions'], 'readwrite', async (tx) => {
     const project = await readProject(tx, projectId)
     const projectStore = tx.objectStore('projects')
+    const branchId = project.branch.id
+    if (object?.kind === 'revision') {
+      const revision = object.revision
+      const chapter = await result<LocalChapter | undefined>(
+        tx.objectStore('chapters').get(revision.chapter_id),
+      )
+      const existing = await sourceRevision(tx, branchId, revision.id)
+      if (
+        object.branch_id !== branchId ||
+        objectId !== `revision:${revision.id}` ||
+        (chapter && chapter.branch_id !== branchId) ||
+        (existing &&
+          JSON.stringify(revisionSignature(existing)) !== JSON.stringify(revisionSignature(revision)))
+      ) {
+        invalid('相同来源修订的内容或归属不一致。')
+      }
+      if (existing) return true
+      if (expected !== 'null') return false
+      const parent = revision.parent_id ? await sourceRevision(tx, branchId, revision.parent_id) : undefined
+      if (!sourceLink(revision, parent))
+        throw new OfflineStoreError('missing', '缺少同一章的连续父修订，来源稿件将延后接收。')
+      await result(tx.objectStore('sourceRevisions').add({ branchId, revision }))
+      return true
+    }
+    if (object?.kind === 'evidence') {
+      const before = project.evidence?.find(({ id }) => id === object.document.id)
+      if (before || expected !== 'null') return false
+      if ((project.evidence?.length ?? 0) >= 100) invalid('稿件的随稿依据数量已达上限。')
+      for (const source of object.document.chapters) {
+        const chapter = await result<LocalChapter | undefined>(tx.objectStore('chapters').get(source.id))
+        const version = source.revision_id
+          ? await sourceRevision(tx, branchId, source.revision_id)
+          : chapter?.branch_id === branchId
+            ? await result<LocalRevision | undefined>(
+                tx.objectStore('revisions').index('byRevision').get([source.id, source.revision]),
+              )
+            : undefined
+        if (!evidenceMatches(source, version)) invalid('需要准确的来源章稿后才能保存云端依据。')
+      }
+      project.evidence = [...(project.evidence ?? []), object.document]
+      await result(projectStore.put(project))
+      return true
+    }
     if (object?.kind === 'branch') {
       if (syncObjectSignature({ format: SYNC_FORMAT, kind: 'branch', ...project }) !== expected) return false
       project.novel.title = object.novel.title
@@ -482,17 +627,38 @@ export function applySyncedObject(
       )
         invalid('云端章位与本机目录冲突。')
       let revision = head?.revision ?? 0
-      if (!head || head.sha256 !== object.head.sha256) {
+      const original = await sourceRevision(tx, branchId, object.head.id)
+      const history: LocalRevision[] = []
+      const sameSource = (left: LocalRevision, right: LocalRevision) =>
+        JSON.stringify(revisionSignature(left)) === JSON.stringify(revisionSignature(right))
+      if (original && sameSource(original, object.head)) {
+        let cursor: LocalRevision | undefined = original
+        while (cursor) {
+          if (head && sameSource(cursor, head)) break
+          if (await result(versions.getKey(cursor.id))) {
+            history.length = 0
+            break
+          }
+          history.push(cursor)
+          cursor = cursor.parent_id ? await sourceRevision(tx, branchId, cursor.parent_id) : undefined
+        }
+        if (head && !cursor) history.length = 0
+      }
+      if (history.length && history.length === object.head.revision - (head?.revision ?? -1)) {
+        for (const entry of history.reverse()) {
+          await result(versions.add(entry))
+          await result(tx.objectStore('sourceRevisions').delete([branchId, entry.id]))
+        }
+        revision = object.head.revision
+      } else if (!head || head.sha256 !== object.head.sha256) {
         revision = head ? head.revision + 1 : 0
-        const remoteId = object.head.id
-        const idUsed = await result(versions.getKey(remoteId))
         await result(
           versions.add({
             ...object.head,
-            id: idUsed ? newId() : remoteId,
+            id: newId(),
             revision,
             parent_id: head?.id ?? null,
-            cause: `云同步，来源修订 ${remoteId}`,
+            cause: `云同步，来源修订 ${object.head.id}`,
           }),
         )
       }
@@ -504,8 +670,79 @@ export function applySyncedObject(
   })
 }
 
+async function validateEvidence(
+  source: unknown,
+  histories: Map<string, LocalRevision[]>,
+  byId: Map<string, LocalRevision>,
+): Promise<LocalEvidence> {
+  const entry = fields(source, ['id', 'kind', 'title', 'body', 'sha256', 'chapters'])
+  const id = identity(entry.id)
+  const kind = entry.kind as EvidenceKind
+  const title = content(entry.title, 200, '依据名称', true)
+  const body = content(entry.body, 250_000, '依据内容')
+  const hash = await manuscriptHash(body)
+  if (
+    !body.trim() ||
+    !evidenceKinds.includes(kind) ||
+    hash !== entry.sha256 ||
+    !Array.isArray(entry.chapters) ||
+    entry.chapters.length > 5000
+  )
+    invalid('稿件依据校验失败。')
+  const chapters = entry.chapters.map((value) => {
+    const reference = fields(value, ['id', 'revision', 'sha256', 'revision_id'])
+    const identifier = identity(reference.id)
+    const revision = number(reference.revision)
+    const revision_id = reference.revision_id === undefined ? undefined : identity(reference.revision_id)
+    const target = revision_id ? byId.get(revision_id) : histories.get(identifier)?.[revision]
+    const link = {
+      id: identifier,
+      revision,
+      sha256: content(reference.sha256, 64, '内容哈希', true),
+      ...(revision_id ? { revision_id } : {}),
+    }
+    if (!evidenceMatches(link, target))
+      throw new OfflineStoreError('missing', '缺少哈希一致的原章稿修订，随稿依据须等来源就绪后再采用。')
+    return link
+  })
+  return { id, kind, title, body, sha256: hash, chapters }
+}
+
+async function validateRevision(source: unknown): Promise<LocalRevision> {
+  const r = fields(source, [
+    'id',
+    'chapter_id',
+    'revision',
+    'parent_id',
+    'content',
+    'sha256',
+    'cause',
+    'created',
+  ])
+  const item = {
+    id: identity(r.id),
+    chapter_id: identity(r.chapter_id),
+    revision: number(r.revision),
+    parent_id: r.parent_id === null ? null : identity(r.parent_id),
+    content: content(r.content, 250_000, '正文'),
+    sha256: content(r.sha256, 64, '内容哈希', true),
+    cause: content(r.cause, 4000, '修订原因'),
+    created: number(r.created, 0, false),
+  }
+  if (item.sha256 !== (await manuscriptHash(item.content))) invalid('正文内容哈希校验失败。')
+  return item
+}
+
 export async function validateManuscript(value: unknown): Promise<ManuscriptPack> {
-  const pack = fields(value, ['format', 'novel', 'branch', 'chapters', 'revisions'])
+  const pack = fields(value, [
+    'format',
+    'novel',
+    'branch',
+    'chapters',
+    'revisions',
+    'evidence',
+    'source_revisions',
+  ])
   if (pack.format !== FORMAT) invalid('稿件交换包格式无法读取，请使用兼容版本。')
   const n = fields(pack.novel, ['id', 'title', 'brief', 'created'])
   const b = fields(pack.branch, ['id', 'novel_id', 'name', 'mode', 'story_revision', 'created'])
@@ -549,32 +786,12 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     chaptersById.set(chapter.id, chapter)
     if (!chapter.archived) positions.add(chapter.position)
   }
-  const ids = new Set<string>()
+  const byId = new Map<string, LocalRevision>()
   const histories = new Map<string, LocalRevision[]>()
   for (const source of pack.revisions) {
-    const r = fields(source, [
-      'id',
-      'chapter_id',
-      'revision',
-      'parent_id',
-      'content',
-      'sha256',
-      'cause',
-      'created',
-    ])
-    const item = {
-      id: identity(r.id),
-      chapter_id: identity(r.chapter_id),
-      revision: number(r.revision),
-      parent_id: r.parent_id === null ? null : identity(r.parent_id),
-      content: content(r.content, 250_000, '正文'),
-      sha256: content(r.sha256, 64, '内容哈希', true),
-      cause: content(r.cause, 4000, '修订原因'),
-      created: number(r.created, 0, false),
-    }
-    if (!chaptersById.has(item.chapter_id) || ids.has(item.id)) invalid('修订归属无效或编号重复。')
-    if (item.sha256 !== (await manuscriptHash(item.content))) invalid('正文内容哈希校验失败。')
-    ids.add(item.id)
+    const item = await validateRevision(source)
+    if (!chaptersById.has(item.chapter_id) || byId.has(item.id)) invalid('修订归属无效或编号重复。')
+    byId.set(item.id, item)
     if (!histories.has(item.chapter_id)) histories.set(item.chapter_id, [])
     histories.get(item.chapter_id)!.push(item)
   }
@@ -590,7 +807,42 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
       invalid('章节当前修订或父修订链不完整。')
     return history
   })
-  return { format: FORMAT, novel, branch, chapters, revisions }
+  const source_revisions: LocalRevision[] = []
+  if (pack.source_revisions !== undefined) {
+    if (!Array.isArray(pack.source_revisions) || pack.source_revisions.length > 50_000)
+      invalid('来源稿件修订的数量超过上限或格式无效。')
+    for (const value of pack.source_revisions) {
+      const source = await validateRevision(value)
+      if (byId.has(source.id)) invalid('来源修订编号重复。')
+      byId.set(source.id, source)
+      source_revisions.push(source)
+    }
+    for (const source of source_revisions) {
+      if (!sourceLink(source, source.parent_id ? byId.get(source.parent_id) : undefined))
+        invalid('来源稿件缺少同一章的连续父修订。')
+    }
+  }
+  const evidence: LocalEvidence[] = []
+  if (pack.evidence !== undefined) {
+    if (!Array.isArray(pack.evidence) || pack.evidence.length > 100)
+      invalid('稿件依据的数量超过上限或格式无效。')
+    const known = new Set<string>()
+    for (const source of pack.evidence) {
+      const document = await validateEvidence(source, histories, byId)
+      if (known.has(document.id)) invalid('随稿依据编号重复。')
+      known.add(document.id)
+      evidence.push(document)
+    }
+  }
+  return {
+    format: FORMAT,
+    novel,
+    branch,
+    chapters,
+    revisions,
+    ...(evidence.length ? { evidence } : {}),
+    ...(source_revisions.length ? { source_revisions } : {}),
+  }
 }
 
 export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
@@ -601,12 +853,14 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
   } catch {
     invalid('无法读取稿件交换包 JSON。')
   }
-  const { novel, branch, chapters, revisions } = await validateManuscript(value)
-  return transact(['projects', 'chapters', 'revisions'], 'readwrite', async (tx) => {
-    const project = { novel, branch }
+  const { novel, branch, chapters, revisions, evidence, source_revisions } = await validateManuscript(value)
+  return transact(['projects', 'chapters', 'revisions', 'sourceRevisions'], 'readwrite', async (tx) => {
+    const project = { novel, branch, ...(evidence?.length ? { evidence } : {}) }
     await result(tx.objectStore('projects').add(project))
     for (const chapter of chapters) await result(tx.objectStore('chapters').add(chapter))
     for (const revision of revisions) await result(tx.objectStore('revisions').add(revision))
+    for (const revision of source_revisions ?? [])
+      await result(tx.objectStore('sourceRevisions').add({ branchId: branch.id, revision }))
     return project
   })
 }

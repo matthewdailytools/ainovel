@@ -92,6 +92,47 @@ test('离线重开可写，双标签冲突留稿，清理浏览器后从交换�
   expect(JSON.parse(await readFile((await roundTrip.path())!, 'utf8'))).toEqual(pack)
 })
 
+test('离线打开随稿体检依据，改稿后标明来源版本', async ({ page, context }) => {
+  await page.goto('/')
+  const { csrf } = await (await page.request.get('/api/session')).json()
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const created = await page.request.post('/api/novels', {
+    headers,
+    data: { title: '遗铃 · 随稿依据' },
+  })
+  expect(created.ok()).toBe(true)
+  const { branch_id } = await created.json()
+  const prefix = `/api/branches/${branch_id}`
+  const chapter = await page.request.post(prefix + '/chapters', { headers, data: { title: '拾铃' } })
+  const { id } = await chapter.json()
+  const saved = await page.request.put('/api/chapters/' + id, {
+    headers,
+    data: { base_revision: 0, content: '学徒捡起铜铃。' },
+  })
+  expect(saved.ok()).toBe(true)
+  const route = prefix + '/workflow-inspections'
+  const { preview } = await (await page.request.get(route)).json()
+  const checked = await page.request.post(route, { headers, data: { basis_sha256: preview.basis_sha256 } })
+  expect(checked.ok()).toBe(true)
+  const pack = await (await page.request.get(prefix + '/manuscript-package')).body()
+  await page.goto('/offline/')
+  await expect(page.getByText('离线页面就绪', { exact: true })).toBeVisible()
+  await context.setOffline(true)
+  await page.getByLabel('导入新离线作品').setInputFiles({
+    name: '遗铃.json',
+    mimeType: 'application/json',
+    buffer: pack,
+  })
+  await page.getByText('十处对账体检', { exact: true }).click()
+  const evidence = page.getByRole('region', { name: '随稿依据' })
+  await expect(evidence.getByText('依据快照 · 只读')).toBeVisible()
+  await expect(evidence.locator('pre')).toContainText('章纲必达与章稿')
+  await page.getByRole('button', { name: '1. 拾铃', exact: true }).click()
+  await page.getByRole('textbox', { name: '章节正文', exact: true }).fill('师姐捡起铜铃。')
+  await page.getByRole('button', { name: '保存正文到浏览器', exact: true }).click()
+  await expect(evidence.getByText('已有章稿改版，以下为来源版本的只读记录。')).toBeVisible()
+})
+
 test('浏览器返回容量错误时保留当前输入与上一保存修订', async ({ page, context }) => {
   await createWorkspace(page)
   await page.evaluate(() => {

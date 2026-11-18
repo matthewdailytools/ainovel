@@ -1,10 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
 import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
 
 from ainovel import cloud_sync
+from ainovel.cloud_attachments import CHUNK_BYTES
 from ainovel.db import DomainError
 
 
@@ -68,6 +70,128 @@ def test_provision_opt_in_authentication_scope_rotation_and_revoke(service):
         stored = [row[0] for row in tx.execute("SELECT token_sha256 FROM sync_devices")]
     assert all(len(row) == 64 for row in stored)
     assert rotated["Authorization"].split(" ", 1)[1] not in stored
+
+
+def test_scoped_attachment_resume_validates_full_content(service):
+    client, _ = service
+    desktop, web = grant(client, "desktop"), grant(client, "web")
+    other = grant(client, "other", "/api/sync/works/another")
+    bundle = WORK + "/attachments"
+    data = b"a" * CHUNK_BYTES + "铜铃资料".encode()
+    digest = sha256(data).hexdigest()
+    manifest = {"name": "铜铃.txt", "size": len(data), "sha256": digest}
+    assert client.post(bundle, headers=desktop, json=manifest).json()["received"] == []
+    file = bundle + "/" + digest
+    assert client.get(file + "/content", headers=web).status_code == 404
+    assert client.get(bundle, headers=web).json()["files"] == []
+    binary = {**desktop, "Content-Type": "application/octet-stream"}
+    unsupported = {**desktop, "Content-Type": "text/plain"}
+    assert client.post(file + "/parts/0", headers=unsupported, content=data[:CHUNK_BYTES]).status_code == 415
+    assert client.post(file + "/parts/1", headers=binary, content=b"bad").status_code == 400
+    assert client.post(file + "/parts/0", headers=binary, content=data[:CHUNK_BYTES]).status_code == 204
+    assert client.post(bundle, headers=desktop, json=manifest).json()["received"] == [0]
+    assert client.post(file + "/seal", headers=desktop).status_code == 409
+    assert client.post(file + "/parts/0", headers=binary, content=data[:CHUNK_BYTES]).status_code == 204
+    assert client.post(file + "/parts/1", headers=binary, content=data[CHUNK_BYTES:]).status_code == 204
+    assert client.post(file + "/seal", headers=desktop).json()["sealed"] == 1
+    assert client.get(bundle, headers=web).json()["files"][0]["sha256"] == digest
+    assert client.get(file + "/content", headers=other).status_code == 401
+    assert client.get(file + "/content", headers=web).content == data
+
+
+def test_attachment_wrong_digest_is_not_published(service):
+    client, _ = service
+    writer = grant(client, "writer")
+    bundle = WORK + "/attachments"
+    valid, invalid = b"valid", b"wrong"
+    digest = sha256(valid).hexdigest()
+    address = bundle + "/" + digest
+    assert client.post(
+        bundle, headers=writer, json={"sha256": digest, "size": len(valid), "name": "file.txt"}
+    ).is_success
+    binary = {**writer, "Content-Type": "application/octet-stream"}
+    assert client.post(address + "/parts/0", headers=binary, content=invalid).status_code == 204
+    rejected = client.post(address + "/seal", headers=writer)
+    assert rejected.status_code == 409 and rejected.json()["code"] == "sync_attachment_integrity"
+    assert client.get(address + "/content", headers=writer).status_code == 404
+    assert client.get(bundle, headers=writer).json()["files"] == []
+
+
+def test_source_revision_validates_parent_sha_and_never_accepts_mutation(service):
+    client, _ = service
+    desktop, web = grant(client, "desktop"), grant(client, "web")
+
+    def source(change, identifier, revision, ancestor, content):
+        return parent(
+            change,
+            object_id=f"revision:{identifier}",
+            payload={
+                "format": "ainovel-manuscript-sync/1",
+                "kind": "revision",
+                "branch_id": "bell",
+                "revision": {
+                    "id": identifier,
+                    "chapter_id": "chapter-one",
+                    "revision": revision,
+                    "parent_id": ancestor,
+                    "content": content,
+                    "sha256": sha256(content.encode()).hexdigest(),
+                    "cause": "作者原稿",
+                    "created": 8,
+                },
+            },
+        )
+
+    base = source("base-upload", "base", 0, None, "")
+    next_revision = source("next-upload", "next", 1, "base", "师姐拾铃。")
+    assert client.post(WORK + "/push", headers=desktop, json=next_revision).status_code == 409
+    assert push(client, desktop, base)["sequence"] == 1
+    assert push(client, desktop, next_revision) == push(client, desktop, next_revision)
+    assert push(client, web, {**base, "change_id": "peer-had-same-base"})["status"] == "applied"
+
+    changed = source("changed-upload", "next", 1, "base", "学徒拾铃。")
+    changed["parent_revision"] = "next-upload"
+    broken_hash = source("bad-hash-upload", "other", 1, "base", "找到铜铃。")
+    broken_hash["payload"]["revision"]["sha256"] = "0" * 64
+    for rejected in (
+        changed,
+        broken_hash,
+        parent("deleted", "next-upload", tombstone=True, object_id="revision:next"),
+    ):
+        response = client.post(WORK + "/push", headers=web, json=rejected)
+        assert response.status_code == 409, response.text
+    recorded = client.get(WORK + "/pull", headers=web).json()
+    assert [(row["object_id"], row["status"]) for row in recorded["changes"]] == [
+        ("revision:base", "applied"),
+        ("revision:next", "applied"),
+        ("revision:base", "applied"),
+    ]
+
+
+def test_configured_browser_origin_can_call_isolated_cloud(tmp_path):
+    origin = "http://127.0.0.1:8877"
+    cloud = cloud_sync.create_sync_app(
+        tmp_path / "browser.sqlite", "local-test-token-1234567890abcdef", (origin,)
+    )
+    with TestClient(cloud) as client:
+        assert (
+            client.options(
+                WORK + "/pull",
+                headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "authorization",
+                },
+            ).headers["access-control-allow-origin"]
+            == origin
+        )
+        assert (
+            client.options(
+                WORK + "/pull",
+                headers={"Origin": "https://other.invalid", "Access-Control-Request-Method": "GET"},
+            ).status_code
+            == 400
+        )
 
 
 def test_persistent_receipt_idempotent_retry_and_ordered_pull(service):
@@ -168,6 +292,17 @@ def test_stale_edit_cannot_resurrect_tombstone(service):
     assert kept.status_code == 200
     assert kept.json()["tombstone"] and kept.json()["payload"] is None
     assert client.get(WORK + "/pull?after=3", headers=web).json()["changes"] == [kept.json()]
+
+
+def test_conflict_without_recorded_parent_remains_distinct_from_tombstone(service):
+    client, _ = service
+    desktop, web = grant(client, "desktop"), grant(client, "web")
+    push(client, desktop, parent("desktop-first"))
+    submitted = push(client, web, parent("independent"))
+    compared = client.get(WORK + "/conflicts/independent", headers=web).json()
+    assert compared["base"] is None and compared["parent_revision"] is None
+    assert compared["incoming"] == submitted
+    assert not compared["current"]["tombstone"]
 
 
 def test_bounded_payloads_and_sanitized_validation(service, monkeypatch):

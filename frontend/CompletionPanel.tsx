@@ -16,6 +16,21 @@ type Current = {
   history?: { id: string; current: boolean; created: number }[]
 }
 type Preview = { checks: Check[]; manifest: Manifest; materials: Record<string, string> | null }
+type Preparation = {
+  id: string
+  status: string
+  error: string
+  artifact_id: string | null
+  candidate?: {
+    current: boolean
+    closures: Record<ClosureKey, Closure>
+    intro: string
+    intro_coverage: string
+    coverage: string
+    spoiler_scope: 'opening' | 'whole'
+    sample_chapter_ids: string[]
+  }
+}
 
 const closureFields = [
   ['ending', '主冲突与终局'],
@@ -167,10 +182,14 @@ export function CompletionPanel({
   branchId,
   chapters,
   notify,
+  account,
+  modelReady,
 }: {
   branchId: string
   chapters: ChapterOption[]
   notify: Notify
+  account: string
+  modelReady: boolean
 }) {
   const endpoint = `/branches/${encodeURIComponent(branchId)}/book-completion`
   const [current, setCurrent] = useState<Current>()
@@ -185,6 +204,10 @@ export function CompletionPanel({
   const [busy, setBusy] = useState<'preview' | 'confirm'>()
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [preparation, setPreparation] = useState<Preparation | null>(null)
+  const [preparationId, setPreparationId] = useState<string>()
+  const [preparing, setPreparing] = useState(false)
+  const pendingPreparation = useRef<{ key: string; requestId: string } | undefined>(undefined)
   const alive = useRef(true)
   useLeaveGuard(
     !!(
@@ -215,6 +238,27 @@ export function CompletionPanel({
       active = false
     }
   }, [endpoint, reload])
+  useEffect(() => {
+    let active = true
+    let timer: ReturnType<typeof setTimeout>
+    async function refreshPreparation() {
+      try {
+        const { task: result } = await api<{ task: Preparation | null }>(`${endpoint}/preparation`)
+        if (!active) return
+        setPreparation(result)
+        if (result && ['queued', 'running'].includes(result.status)) {
+          timer = setTimeout(() => void refreshPreparation(), 1000)
+        }
+      } catch (failure) {
+        if (active) notify(failure)
+      }
+    }
+    void refreshPreparation()
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [endpoint, reload, notify])
 
   const ordered = [...chapters].sort((left, right) => left.position - right.position)
   const titles = new Map(ordered.map(({ id, title }) => [id, title]))
@@ -226,6 +270,7 @@ export function CompletionPanel({
     intro: intro.trim(),
     spoiler_scope: spoilerScope,
     sample_chapter_ids: sampleIds,
+    ...(preparationId ? { preparation_id: preparationId } : {}),
   }
   const signature = JSON.stringify(body)
   const readyPreview = preview?.signature === signature ? preview.result : undefined
@@ -240,6 +285,53 @@ export function CompletionPanel({
   function editClosure(id: ClosureKey, transform: (closure: Closure) => Closure) {
     setForm((before) => ({ ...before, [id]: transform(before[id]) }))
     setReviewed(false)
+  }
+
+  async function prepare() {
+    if (!current || preparing || !modelReady) return
+    setPreparing(true)
+    try {
+      const input = {
+        basis_sha256: current.basis_sha256,
+        spoiler_scope: spoilerScope,
+        sample_chapters: openingLength,
+        account,
+      }
+      const key = JSON.stringify(input)
+      if (pendingPreparation.current?.key !== key)
+        pendingPreparation.current = { key, requestId: crypto.randomUUID() }
+      await api(`${endpoint}/preparation`, 'POST', {
+        ...input,
+        client_request_id: pendingPreparation.current.requestId,
+      })
+      pendingPreparation.current = undefined
+      if (alive.current) setReload((version) => version + 1)
+    } catch (failure) {
+      if (alive.current) notify(failure)
+    } finally {
+      if (alive.current) setPreparing(false)
+    }
+  }
+
+  function loadPreparation() {
+    const candidate = preparation?.candidate
+    if (!preparation?.artifact_id || !candidate?.current) return
+    setForm((existing) => {
+      const updated = { ...existing }
+      for (const [key] of closureFields) {
+        if (!existing[key].note && !existing[key].sources.length) updated[key] = candidate.closures[key]
+      }
+      return updated
+    })
+    if (!intro.trim()) {
+      setIntro(candidate.intro)
+      setSpoilerScope(candidate.spoiler_scope)
+      setOpeningLength(candidate.sample_chapter_ids.length)
+    }
+    setPreparationId(preparation.artifact_id)
+    setReviewed(false)
+    setPreview(undefined)
+    setMessage('已将 AI 建议载入空白项。请按原文核对并记录通读。')
   }
 
   async function submit(action: 'preview' | 'confirm') {
@@ -270,6 +362,7 @@ export function CompletionPanel({
         setIntro('')
         setSpoilerScope('opening')
         setOpeningLength(1)
+        setPreparationId(undefined)
         setMessage('已确认完结，交付包已固定到本次稿件版本。')
       }
     } catch (failure) {
@@ -332,6 +425,43 @@ export function CompletionPanel({
         </details>
       )}
       {!!checks.length && <CheckList checks={checks} />}
+      <details>
+        <summary>AI 准备完本建议</summary>
+        <p>所选试读范围用于起草简介。收束核对会读取当前正文或体检已有的选区。</p>
+        <button
+          type="button"
+          disabled={
+            !current ||
+            !modelReady ||
+            preparing ||
+            (!!preparation && ['queued', 'running'].includes(preparation.status))
+          }
+          onClick={() => void prepare()}
+        >
+          生成完本核对建议与简介
+        </button>
+        {preparation && ['queued', 'running'].includes(preparation.status) && (
+          <p role="status">正在准备完本建议…</p>
+        )}
+        {preparation?.error && <p role="alert">{preparation.error}</p>}
+        {preparation?.candidate && (
+          <>
+            <p>
+              收束依据 · {preparation.candidate.coverage}。简介依据 · {preparation.candidate.intro_coverage}。
+            </p>
+            <p>{preparation.candidate.intro}</p>
+            <button type="button" disabled={!preparation.candidate.current} onClick={loadPreparation}>
+              载入 AI 建议到空白项
+            </button>
+            {!preparation.candidate.current && <p>依据已更新，请重新生成。</p>}
+          </>
+        )}
+      </details>
+      {preparationId && (
+        <button type="button" onClick={() => setPreparationId(undefined)}>
+          解除 AI 建议的版本关联
+        </button>
+      )}
       <fieldset disabled={!current || !!busy}>
         <legend>作者通读与收束说明</legend>
         <label>

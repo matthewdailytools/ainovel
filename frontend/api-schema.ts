@@ -34,6 +34,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/reading-metrics/history': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Reading History */
+    get: operations['reading_history_api_branches__branch_id__reading_metrics_history_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/reading-metrics/history/{identifier}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Saved Report */
+    get: operations['read_saved_report_api_branches__branch_id__reading_metrics_history__identifier__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/reading-metrics/import': {
     parameters: {
       query?: never
@@ -137,6 +171,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/workflow-inspections/length-targets': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Length Targets */
+    put: operations['save_length_targets_api_branches__branch_id__workflow_inspections_length_targets_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/workflow-inspections/{inspection_id}': {
     parameters: {
       query?: never
@@ -182,6 +233,40 @@ export interface paths {
     put?: never
     /** Import Package */
     post: operations['import_package_api_manuscript_packages_import_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/manuscript-evidence': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Evidence */
+    get: operations['get_evidence_api_branches__branch_id__manuscript_evidence_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/manuscript-sources/{revision_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Source */
+    get: operations['get_source_api_branches__branch_id__manuscript_sources__revision_id__get']
+    put?: never
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -749,6 +834,23 @@ export interface paths {
     }
     /** Setting Options */
     get: operations['setting_options_api_branches__branch_id__outline_workspace_setting_options_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/outline-workspace/reference-options': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Reference Options */
+    get: operations['reference_options_api_branches__branch_id__outline_workspace_reference_options_get']
     put?: never
     post?: never
     delete?: never
@@ -2124,8 +2226,8 @@ export interface paths {
     delete?: never
     options?: never
     head?: never
-    /** Edit Reference */
-    patch: operations['edit_reference_api_reference_sessions__identifier__patch']
+    /** Edit Saved Reference */
+    patch: operations['edit_saved_reference_api_reference_sessions__identifier__patch']
     trace?: never
   }
   '/api/reference-sessions/{identifier}/tasks': {
@@ -2260,6 +2362,75 @@ export interface paths {
     get: operations['proposal_api_branches__branch_id__outline_workspace_generation__identifier__get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/workflow-inspections/semantic': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Start */
+    post: operations['start_api_branches__branch_id__workflow_inspections_semantic_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/workflow-inspections/semantic/tasks': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** History */
+    get: operations['history_api_branches__branch_id__workflow_inspections_semantic_tasks_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/workflow-inspections/semantic/{identifier}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Candidate */
+    get: operations['candidate_api_branches__branch_id__workflow_inspections_semantic__identifier__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/book-completion/preparation': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Latest Preparation */
+    get: operations['latest_preparation_api_branches__branch_id__book_completion_preparation_get']
+    put?: never
+    /** Prepare */
+    post: operations['prepare_api_branches__branch_id__book_completion_preparation_post']
     delete?: never
     options?: never
     head?: never
@@ -2528,6 +2699,22 @@ export interface components {
       reason: string
       /** Evidence */
       evidence?: components['schemas']['Source'][]
+      /** Source Candidate Id */
+      source_candidate_id?: string | null
+      /**
+       * Author Overrides Candidate
+       * @default false
+       */
+      author_overrides_candidate: boolean
+    }
+    /** BasisExcerpt */
+    BasisExcerpt: {
+      /** Id */
+      id: string
+      /** Label */
+      label: string
+      /** Text */
+      text: string
     }
     /** Body_import_book_api_library_import_post */
     Body_import_book_api_library_import_post: {
@@ -2568,6 +2755,25 @@ export interface components {
        * @default 0
        */
       candidate_revision: number
+    }
+    /** CandidateItem */
+    CandidateItem: {
+      /**
+       * Check Id
+       * @enum {string}
+       */
+      check_id: '01' | '02' | '10'
+      /**
+       * Result
+       * @enum {string}
+       */
+      result: 'pass' | 'fail' | 'unknown'
+      /** Reason */
+      reason: string
+      /** Evidence */
+      evidence: components['schemas']['Source'][]
+      /** Basis Excerpts */
+      basis_excerpts: components['schemas']['BasisExcerpt'][]
     }
     /** CandidateRecheckInput */
     CandidateRecheckInput: {
@@ -2619,6 +2825,8 @@ export interface components {
       result: string
       /** Setting Ids */
       setting_ids?: string[]
+      /** Reference Cards */
+      reference_cards?: components['schemas']['OutlineCardReference'][]
     }
     /** Character */
     Character: {
@@ -2693,6 +2901,8 @@ export interface components {
       sample_chapter_ids: string[]
       /** Materials Reviewed */
       materials_reviewed: boolean
+      /** Preparation Id */
+      preparation_id?: string | null
     }
     /** ConceptionCategory */
     ConceptionCategory: {
@@ -2778,6 +2988,21 @@ export interface components {
       /** Description */
       description: string
     }
+    /** ConceptionProjectImpact */
+    ConceptionProjectImpact: {
+      /** Item Id */
+      item_id: string
+      /** Category Id */
+      category_id: string
+      /** Title */
+      title: string
+      /** Source Project Id */
+      source_project_id: string
+      /** Source Project Revision */
+      source_project_revision?: number | null
+      /** Reconciled */
+      reconciled: boolean
+    }
     /** ConceptionSource */
     ConceptionSource: {
       /** Item Id */
@@ -2804,6 +3029,8 @@ export interface components {
       /** Sources */
       sources: components['schemas']['ConceptionSource'][]
       project?: components['schemas']['ConfirmedProject'] | null
+      /** Project Impacts */
+      project_impacts?: components['schemas']['ConceptionProjectImpact'][]
     }
     /** ConceptionWorldExtractInput */
     ConceptionWorldExtractInput: {
@@ -2853,6 +3080,8 @@ export interface components {
        * @default
        */
       note: string
+      /** Reconciled Project Items */
+      reconciled_project_items?: string[]
     }
     /** ConfirmOutline */
     ConfirmOutline: {
@@ -3090,6 +3319,17 @@ export interface components {
       /** Record Sha256 */
       record_sha256: string
     }
+    /** EvidenceChapter */
+    EvidenceChapter: {
+      /** Id */
+      id: string
+      /** Revision */
+      revision: number
+      /** Sha256 */
+      sha256: string
+      /** Revision Id */
+      revision_id?: string | null
+    }
     /** ExcerptInput */
     ExcerptInput: {
       /** Unit Id */
@@ -3180,6 +3420,25 @@ export interface components {
       /** Reason */
       reason: string
     }
+    /** GenerateInspectionCandidate */
+    GenerateInspectionCandidate: {
+      /**
+       * Scope
+       * @default book
+       * @enum {string}
+       */
+      scope: 'chapter' | 'volume' | 'book'
+      /** Scope Id */
+      scope_id?: string | null
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
+    }
     /** GenerateOutline */
     GenerateOutline: {
       /** Base Revision */
@@ -3197,6 +3456,8 @@ export interface components {
       client_request_id: string
       /** Budget Limit */
       budget_limit?: number | null
+      /** Reference Cards */
+      reference_cards?: components['schemas']['OutlineCardReference'][]
     }
     /** GenreProfileBasis */
     GenreProfileBasis: {
@@ -3233,6 +3494,50 @@ export interface components {
       /** Id */
       id: string
       report: components['schemas']['ReadingReport']
+    }
+    /** InspectedChapter */
+    InspectedChapter: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Revision */
+      revision: number
+      /** Sha256 */
+      sha256: string
+    }
+    /** InspectionCandidate */
+    InspectionCandidate: {
+      /** Id */
+      id: string
+      /**
+       * Scope
+       * @enum {string}
+       */
+      scope: 'chapter' | 'volume' | 'book'
+      /** Scope Id */
+      scope_id: string | null
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Current */
+      current: boolean
+      /** Chapters */
+      chapters: components['schemas']['InspectedChapter'][]
+      /** Items */
+      items: components['schemas']['CandidateItem'][]
+    }
+    /** InspectionCandidateTask */
+    InspectionCandidateTask: {
+      /** Id */
+      id: string
+      /** Status */
+      status: string
+      /** Error */
+      error: string
+      /** Created */
+      created: number
+      /** Artifact Id */
+      artifact_id: string | null
     }
     /** InspectionInput */
     InspectionInput: {
@@ -3286,6 +3591,10 @@ export interface components {
       chapters: components['schemas']['PortableChapter'][]
       /** Revisions */
       revisions: components['schemas']['PortableRevision'][]
+      /** Evidence */
+      evidence?: components['schemas']['PortableEvidence'][]
+      /** Source Revisions */
+      source_revisions?: components['schemas']['PortableRevision'][]
     }
     /** Mapping */
     Mapping: {
@@ -3471,6 +3780,32 @@ export interface components {
        */
       brief: string
     }
+    /** OutlineCard */
+    OutlineCard: {
+      /** Session Id */
+      session_id: string
+      /** Card Id */
+      card_id: string
+      /** Revision */
+      revision: number
+      /** Technique */
+      technique: string
+      /** Conditions */
+      conditions: string
+      /** Exceptions */
+      exceptions: string
+      /** Source Title */
+      source_title: string
+    }
+    /** OutlineCardReference */
+    OutlineCardReference: {
+      /** Session Id */
+      session_id: string
+      /** Card Id */
+      card_id: string
+      /** Revision */
+      revision: number
+    }
     /** OutlineGenerationTask */
     OutlineGenerationTask: {
       /** Id */
@@ -3572,6 +3907,24 @@ export interface components {
        */
       stale: 0 | 1
     }
+    /** PortableEvidence */
+    PortableEvidence: {
+      /** Id */
+      id: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'project' | 'settings' | 'outline' | 'inspection' | 'completion'
+      /** Title */
+      title: string
+      /** Body */
+      body: string
+      /** Sha256 */
+      sha256: string
+      /** Chapters */
+      chapters?: components['schemas']['EvidenceChapter'][]
+    }
     /** PortableRevision */
     PortableRevision: {
       /** Id */
@@ -3601,6 +3954,28 @@ export interface components {
       brief: string
       /** Created */
       created: number
+    }
+    /** PrepareCompletion */
+    PrepareCompletion: {
+      /** Basis Sha256 */
+      basis_sha256: string
+      /**
+       * Spoiler Scope
+       * @default opening
+       * @enum {string}
+       */
+      spoiler_scope: 'opening' | 'whole'
+      /**
+       * Sample Chapters
+       * @default 1
+       */
+      sample_chapters: number
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
     }
     /** ProjectBrief */
     ProjectBrief: {
@@ -3703,6 +4078,23 @@ export interface components {
       /** Closes Chapter Id */
       closes_chapter_id: string
     }
+    /** PublicationChange */
+    PublicationChange: {
+      /** Chapter Id */
+      chapter_id: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'access' | 'recommendation' | 'revision'
+      /**
+       * At
+       * Format: date-time
+       */
+      at: string
+      /** Note */
+      note: string
+    }
     /** PublishedChapter */
     PublishedChapter: {
       /** Chapter Id */
@@ -3712,6 +4104,46 @@ export interface components {
        * Format: date-time
        */
       published_at: string
+    }
+    /** ReadingDiagnosis */
+    ReadingDiagnosis: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Target Chapter Id */
+      target_chapter_id: string
+      /** Rate */
+      rate: number
+      /** Numerator */
+      numerator: number
+      /** Denominator */
+      denominator: number
+      /** Baseline Rate */
+      baseline_rate: number
+      /** Baseline Pairs */
+      baseline_pairs: number
+      /** Publication Gap Hours */
+      publication_gap_hours: number
+      /** Median Publication Gap Hours */
+      median_publication_gap_hours: number
+      /** Changes */
+      changes: components['schemas']['PublicationChange'][]
+    }
+    /** ReadingHistoryEntry */
+    ReadingHistoryEntry: {
+      /** Id */
+      id: string
+      /** Release Version */
+      release_version: string
+      /**
+       * Mode
+       * @enum {string}
+       */
+      mode: 'events' | 'aggregate'
+      /**
+       * Extracted At
+       * Format: date-time
+       */
+      extracted_at: string
     }
     /** ReadingInput */
     ReadingInput: {
@@ -3766,6 +4198,8 @@ export interface components {
       observed_until: string
       /** Chapters */
       chapters: components['schemas']['PublishedChapter'][]
+      /** Publication Changes */
+      publication_changes?: components['schemas']['PublicationChange'][]
       /** Read Definition */
       read_definition: string
       /** Completion Definition */
@@ -3785,6 +4219,8 @@ export interface components {
       native_metrics?: components['schemas']['NativeMetric'][]
       /** Metrics */
       metrics: components['schemas']['Metric'][]
+      /** Diagnostics */
+      diagnostics?: components['schemas']['ReadingDiagnosis'][]
       /** Notes */
       notes: string[]
     }
@@ -4004,6 +4440,20 @@ export interface components {
       base_revision: number
       /** Content */
       content: string
+    }
+    /** SaveLengthTargets */
+    SaveLengthTargets: {
+      /**
+       * Scope
+       * @default book
+       * @enum {string}
+       */
+      scope: 'chapter' | 'volume' | 'book'
+      /** Scope Id */
+      scope_id?: string | null
+      /** Base Target Id */
+      base_target_id?: string | null
+      targets: components['schemas']['LengthTargets']
     }
     /** SaveOutline */
     SaveOutline: {
@@ -4228,6 +4678,15 @@ export interface components {
        * @default false
        */
       auto_adopt_body: boolean
+      /** Reference Session Id */
+      reference_session_id?: string | null
+      /** Reference Revision */
+      reference_revision?: number | null
+      /**
+       * Auto Adopt Reference
+       * @default false
+       */
+      auto_adopt_reference: boolean
     }
     /** State */
     State: {
@@ -4548,6 +5007,69 @@ export interface operations {
       }
     }
   }
+  reading_history_api_branches__branch_id__reading_metrics_history_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReadingHistoryEntry'][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_saved_report_api_branches__branch_id__reading_metrics_history__identifier__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ImportedReport']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   import_reading_metrics_api_branches__branch_id__reading_metrics_import_post: {
     parameters: {
       query?: never
@@ -4785,6 +5307,41 @@ export interface operations {
       }
     }
   }
+  save_length_targets_api_branches__branch_id__workflow_inspections_length_targets_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveLengthTargets']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   inspection_api_branches__branch_id__workflow_inspections__inspection_id__get: {
     parameters: {
       query?: never
@@ -4868,6 +5425,69 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_evidence_api_branches__branch_id__manuscript_evidence_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PortableEvidence'][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_source_api_branches__branch_id__manuscript_sources__revision_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        revision_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PortableRevision']
         }
       }
       /** @description Validation Error */
@@ -6197,6 +6817,37 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  reference_options_api_branches__branch_id__outline_workspace_reference_options_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OutlineCard'][]
         }
       }
       /** @description Validation Error */
@@ -9054,7 +9705,7 @@ export interface operations {
       }
     }
   }
-  edit_reference_api_reference_sessions__identifier__patch: {
+  edit_saved_reference_api_reference_sessions__identifier__patch: {
     parameters: {
       query?: never
       header?: never
@@ -9410,6 +10061,173 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['OutlineProposal']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  start_api_branches__branch_id__workflow_inspections_semantic_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['GenerateInspectionCandidate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InspectionCandidateTask']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  history_api_branches__branch_id__workflow_inspections_semantic_tasks_get: {
+    parameters: {
+      query?: {
+        scope?: 'chapter' | 'volume' | 'book'
+        scope_id?: string | null
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InspectionCandidateTask'][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  candidate_api_branches__branch_id__workflow_inspections_semantic__identifier__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InspectionCandidate']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  latest_preparation_api_branches__branch_id__book_completion_preparation_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  prepare_api_branches__branch_id__book_completion_preparation_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PrepareCompletion']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
         }
       }
       /** @description Validation Error */

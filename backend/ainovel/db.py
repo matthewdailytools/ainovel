@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS chapters(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL 
  archived INTEGER NOT NULL DEFAULT 0,stale INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,chapter_id TEXT NOT NULL REFERENCES chapters(id),
  revision INTEGER NOT NULL,content TEXT NOT NULL,cause TEXT NOT NULL,created REAL NOT NULL,UNIQUE(chapter_id,revision));
+CREATE TABLE IF NOT EXISTS manuscript_revision_sources(
+ branch_id TEXT NOT NULL REFERENCES branches(id),id TEXT NOT NULL,chapter_id TEXT NOT NULL,payload TEXT NOT NULL,
+ PRIMARY KEY(branch_id,id));
+CREATE INDEX IF NOT EXISTS manuscript_sources_chapter ON manuscript_revision_sources(branch_id,chapter_id);
 CREATE TABLE IF NOT EXISTS outline_revisions(
  id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),revision INTEGER NOT NULL,
  confirmed INTEGER NOT NULL,payload TEXT NOT NULL,setting_basis TEXT NOT NULL,created REAL NOT NULL,

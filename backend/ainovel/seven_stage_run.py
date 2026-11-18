@@ -1,6 +1,7 @@
 """Durable parent run for the existing seven-stage author and generation operations."""
 
 from decimal import Decimal
+from hashlib import sha256
 import json
 from time import time
 from typing import Literal
@@ -14,6 +15,20 @@ from .project_brief import Identifier, IdeaText
 
 KIND = "seven_stage_run"
 BUSY_CHILD = {"queued", "running"}
+STALE_BASIS = {
+    "completion_changed",
+    "conception_changed",
+    "conception_snapshot",
+    "inspection_changed",
+    "outline_candidate_stale",
+    "outline_changed",
+    "outline_conflict",
+    "project_brief_changed",
+    "reference_changed",
+    "revision_conflict",
+    "seven_stage_changed",
+    "story_changed",
+}
 
 
 class StartRun(Input):
@@ -26,6 +41,9 @@ class StartRun(Input):
     client_request_id: str = Field(min_length=8, max_length=128)
     auto_confirm_planning: bool = Field(default=False, strict=True)
     auto_adopt_body: bool = Field(default=False, strict=True)
+    reference_session_id: Identifier | None = None
+    reference_revision: int | None = Field(default=None, ge=0, strict=True)
+    auto_adopt_reference: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def compatible_source(self):
@@ -34,6 +52,11 @@ class StartRun(Input):
                 raise ValueError("从创意启动需提供创作思路和章数。")
         elif not self.source_id or self.idea:
             raise ValueError("接力时请选择已确认设定或大纲。")
+        if self.reference_session_id:
+            if self.reference_revision is None or self.start_from == "outline":
+                raise ValueError("从创意或设定接力时，可选择绑定修订的拆解会话。")
+        elif self.reference_revision is not None or self.auto_adopt_reference:
+            raise ValueError("请先选择本工作版本的参考会话。")
         return self
 
 
@@ -59,13 +82,59 @@ def _key(worker, step):
     return f"seven-stage-{worker.task['id']}-{step}"
 
 
+def _guard(worker, state):
+    def before_write(tx):
+        worker.db.check_attempt(tx, worker.task["id"], worker.attempt)
+        _unchanged(_story(tx, worker.task["branch_id"])["story_revision"], state["story_revision"])
+
+    return before_write
+
+
+def _ensure_exclusive(tx, branch_id, except_id=""):
+    if tx.execute(
+        "SELECT 1 FROM tasks WHERE branch_id=? AND kind=? AND id<>? AND status IN "
+        "('queued','running','waiting_child','paused','needs_review') LIMIT 1",
+        (branch_id, KIND, except_id),
+    ).fetchone():
+        raise DomainError("seven_stage_active", "当前工作版本已有未完成的自动接力。", 409)
+
+
+def _reference_basis(tx, branch_id, identifier, revision):
+    row = tx.execute("SELECT revision,payload FROM reference_sessions WHERE id=?", (identifier,)).fetchone()
+    if not row:
+        raise DomainError("not_found", "找不到所选拆解会话。", 404)
+    if row["revision"] != revision:
+        raise DomainError("reference_changed", "已保存的拆解会话修订改变，请重新选择。", 409)
+    stored = json.loads(row["payload"])
+    if stored.get("branch_id") != branch_id:
+        raise DomainError("ownership", "请使用当前工作版本的拆解会话。", 403)
+    goal, source = stored["goal"], stored["source"]
+    if not goal.strip() or not source["quote"].strip():
+        raise DomainError("reference_scope", "自动拆解需要已保存的学习目标和原文选段。", 409)
+    return {
+        "id": identifier,
+        "revision": revision,
+        "goal": goal,
+        "source": {
+            **{key: source[key] for key in ("title", "unit_id", "file_hash", "start", "end")},
+            "quote_sha256": sha256(source["quote"].encode()).hexdigest(),
+        },
+    }
+
+
 def start_run(domain, branch_id, data):
     from .conception import revision_tx
     from .outline_workspace import _view
     from .project_brief import confirmed_project_tx
     from .setting_review import confirmed_world_basis
+    from .work_snapshot import checkpoint_tx
 
-    payload = {**data.model_dump(), "branch_id": branch_id}
+    excluded = (
+        set()
+        if data.reference_session_id
+        else {"reference_session_id", "reference_revision", "auto_adopt_reference"}
+    )
+    payload = {**data.model_dump(exclude=excluded), "branch_id": branch_id}
     with domain.db.connect(True) as tx:
         prior = tx.execute(
             "SELECT tasks.id,tasks.kind,tasks.payload FROM task_requests JOIN tasks "
@@ -78,12 +147,7 @@ def start_run(domain, branch_id, data):
             identifier = prior["id"]
         else:
             story = _story(tx, branch_id)
-            if tx.execute(
-                "SELECT 1 FROM tasks WHERE branch_id=? AND kind=? AND status IN "
-                "('queued','running','waiting_child','paused','needs_review') LIMIT 1",
-                (branch_id, KIND),
-            ).fetchone():
-                raise DomainError("seven_stage_active", "当前工作版本已有未完成的自动接力。", 409)
+            _ensure_exclusive(tx, branch_id)
             outline = _view(tx, branch_id)
             active_chapters = outline["chapters"]
             project = confirmed_project_tx(tx, branch_id)
@@ -114,6 +178,13 @@ def start_run(domain, branch_id, data):
                 "children": [],
                 "completed_chapters": [],
             }
+            if data.reference_session_id:
+                state["reference_basis"] = _reference_basis(
+                    tx, branch_id, data.reference_session_id, data.reference_revision
+                )
+                if data.start_from == "settings":
+                    state["stage"] = "reference"
+            state["start_snapshot_id"] = checkpoint_tx(tx, branch_id, "启动七台接力")
             identifier = uid()
             timestamp = time()
             tx.execute(
@@ -149,6 +220,8 @@ def _transition(worker, state, stage):
     state["stage"] = stage
     state.pop("child_id", None)
     state.pop("artifact_id", None)
+    state.pop("child_recovery", None)
+    state.pop("interruption", None)
     worker.checkpoint(worker.task["result"], "queued")
 
 
@@ -171,6 +244,38 @@ def _remaining(worker, state):
     return float(Decimal(left) / 1_000_000)
 
 
+def _child_recovery(tx, parent_id, child_id):
+    child = tx.execute("SELECT status,payload FROM tasks WHERE id=?", (child_id,)).fetchone()
+    if not child or json.loads(child["payload"]).get("seven_stage_run_id") != parent_id:
+        raise DomainError("seven_stage_child", "无法确认这项子任务属于当前接力。", 409)
+    recovery = {"child_id": child_id, "state": "blocked", "dispatch_event_ids": []}
+    if child["status"] in BUSY_CHILD or child["status"] == "succeeded":
+        return {**recovery, "state": "ready"}
+    if child["status"] != "blocked_runtime":
+        return recovery
+    unresolved = tx.execute(
+        "SELECT sent.id FROM task_events sent WHERE sent.task_id=? AND sent.kind='step_dispatched' "
+        "AND NOT EXISTS (SELECT 1 FROM task_events proof WHERE proof.task_id=sent.task_id "
+        "AND proof.id>sent.id AND proof.kind='step_not_sent' "
+        "AND json_extract(proof.payload,'$.dispatch_event_id')=sent.id "
+        "AND json_extract(proof.payload,'$.fingerprint')=json_extract(sent.payload,'$.fingerprint')) "
+        "AND NOT EXISTS (SELECT 1 FROM task_events completed JOIN task_steps cached "
+        "ON cached.task_id=completed.task_id AND cached.fingerprint=json_extract(completed.payload,'$.fingerprint') "
+        "WHERE completed.task_id=sent.task_id AND completed.id>sent.id AND completed.kind='step_completed' "
+        "AND cached.fingerprint=json_extract(sent.payload,'$.fingerprint') AND cached.created>=sent.created "
+        "AND NOT EXISTS (SELECT 1 FROM task_events other WHERE other.task_id=sent.task_id "
+        "AND other.kind='step_dispatched' AND sent.id<other.id AND other.id<completed.id "
+        "AND json_extract(other.payload,'$.fingerprint')=cached.fingerprint)) "
+        "ORDER BY sent.id LIMIT 20",
+        (child_id,),
+    ).fetchall()
+    if unresolved:
+        recovery.update(state="unknown", dispatch_event_ids=[row["id"] for row in unresolved])
+    else:
+        recovery["state"] = "retryable"
+    return recovery
+
+
 def _drive_child(worker, state, step, kind, payload):
     key = _key(worker, step)
     if identifier := state.get("child_id"):
@@ -179,8 +284,16 @@ def _drive_child(worker, state, step, kind, payload):
             _checkpoint(worker, "waiting_child")
             return None
         if child["status"] != "succeeded":
-            _checkpoint(worker, "needs_review", child["error"] or "子任务未完成，请先核对其记录。")
+            with worker.db.connect() as tx:
+                tx.execute("BEGIN")
+                recovery = _child_recovery(tx, worker.task["id"], identifier)
+            state["child_recovery"] = recovery
+            if recovery["state"] == "unknown":
+                _checkpoint(worker, "needs_review", "子任务存在已派发但结果未知的步骤，请核对回执和费用。")
+            else:
+                _checkpoint(worker, "needs_review", child["error"] or "子任务未完成，请先核对其记录。")
             return None
+        state.pop("child_recovery", None)
         artifact = worker.domain.artifact(child["result"]["artifact_id"])
         state["artifact_id"] = artifact["id"]
         return artifact
@@ -219,7 +332,12 @@ def _conception_child(worker, state, operation):
     input_fields = (
         {"operation": "project_brief", "idea": worker.task["payload"]["idea"]}
         if operation == "project"
-        else {"category_id": "world", "instruction": "", "project_confirmation_id": state["project_id"]}
+        else {
+            "category_id": None,
+            "target_category_ids": ["core", "characters", "world", "relationships"],
+            "instruction": "",
+            "project_confirmation_id": state["project_id"],
+        }
     )
     return _drive_child(
         worker,
@@ -257,11 +375,117 @@ def _project(worker, state):
                 candidate_id=draft["id"],
                 **draft["payload"],
             ),
+            before_write=_guard(worker, state),
         )
     _unchanged(_story_revision(worker.domain, branch), state["story_revision"] + 1)
     state["story_revision"] += 1
     state["project_id"] = current["id"]
-    _transition(worker, state, "settings")
+    _transition(worker, state, "reference" if state.get("reference_basis") else "settings")
+
+
+def _reference_revisions(session, draft, captured_revision):
+    from .reference import card_version
+
+    metadata = session["payload"]
+    if adoption := metadata.get("analysis_adoption"):
+        if adoption["artifact_id"] == draft["id"]:
+            return [
+                {"session_id": session["id"], "card_id": key, "revision": adoption["revision"]}
+                for key in adoption["cards"]
+            ]
+    prior = next(
+        (version for version in metadata.get("history", []) if version["revision"] == captured_revision),
+        None,
+    )
+    if not prior or prior["results"].get("analyze") != draft["id"]:
+        return []
+    received = {card["id"] for card in draft["payload"]["cards"]}
+    refs = []
+    for key in metadata["selected_ids"]:
+        if key in received:
+            revision = metadata.get("pinned_revisions", {}).get(key, session["revision"])
+            if card_version(session, key, revision)["card"]["exceptions"].strip():
+                refs.append({"session_id": session["id"], "card_id": key, "revision": revision})
+    return refs
+
+
+def _save_reference_cards(worker, state, session, draft):
+    from .reference import EditReference, edit_reference
+
+    metadata = session["payload"]
+    proposed = draft["payload"]["cards"]
+    keys = [card["id"] for card in proposed]
+    if len(metadata["cards"]) + len(proposed) > 8 or len(metadata["selected_ids"]) + len(keys) > 8:
+        return []
+    required = ("observation", "interpretation", "technique", "conditions", "exceptions", "evidence")
+    if any(not card[field].strip() for card in proposed for field in required):
+        return []
+    saved = edit_reference(
+        worker.domain,
+        session["id"],
+        EditReference(
+            base_revision=session["revision"],
+            **{
+                key: metadata[key]
+                for key in ("goal", "plot", "fixed", "application_plan", "branch_id", "chapter_id")
+            },
+            cards=[*metadata["cards"], *proposed],
+            selected_ids=[*metadata["selected_ids"], *keys],
+            pinned_revisions=metadata.get("pinned_revisions", {}),
+        ),
+        before_write=_guard(worker, state),
+        analysis_adoption={"artifact_id": draft["id"], "cards": keys},
+    )
+    return [{"session_id": session["id"], "card_id": key, "revision": saved["revision"]} for key in keys]
+
+
+def _reference(worker, state):
+    from .reference import session
+
+    branch = worker.task["branch_id"]
+    _unchanged(_story_revision(worker.domain, branch), state["story_revision"])
+    basis = state["reference_basis"]
+    child = worker.domain.task(state["child_id"]) if state.get("child_id") else None
+    if not child or child["status"] != "succeeded":
+        with worker.db.connect() as tx:
+            live = _reference_basis(tx, branch, basis["id"], basis["revision"])
+        if live != basis:
+            raise DomainError("reference_changed", "拆解依据发生变化，请重新启动接力。", 409)
+    request = _module_payload(
+        worker,
+        "reference.analyze",
+        basis["goal"],
+        reference_session_id=basis["id"],
+        reference_revision=basis["revision"],
+    )
+    if not (draft := _drive_child(worker, state, "reference", "module", request)):
+        return
+    source = draft["basis"].get("reference_session", {})
+    if (
+        draft["kind"] != "reference_analysis"
+        or source.get("id") != basis["id"]
+        or source.get("revision") != basis["revision"]
+    ):
+        raise DomainError("reference_changed", "拆解产物未对应显式选择的会话修订。", 409)
+    state["reference_analysis_id"] = draft["id"]
+    if not draft["payload"]["cards"]:
+        state["reference_references"] = []
+    else:
+        current = session(worker.domain, basis["id"])
+        refs = _reference_revisions(current, draft, basis["revision"])
+        if (
+            not refs
+            and worker.task["payload"].get("auto_adopt_reference")
+            and current["revision"] == basis["revision"]
+        ):
+            refs = _save_reference_cards(worker, state, current, draft)
+        if not refs:
+            _checkpoint(
+                worker, "needs_review", "请在拆解台核对本次分析，保存并选择含适用条件和须替换内容的手法卡。"
+            )
+            return
+        state["reference_references"] = refs
+    _transition(worker, state, "settings" if worker.task["payload"]["start_from"] == "idea" else "outline")
 
 
 def _settings(worker, state):
@@ -289,6 +513,7 @@ def _settings(worker, state):
                 idempotency_key=_key(worker, "adopt-settings"),
                 categories=draft["payload"]["categories"],
             ),
+            before_write=_guard(worker, state),
         )
         adopted = True
     if adopted and allow and not (current["confirmation"] or {}).get("current"):
@@ -301,6 +526,7 @@ def _settings(worker, state):
                 note="本次自动接力已获授权，采用 AI 设定草案。",
                 idempotency_key=_key(worker, "confirm-settings"),
             ),
+            before_write=_guard(worker, state),
         )
     if not adopted or not (current["confirmation"] or {}).get("current"):
         _checkpoint(worker, "needs_review", "请采用本次设定草案并确认设定。")
@@ -361,6 +587,8 @@ def _outline(worker, state):
         "base_revision": state["outline_revision"],
         "confirmation_id": state["setting_id"],
     }
+    if selected := state.get("reference_references"):
+        request["outline_generation"]["reference_cards"] = selected
     if not (candidate := _drive_child(worker, state, "outline", "module", request)):
         return
     view = read_outline(worker.domain, branch)
@@ -380,12 +608,40 @@ def _outline(worker, state):
                     source_generation_id=candidate["id"],
                     plan=candidate["payload"]["plan"],
                 ),
+                before_write=_guard(worker, state),
             )
-        view = confirm_outline(worker.domain, branch, ConfirmOutline(base_revision=view["draft"]["revision"]))
+        view = confirm_outline(
+            worker.domain,
+            branch,
+            ConfirmOutline(base_revision=view["draft"]["revision"]),
+            before_write=_guard(worker, state),
+        )
     if view["stale"]:
         raise DomainError("outline_changed", "本次确认大纲已失效。", 409)
     state["outline_id"] = view["confirmed"]["id"]
     _transition(worker, state, "writing")
+
+
+def _volume_checkpoint(worker, state, volume):
+    from .work_snapshot import checkpoint_tx
+
+    saved = state.setdefault("volume_snapshot_ids", {})
+    if volume["id"] in saved:
+        return
+    branch = worker.task["branch_id"]
+    with worker.db.connect(True) as tx:
+        _guard(worker, state)(tx)
+        saved[volume["id"]] = checkpoint_tx(
+            tx,
+            branch,
+            f"接力到卷末 · {volume['title']}"[:200],
+            scope="volume",
+            scope_id=volume["id"],
+        )
+        tx.execute(
+            "UPDATE tasks SET result=?,updated=? WHERE id=? AND attempt=?",
+            (dumps(worker.task["result"]), time(), worker.task["id"], worker.attempt),
+        )
 
 
 def _writing(worker, state):
@@ -396,13 +652,17 @@ def _writing(worker, state):
     confirmed = view["confirmed"]
     if not confirmed or confirmed["id"] != state["outline_id"] or view["stale"]:
         raise DomainError("outline_changed", "采用的大纲已变化，请重新选择接力起点。", 409)
-    plans = [chapter for _, _, chapter in _chapter_plans(confirmed["plan"])]
+    plans = [(volume, chapter) for volume, _, chapter in _chapter_plans(confirmed["plan"])]
     completed = state["completed_chapters"]
+    if completed:
+        prior_volume = plans[len(completed) - 1][0]
+        if len(completed) == len(plans) or prior_volume["id"] != plans[len(completed)][0]["id"]:
+            _volume_checkpoint(worker, state, prior_volume)
     if len(completed) == len(plans):
         _unchanged(_story_revision(worker.domain, branch), state["story_revision"])
         _transition(worker, state, "inspection")
         return
-    plan = plans[len(completed)]
+    plan = plans[len(completed)][1]
     chapter = worker.domain.chapter(plan["chapter_id"], branch)
     step = f"chapter-{chapter['id']}"
     if not state.get("child_id"):
@@ -443,6 +703,7 @@ def _writing(worker, state):
             _key(worker, step + "-accept"),
             require_review=True,
             candidate_revision=artifact["candidate_revision"],
+            before_write=_guard(worker, state),
         )
     receipt = worker.domain.acceptance_receipt(artifact["id"])["receipt"]
     saved = worker.domain.chapter(chapter["id"], branch)
@@ -455,6 +716,7 @@ def _writing(worker, state):
 
 
 def _inspection(worker, state):
+    from .inspection_semantic import ACTION, KEYS, KIND as SEMANTIC
     from .workflow_inspection import InspectionInput, _evaluate, create_inspection, latest_book_inspection
 
     branch = worker.task["branch_id"]
@@ -466,17 +728,50 @@ def _inspection(worker, state):
             preview, _ = _evaluate(tx, branch, "book", None)
     if not report or not report["current"]:
         report = create_inspection(
-            worker.domain, branch, InspectionInput(basis_sha256=preview["basis_sha256"])
+            worker.domain,
+            branch,
+            InspectionInput(basis_sha256=preview["basis_sha256"]),
+            before_write=_guard(worker, state),
         )
     state["inspection_id"] = report["id"]
-    if any(item["current_status"] not in {"green", "not_applicable"} for item in report["items"]):
-        _checkpoint(worker, "needs_review", "体检单已生成，请核对待处理项再继续。")
+    if _inspection_ready(report):
+        _transition(worker, state, "completion")
         return
-    _transition(worker, state, "completion")
+    semantic = any(
+        item["check_id"] in KEYS and item["current_status"] in {"pending", "yellow", "outdated"}
+        for item in report["items"]
+    )
+    if semantic:
+        basis = report["basis_sha256"]
+        if state.get("inspection_basis_sha256") not in {None, basis}:
+            state["inspection_basis_changed"] = True
+            _checkpoint(worker, "needs_review", "体检依据已变化，请核对后续跑，旧候选仍可查。")
+            return
+        state["inspection_basis_sha256"] = basis
+        request = _module_payload(worker, "review.chapter", ACTION)
+        request["inspection_semantic"] = {"scope": "book", "scope_id": None, "basis_sha256": basis}
+        candidate = _drive_child(worker, state, f"inspection-{basis}", "module", request)
+        if not candidate:
+            return
+        if candidate["kind"] != SEMANTIC or candidate["basis"].get("inspection_basis_sha256") != basis:
+            raise DomainError("inspection_changed", "无法核对本次体检候选的依据。", 409)
+        state["inspection_candidate_id"] = candidate["id"]
+        _checkpoint(worker, "needs_review", "体检单和语义候选已生成，请核对待处理项再继续。")
+        return
+    _checkpoint(worker, "needs_review", "体检单已生成，请核对待处理项再继续。")
+
+
+def _inspection_ready(report):
+    return bool(
+        report
+        and report["current"]
+        and all(item["current_status"] in {"green", "not_applicable"} for item in report["items"])
+    )
 
 
 def _completion(worker, state):
     from .book_completion import _evaluate, _latest
+    from .completion_preparation import KEY, KIND as PREPARATION
 
     branch = worker.task["branch_id"]
     _unchanged(_story_revision(worker.domain, branch), state["story_revision"])
@@ -484,12 +779,29 @@ def _completion(worker, state):
         tx.execute("BEGIN")
         preview = _evaluate(tx, branch)
         record = _latest(tx, branch, preview["basis_sha256"])
-    if not record or not record["current"]:
-        _checkpoint(worker, "needs_review", "请核对完本六项并确认交付材料。")
+    if record and record["current"]:
+        state["completion_id"] = record["id"]
+        state["stage"] = "done"
+        state.pop("child_id", None)
+        _checkpoint(worker, "succeeded")
         return
-    state["completion_id"] = record["id"]
-    state["stage"] = "done"
-    _checkpoint(worker, "succeeded")
+    basis = preview["basis_sha256"]
+    if state.get("completion_basis_sha256") not in {None, basis}:
+        state["completion_basis_changed"] = True
+        _checkpoint(
+            worker, "needs_review", "完本建议的依据已变化，旧结果可查。请续跑核对最新体检和完本材料。"
+        )
+        return
+    state["completion_basis_sha256"] = basis
+    request = _module_payload(worker, "outline.plan", "准备完本核对建议与开篇范围的交付简介。")
+    request[KEY] = {"basis_sha256": basis, "spoiler_scope": "opening", "sample_chapters": 1}
+    prepared = _drive_child(worker, state, f"completion-{basis}", "module", request)
+    if not prepared:
+        return
+    if prepared["kind"] != PREPARATION or prepared["basis"].get("completion_basis_sha256") != basis:
+        raise DomainError("completion_changed", "无法核对本次完本建议的依据。", 409)
+    state["completion_preparation_id"] = prepared["id"]
+    _checkpoint(worker, "needs_review", "完本建议与简介已准备，请核对六项并确认交付材料。")
 
 
 def run(worker):
@@ -499,13 +811,23 @@ def run(worker):
         return
     handlers = {
         "project": _project,
+        "reference": _reference,
         "settings": _settings,
         "outline": _outline,
         "writing": _writing,
         "inspection": _inspection,
         "completion": _completion,
     }
-    handlers[state["stage"]](worker, state)
+    try:
+        handlers[state["stage"]](worker, state)
+    except DomainError as error:
+        if error.code == "conception_setting_review":
+            _checkpoint(worker, "needs_review", "设定体检有待核对项，请在设定台处理并确认后继续。")
+            return
+        if error.code not in STALE_BASIS:
+            raise
+        state["interruption"] = {"code": error.code, "message": error.message}
+        _checkpoint(worker, "needs_review", error.message)
 
 
 def register_routes(app, domain, provider_ready):
@@ -551,10 +873,24 @@ def _control(domain, branch_id, task_id, action):
             raise DomainError("not_found", "找不到当前作品的自动接力。", 404)
         status = row["status"]
         if action == "resume" and status in {"paused", "needs_review", "blocked_runtime"}:
+            _ensure_exclusive(tx, branch_id, task_id)
             result = json.loads(row["result"])
             state = result["seven_stage_run"]
             revision = _story(tx, branch_id)["story_revision"]
-            if state["stage"] in {"inspection", "completion"} and revision != state["story_revision"]:
+            child_id = state.get("child_id")
+            recovery = _child_recovery(tx, task_id, child_id) if child_id else None
+            if recovery and _author_result_exists(tx, branch_id, state):
+                recovery = None
+            if recovery and recovery["state"] == "unknown":
+                refs = "、".join(str(identifier) for identifier in recovery["dispatch_event_ids"])
+                raise DomainError(
+                    "unknown_result", f"存在未结子任务请求（派发记录 {refs}），请先核对回执。", 409
+                )
+            if state["stage"] in {"inspection", "completion"} and (
+                revision != state["story_revision"]
+                or state.get("inspection_basis_changed")
+                or state.get("completion_basis_changed")
+            ):
                 from .outline_workspace import _view
 
                 outline = _view(tx, branch_id)
@@ -568,9 +904,43 @@ def _control(domain, branch_id, task_id, action):
                 # generated receipts and re-run inspection before any completion.
                 state["story_revision"] = revision
                 state["stage"] = "inspection"
+                for key in (
+                    "interruption",
+                    "inspection_basis_changed",
+                    "inspection_basis_sha256",
+                    "inspection_candidate_id",
+                    "completion_basis_changed",
+                    "completion_basis_sha256",
+                    "child_id",
+                    "artifact_id",
+                    "child_recovery",
+                    "completion_preparation_id",
+                ):
+                    state.pop(key, None)
+                recovery = None
+            if state.get("interruption"):
+                raise DomainError(
+                    "seven_stage_changed", "当前检查点的依据已失效，请从有效版本另行接力。", 409
+                )
+            next_status = "queued"
+            if recovery:
+                if recovery["state"] == "blocked":
+                    raise DomainError(
+                        "seven_stage_child", "当前子任务已停止，请先核对原记录后重新启动接力。", 409
+                    )
+                if recovery["state"] == "retryable":
+                    _unchanged(revision, state["story_revision"])
+                    tx.execute(
+                        "UPDATE tasks SET status='queued',cancel=0,pause=0,attempt=NULL,error='',updated=? "
+                        "WHERE id=? AND status='blocked_runtime'",
+                        (time(), child_id),
+                    )
+                    domain.db.event(tx, child_id, "resume_requested", {"seven_stage_parent": task_id})
+                    next_status = "waiting_child"
+                    state.pop("child_recovery", None)
             tx.execute(
-                "UPDATE tasks SET status='queued',result=?,pause=0,error='',updated=? WHERE id=?",
-                (dumps(result), time(), task_id),
+                "UPDATE tasks SET status=?,result=?,pause=0,error='',updated=? WHERE id=?",
+                (next_status, dumps(result), time(), task_id),
             )
         elif action == "pause" and status in {"queued", "running", "waiting_child"}:
             tx.execute(
@@ -590,3 +960,17 @@ def _control(domain, branch_id, task_id, action):
         else:
             raise DomainError("seven_stage_state", "当前接力状态不支持此操作。", 409)
         domain.db.event(tx, task_id, f"seven_stage_{action}", {})
+
+
+def _author_result_exists(tx, branch_id, state):
+    if state["stage"] == "inspection":
+        from .workflow_inspection import latest_book_inspection
+
+        return _inspection_ready(latest_book_inspection(tx, branch_id))
+    if state["stage"] == "completion":
+        from .book_completion import _evaluate, _latest
+
+        basis = _evaluate(tx, branch_id)["basis_sha256"]
+        official = _latest(tx, branch_id, basis)
+        return bool(official and official["current"])
+    return False

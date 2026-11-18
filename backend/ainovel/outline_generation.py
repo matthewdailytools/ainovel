@@ -9,10 +9,13 @@ from .db import DomainError
 from .models import Input, ModuleInput
 from .outline_workspace import (
     Identifier,
+    OutlineCardReference,
     OutlinePlan,
+    _card_key,
     _chapter_plans,
     _check_base,
     _decode,
+    _freeze_cards,
     _latest,
     _settings,
     _validate,
@@ -30,6 +33,9 @@ class GenerateOutline(Input):
     instruction: Annotated[str, StringConstraints(strip_whitespace=True, max_length=6000)] = ""
     client_request_id: str = Field(min_length=8, max_length=128)
     budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    reference_cards: list[OutlineCardReference] = Field(
+        default_factory=list, max_length=8, exclude_if=lambda value: not value
+    )
 
 
 class OutlineGenerationTask(Input):
@@ -73,13 +79,24 @@ def freeze_tx(tx, branch_id, request):
     ]
     from .project_brief import confirmed_project_tx
 
+    previous = _decode(latest)
+    basis = _settings(tx, branch_id, request["confirmation_id"])
+    if previous and (cards := previous["setting_basis"].get("reference_cards")):
+        basis["reference_cards"] = cards
+    references = request.get("reference_cards", [])
+    if references:
+        approved = _freeze_cards(tx, branch_id, references, basis)
+        basis["reference_cards"] = list(
+            {_card_key(card): card for card in [*basis.get("reference_cards", []), *approved]}.values()
+        )
     return {
         "base_revision": request["base_revision"],
-        "outline": _decode(latest)["plan"] if latest else None,
-        "setting_basis": _settings(tx, branch_id, request["confirmation_id"]),
+        "outline": previous["plan"] if previous else None,
+        "setting_basis": basis,
         "project": confirmed_project_tx(tx, branch_id),
         "chapters": chapters,
         "promises": records,
+        **({"reference_cards": references} if references else {}),
     }
 
 
@@ -91,6 +108,7 @@ def _current(tx, branch_id, frozen):
             {
                 "base_revision": frozen["base_revision"],
                 "confirmation_id": frozen["setting_basis"]["confirmation_id"],
+                "reference_cards": frozen.get("reference_cards", []),
             },
         )
     except DomainError as error:
@@ -99,6 +117,9 @@ def _current(tx, branch_id, frozen):
             "outline_chapters",
             "conception_snapshot",
             "conception_changed",
+            "outline_reference",
+            "reference_card",
+            "reference_card_incomplete",
         }:
             raise
         return False
@@ -151,6 +172,7 @@ def register_routes(app, domain, provider_ready):
         request["outline_generation"] = {
             "base_revision": data.base_revision,
             "confirmation_id": data.confirmation_id,
+            **({"reference_cards": data.model_dump()["reference_cards"]} if data.reference_cards else {}),
         }
         return _task_view(domain.queue("module", request))
 
@@ -195,6 +217,8 @@ async def run(worker, request, frozen):
     definitions = schema["$defs"]
     chapter = definitions["ChapterPlan"]["properties"]
     chapter["chapter_id"]["enum"] = chapter_ids
+    eligible = {_card_key(card) for card in frozen.get("reference_cards", [])}
+    chapter["reference_cards"]["maxItems"] = len(eligible)
     if setting_ids:
         chapter["setting_ids"]["items"]["enum"] = setting_ids
     else:
@@ -222,12 +246,35 @@ async def run(worker, request, frozen):
             "这是规划候选，不能把计划写成已发生的事实。"
         ),
     }
+    if eligible:
+        instruction["获准采用的手法卡"] = [
+            {key: value for key, value in card.items() if key != "source_title"}
+            for card in frozen["setting_basis"]["reference_cards"]
+            if _card_key(card) in eligible
+        ]
+        instruction["要求"] += "可按章纲需要选用获准手法卡，只照填其三个编号字段，替换原作人物、场景和道具。"
+    preserved = {
+        row["chapter_id"]: row["reference_cards"]
+        for _, _, row in _chapter_plans(frozen["outline"] or {"volumes": []})
+        if row.get("reference_cards")
+    }
     for attempt in range(2):
         value = await worker.call(
             instruction, schema=OutlinePlan, context={}, contract=schema, max_output=8192
         )
         plan = OutlinePlan.model_validate(value).model_dump()
         try:
+            for _, _, row in _chapter_plans(plan):
+                chosen = row.get("reference_cards", [])
+                if not {_card_key(ref) for ref in chosen} <= eligible:
+                    raise DomainError("outline_reference", "只可选用获准的手法卡修订。")
+                saved = preserved.get(row["chapter_id"], [])
+                if saved:
+                    selected = {(ref["session_id"], ref["card_id"]) for ref in saved}
+                    row["reference_cards"] = [
+                        *saved,
+                        *(ref for ref in chosen if (ref["session_id"], ref["card_id"]) not in selected),
+                    ]
             _validate(graph, plan, frozen["setting_basis"], True)
             if [row["chapter_id"] for _, _, row in _chapter_plans(plan)] != chapter_ids:
                 raise DomainError("outline_coverage", "候选须按序覆盖现有目录的全部章节。")

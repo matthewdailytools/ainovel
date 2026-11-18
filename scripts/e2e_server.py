@@ -66,6 +66,21 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if instruction.get("动作") in {"准备完本收束核对建议", "起草完本交付简介"}:
+            if "正文依据" in instruction:
+                source = instruction["正文依据"][-1]["source_id"]
+                payload = {
+                    "ending": {"note": "核对铜铃的收束和人物去向。", "source_ids": [source]},
+                    "characters": {"note": "", "source_ids": []},
+                    "promises": {"note": "", "source_ids": []},
+                }
+            else:
+                payload = {"intro": "学徒从铜铃的来历追起。"}
+            return {
+                "text": json.dumps(payload),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-delivery-draft",
+            }
         if instruction.get("动作") == "生成四级大纲候选":
             chapters = instruction["章节目录"]
             setting_ids = [rule["id"] for rule in instruction["已确认世界设定"]]
@@ -111,6 +126,25 @@ class Model(ReferenceModel):
                 "text": json.dumps(plan),
                 "usage": {"input": 1, "output": 1},
                 "call_id": "offline-outline",
+            }
+        if instruction.get("动作") == "对账立项章纲与节奏":
+            first = next(iter(instruction["保存原文"]))
+            items = []
+            for check_id in ("01", "02", "10"):
+                sources = instruction["对照依据"][check_id]
+                items.append(
+                    {
+                        "check_id": check_id,
+                        "result": "pass" if sources else "unknown",
+                        "reason": "本次冻结保存稿待作者核对。",
+                        "paragraph_refs": [first],
+                        "basis_refs": [sources[0]["id"]] if sources else [],
+                    }
+                )
+            return {
+                "text": json.dumps({"items": items}),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-inspection-semantic",
             }
         if instruction.get("动作") == "对照单条已确认设定与保存稿":
             assert instruction["设定"] == "铜铃只在门内响。"

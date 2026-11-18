@@ -3,6 +3,7 @@
 import hashlib
 import json
 from time import time
+from unicodedata import normalize
 
 from pydantic import Field, StrictInt, StringConstraints
 from typing import Annotated, Literal
@@ -68,6 +69,8 @@ class ConceptionDecision(ConceptionBasis):
 
 class ConfirmConception(ConceptionDecision):
     note: str = Field(default="", max_length=4000)
+    reconciled_project_items: list[Identifier] = Field(default_factory=list, max_length=240)
+    reviewed_setting_findings: list[Identifier] = Field(default_factory=list, max_length=7440)
 
 
 class CandidateSelection(Input):
@@ -108,6 +111,36 @@ class ConceptionSource(Input):
     author_edited: bool
 
 
+class ConceptionProjectImpact(Input):
+    item_id: Identifier
+    category_id: Identifier
+    title: str
+    source_project_id: Identifier
+    source_project_revision: int | None = None
+    reconciled: bool
+
+
+class SettingFindingLocation(Input):
+    item_id: Identifier
+    category_id: Identifier | None = None
+    category_title: str | None = None
+    item_number: int | None = None
+    link_number: int | None = None
+
+
+class SettingFinding(Input):
+    id: Identifier
+    kind: Literal[
+        "same_name", "missing_link", "self_link", "duplicate_link", "skipped_link", "empty_link", "policy_link"
+    ]
+    locations: list[SettingFindingLocation]
+    reviewed: bool = False
+
+
+class SettingInspection(Input):
+    findings: list[SettingFinding]
+
+
 class ConceptionWorkspace(Input):
     revision: int
     story_revision: int
@@ -117,6 +150,8 @@ class ConceptionWorkspace(Input):
     observed: list[ConceptionObserved]
     sources: list[ConceptionSource]
     project: ConfirmedProject | None = None
+    project_impacts: list[ConceptionProjectImpact] = Field(default_factory=list)
+    setting_findings: list[SettingFinding] = Field(default_factory=list)
 
 
 def _latest(tx, branch_id, kind):
@@ -161,6 +196,91 @@ def _workspace(tx, branch_id):
 
 def _items(categories):
     return {item["id"]: (category["id"], item) for category in categories for item in category["items"]}
+
+
+def _comparison_text(value):
+    return " ".join(normalize("NFKC", value).casefold().split())
+
+
+def _policy_terms(item):
+    policy = item.get("setting_policy") or {}
+    return tuple(_comparison_text(policy.get(field, "")) for field in ("scope", "exceptions"))
+
+
+def _invalid_link_reason(source_id, target_id, items, preceding):
+    if target_id == source_id:
+        return "self_link"
+    if target_id not in items:
+        return "missing_link"
+    if target_id in preceding:
+        return "duplicate_link"
+    return None
+
+
+def setting_findings(categories):
+    """Compare recorded names, link addresses and policy text without deciding rule semantics."""
+    entries = {
+        item["id"]: (
+            item,
+            category["skipped"],
+            {
+                "item_id": item["id"],
+                "category_id": category["id"],
+                "category_title": category["title"],
+                "item_number": number,
+            },
+        )
+        for category in categories
+        for number, item in enumerate(category["items"], 1)
+    }
+    findings = []
+
+    def report(kind, *locations):
+        evidence = [
+            (location, entries[location["item_id"]][0] if location["item_id"] in entries else None)
+            for location in locations
+        ]
+        identifier = hashlib.sha256(dumps([kind, evidence]).encode()).hexdigest()
+        findings.append({"id": identifier, "kind": kind, "locations": locations, "reviewed": False})
+
+    names = {}
+    for item, skipped, location in entries.values():
+        policy = item.get("setting_policy")
+        if skipped or not item["detail"].strip() or (location["category_id"] != "world" and not policy):
+            continue
+        meaning = (_comparison_text(item["detail"]), (policy or {}).get("strength"), _policy_terms(item))
+        names.setdefault(_comparison_text(item["title"]), []).append((meaning, location))
+    for group in names.values():
+        if len({meaning for meaning, _ in group}) > 1:
+            report("same_name", *(location for _, location in group))
+
+    for source, skipped, location in entries.values():
+        preceding = set()
+        for number, target_id in enumerate(source["links"], 1):
+            target = entries.get(target_id)
+            origin = {**location, "link_number": number}
+            invalid = _invalid_link_reason(source["id"], target_id, entries, preceding)
+            preceding.add(target_id)
+            if invalid:
+                report(invalid, origin, target[2] if target else {"item_id": target_id})
+            elif not skipped and target:
+                entry, target_skipped, destination = target
+                if target_skipped:
+                    report("skipped_link", origin, destination)
+                elif not entry["detail"].strip():
+                    report("empty_link", origin, destination)
+                elif any(
+                    left and right and left != right
+                    for left, right in zip(_policy_terms(source), _policy_terms(entry), strict=True)
+                ):
+                    report("policy_link", origin, destination)
+    return findings
+
+
+def setting_findings_reviewed(payload, findings=None):
+    if findings is None:
+        findings = setting_findings(payload["categories"])
+    return {finding["id"] for finding in findings} == set(payload.get("reviewed_setting_findings", []))
 
 
 def completeness_issues(categories, observed=(), source_records=()):
@@ -300,9 +420,37 @@ def _source_records(tx, branch_id, workspace):
     return result
 
 
+def _project_impacts(workspace, project_id):
+    if not project_id:
+        return []
+    impacts = []
+    for category in workspace["categories"]:
+        if category["skipped"]:
+            continue
+        for item in category["items"]:
+            origin = workspace["origins"].get(item["id"], {})
+            previous = origin.get("project_confirmation_id")
+            if previous and project_id not in {previous, origin.get("equivalent_project_confirmation_id")}:
+                impacts.append(
+                    {
+                        "item_id": item["id"],
+                        "category_id": category["id"],
+                        "title": item["title"],
+                        "source_project_id": previous,
+                        "source_project_revision": origin.get("project_revision"),
+                    }
+                )
+    return impacts
+
+
 def _current(tx, branch, revision, confirmation, observed=None, source_records=None):
     project = confirmed_project_tx(tx, branch["id"])
-    if confirmation.get("project_confirmation_id") != (project["id"] if project else None):
+    project_id = project["id"] if project else None
+    if confirmation.get("project_confirmation_id") != project_id:
+        return False
+    if {item["item_id"] for item in _project_impacts(confirmation, project_id)} != set(
+        confirmation.get("reconciled_project_items", [])
+    ):
         return False
     return confirmation["revision"] == revision and (
         confirmation["story_revision"] == branch["story_revision"]
@@ -346,8 +494,10 @@ def _snapshot_tx(tx, branch):
     workspace = _workspace(tx, branch["id"])
     observed = _observed(tx, branch["id"])
     evidence = _source_records(tx, branch["id"], workspace)
+    project = confirmed_project_tx(tx, branch["id"])
     row = _latest(tx, branch["id"], CONFIRMATION)
     confirmation = None
+    reconciled_items = set()
     if row:
         payload = _read_payload(row)
         confirmation = {
@@ -357,6 +507,8 @@ def _snapshot_tx(tx, branch):
             "note": payload["note"],
             "planning_brief": payload["planning_brief"],
         }
+        if confirmation["current"]:
+            reconciled_items = set(payload.get("reconciled_project_items", []))
     categories = workspace["categories"]
     return {
         "revision": workspace["revision"],
@@ -366,7 +518,11 @@ def _snapshot_tx(tx, branch):
         "confirmation": confirmation,
         "observed": observed,
         "sources": evidence,
-        "project": confirmed_project_tx(tx, branch["id"]),
+        "project": project,
+        "project_impacts": [
+            {**item, "reconciled": item["item_id"] in reconciled_items}
+            for item in _project_impacts(workspace, project["id"] if project else None)
+        ],
     }
 
 
@@ -444,8 +600,10 @@ def _receipt(tx, data, artifact_id, fingerprint):
     )
 
 
-def adopt(domain, branch_id, data):
+def adopt(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
+        if before_write is not None:
+            before_write(tx)
         branch = _branch(tx, branch_id)
         fingerprint, replay = _decision(tx, branch, data, "adopt")
         if replay:
@@ -498,6 +656,7 @@ def adopt(domain, branch_id, data):
                 }
                 if project_id:
                     origins[item.id]["project_confirmation_id"] = project_id
+                    origins[item.id]["project_revision"] = basis.get("project_revision")
                 if evidence := candidate.get("source_evidence", {}).get(item.id):
                     from .domain import utf16_slice
 
@@ -516,14 +675,22 @@ def adopt(domain, branch_id, data):
         return _snapshot_tx(tx, branch)
 
 
-def confirm(domain, branch_id, data):
+def confirm(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
+        if before_write is not None:
+            before_write(tx)
         branch = _branch(tx, branch_id)
         fingerprint, replay = _decision(tx, branch, data, "confirm")
         if replay:
             return _snapshot_tx(tx, branch)
         workspace = _workspace(tx, branch_id)
         _check_basis(branch, workspace, data)
+        project = confirmed_project_tx(tx, branch_id)
+        project_id = project["id"] if project else None
+        impacted = [item["item_id"] for item in _project_impacts(workspace, project_id)]
+        accepted = set(data.reconciled_project_items)
+        if accepted != set(impacted) or len(accepted) != len(data.reconciled_project_items):
+            raise DomainError("conception_project_review", "请逐项核对受立项变更影响的设定，再确认。", 409)
         categories = workspace["categories"]
         observed = _observed(tx, branch_id)
         evidence = _source_records(tx, branch_id, workspace)
@@ -545,9 +712,10 @@ def confirm(domain, branch_id, data):
             "note": data.note.strip(),
             "planning_brief": planning_brief if len(planning_brief) <= 30_000 else "",
         }
-        project = confirmed_project_tx(tx, branch_id)
         if project:
-            payload["project_confirmation_id"] = project["id"]
+            payload["project_confirmation_id"] = project_id
+        if impacted:
+            payload["reconciled_project_items"] = impacted
         identifier = _insert(tx, branch, CONFIRMATION, payload, {"story_revision": branch["story_revision"]})
         _receipt(tx, data, identifier, fingerprint)
         return _snapshot_tx(tx, branch)

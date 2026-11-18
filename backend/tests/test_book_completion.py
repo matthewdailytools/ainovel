@@ -1,8 +1,10 @@
+import asyncio
 from hashlib import sha256
 from io import BytesIO
 import json
 from zipfile import ZipFile
 
+from ainovel.worker import Worker
 from test_workflow_inspection import author
 
 
@@ -67,7 +69,85 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
             sha256(archive.read(name)).hexdigest() == digest for name, digest in manifest["files"].items()
         )
         assert chapter["content"] in archive.read("正文.md").decode()
+    length = client.get(inspection).json()["preview"]["length_target"]
+    changed = client.put(
+        inspection + "/length-targets",
+        json={"base_target_id": length["id"], "targets": {"expected_chapters": 2}},
+    )
+    assert changed.status_code == 200, changed.text
+    latest = client.get(endpoint).json()
+    assert not latest["latest"]["current"]
+    assert latest["basis_sha256"] != data["basis_sha256"]
+    review = client.post(endpoint + "/preview", json={**data, "basis_sha256": latest["basis_sha256"]}).json()
+    assert next(row for row in review["checks"] if row["id"] == "manuscript")["status"] == "red"
+    assert (
+        client.post(endpoint + "/confirm", json={**data, "basis_sha256": latest["basis_sha256"]}).status_code
+        == 409
+    )
     domain.save(chapter["id"], chapter["revision"], "学徒仍在找铃。")
     assert not client.get(endpoint).json()["latest"]["current"]
     with ZipFile(BytesIO(client.get(export).content)) as archive:
         assert chapter["content"] in archive.read("正文.md").decode()
+
+
+def test_completion_preparation_uses_exact_sources_and_keeps_author_gate(client, domain, settings, story):
+    branch = story["branch_id"]
+    opening = domain.save(story["chapter_id"], 0, "😀学徒拾起那只哑铃。")
+    second = domain.create_chapter(branch, "归还")
+    ending = domain.save(second["id"], 0, "师姐解下铃绳，归还铜铃。")
+    endpoint = f"/api/branches/{branch}/book-completion"
+    basis = client.get(endpoint).json()["basis_sha256"]
+    queued = client.post(
+        endpoint + "/preparation",
+        json={"basis_sha256": basis, "account": "deepseek", "client_request_id": "delivery-draft-one"},
+    )
+    assert queued.status_code == 202, queued.text
+
+    class Model:
+        async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+            task = json.loads(prompt.split("\n只返回")[0])["任务"]
+            if task["动作"] == "起草完本交付简介":
+                assert task["可用正文"] == [opening["content"]]
+                assert ending["content"] not in prompt
+                payload = {"intro": "学徒从哑铃的来历追起。"}
+            else:
+                assert task["动作"] == "准备完本收束核对建议"
+                last = task["正文依据"][-1]
+                assert last["text"] == ending["content"]
+                payload = {
+                    "ending": {"note": "核对归还是否收束。", "source_ids": [last["source_id"]]},
+                    "characters": {"note": "缺少后续依据。", "source_ids": []},
+                    "promises": {"note": "", "source_ids": []},
+                }
+            return {"text": json.dumps(payload), "usage": {"input": 1, "output": 1}, "call_id": task["动作"]}
+
+    assert asyncio.run(Worker(settings, Model()).run_once())
+    state = client.get(endpoint + "/preparation").json()["task"]
+    assert state["status"] == "succeeded", state["error"]
+    assert state["candidate"]["current"]
+    assert state["candidate"]["closures"]["ending"]["sources"] == [
+        {
+            "chapter_id": ending["id"],
+            "revision": ending["revision"],
+            "start": 0,
+            "end": len(ending["content"]),
+            "quote": ending["content"],
+        }
+    ]
+    assert state["candidate"]["closures"]["characters"]["note"] == ""
+    assert client.get(endpoint).json()["latest"] is None
+    data = {
+        "basis_sha256": basis,
+        "preparation_id": state["artifact_id"],
+        **state["candidate"]["closures"],
+        "read_note": "",
+        "intro": state["candidate"]["intro"],
+        "spoiler_scope": "opening",
+        "sample_chapter_ids": [opening["id"]],
+        "materials_reviewed": False,
+    }
+    assert client.post(endpoint + "/confirm", json=data).json()["code"] == "completion_blocked"
+    domain.save(opening["id"], opening["revision"], "学徒把铃留在门外。")
+    assert not client.get(endpoint + "/preparation").json()["task"]["candidate"]["current"]
+    data["basis_sha256"] = client.get(endpoint).json()["basis_sha256"]
+    assert client.post(endpoint + "/preview", json=data).json()["code"] == "completion_preparation_stale"

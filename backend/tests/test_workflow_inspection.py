@@ -62,6 +62,95 @@ def test_body_count_excludes_markdown_formatting_but_keeps_punctuation():
     assert body_chars("## 排版标题\n- **铜铃** [响了](https://example.invalid)\n---\n> 入门。😀\u200b") == 8
 
 
+def test_only_absent_optional_material_can_be_marked_not_applicable(inspection_client, domain, story):
+    chapter = domain.save(story["chapter_id"], 0, "学徒拾铃入门。")
+    route = endpoint(story)
+    preview = read(inspection_client, route)["preview"]
+    allowed = {row["check_id"] for row in preview["items"] if row["can_mark_not_applicable"]}
+    assert allowed == {"05", "07"}
+    for row in preview["items"]:
+        if row["check_id"] in allowed:
+            continue
+        verdict = author(row["check_id"], chapter, "not_applicable")
+        verdict["evidence"] = []
+        blocked = inspection_client.post(
+            route, json={"basis_sha256": preview["basis_sha256"], "author_reviews": [verdict]}
+        )
+        assert blocked.status_code == 400
+        assert blocked.json()["code"] == "inspection_required"
+    authored = [author(check_id, chapter, "not_applicable") for check_id in allowed]
+    for verdict in authored:
+        verdict["basis_note"] = "逐项核对了本范围采用的资料与正文。"
+        verdict["reason"] = "本范围未采用该类设定或伏笔。"
+        verdict["evidence"] = []
+    created = report(inspection_client, route, preview, author_reviews=authored)
+    assert item(created, "05")["current_status"] == item(created, "07")["current_status"] == "not_applicable"
+
+    branch = story["branch_id"]
+    conception = f"/api/branches/{branch}/conception"
+    workspace = read(inspection_client, conception)
+    next(category for category in workspace["categories"] if category["id"] == "world")["items"] = [
+        {"id": "bell", "title": "铃声", "detail": "铜铃只在门内响。", "links": []}
+    ]
+    saved = inspection_client.put(
+        conception,
+        json={
+            "base_revision": workspace["revision"],
+            "base_story_revision": workspace["story_revision"],
+            "categories": workspace["categories"],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    changed = read(inspection_client, route)
+    assert item(changed["preview"], "05")["status"] == "outdated"
+    assert not item(changed["preview"], "05")["can_mark_not_applicable"]
+    assert item(changed["latest"], "05")["current_status"] == "outdated"
+    assert item(changed["latest"], "07")["current_status"] == "not_applicable"
+
+
+def test_numeric_targets_are_versioned_and_omission_cannot_remove_a_failed_target(
+    inspection_client, domain, story
+):
+    chapter = domain.save(story["chapter_id"], 0, "铃声。")
+    route = endpoint(story)
+    targets = route + "/length-targets"
+    first = inspection_client.put(targets, json={"targets": {"expected_chapters": 2}})
+    assert first.status_code == 200, first.text
+    preview = first.json()["preview"]
+    goal = preview["length_target"]
+    assert goal["revision"] == 1
+    assert item(preview, "09")["status"] == "red"
+
+    created = report(inspection_client, route, preview, author_reviews=[author("09", chapter)])
+    assert item(created, "09")["current_status"] == "red"
+    assert item(read(inspection_client, route)["preview"], "09")["status"] == "red"
+    changed_inline = inspection_client.post(
+        route, json={"basis_sha256": preview["basis_sha256"], "length_targets": {"expected_chapters": 1}}
+    )
+    assert changed_inline.status_code == 409
+    assert inspection_client.put(targets, json={"targets": {"expected_chapters": 1}}).status_code == 409
+    assert (
+        inspection_client.put(targets, json={"base_target_id": goal["id"], "targets": {}}).status_code == 422
+    )
+
+    updated = inspection_client.put(
+        targets, json={"base_target_id": goal["id"], "targets": {"expected_chapters": 1}}
+    )
+    assert updated.status_code == 200, updated.text
+    result = updated.json()
+    assert result["preview"]["length_target"]["revision"] == 2
+    assert result["preview"]["basis_sha256"] != preview["basis_sha256"]
+    assert item(result["preview"], "09")["status"] == "green"
+    assert item(result["latest"], "09")["current_status"] == "outdated"
+    assert all(
+        row["current_status"] == row["status"] for row in result["latest"]["items"] if row["check_id"] != "09"
+    )
+    assert inspection_client.post(route, json={"basis_sha256": preview["basis_sha256"]}).status_code == 409
+    historical = read(inspection_client, f"{route}/{created['id']}")
+    assert historical["length_target"] == goal
+    assert item(historical, "09")["status"] == "red"
+
+
 def test_inspection_freezes_author_evidence_and_scoped_manifests(inspection_client, domain, story):
     first = domain.save(story["chapter_id"], 0, "😀学徒拾铃。")
     branch = story["branch_id"]
@@ -107,10 +196,17 @@ def test_invalid_author_excerpt_and_missing_chapter_target_cannot_pass(inspectio
     review = author("06", chapter)
     review["evidence"][0]["quote"] = "无关。"
     response = inspection_client.post(
-        route, json={"basis_sha256": preview["basis_sha256"], "author_reviews": [review]}
+        route,
+        json={
+            "basis_sha256": preview["basis_sha256"],
+            "author_reviews": [review],
+            "length_targets": {"expected_chapters": 2},
+        },
     )
     assert response.status_code == 409
-    assert read(inspection_client, route)["latest"] is None
+    rejected = read(inspection_client, route)
+    assert rejected["latest"] is None
+    assert rejected["preview"]["length_target"] is None
     invalid_scope = inspection_client.get(route, params={"scope": "volume", "scope_id": "missing"})
     assert invalid_scope.status_code == 409
     created = report(inspection_client, route, preview, length_targets={"expected_chapters": 2})

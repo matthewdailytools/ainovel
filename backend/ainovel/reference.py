@@ -445,6 +445,58 @@ async def run_reference(worker, request, context):
     }
 
 
+def edit_reference(domain, identifier, data, *, before_write=None, analysis_adoption=None):
+    if not data.goal.strip():
+        raise DomainError("reference_goal", "学习目标不能只有空白。")
+    if data.chapter_id:
+        if not data.branch_id:
+            raise DomainError("ownership", "章节需要明确的目标工作版本。")
+        domain.chapter(data.chapter_id, data.branch_id)
+    if data.branch_id:
+        domain.branch(data.branch_id)
+    with domain.db.connect(True) as tx:
+        if before_write is not None:
+            before_write(tx)
+        row = tx.execute("SELECT * FROM reference_sessions WHERE id=?", (identifier,)).fetchone()
+        if not row or row["revision"] != data.base_revision:
+            raise DomainError("reference_changed", "会话在别处更新，表单保留，请重新比较。", 409)
+        p = json.loads(row["payload"])
+        cards = [c.model_dump() for c in data.cards]
+        ids = [c["id"] for c in cards]
+        if (
+            len(set(ids)) != len(ids)
+            or any(not i for i in ids)
+            or len(set(data.selected_ids)) != len(data.selected_ids)
+            or not set(data.selected_ids).issubset(set(ids) | data.pinned_revisions.keys())
+            or not data.pinned_revisions.keys() <= set(data.selected_ids)
+        ):
+            raise DomainError("reference_rules", "写法标识须唯一，选中规则必须存在。")
+        if any(not c["evidence"].strip() or c["evidence"] not in p["source"]["quote"] for c in cards):
+            raise DomainError("evidence", "手动修改的证据仍须来自所选原文。")
+        for card_id, revision in data.pinned_revisions.items():
+            card_version({**dict(row), "payload": p}, card_id, revision)
+        p.setdefault("history", []).append(
+            {
+                "revision": row["revision"],
+                "goal": p["goal"],
+                "cards": p["cards"],
+                "application_plan": p["application_plan"],
+                "results": p["results"],
+            }
+        )
+        p.update(data.model_dump(exclude={"base_revision"}))
+        p["cards"], p["results"] = cards, {}
+        if analysis_adoption is not None:
+            p["analysis_adoption"] = {**analysis_adoption, "revision": row["revision"] + 1}
+        for card_id in set(data.selected_ids) - data.pinned_revisions.keys():
+            card_version({**dict(row), "payload": p}, card_id, row["revision"])
+        tx.execute(
+            "UPDATE reference_sessions SET revision=revision+1,payload=?,updated=? WHERE id=?",
+            (dumps(p), time(), identifier),
+        )
+    return session(domain, identifier)
+
+
 def register_routes(app, domain, provider_ready):
     @app.get("/api/reference-sessions")
     def references(branch_id: str | None = None):
@@ -527,52 +579,8 @@ def register_routes(app, domain, provider_ready):
         return session(domain, identifier)
 
     @app.patch("/api/reference-sessions/{identifier}")
-    def edit_reference(identifier: str, data: EditReference):
-        if not data.goal.strip():
-            raise DomainError("reference_goal", "学习目标不能只有空白。")
-        if data.chapter_id:
-            if not data.branch_id:
-                raise DomainError("ownership", "章节需要明确的目标工作版本。")
-            domain.chapter(data.chapter_id, data.branch_id)
-        if data.branch_id:
-            domain.branch(data.branch_id)
-        with domain.db.connect(True) as tx:
-            row = tx.execute("SELECT * FROM reference_sessions WHERE id=?", (identifier,)).fetchone()
-            if not row or row["revision"] != data.base_revision:
-                raise DomainError("reference_changed", "会话在别处更新，表单保留，请重新比较。", 409)
-            p = json.loads(row["payload"])
-            cards = [c.model_dump() for c in data.cards]
-            ids = [c["id"] for c in cards]
-            if (
-                len(set(ids)) != len(ids)
-                or any(not i for i in ids)
-                or len(set(data.selected_ids)) != len(data.selected_ids)
-                or not set(data.selected_ids).issubset(set(ids) | data.pinned_revisions.keys())
-                or not data.pinned_revisions.keys() <= set(data.selected_ids)
-            ):
-                raise DomainError("reference_rules", "写法标识须唯一，选中规则必须存在。")
-            if any(not c["evidence"].strip() or c["evidence"] not in p["source"]["quote"] for c in cards):
-                raise DomainError("evidence", "手动修改的证据仍须来自所选原文。")
-            for card_id, revision in data.pinned_revisions.items():
-                card_version({**dict(row), "payload": p}, card_id, revision)
-            p.setdefault("history", []).append(
-                {
-                    "revision": row["revision"],
-                    "goal": p["goal"],
-                    "cards": p["cards"],
-                    "application_plan": p["application_plan"],
-                    "results": p["results"],
-                }
-            )
-            p.update(data.model_dump(exclude={"base_revision"}))
-            p["cards"], p["results"] = cards, {}
-            for card_id in set(data.selected_ids) - data.pinned_revisions.keys():
-                card_version({**dict(row), "payload": p}, card_id, row["revision"])
-            tx.execute(
-                "UPDATE reference_sessions SET revision=revision+1,payload=?,updated=? WHERE id=?",
-                (dumps(p), time(), identifier),
-            )
-        return session(domain, identifier)
+    def edit_saved_reference(identifier: str, data: EditReference):
+        return edit_reference(domain, identifier, data)
 
     @app.post("/api/reference-sessions/{identifier}/actions", status_code=202)
     def start_reference(identifier: str, data: ReferenceAction):
