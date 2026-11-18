@@ -129,6 +129,8 @@ uv run python -m ainovel.cloud_sync_backup restore --file 'D:/sync-backups/ledge
 
 在桌面「离线写作与交换」或独立 Web 页面底部可下载 `.ainovel-backup`。在桌面选择「导入独立作品备份」，或在独立 Web 选择「从独立备份恢复作品」，就能用同一文件离线交接。文件按记录校验，保留已保存稿件、修订、来源和冻结交付，手法卡原句按作者选带。导入为独立作品，同标识的现有作品保留。桌面单个 `.ainovel-backup` 上限 128 MiB，`.json` 稿件交换上限 24 MiB。桌面全库备份使用下列命令。[本机和浏览器备份验收](docs/acceptance/七台工作流实施验收.md)
 
+导出七台接力证据时，在「整书创作 → 七台自动接力 → 接力检查点」选择待导出的记录，复制「父批次编号」。导出命令使用启动该批次时相同的数据目录。用 `AINOVEL_DATA_DIR` 指定了隔离目录时，在执行导出的终端设置同一值。[两章试写操作](七台实施操作与提示词.md#真实模型两章试写与证据导出)
+
 ```powershell
 uv run python -m ainovel backup
 uv run python -m ainovel verify --file '备份文件.zip'
@@ -142,8 +144,10 @@ uv run python -m ainovel.evaluate --execute --stage books --accounts openai_1,op
 # 不调用模型：从同一备份恢复后导出指定任务的正文、状态、修订与费用证据。
 uv run python -m ainovel.evidence_export --task '半自动任务标识' --task '全自动任务标识'
 
-# 七台接力结束或暂停后，导出已有任务和可选的独立共享费用账本证据。
-uv run python -m ainovel.evidence_export --task '七台父任务标识' --usage-ledger 'D:/approved-usage/usage.sqlite'
+# 七台接力结束或暂停后，导出已有任务及其本地费用证据。
+uv run python -m ainovel.evidence_export --task '此处粘贴父批次编号'
+# 若本次验收关联独立的共享费用账本，导出时指定账本文件。
+uv run python -m ainovel.evidence_export --task '此处粘贴父批次编号' --usage-ledger 'D:/approved-usage/usage.sqlite'
 ```
 
 覆盖式整库恢复前先关闭本机工作台与 Worker。恢复、启动和整库备份会核对同一数据目录的占用状态。收到正在启动或恢复的提示时，待当前操作结束后重试。`verify` 在隔离位置验证备份，无需打开当前稿库。
