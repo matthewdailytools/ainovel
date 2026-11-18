@@ -280,9 +280,9 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
     expect(adopted.promises[0].stages[1].sources).toEqual([source])
     await panel.getByText('大纲版本历史', { exact: true }).click()
     await panel.getByRole('combobox', { name: '浏览正式大纲修订' }).selectOption(remote.confirmed.id)
-    await expect(panel.locator('pre')).toContainText(desktopText)
+    await expect(panel.getByLabel('所选大纲修订', { exact: true })).toContainText(desktopText)
     await panel.getByRole('button', { name: '查看上一大纲修订' }).click()
-    await expect(panel.locator('pre')).toContainText(commonText)
+    await expect(panel.getByLabel('所选大纲修订', { exact: true })).toContainText(commonText)
 
     const webProgress = '浏览器核对双笔铸记后回收。'
     const desktopProgress = '桌面补记保管人的证词。'
@@ -383,7 +383,7 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
         await expect(pending.getByText(/^已确认修订 /)).toHaveCount(0)
       }
       await pending.getByText('大纲版本历史', { exact: true }).click()
-      await expect(pending.locator('pre')).toContainText(commonText)
+      await expect(pending.getByLabel('所选大纲修订', { exact: true })).toContainText(commonText)
       const download = archive.waitForEvent('download')
       await archive.getByRole('button', { name: '导出稿件交换包', exact: true }).click()
       const transported = JSON.parse(await readFile((await (await download).path())!, 'utf-8'))

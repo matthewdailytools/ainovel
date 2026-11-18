@@ -70,6 +70,42 @@ export type SettingsHistory = {
   source_devices?: Record<string, string>
 }
 
+export function createSettingsDraft(
+  id: string,
+  parentId: string | null,
+  projectVersionId: string | null,
+  source?: SettingsVersionRecord,
+): SettingsVersion {
+  const historical = source?.version
+  const origins = Object.fromEntries(
+    Object.entries(historical?.origins ?? {}).map(([itemId, origin]) => [
+      itemId,
+      {
+        ...origin,
+        evidence: origin.evidence && { ...origin.evidence },
+        device_id: origin.device_id ?? source?.source?.device_id ?? source?.recordedDevice ?? null,
+      },
+    ]),
+  )
+  return {
+    id,
+    parent_id: parentId,
+    project_version_id: projectVersionId,
+    categories: historical
+      ? structuredClone(historical.categories)
+      : settingCategories.map(([categoryId, title]) => ({
+          id: categoryId,
+          title,
+          items: [],
+          skipped: false,
+        })),
+    origins,
+    note: '',
+    reviewed_setting_findings: [],
+    reconciled_project_items: [],
+  }
+}
+
 type LinkFinding = 'missing_link' | 'self_link' | 'duplicate_link'
 type FindingKind = LinkFinding | 'same_name' | 'skipped_link' | 'empty_link' | 'policy_link'
 type Location = {

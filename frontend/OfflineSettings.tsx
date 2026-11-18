@@ -4,9 +4,9 @@ import { ConceptionItemEditor } from './ConceptionItems'
 import { useLeaveGuard } from './leaveGuard'
 import {
   blockingSettingsFindings,
+  createSettingsDraft,
   inspectSettingsDraft,
   prepareSettingsVersion,
-  settingCategories,
   type SettingsFinding,
   type SettingsItem,
   type SettingsVersion,
@@ -37,6 +37,59 @@ type Review = {
 
 function selectId(ids: string[], id: string, checked: boolean) {
   return checked ? [...ids, id] : ids.filter((value) => value !== id)
+}
+
+function SettingsRestorePreview({
+  current,
+  historical,
+}: {
+  current?: SettingsVersion
+  historical: SettingsVersion
+}) {
+  function entries(version?: SettingsVersion) {
+    return new Map(
+      (version?.categories ?? []).flatMap(({ id, title, items, skipped }) =>
+        items.map(
+          (item) =>
+            [item.id, { category: id, title, skipped, item, origin: version?.origins[item.id] }] as const,
+        ),
+      ),
+    )
+  }
+  const active = entries(current)
+  const selected = entries(historical)
+  const changes = [...new Set([...active.keys(), ...selected.keys()])].flatMap((id) => {
+    const before = active.get(id)
+    const after = selected.get(id)
+    return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ id, before, after }]
+  })
+  return (
+    <details style={{ overflowWrap: 'anywhere' }}>
+      <summary>恢复差异（{changes.length} 项）</summary>
+      {!!changes.length && (
+        <ul>
+          {changes.map(({ id, before, after }) => (
+            <li key={id}>
+              {before && after ? '还原' : after ? '带回' : '移出'} · {after?.item.title ?? before?.item.title}{' '}
+              · {id}
+              {before && (
+                <p>
+                  当前 · {before.title} · {before.item.detail || '未填写'}
+                </p>
+              )}
+              {after && (
+                <p>
+                  所选 · {after.title} · {after.item.detail || '未填写'}
+                  {!!after.item.links.length && ` · 关联 ${after.item.links.join('、')}`}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="small">恢复稿需按现行立项体检。确认后，采用旧设定修订的大纲需复核。</p>
+    </details>
+  )
 }
 
 function SettingsVersionPreview({ record }: { record: SettingsVersionRecord }) {
@@ -117,12 +170,14 @@ export function OfflineSettings({
 }) {
   const [data, setData] = useState<OfflineSettingsData>()
   const [draft, setDraft] = useState<SettingsVersion>()
+  const [restoring, setRestoring] = useState<{ id: string; projectId: string | null }>()
   const [review, setReview] = useState<Review>()
   const [categoryId, setCategoryId] = useState('world')
   const [selectedRevision, setSelectedRevision] = useState('')
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
+  const recoveryFocus = useRef<HTMLSelectElement>(null)
   const request = useRef(0)
   const current = data?.current?.version
   const projectChanged = current && current.project_version_id !== data?.projectVersionId
@@ -136,11 +191,16 @@ export function OfflineSettings({
   const history = data?.versions ?? []
   const record = history.find((entry) => entry.version.id === selectedRevision) ?? data?.current
   const parent = history.find((entry) => entry.version.id === record?.version.parent_id)
+  const restoreSource = record && record.version.id !== current?.id ? record : undefined
+  const restoreNote = restoring ? `从设定修订 ${restoring.id} 恢复。` : ''
   useLeaveGuard(dirty, '离线设定')
   useEffect(() => {
     onDirty(dirty)
     return () => onDirty(false)
   }, [dirty, onDirty])
+  useEffect(() => {
+    if (restoring) recoveryFocus.current?.focus()
+  }, [restoring])
 
   useEffect(() => {
     const attempt = ++request.current
@@ -159,6 +219,7 @@ export function OfflineSettings({
 
   function edit(next: SettingsVersion | undefined) {
     setDraft(next)
+    if (!next) setRestoring(undefined)
     setReview(undefined)
     setError('')
     setStatus('')
@@ -227,29 +288,11 @@ export function OfflineSettings({
     })
   }
 
-  function startDraft(projectId: string | null, record?: SettingsVersionRecord) {
-    const version = record?.version
-    const origins = Object.fromEntries(
-      Object.entries(version?.origins ?? {}).map(([id, origin]) => [
-        id,
-        {
-          ...origin,
-          device_id: origin.device_id ?? record?.source?.device_id ?? record?.recordedDevice ?? null,
-        },
-      ]),
-    )
-    edit({
-      id: crypto.randomUUID(),
-      parent_id: version?.id ?? null,
-      project_version_id: projectId,
-      categories:
-        version?.categories ??
-        settingCategories.map(([id, title]) => ({ id, title, items: [], skipped: false })),
-      origins,
-      note: '',
-      reviewed_setting_findings: [],
-      reconciled_project_items: [],
-    })
+  function startDraft(source?: SettingsVersionRecord, restore = false) {
+    if (!data) return
+    edit(createSettingsDraft(crypto.randomUUID(), current?.id ?? null, data.projectVersionId, source))
+    const version = source?.version
+    setRestoring(restore && version ? { id: version.id, projectId: version.project_version_id } : undefined)
   }
 
   async function run(operation: () => Promise<void>) {
@@ -266,9 +309,10 @@ export function OfflineSettings({
 
   async function confirm() {
     if (!draft || !review || stale || !canConfirm) return
+    const note = [restoreNote, draft.note.trim()].filter(Boolean).join('\n')
     const version = await prepareSettingsVersion({
       ...draft,
-      note: draft.note.trim(),
+      note,
       reviewed_setting_findings: review.findings,
       reconciled_project_items: review.projectItems,
     })
@@ -279,7 +323,7 @@ export function OfflineSettings({
       throw failure
     }
     edit(undefined)
-    setStatus('已确认并保存新的设定修订。')
+    setStatus(restoring ? '已确认历史内容为新的设定修订。' : '已确认并保存新的设定修订。')
     setData(await read())
   }
 
@@ -298,7 +342,7 @@ export function OfflineSettings({
       {data && !current && !draft && (
         <>
           <p>本机还没有已确认设定。</p>
-          <button type="button" disabled={disabled || busy} onClick={() => startDraft(data.projectVersionId)}>
+          <button type="button" disabled={disabled || busy} onClick={() => startDraft()}>
             开始建立设定
           </button>
         </>
@@ -310,11 +354,7 @@ export function OfflineSettings({
           </p>
           {projectChanged && <p className="small">采用的立项已变化。编辑并核对后可确认新的设定修订。</p>}
           {!draft && (
-            <button
-              type="button"
-              disabled={disabled || busy}
-              onClick={() => startDraft(data.projectVersionId, data.current)}
-            >
+            <button type="button" disabled={disabled || busy} onClick={() => startDraft(data.current)}>
               编辑当前设定
             </button>
           )}
@@ -323,10 +363,21 @@ export function OfflineSettings({
       {draft && (
         <fieldset disabled={disabled || busy}>
           <legend>本地设定编辑</legend>
+          {restoring && (
+            <p className="small" style={{ overflowWrap: 'anywhere' }}>
+              {restoreNote}
+              {restoring.projectId !== draft.project_version_id &&
+                ` 原立项 ${restoring.projectId ?? '未采用'} · 现行立项 ${draft.project_version_id ?? '未采用'}。`}
+            </p>
+          )}
           {stale && <p role="alert">当前设定或立项已更新。请先核对当前版本，未确认输入仍保留。</p>}
           <label>
             设定类别
-            <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+            <select
+              ref={recoveryFocus}
+              value={categoryId}
+              onChange={(event) => setCategoryId(event.target.value)}
+            >
               {categories.map((row) => (
                 <option key={row.id} value={row.id}>
                   {row.title}
@@ -374,7 +425,7 @@ export function OfflineSettings({
             确认说明
             <textarea
               value={draft.note}
-              maxLength={4000}
+              maxLength={4000 - (restoreNote ? restoreNote.length + 1 : 0)}
               onChange={(event) => setDraft({ ...draft, note: event.target.value })}
             />
           </label>
@@ -503,6 +554,19 @@ export function OfflineSettings({
             </button>
           )}
           {record && <SettingsVersionPreview key={record.version.id} record={record} />}
+          {restoreSource && (
+            <>
+              <SettingsRestorePreview current={current} historical={restoreSource.version} />
+              <button
+                type="button"
+                disabled={disabled || busy || dirty}
+                onClick={() => startDraft(restoreSource, true)}
+              >
+                恢复所选版本为设定草稿
+              </button>
+              {dirty && <p className="small">确认或放弃当前草稿后可选择其他恢复来源。</p>}
+            </>
+          )}
         </details>
       )}
     </details>

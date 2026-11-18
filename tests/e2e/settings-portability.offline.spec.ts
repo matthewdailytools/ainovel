@@ -88,4 +88,29 @@ test('独立 Web 断网新建设定，版本历史经桌面往返后可离线恢
   await panel.getByRole('button', { name: '查看上一修订' }).click()
   await version.getByText('世界设定', { exact: true }).click()
   await expect(version.getByText(first)).toBeVisible()
+  await panel.getByText('恢复差异（1 项）', { exact: true }).click()
+  await expect(panel.getByText(`当前 · 世界设定 · ${second}`, { exact: true })).toBeVisible()
+  await panel.getByRole('button', { name: '恢复所选版本为设定草稿' }).press('Enter')
+  await expect(panel.getByLabel('设定类别')).toBeFocused()
+  await expect(panel.getByLabel('设定内容')).toHaveValue(first)
+  await expect(panel.getByText(`当前确认修订 ${adopted.id}`)).toBeVisible()
+  await expect(panel.getByRole('button', { name: '确认设定并保存到浏览器' })).toHaveCount(0)
+  await panel.getByRole('button', { name: '体检本地设定草稿' }).click()
+  await panel.getByRole('button', { name: '确认设定并保存到浏览器' }).click()
+  await expect(panel.getByText('已确认历史内容为新的设定修订。')).toBeVisible()
+  const recoveredExport = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出稿件交换包' }).click()
+  const recoveredPack = JSON.parse(
+    await readFile((await (await recoveredExport).path())!, 'utf8'),
+  ) as ManuscriptPack
+  const recoveredHistory = recoveredPack.settings_history!
+  const restored = recoveredHistory.versions.find(({ id }) => id === recoveredHistory.adopted_revision_id)!
+  expect(restored).toMatchObject({
+    parent_id: adopted.id,
+    note: `从设定修订 ${base.id} 恢复。`,
+    categories: base.categories,
+    origins: base.origins,
+  })
+  expect(recoveredHistory.versions).toHaveLength(3)
+  expect(recoveredHistory.versions).toEqual(expect.arrayContaining([base, adopted]))
 })

@@ -130,6 +130,7 @@ export function OfflineOutline({
 }) {
   const [data, setData] = useState<OfflineOutlineData>()
   const [draft, setDraft] = useState<OutlineVersion>()
+  const [restoringId, setRestoringId] = useState<string>()
   const [promiseTitle, setPromiseTitle] = useState('')
   const [promiseNotes, setPromiseNotes] = useState('')
   const [nextPromise, setNextPromise] = useState('')
@@ -137,6 +138,7 @@ export function OfflineOutline({
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
+  const recoveryFocus = useRef<HTMLTextAreaElement>(null)
   const request = useRef(0)
   const current = data?.current?.version
   const activeSettings = data?.settings?.project_version_id === data?.projectVersionId ? data?.settings : null
@@ -156,6 +158,10 @@ export function OfflineOutline({
     data?.current ??
     history.find((row) => row.version.id === data?.restorePending?.revisionId)
   const parent = history.find((row) => row.version.id === record?.version.parent_id)
+  const restoreSource = record && record.version.id !== current?.id ? record.version : undefined
+  const compatibleBasis =
+    restoreSource?.project_version_id === data?.projectVersionId &&
+    restoreSource?.settings_version_id === (activeSettings?.id ?? null)
   const settings = eligibleOutlineSettings(activeSettings)
   const cardIndex = new Map(
     [...(data?.cards ?? []), ...(draft?.reference_cards ?? [])].map((card) => [outlineCardKey(card), card]),
@@ -173,6 +179,9 @@ export function OfflineOutline({
     onDirty(dirty)
     return () => onDirty(false)
   }, [dirty, onDirty])
+  useEffect(() => {
+    if (restoringId) recoveryFocus.current?.focus()
+  }, [restoringId])
 
   useEffect(() => {
     const attempt = ++request.current
@@ -200,8 +209,41 @@ export function OfflineOutline({
       reference_cards: current?.reference_cards ?? [],
       promise_sources: current?.promise_sources ?? {},
     })
+    setRestoringId(undefined)
     setError('')
     setStatus('')
+  }
+
+  function validateCurrentSources(version: OutlineVersion) {
+    return validateOutlineVersionSources(version, {
+      project: (id) => id === data?.projectVersionId,
+      outline: (id) => id === current?.id,
+      settings: (id) => (id === activeSettings?.id ? activeSettings : null),
+      chapter: (id) => chapters.find((chapter) => chapter.id === id),
+      reference: (id) => data?.referenceVersions?.find((card) => card.id === id),
+      ...(data?.promises ? { promise: (id: string) => data.promises?.find((entry) => entry.id === id) } : {}),
+    })
+  }
+
+  async function restoreHistorical() {
+    if (!restoreSource || !compatibleBasis || draft) return
+    setBusy(true)
+    setError('')
+    setStatus('')
+    try {
+      const next = prepareOutlineVersion({
+        ...restoreSource,
+        id: crypto.randomUUID(),
+        parent_id: current?.id ?? null,
+      })
+      await validateCurrentSources(next)
+      setDraft(next)
+      setRestoringId(restoreSource.id)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '暂时无法载入所选大纲历史。')
+    } finally {
+      setBusy(false)
+    }
   }
 
   function editPlan(transform: (plan: OutlineVersion['plan']) => OutlineVersion['plan']) {
@@ -253,19 +295,11 @@ export function OfflineOutline({
           Object.entries(draft.promise_sources).filter(([id]) => windows.has(id)),
         ),
       })
-      await validateOutlineVersionSources(version, {
-        project: (id) => id === data.projectVersionId,
-        outline: (id) => id === current?.id,
-        settings: (id) => (id === activeSettings?.id ? activeSettings : null),
-        chapter: (id) => chapters.find((chapter) => chapter.id === id),
-        reference: (id) => data.referenceVersions?.find((card) => card.id === id),
-        ...(data.promises
-          ? { promise: (id: string) => data.promises?.find((entry) => entry.id === id) }
-          : {}),
-      })
+      await validateCurrentSources(version)
       await onConfirm(draft.parent_id, version)
       setDraft(undefined)
-      setStatus('已确认并保存大纲修订。')
+      setRestoringId(undefined)
+      setStatus(restoringId ? '已确认历史内容为新的大纲修订。' : '已确认并保存大纲修订。')
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '大纲未保存，当前输入已保留。')
     } finally {
@@ -302,6 +336,11 @@ export function OfflineOutline({
       {draft && (
         <fieldset disabled={disabled || busy}>
           <legend>四级大纲与伏笔计划</legend>
+          {restoringId && (
+            <p className="small" style={{ overflowWrap: 'anywhere' }}>
+              从大纲修订 {restoringId} 载入。确认前请核对章纲、手法卡和伏笔窗口。
+            </p>
+          )}
           {stale && <p role="alert">大纲或上游依据已更新。请先核对当前版本，未确认输入仍保留。</p>}
           <p className="small" style={{ overflowWrap: 'anywhere' }}>
             立项 {draft.project_version_id ?? '未采用'} · 设定 {draft.settings_version_id ?? '未采用'}
@@ -309,6 +348,7 @@ export function OfflineOutline({
           <label>
             总纲
             <textarea
+              ref={recoveryFocus}
               maxLength={4000}
               value={draft.plan.summary}
               onChange={(event) => editPlan((plan) => ({ ...plan, summary: event.target.value }))}
@@ -615,6 +655,7 @@ export function OfflineOutline({
             onClick={() => {
               if (window.confirm('放弃本次未确认的大纲修改？')) {
                 setDraft(undefined)
+                setRestoringId(undefined)
                 setError('')
               }
             }}
@@ -650,9 +691,32 @@ export function OfflineOutline({
             <p>稿件包记载的来源设备 {record.recordedDeviceId}</p>
           )}
           {record && (
-            <pre style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+            <pre aria-label="所选大纲修订" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
               {describeOutlineVersion(record.version)}
             </pre>
+          )}
+          {restoreSource && (
+            <>
+              {current && (
+                <details>
+                  <summary>对照当前大纲</summary>
+                  <pre aria-label="当前大纲修订" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+                    {describeOutlineVersion(current)}
+                  </pre>
+                </details>
+              )}
+              {!compatibleBasis && (
+                <p className="small">选中修订的立项或设定依据已变化。可对照历史并核对当前大纲。</p>
+              )}
+              {dirty && <p className="small">确认或放弃当前草稿后可选择其他恢复来源。</p>}
+              <button
+                type="button"
+                disabled={disabled || busy || dirty || !compatibleBasis}
+                onClick={() => void restoreHistorical()}
+              >
+                恢复所选版本为大纲草稿
+              </button>
+            </>
           )}
         </details>
       )}

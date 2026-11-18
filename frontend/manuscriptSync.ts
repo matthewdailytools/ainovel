@@ -2,6 +2,7 @@ import {
   applySyncedObject,
   acknowledgeLocalPublications,
   checkLocalStorySelection,
+  forkLocalManuscript,
   manuscriptHash,
   readLocalPublications,
   readLocalSyncSnapshot,
@@ -583,11 +584,92 @@ export async function prepareWebResolution(project: LocalProject, scope: SyncSco
   }
 }
 
+type WebComparison = Awaited<ReturnType<typeof prepareWebResolution>>
+export type WebForkChoice = 'local' | 'current' | 'incoming' | 'base'
+const forkLabels = {
+  local: '本机当前版',
+  current: '云端当前版',
+  incoming: '另一提交版',
+  base: '共同依据',
+} as const
+
+function comparisonSource(compared: WebComparison, choice: WebForkChoice) {
+  switch (choice) {
+    case 'local':
+      return compared.object
+    case 'current':
+      return compared.current.payload
+    case 'incoming':
+      return compared.incoming.payload
+    case 'base':
+      return compared.base?.payload
+  }
+}
+
+export function webForkChoices(compared: WebComparison) {
+  if (!compared.incoming.object_id.startsWith('chapter:')) return []
+  const choices: WebForkChoice[] = ['local', 'current', 'incoming', 'base']
+  return choices.flatMap((choice) =>
+    comparisonSource(compared, choice)?.kind === 'chapter' ? [{ choice, label: forkLabels[choice] }] : [],
+  )
+}
+
+function exactChapterHead(value: WebComparison['object']) {
+  return value?.kind === 'chapter' ? value.head.id : null
+}
+
+function checkWebComparison(compared: WebComparison, fresh: WebComparison) {
+  if (
+    fresh.current.change_id !== compared.current.change_id ||
+    fresh.signature !== compared.signature ||
+    exactChapterHead(fresh.object) !== exactChapterHead(compared.object) ||
+    fresh.publicationId !== compared.publicationId
+  )
+    throw new Error('本机或云端版本已变化，请重新比较。')
+}
+
+export async function forkWebConflict(
+  project: LocalProject,
+  scope: SyncScope,
+  compared: WebComparison,
+  choice: WebForkChoice,
+  name: string,
+) {
+  const id = compared.incoming.conflict_id
+  if (!id || scope.workId !== project.branch.id) throw new Error('当前作品找不到可另存的冲突比较。')
+  const fresh = await prepareWebResolution(project, scope, id)
+  checkWebComparison(compared, fresh)
+  if (!webForkChoices(fresh).some((option) => option.choice === choice))
+    throw new Error('请选择仍有正文的比较版本。')
+  const source = await validateSyncedObject(
+    project,
+    fresh.incoming.object_id,
+    comparisonSource(fresh, choice),
+  )
+  if (source?.kind !== 'chapter') throw new Error('尚未取得所选章节的准确来源。')
+  return forkLocalManuscript(
+    project.novel.id,
+    {
+      chapterId: source.chapter.id,
+      revisionId: source.head.id,
+      content: source.head.content,
+      sha256: source.head.sha256,
+    },
+    name,
+    {
+      branchId: project.branch.id,
+      currentChapter: fresh.signature,
+      currentRevisionId: exactChapterHead(fresh.object),
+      publicationId: fresh.publicationId,
+    },
+  )
+}
+
 export async function resolveWebManuscript(
   project: LocalProject,
   scope: SyncScope,
   transport: SyncTransport,
-  compared: Awaited<ReturnType<typeof prepareWebResolution>>,
+  compared: WebComparison,
   choice: 'current' | 'incoming' | 'local' | { choice: 'merge_prose'; content: string },
 ) {
   const id = compared.incoming.conflict_id!
@@ -602,12 +684,7 @@ export async function resolveWebManuscript(
     }
   }
   const fresh = await prepareWebResolution(project, scope, id)
-  if (
-    fresh.current.change_id !== compared.current.change_id ||
-    fresh.signature !== compared.signature ||
-    fresh.publicationId !== compared.publicationId
-  )
-    throw new Error('本机或云端版本已变化，请重新比较。')
+  checkWebComparison(compared, fresh)
   if (choice === 'local' && fresh.object?.kind === 'project-head') {
     const selected = fresh.object.revision_id
     if (!fresh.versions.some(({ version, source }) => source && version.id === selected))

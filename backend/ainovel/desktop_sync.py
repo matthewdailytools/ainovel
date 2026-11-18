@@ -52,6 +52,16 @@ from .project_sync import (
 
 FORMAT = "ainovel-manuscript-sync/1"
 RESPONSE_LIMIT = 8 * 1024 * 1024
+CONFLICT_REJECTIONS = {"sync_head_changed": 409, "sync_conflict_resolved": 409}
+PROSE_MERGE_REJECTIONS = {
+    **CONFLICT_REJECTIONS,
+    "sync_chapter": 409,
+    "sync_history": 409,
+    "sync_input": 422,
+    "sync_replay": 409,
+    "sync_object_size": 413,
+    "sync_request_size": 413,
+}
 WORKFLOW_REJECTIONS = {
     "sync_workflow": "云端未能核对这份体检或交付历史，原记录已保留本机。",
     "sync_workflow_dependency": "云端尚缺原章稿修订或通过的体检单，将继续等待来源。",
@@ -253,13 +263,21 @@ def _network(origin, token, method, path, payload=None):
                     code = result.get("code") if isinstance(result, dict) else None
                     if isinstance(code, str) and code in WORKFLOW_REJECTIONS:
                         raise DomainError(code, WORKFLOW_REJECTIONS[code], response.status_code)
+                    if isinstance(code, str) and (
+                        PROSE_MERGE_REJECTIONS.get(code) == response.status_code
+                        or code == "sync_auth"
+                        and response.status_code == 401
+                    ):
+                        raise DomainError(
+                            code,
+                            f"同步服务拒绝此操作（HTTP {response.status_code}）。请核对设备凭据或刷新比较。",
+                            response.status_code,
+                        )
                     raise DomainError(
                         code
                         if isinstance(code, str)
                         and code
                         in {
-                            "sync_head_changed",
-                            "sync_conflict_resolved",
                             "sync_story",
                             "sync_story_dependency",
                             "sync_story_evidence",
@@ -1096,12 +1114,8 @@ class DesktopSync:
                     branch_id, origin, token, path, Receipt, method="POST", data=json.loads(row["request"])
                 )
             except DomainError as error:
-                known_rejection = {"sync_head_changed", "sync_conflict_resolved"}
-                if _is_prose_merge(row):
-                    known_rejection.update(
-                        {"sync_chapter", "sync_history", "sync_object_size", "sync_input", "sync_replay"}
-                    )
-                if row["conflict_id"] and error.code in known_rejection:
+                known_rejections = PROSE_MERGE_REJECTIONS if _is_prose_merge(row) else CONFLICT_REJECTIONS
+                if row["conflict_id"] and known_rejections.get(error.code) == error.status:
                     with self.domain.db.connect(True) as tx:
                         tx.execute(
                             "DELETE FROM desktop_sync_outbox WHERE branch_id=? AND change_id=?",

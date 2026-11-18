@@ -136,6 +136,17 @@ test('桌面和离线 Web 同章修改产生可解决冲突，历史稿仍可查
     await context.setOffline(false)
     await sync.click()
     await web.getByRole('button', { name: /^比较冲突/ }).click()
+    await context.setOffline(true)
+    await compare.getByRole('button', { name: '另存为本地工作版本', exact: true }).click()
+    await compare.getByLabel('另存章稿来源').selectOption('current')
+    await compare.getByLabel('新工作版本名称').fill('遗铃 · 留存桌面草稿')
+    await compare.getByRole('button', { name: '保存工作版本副本', exact: true }).click()
+    await expect(
+      web.getByRole('status').filter({ hasText: '已另存本机工作版本「遗铃 · 留存桌面草稿」' }),
+    ).toBeVisible()
+    await expect(editor).toHaveValue(webBeforeMerge)
+    await expect(compare).toBeVisible()
+    await context.setOffline(false)
     await compare.getByRole('button', { name: '手动合并正文', exact: true }).click()
     const merge = compare.getByRole('textbox', { name: '合并正文', exact: true })
     await expect(merge).toHaveValue(webBeforeMerge)
@@ -303,6 +314,18 @@ test('桌面和离线 Web 同章修改产生可解决冲突，历史稿仍可查
     await editor.fill('这段内容保存在本机。')
     await web.getByRole('button', { name: '保存正文到浏览器', exact: true }).click()
     await expect(web.getByRole('status').filter({ hasText: '本地已保存 · 修订 1' })).toBeVisible()
+    await web.reload()
+    await web
+      .getByRole('combobox', { name: '离线作品', exact: true })
+      .selectOption({ label: '遗铃 · 留存桌面草稿' })
+    await web.getByRole('button', { name: '1. 拾铃', exact: true }).click()
+    await expect(editor).toHaveValue(desktopBeforeMerge)
+    await web.getByText('冲突另存来源', { exact: true }).click()
+    await expect(web.getByRole('region', { name: '随稿依据' })).toContainText(branch_id)
+    await expect(web.getByRole('region', { name: '随稿依据' })).toContainText('比较时所选修订')
+    await editor.fill('副本继续独立编辑。')
+    await web.getByRole('button', { name: '保存正文到浏览器', exact: true }).click()
+    await expect(web.getByRole('status').filter({ hasText: '本地已保存 · 修订' })).toBeVisible()
   } finally {
     await context.close()
   }

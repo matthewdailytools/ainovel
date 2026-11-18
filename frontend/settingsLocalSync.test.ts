@@ -16,7 +16,13 @@ import {
   syncObjectSignature,
   validateSyncedObject,
 } from './offlineStore'
-import { settingCategories, type SettingsVersion } from './settingsSyncModel'
+import {
+  createSettingsDraft,
+  inspectSettingsDraft,
+  prepareSettingsVersion,
+  settingCategories,
+  type SettingsVersion,
+} from './settingsSyncModel'
 import { syncWebManuscript } from './manuscriptSync'
 import { setSyncEnabled, type SyncPayload, type SyncReceipt, type SyncTransport } from './syncClient'
 
@@ -186,6 +192,68 @@ test('M3 version and adopted head roll back if durable marking fails, then queue
   await expect(
     confirmLocalSettings(work, version.id, { ...next, id: 'stale-setting' }),
   ).rejects.toMatchObject({ code: 'conflict' })
+})
+
+test('M3 restoration keeps original references and requires fresh conflict and current project review', async () => {
+  const { work, branch_id, version, convention, item, store, adopt } = await prepare()
+  const other = { ...item, id: 'bell-variant', detail: '铜铃里没有刻痕。' }
+  const old = {
+    ...version,
+    categories: version.categories.map((category) =>
+      category.id === 'world' ? { ...category, items: [item, other] } : category,
+    ),
+    origins: {
+      ...version.origins,
+      [other.id]: { ...version.origins[item.id], origin: 'ai' as const, artifact_id: 'original-ai' },
+    },
+  }
+  const originalReview = await inspectSettingsDraft(old.categories, old.origins, old.project_version_id)
+  expect(originalReview.findings.map(({ kind }) => kind)).toEqual(['same_name'])
+  old.reviewed_setting_findings = originalReview.findings.map(({ id }) => id)
+  await store(old)
+  await adopt(old)
+  const recent = { ...version, id: 'recent-setting', parent_id: old.id, note: '暂时只采用第一条规则。' }
+  await confirmLocalSettings(work, old.id, recent)
+  const newProject = await confirmLocalProjectBrief(work, convention.id, {
+    idea: '改为寻找铃匠',
+    brief: { ...brief, ending: '由新主人重新铸铃' },
+  })
+  const historical = (await readLocalSettings(work)).versions.find(({ version }) => version.id === old.id)!
+  const draft = createSettingsDraft('restore-old-setting', recent.id, newProject.id, historical)
+  expect(draft).toMatchObject({
+    parent_id: recent.id,
+    project_version_id: newProject.id,
+    reviewed_setting_findings: [],
+    reconciled_project_items: [],
+  })
+  expect(draft.origins[other.id]).toEqual({ ...old.origins[other.id], device_id: 'desktop' })
+  expect(draft.categories).toEqual(old.categories)
+  expect(draft.categories).not.toBe(historical.version.categories)
+  await expect(prepareSettingsVersion(draft)).rejects.toThrow('受立项变更影响')
+  const checked = await inspectSettingsDraft(draft.categories, draft.origins, draft.project_version_id)
+  expect(checked.projectImpacts).toEqual([item.id, other.id])
+  const reconciled = { ...draft, reconciled_project_items: checked.projectImpacts }
+  await expect(prepareSettingsVersion(reconciled)).rejects.toThrow('逐项核对设定冲突')
+  const restored = await prepareSettingsVersion({
+    ...reconciled,
+    reviewed_setting_findings: checked.findings.map(({ id }) => id),
+    note: `从设定修订 ${old.id} 恢复。`,
+  })
+  await confirmLocalSettings(work, recent.id, restored)
+  await expect(
+    confirmLocalSettings(work, recent.id, { ...restored, id: 'another-stale-restoration' }),
+  ).rejects.toMatchObject({ code: 'conflict' })
+  const saved = await readLocalSettings(work)
+  expect(saved.current?.version).toEqual(restored)
+  expect(saved.versions.map(({ version }) => version)).toEqual(
+    expect.arrayContaining([old, recent, restored]),
+  )
+  expect(await readLocalPublications(branch_id)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ objectId: `settings-version:${restored.id}` }),
+      expect.objectContaining({ objectId: `settings:${branch_id}` }),
+    ]),
+  )
 })
 
 test('M3 first confirmation uses an empty head CAS and a package preserves parent, competing version and source', async () => {

@@ -11,10 +11,13 @@ import { describeReferenceVersion } from './referenceArchive'
 import { readSyncState, setSyncEnabled, type SyncPayload } from './syncClient'
 import {
   cloudScope,
+  forkWebConflict,
   httpSyncTransport,
   prepareWebResolution,
   resolveWebManuscript,
   syncWebManuscript,
+  webForkChoices,
+  type WebForkChoice,
 } from './manuscriptSync'
 
 type State = Awaited<ReturnType<typeof readSyncState>> & {
@@ -63,13 +66,15 @@ export function WebSyncPanel({
   unsaved,
   onApplied,
   onBusy,
-  onMergeDraftDirty,
+  onConflictDraftDirty,
+  onForkSaved,
 }: {
   project: LocalProject
   unsaved: boolean
   onApplied: () => Promise<void>
   onBusy: (busy: boolean) => void
-  onMergeDraftDirty: (dirty: boolean) => void
+  onConflictDraftDirty: (dirty: boolean) => void
+  onForkSaved: (project: LocalProject) => void
 }) {
   const [service, setService] = useState('')
   const [device, setDevice] = useState('')
@@ -77,16 +82,18 @@ export function WebSyncPanel({
   const [status, setStatus] = useState<State>()
   const [compared, setCompared] = useState<Comparison>()
   const [mergeText, setMergeText] = useState<string>()
+  const [fork, setFork] = useState<{ choice: WebForkChoice; name: string }>()
+  const [forkNotice, setForkNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [message, setMessage] = useState('')
   const ready = !!service.trim() && !!device.trim()
-  const hasMergeDraft = mergeText !== undefined
-  useLeaveGuard(hasMergeDraft, '同步合并正文')
+  const hasConflictDraft = mergeText !== undefined || fork !== undefined
+  useLeaveGuard(hasConflictDraft, '云同步冲突编辑')
   useEffect(() => {
-    onMergeDraftDirty(hasMergeDraft)
-    return () => onMergeDraftDirty(false)
-  }, [hasMergeDraft, onMergeDraftDirty])
+    onConflictDraftDirty(hasConflictDraft)
+    return () => onConflictDraftDirty(false)
+  }, [hasConflictDraft, onConflictDraftDirty])
   useEffect(() => {
     let active = true
     setStatus(undefined)
@@ -109,11 +116,15 @@ export function WebSyncPanel({
     }
   }, [project.branch.id, service, device, ready])
 
-  async function run(action: 'enable' | 'disable' | 'sync' | 'compare' | 'choose' | 'merge', value?: string) {
+  async function run(
+    action: 'enable' | 'disable' | 'sync' | 'compare' | 'choose' | 'merge' | 'fork',
+    value?: string,
+  ) {
     if (busy || !ready) return
     setBusy(true)
     onBusy(true)
     setMessage('')
+    setForkNotice('')
     try {
       const scope = cloudScope(service, project.branch.id, device.trim())
       if (action === 'disable') {
@@ -124,6 +135,14 @@ export function WebSyncPanel({
       }
       if (action === 'compare' && value) {
         setCompared(await prepareWebResolution(project, scope, value))
+        return
+      }
+      if (action === 'fork' && compared && fork) {
+        if (unsaved) throw new Error('请先保存正在编辑的稿件，再另存冲突版本。')
+        const saved = await forkWebConflict(project, scope, compared, fork.choice, fork.name)
+        setFork(undefined)
+        onForkSaved(saved)
+        setForkNotice(`已另存本机工作版本「${saved.novel.title}」，可从离线作品中打开。`)
         return
       }
       const transport = httpSyncTransport(scope, token.trim())
@@ -175,6 +194,7 @@ export function WebSyncPanel({
     compared?.object?.kind === 'chapter' &&
     compared.current.payload?.kind === 'chapter' &&
     compared.incoming.payload?.kind === 'chapter'
+  const forkChoices = compared ? webForkChoices(compared) : []
   return (
     <details>
       <summary>作品云同步</summary>
@@ -182,7 +202,7 @@ export function WebSyncPanel({
       <p>
         工作版本编号 <code>{project.branch.id}</code>
       </p>
-      <fieldset disabled={busy || attachmentBusy || hasMergeDraft}>
+      <fieldset disabled={busy || attachmentBusy || hasConflictDraft}>
         <legend>设备连接</legend>
         <label>
           同步服务地址
@@ -220,6 +240,7 @@ export function WebSyncPanel({
         </button>
       </fieldset>
       {message && <p role="alert">{message}</p>}
+      {forkNotice && <p role="status">{forkNotice}</p>}
       {status && (
         <p role="status">
           {status.enabled ? '已启用' : '本地模式'} · 游标 {status.cursor} · {status.pending.length}{' '}
@@ -241,7 +262,7 @@ export function WebSyncPanel({
           key={id}
           type="button"
           title={id}
-          disabled={busy || hasMergeDraft}
+          disabled={busy || hasConflictDraft}
           onClick={() => void run('compare', id)}
         >
           比较冲突 {id.slice(0, 8)}
@@ -268,7 +289,7 @@ export function WebSyncPanel({
               </pre>
             </details>
           ))}
-          {canMerge && mergeText === undefined && (
+          {canMerge && !hasConflictDraft && (
             <button
               type="button"
               disabled={busy || !token || unsaved}
@@ -278,6 +299,55 @@ export function WebSyncPanel({
             >
               手动合并正文
             </button>
+          )}
+          {!!forkChoices.length && !hasConflictDraft && (
+            <button
+              type="button"
+              disabled={busy || unsaved}
+              onClick={() => setFork({ choice: forkChoices[0].choice, name: '章稿冲突副本' })}
+            >
+              另存为本地工作版本
+            </button>
+          )}
+          {fork && (
+            <fieldset disabled={busy || unsaved}>
+              <legend>另存冲突工作版本</legend>
+              <p className="small">在此设备保存所选正文和源作品依据。原工作版本与云端冲突保留。</p>
+              <label>
+                另存章稿来源
+                <select
+                  value={fork.choice}
+                  onChange={(event) => {
+                    const entry = forkChoices.find(({ choice }) => choice === event.target.value)
+                    if (entry) setFork({ ...fork, choice: entry.choice })
+                  }}
+                >
+                  {forkChoices.map(({ choice, label }) => (
+                    <option key={choice} value={choice}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                新工作版本名称
+                <input
+                  maxLength={400}
+                  value={fork.name}
+                  onChange={(event) => setFork({ ...fork, name: event.target.value })}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={!fork.name.trim() || Array.from(fork.name).length > 200}
+                onClick={() => void run('fork')}
+              >
+                保存工作版本副本
+              </button>
+              <button type="button" onClick={() => setFork(undefined)}>
+                取消另存
+              </button>
+            </fieldset>
           )}
           {canMerge && mergeText !== undefined && (
             <fieldset disabled={busy || !token || unsaved}>
@@ -320,7 +390,7 @@ export function WebSyncPanel({
             <button
               key={choice}
               type="button"
-              disabled={busy || !token || unsaved || hasMergeDraft}
+              disabled={busy || !token || unsaved || hasConflictDraft}
               onClick={() => {
                 const kind = compared.current.payload?.kind
                 const history =
@@ -346,7 +416,7 @@ export function WebSyncPanel({
         workId={project.branch.id}
         service={service}
         token={token}
-        inactive={!status?.enabled || busy || hasMergeDraft}
+        inactive={!status?.enabled || busy || hasConflictDraft}
         onBusy={setAttachmentBusy}
       />
     </details>

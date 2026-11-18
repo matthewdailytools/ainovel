@@ -40,6 +40,7 @@ import {
   type WorkflowSyncObject,
 } from './workflowArchive'
 import { createStoryOfflineStore, storyReadStores, storyWriteStores } from './storyOfflineStore'
+import { buildOfflineFork, type OfflineForkSelection } from './offlineForkModel'
 import {
   createEditedReferenceVersion,
   referenceCardKey,
@@ -1805,6 +1806,100 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
   } catch {
     invalid('无法读取稿件交换包 JSON。')
   }
+  return writeLocalManuscript(await validateManuscript(value))
+}
+
+export async function forkLocalManuscript(
+  projectId: string,
+  selected: OfflineForkSelection,
+  name: string,
+  expected: {
+    branchId: string
+    currentChapter: string
+    currentRevisionId: string | null
+    publicationId: string | null
+  },
+): Promise<LocalProject> {
+  const source = await exportLocalManuscript(projectId)
+  if (source.branch.id !== expected.branchId)
+    throw new OfflineStoreError('ownership', '冲突比较属于另一工作版本。')
+  const { pack, provenance } = await buildOfflineFork(source, selected, name, {
+    validate: validateManuscript,
+    digest: manuscriptHash,
+  })
+  const chosen = pack.revisions.find((row) => row.id === provenance.newRevisionId)
+  if (!chosen) invalid('副本缺少所选的章稿修订。')
+  const body = JSON.stringify(
+    {
+      原工作版本: provenance.sourceBranchId,
+      原章节: provenance.chapterId,
+      比较时所选修订: provenance.sourceRevisionId,
+      本机副本章节: provenance.newChapterId,
+      本机副本修订: provenance.newRevisionId,
+      '原章稿 SHA-256': chosen.sha256,
+    },
+    null,
+    2,
+  )
+  const receipt = {
+    id: newId(),
+    kind: 'project' as const,
+    title: '冲突另存来源',
+    body,
+    sha256: await manuscriptHash(body),
+    chapters: [
+      { id: chosen.chapter_id, revision: chosen.revision, revision_id: chosen.id, sha256: chosen.sha256 },
+    ],
+  }
+  const copy = await validateManuscript({ ...pack, evidence: [receipt] })
+  const referenceStamp = (archive: ReferenceHistory | undefined) =>
+    JSON.stringify(
+      (archive?.adopted_heads ?? [])
+        .map(({ session_id, card_id, revision_id }) => JSON.stringify([session_id, card_id, revision_id]))
+        .sort(),
+    )
+  const expectedReference = referenceStamp(source.reference_history)
+  return writeLocalManuscript(copy, async (tx) => {
+    const project = await readProject(tx, projectId)
+    if (
+      project.branch.id !== expected.branchId ||
+      project.branch.story_revision !== source.branch.story_revision ||
+      referenceStamp(await readReferenceHistory(tx, project.branch.id)) !== expectedReference
+    )
+      throw new OfflineStoreError('conflict', '原工作版本已有变化。请重新比较后再另存。')
+    const chapter = await result<LocalChapter | undefined>(tx.objectStore('chapters').get(selected.chapterId))
+    if (!chapter || chapter.branch_id !== project.branch.id)
+      throw new OfflineStoreError('missing', '原工作版本已找不到要另存的章节。')
+    const head = !chapter.archived
+      ? await result<LocalRevision | undefined>(
+          tx.objectStore('revisions').index('byRevision').get([chapter.id, chapter.revision]),
+        )
+      : undefined
+    const signature = syncObjectSignature(
+      head ? { format: SYNC_FORMAT, kind: 'chapter', chapter, head } : null,
+    )
+    const marker = await readPublication(tx, project.branch.id, `chapter:${chapter.id}`)
+    const original = await sourceRevision(tx, project.branch.id, selected.revisionId)
+    if (
+      signature !== expected.currentChapter ||
+      (head?.id ?? null) !== expected.currentRevisionId ||
+      (marker?.id ?? null) !== expected.publicationId
+    )
+      throw new OfflineStoreError('conflict', '本机章稿已在其他窗口更新。请重新比较后再另存。')
+    if (
+      !original ||
+      original.chapter_id !== chapter.id ||
+      original.sha256 !== selected.sha256 ||
+      original.content !== selected.content
+    )
+      throw new OfflineStoreError('missing', '尚未核验所选原稿修订，请同步来源后再另存。')
+  })
+}
+
+function writeLocalManuscript(
+  pack: ManuscriptPack,
+  verifySource?: (tx: IDBTransaction) => Promise<void>,
+): Promise<LocalProject> {
   const {
     novel,
     branch,
@@ -1818,7 +1913,7 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
     workflow_history,
     story_history,
     reference_history,
-  } = await validateManuscript(value)
+  } = pack
   const stores = [
     ...new Set([
       ...settingsDependencyStores,
@@ -1829,6 +1924,7 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
     ]),
   ]
   return transact(stores, 'readwrite', async (tx) => {
+    if (verifySource) await verifySource(tx)
     const project = { novel, branch, ...(evidence?.length ? { evidence } : {}) }
     await result(tx.objectStore('projects').add(project))
     for (const chapter of chapters) await result(tx.objectStore('chapters').add(chapter))
