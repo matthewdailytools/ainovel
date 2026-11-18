@@ -686,7 +686,7 @@ class Domain:
         if kind == "conception_generate":
             from .conception_generation import freeze
 
-            initial["conception_generation_snapshot"] = freeze(self, payload)
+            initial["conception_generation_snapshot"] = freeze(self, payload, genre_profile=profile)
         from .flow_entailment import KEY as FLOW_KEY, VERSION as FLOW_VERSION
 
         if kind in {"workflow", "candidate_recheck", "source_corrected_candidate_recheck"}:

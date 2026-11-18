@@ -20,6 +20,32 @@ def test_setting_framework_covers_catalogue_and_separates_mixed_genres():
     assert "无CP" in mixed["author_exceptions"]
 
 
+@pytest.mark.parametrize("category", ["core", "characters", "relationships", "world"])
+def test_each_setting_category_projects_all_genres_without_losing_topic_provenance(category):
+    catalogue = get_catalog()["genres"]
+    for genre, secondary in zip(catalogue, [*catalogue[1:], catalogue[0]], strict=True):
+        profile = assemble_profile({"genres": [genre["id"], secondary["id"]]})
+        framework = setting_framework(profile, category=category)
+        assert framework["category"] == category
+        assert [setting["id"] for setting in [framework["primary"], *framework["secondary"]]] == [
+            genre["id"],
+            secondary["id"],
+        ]
+        for index, (entry, source) in enumerate(
+            zip([framework["primary"], *framework["secondary"]], (genre, secondary), strict=True)
+        ):
+            assert entry["topics"]
+            catalogue_topics = {topic["id"]: topic["items"] for topic in source["topics"]}
+            expanded = {topic["id"]: topic["items"] for topic in entry["topics"]}
+            deferred = set(entry["deferred_topic_ids"])
+            assert len(expanded) <= (3 if index else len(catalogue_topics) if category == "world" else 5)
+            assert not (expanded.keys() & deferred)
+            assert expanded.keys() | deferred == catalogue_topics.keys()
+            assert expanded == {identifier: catalogue_topics[identifier] for identifier in expanded}
+            if index == 0 and category == "world":
+                assert not deferred
+
+
 def test_runtime_catalog_reuses_all_reviewed_genres_topics_and_channel_variants():
     source = Path(__file__).parents[2] / "novel-ai-modules-review.html"
     design = json.loads(

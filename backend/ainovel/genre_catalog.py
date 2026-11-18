@@ -166,31 +166,89 @@ def assemble_profile(reader: Mapping[str, object] | None) -> dict[str, Any]:
     }
 
 
-def setting_framework(profile: Mapping[str, Any]) -> dict[str, Any]:
+# Topic owners in the shared catalogue describe the domain each topic serves.
+# A category can draw on several domains when they affect its decisions.
+_SETTING_TOPIC_OWNERS = {
+    "core": "M01 M15 M17 M16 T01 T03 T04 T05 T06 T10 T11 T02 T07 T08 T09 T12 M14".split(),
+    "characters": "M12 M06 T01 M13 M07 M05 T05 T08 T07 T11 T02 T06 T09 M14 M11 M08 T04 T10 T12 M16".split(),
+    "relationships": "M13 T05 M08 T01 T08 T11 M12 M10 T03 T06 T02 T07 T09 M05 M11 T04 T10 T12 M16".split(),
+    "world": "M04 M05 M06 M07 M08 M09 M10 M11 M03 T02 T03 T04 T06 T07 T08 T09 T10 T11 T01 T05 T12 M14 M19".split(),
+}
+
+# These topics share broad catalogue owners but serve different setting decisions.
+_SETTING_TOPIC_PRIORITY = {
+    "xianxia": {
+        "core": ("xianxia-24", "xianxia-23", "xianxia-12"),
+        "characters": ("xianxia-3", "xianxia-4", "xianxia-23"),
+        "relationships": ("xianxia-13", "xianxia-14", "xianxia-8", "xianxia-17"),
+        "world": ("xianxia-2", "xianxia-4", "xianxia-12"),
+    },
+    "mystery": {
+        "core": ("mystery-1", "mystery-2", "mystery-3", "mystery-7", "mystery-8"),
+        "characters": ("mystery-4", "mystery-5", "mystery-6"),
+        "relationships": ("mystery-5", "mystery-4", "mystery-1"),
+        "world": ("mystery-6", "mystery-1", "mystery-3"),
+    },
+}
+
+
+def _setting_topics(topics: list[dict], identifier: str, category: str, *, primary: bool) -> list[dict]:
+    if category == "world" and primary:
+        return topics
+    owners = {owner: index for index, owner in enumerate(_SETTING_TOPIC_OWNERS[category])}
+    priorities = _SETTING_TOPIC_PRIORITY.get(identifier, {}).get(category, ())
+    preferred = {topic_id: index for index, topic_id in enumerate(priorities)}
+    relevant = [topic for topic in topics if topic["id"] in preferred or topic["owner"] in owners]
+    ordered = sorted(
+        relevant,
+        key=lambda topic: (
+            preferred.get(topic["id"], len(preferred)),
+            owners.get(topic["owner"], len(owners)),
+        ),
+    )
+    return ordered[: 5 if primary else 3]
+
+
+def setting_framework(profile: Mapping[str, Any], *, category: str | None = None) -> dict[str, Any]:
     """Select setting topics from the frozen catalogue profile for M3."""
     topics = profile.get("required_topics", [])
 
     def group(identifier):
+        return [topic for topic in topics if topic["group"] == identifier]
+
+    def display(grouped):
         return [
-            {"title": topic["title"], "items": topic["items"]}
-            for topic in topics
-            if topic["group"] == identifier
+            {**({"id": topic["id"]} if category else {}), "title": topic["title"], "items": topic["items"]}
+            for topic in grouped
         ]
 
     genre_ids = profile.get("genre_ids", [])
     genres = {entry["id"]: entry["name"] for entry in _catalog()["genres"]}
-    selected = [
-        {"id": identifier, "name": genres[identifier], "topics": group(identifier)}
-        for identifier in genre_ids
-    ]
+    selected = []
+    for identifier in genre_ids:
+        name = genres[identifier]
+        entry = {"id": identifier, "name": name}
+        grouped = group(identifier)
+        if category:
+            expanded = _setting_topics(
+                grouped, identifier, category, primary=name == profile.get("primary_genre")
+            )
+            included = {topic["id"] for topic in expanded}
+            entry["deferred_topic_ids"] = [topic["id"] for topic in grouped if topic["id"] not in included]
+        else:
+            expanded = grouped
+        entry["topics"] = display(expanded)
+        selected.append(entry)
     primary = next((entry for entry in selected if entry["name"] == profile.get("primary_genre")), None)
     return {
         "catalog_version": profile.get("catalog_version"),
+        **({"category": category} if category else {}),
         "common": ["人物与关系", "时间地点", "资源与组织", "主要冲突", "终局与披露边界"],
         "primary": primary,
         "secondary": [entry for entry in selected if entry is not primary],
         "mechanisms": [
-            {"id": identifier, "topics": group(identifier)} for identifier in profile.get("mechanism_ids", [])
+            {"id": identifier, "topics": display(group(identifier))}
+            for identifier in profile.get("mechanism_ids", [])
         ],
         "custom_genres": profile.get("custom_genres", []),
         "author_exceptions": profile.get("author_exceptions", []),

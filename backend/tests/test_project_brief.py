@@ -1,9 +1,12 @@
 import asyncio
 import json
 
+import pytest
+
+from ainovel.conception_generation import SETTING_FRAME_VERSION
 from ainovel.db import uid
 from ainovel.worker import Worker
-from test_conception_workbench import confirm, path
+from test_conception_workbench import basis, confirm, path, save
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 from test_workflow_inspection import author
 
@@ -20,6 +23,77 @@ BRIEF = {
     "ending": "主角决定把铃留在门外。",
     "final_image": "门外的铜铃不再响。",
 }
+
+
+SETTING_SAMPLES = {
+    "xianxia": {
+        "core": ("修炼之道与终局", "主角发现破境代价后放弃升阶，只保住渡口。"),
+        "characters": ("未入门的舟子", "舟子只能辨认残符的气息，不懂完整经诀。"),
+        "relationships": ("渡口传承", "舟子知师父拒绝传诀，却不知道师父曾失去灵根。"),
+        "world": ("残符的启用代价", "每启用一枚残符会损失一缕修为。"),
+    },
+    "mystery": {
+        "core": ("遗铃的埋件", "绑绳换于退潮后，读者要到验第二份账簿才知道。"),
+        "characters": ("只听见铃声的舟子", "舟子听到铃声但没看见绑绳被换，起初误判来人。"),
+        "relationships": ("拒绝作证的师徒", "徒弟知道师父当晚在场，师父不知道徒弟听见铜铃。"),
+        "world": ("账簿调阅", "没有掌柜许可，渡口的人不能阅览客船调度账簿。"),
+    },
+    "mixed": {
+        "core": ("灵石账目中的真相", "先让读者看灵石亏空，验第二份账簿后才揭示谁调包。"),
+        "characters": ("无资格破境的账房", "账房懂灵石品相却无突破资格，看到亏空也不知道调包者。"),
+        "relationships": ("互瞒线索的师徒", "师父知宗门的灵石规则，弟子知账簿去向，双方分担核验代价。"),
+        "world": ("宗门的低阶灵石", "渡口只准登记低阶灵石，高阶灵石须由宗门账房验签。"),
+    },
+}
+
+SPECIAL_TOPICS = {
+    "xianxia": {
+        "core": "xianxia-24",
+        "characters": "xianxia-4",
+        "relationships": "xianxia-13",
+        "world": "xianxia-12",
+    },
+    "mystery": {
+        "core": "mystery-1",
+        "characters": "mystery-4",
+        "relationships": "mystery-5",
+        "world": "mystery-3",
+    },
+}
+
+
+class SettingFrameModel:
+    def __init__(self, sample):
+        self.sample = sample
+        self.calls = []
+
+    async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+        frame = json.loads(prompt.split("\n只返回")[0])
+        self.calls.append(frame)
+        task = frame["任务"]
+        if task["action"] == "conception.review.bundle":
+            output = {"issues": []}
+        else:
+            category = task["category_id"]
+            title, detail = self.sample[category]
+            item = {"title": title, "detail": detail, "links": []}
+            if category == "world":
+                item["setting_policy"] = {"strength": "hard", "scope": "旧渡口", "exceptions": "掌柜书面许可"}
+            if category == "relationships":
+                character = next(
+                    entry
+                    for entry in frame["上下文"]["可关联构思与来源"]
+                    if entry["category_id"] == "characters"
+                )
+                item["links"] = [character["ref"]]
+            output = {"items": [item]}
+            if category == "core":
+                output["items"].append({"title": "备用假说", "detail": "渡船从未离开旧码头。", "links": []})
+        return {
+            "text": json.dumps(output, ensure_ascii=False),
+            "usage": {"input": 1, "output": 1},
+            "call_id": uid(),
+        }
 
 
 class Model:
@@ -66,6 +140,178 @@ def run(domain, settings, task, model):
     done = domain.task(task["id"])
     assert done["status"] == "succeeded", done["error"]
     return domain.artifact(done["result"]["artifact_id"])
+
+
+@pytest.mark.parametrize(
+    ("sample", "genres"),
+    [("xianxia", ["xianxia"]), ("mystery", ["mystery"]), ("mixed", ["xianxia", "mystery"])],
+)
+def test_confirmed_project_setting_frames_flow_through_adoption_and_chapter_references(
+    client, domain, settings, story, sample, genres
+):
+    branch, chapter = story["branch_id"], story["chapter_id"]
+    endpoint = path(branch)
+    exception = "无CP，证词不能替代物证。"
+    hard_result = "结尾保住渡口"
+    for definition in (
+        {
+            "kind": "reader",
+            "text": "用证据推进悬念。",
+            "audience": "女频",
+            "genres": ["farm"],
+            "mechanisms": ["无CP"],
+            "author_exceptions": [exception],
+        },
+        {
+            "kind": "intent",
+            "text": f"{hard_result}。不写斗法。",
+            "intent_contract": {"fixed_results": [hard_result], "prohibitions": ["不写斗法"]},
+        },
+    ):
+        saved = client.post(
+            f"/api/branches/{branch}/definitions",
+            json={**definition, "base_story_revision": domain.branch(branch)["story_revision"]},
+        )
+        assert saved.status_code == 201, saved.text
+    author_ending = "舟子归还遗铃，结尾保住渡口。"
+    response = client.put(
+        f"{endpoint}/project-brief",
+        json={
+            "base_revision": 0,
+            "idempotency_key": uid(),
+            "idea": IDEA,
+            "brief": {**BRIEF, "genre_ids": genres, "ending": author_ending},
+        },
+    )
+    assert response.status_code == 200, response.text
+    project = response.json()
+
+    current = client.get(endpoint).json()
+    for category in current["categories"]:
+        category["skipped"] = category["id"] not in SETTING_SAMPLES[sample]
+        if category["id"] == "core":
+            category["items"] = [
+                {
+                    "id": "draft-hypothesis",
+                    "title": "未经核实的证词",
+                    "detail": "旧铃已经毁掉。",
+                    "adoption_state": "pending",
+                }
+            ]
+    current = save(client, endpoint, current)
+    response = client.post(
+        f"{endpoint}/generate",
+        json={
+            **basis(current),
+            "project_confirmation_id": project["id"],
+            "account": "openai_1",
+            "client_request_id": uid(),
+        },
+    )
+    assert response.status_code == 202, response.text
+    queued = response.json()
+    frozen = queued["result"]["conception_generation_snapshot"]
+    assert frozen["setting_frame_version"] == SETTING_FRAME_VERSION
+    assert set(frozen["setting_frames"]) == SETTING_SAMPLES[sample].keys()
+    model = SettingFrameModel(SETTING_SAMPLES[sample])
+    bundle = run(domain, settings, queued, model)
+    assert bundle["basis"]["setting_frame_version"] == SETTING_FRAME_VERSION
+    assert bundle["basis"]["project_confirmation_id"] == project["id"]
+    assert bundle["basis"]["author_contract_id"] and bundle["basis"]["genre_profile_id"]
+    assert len(model.calls) == 5  # Four category requests and the existing consistency review.
+    for call in model.calls[:-1]:
+        task, context = call["任务"], call["上下文"]
+        category_id = task["category_id"]
+        framework = context["设定框架"]
+        assert framework == frozen["setting_frames"][category_id]["context"]
+        assert context["已确认立项"]["brief"]["ending"] == author_ending
+        assert context["已确认立项"]["brief"]["audience"] == BRIEF["audience"]
+        assert context["genre_profile"]["audience"] == "女频"
+        assert context["author_contract"]["intent_contract"]["fixed_results"] == [hard_result]
+        assert context["author_contract"]["intent_contract"]["prohibitions"] == ["不写斗法"]
+        assert task["构思设定框架版本"] == SETTING_FRAME_VERSION
+        guide = task["设定框架用法"]
+        assert all(
+            term in guide for term in ("作者底稿中的真相", "人物在相应时点可知或误判", "读者当时可见", "禁项")
+        )
+        assert "规划中的事件也不等同于正文已发生" in guide
+        assert framework["category"] == category_id and exception in framework["author_exceptions"]
+        assert [mechanism["id"] for mechanism in framework["mechanisms"]] == ["plugin-20"]
+        groups = [framework["primary"], *framework["secondary"]]
+        assert [group["id"] for group in groups] == genres
+        for group in groups:
+            assert SPECIAL_TOPICS[group["id"]][category_id] in {topic["id"] for topic in group["topics"]}
+        references = context["可关联构思与来源"]
+        assert (
+            next(row for row in references if row["title"] == "未经核实的证词")["设定选用状态"] == "pending"
+        )
+        if category_id != "core":
+            candidate = next(row for row in references if row["title"] == SETTING_SAMPLES[sample]["core"][0])
+            assert candidate["origin"] == "本次先前分类的 AI 候选" and candidate["设定选用状态"] == "proposed"
+
+    selected = [{**category, "items": category["items"][:1]} for category in bundle["payload"]["categories"]]
+    items = {category["id"]: category["items"][0] for category in selected}
+    assert items["relationships"]["links"] == [items["characters"]["id"]]
+    items["characters"]["detail"] += " 作者补充：开篇不认识掌柜。"
+    response = client.post(
+        f"{endpoint}/adopt",
+        json={
+            **basis(current),
+            "idempotency_key": uid(),
+            "artifact_id": bundle["id"],
+            "categories": selected,
+        },
+    )
+    assert response.status_code == 200, response.text
+    confirmed = confirm(client, endpoint, response.json())["confirmation"]
+    outline_endpoint = f"/api/branches/{branch}/outline-workspace"
+    options = client.get(outline_endpoint + "/setting-options").json()["items"]
+    assert {row["id"] for row in options} == {item["id"] for item in items.values()}
+    frozen_chapter = chapter_plan(chapter, "查清遗铃去向")
+    frozen_chapter["setting_ids"] = [item["id"] for item in items.values()]
+    outline_plan = {
+        "summary": "追查渡口遗铃",
+        "volumes": [
+            {
+                "id": "ferry",
+                "title": "渡口",
+                "summary": "找到遗铃线索",
+                "units": [
+                    {"id": "clue", "title": "查证", "summary": "先听铃再验账", "chapters": [frozen_chapter]}
+                ],
+            }
+        ],
+    }
+    outline = put_and_confirm(
+        client,
+        outline_endpoint,
+        {"base_revision": 0, "confirmation_id": confirmed["id"], "plan": outline_plan},
+    )
+    writing = client.post(
+        "/api/modules",
+        json={
+            "action": "writing.advise",
+            "novel_id": story["id"],
+            "branch_id": branch,
+            "chapter_id": chapter,
+            "base_revision": domain.chapter(chapter, branch)["revision"],
+            "instruction": "按当前作者设定继续。",
+            "account": "openai_1",
+            "conception_snapshot_id": confirmed["id"],
+            "outline_revision_id": outline["confirmed"]["id"],
+        },
+    )
+    assert writing.status_code == 202, writing.text
+    bound = {row["id"]: row for row in writing.json()["result"]["outline"]["settings"]}
+    assert {identifier: row["detail"] for identifier, row in bound.items()} == {
+        item["id"]: item["detail"] for item in items.values()
+    }
+    assert {row["category_id"] for row in bound.values() if "category_id" in row} == {
+        "core",
+        "characters",
+        "relationships",
+    }
+    assert bound[items["world"]["id"]]["setting_policy"]["exceptions"] == "掌柜书面许可"
 
 
 def test_project_revision_preview_tracks_actual_downstream_records_and_rechecks_before_commit(

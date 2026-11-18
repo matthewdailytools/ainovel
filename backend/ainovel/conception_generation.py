@@ -11,6 +11,7 @@ from pydantic import AfterValidator, Field, StringConstraints, model_validator
 from .conception import SettingPolicy
 from .db import DomainError, dumps, uid
 from .evidence import source_units
+from .genre_catalog import assemble_profile, setting_framework
 from .ideation_structure import Detail, substantive
 from .models import Input
 from .project_brief import DRAFT_KIND, IdeaText, confirmed_project_tx
@@ -21,6 +22,7 @@ VERSION = "conception-generate/3"
 LEGACY_VERSION = "conception-generate/2"
 CONSISTENCY_VERSION = "conception-consistency/1"
 WORLD_EXTRACTION_VERSION = "conception-world-extract/1"
+SETTING_FRAME_VERSION = "conception-setting-frame/1"
 WORLD_SOURCE_LIMIT = 20_000
 Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
 Reference = Annotated[str, StringConstraints(pattern=r"^[SN][1-9][0-9]{0,3}$")]
@@ -37,6 +39,25 @@ GUIDES = {
     "foreshadowing": "写明铺设、强化与建议回收方式，或注明开放原因；用 links 连接相应的事件，保留计划性质。",
     "outline": "按卷或阶段整理大纲，写出起点、关键转折、阶段结果与收束，沿用已有事件，不强制固定章数。",
 }
+
+SETTING_GUIDES = {
+    "core": "确定主线需求、读者承诺、代价和终局。对需要保留的秘密，写出作者底稿、叙述视角和最早披露时点。",
+    "characters": "按题材为人物设计目标、资格、能做到的事及其代价。分别写明角色已知、误以为真、怎样得到新信息。",
+    "relationships": "写明关系两端的权责、资源或证词依赖和选择。分别写双方所知与相信的事，并标明隐藏承诺或真相何时可披露。",
+    "world": (
+        "交代世界规则的触发、限制、代价、适用范围和例外。为规则提供 setting_policy，"
+        "使用 hard 表示明确限制或 soft 表示可调整倾向，写明适用范围与例外。"
+    ),
+}
+
+SETTING_GUIDANCE = (
+    "使用主类型的专项主题，辅类型只取与主线交叉的设定，机制按适用场景挂载。"
+    "已确认立项的题材、读者定位和约束优先；频道只调整读者预期和叙述重点。"
+    "保留作者固定条件、禁项和明确例外。存在冲突时说明冲突双方与适用场景，将取舍留给作者。"
+    "分别标明作者底稿中的真相、人物在相应时点可知或误判的信息、读者当时可见的证据。"
+    "本次生成是待确认设定。工作台的选用状态供复核，待定条目和先前 AI 候选仅供参考。"
+    "即使设定已确认，规划中的事件也不等同于正文已发生的事实。"
+)
 
 
 class ConceptionTaskInput(Input):
@@ -168,7 +189,21 @@ def validate_basis_tx(tx, branch_id, payload):
         confirmed_project_tx(tx, branch_id, identifier)
 
 
-def freeze(domain, payload):
+def _setting_profile(profile, project):
+    if not project:
+        return profile
+    return assemble_profile(
+        {
+            "audience": profile["audience"],
+            "genres": project["brief"]["genre_ids"],
+            "mechanisms": profile.get("mechanism_requests", []),
+            "author_exceptions": profile.get("author_exceptions", []),
+            "text": profile.get("author_notes", ""),
+        }
+    )
+
+
+def freeze(domain, payload, *, genre_profile):
     from .conception import snapshot
 
     current = snapshot(domain, payload["branch_id"])
@@ -236,6 +271,17 @@ def freeze(domain, payload):
                 "kind": kind,
                 "text": json.loads(definition["payload"]).get("text", ""),
             }
+    framed_targets = [target for target in targets if target in SETTING_GUIDES]
+    if framed_targets:
+        profile = _setting_profile(genre_profile, project)
+        basis["setting_frame_version"] = SETTING_FRAME_VERSION
+        basis["setting_frames"] = {
+            target: {
+                "guide": SETTING_GUIDANCE + SETTING_GUIDES[target],
+                "context": setting_framework(profile, category=target),
+            }
+            for target in framed_targets
+        }
     return {
         **basis,
         **({"confirmed_project": project} if project else {}),
@@ -362,10 +408,10 @@ async def extract_world(worker, frozen):
     raise DomainError("evidence", "世界设定候选仍无法回查到所选正文，本次没有发布候选。")
 
 
-def reference_context(categories, completed, source_items):
+def reference_context(categories, completed, source_items, *, distinguish_adoption=False):
     entries = [
-        (category["id"], entry, source)
-        for group, source in ((categories, "构思工作台已保存"), (completed, "本次先前分类的 AI 候选"))
+        (category["id"], entry, candidate)
+        for group, candidate in ((categories, False), (completed, True))
         for category in group
         for entry in category["items"]
     ]
@@ -384,16 +430,25 @@ def reference_context(categories, completed, source_items):
                 else "从当前保存稿提取，作者已采用"
             )
             if entry["id"] in source_items
-            else source,
+            else ("本次先前分类的 AI 候选" if candidate else "构思工作台已保存"),
+            **(
+                {"设定选用状态": "proposed" if candidate else entry.get("adoption_state") or "adopted"}
+                if distinguish_adoption
+                else {}
+            ),
         }
-        for category_id, entry, source in entries
+        for category_id, entry, candidate in entries
     ]
     return reference_ids, references
 
 
 async def generate_category(worker, request, frozen, category, completed):
+    frame = frozen.get("setting_frames", {}).get(category["id"])
     reference_ids, references = reference_context(
-        frozen["categories"], completed, frozen["current_source_items"]
+        frozen["categories"],
+        completed,
+        frozen["current_source_items"],
+        distinguish_adoption=frame is not None,
     )
     instruction = {
         "action": "conception.generate.category",
@@ -432,20 +487,13 @@ async def generate_category(worker, request, frozen, category, completed):
         instruction["立项交接"] = (
             "以已确认立项的定位、限制和终局为规划依据。与原作者硬约定冲突时列出供作者核对。"
         )
-    if category["id"] == "world":
-        from .genre_catalog import assemble_profile, setting_framework
-
-        profile = worker.genre_snapshot()
-        if project:
-            profile = assemble_profile(
-                {
-                    "audience": profile["audience"],
-                    "genres": project["brief"]["genre_ids"],
-                    "mechanisms": profile.get("mechanism_requests", []),
-                    "author_exceptions": profile.get("author_exceptions", []),
-                    "text": profile.get("author_notes", ""),
-                }
-            )
+    if frame:
+        context["设定框架"] = frame["context"]
+        context["source_version_basis"]["setting_frame_version"] = frozen["setting_frame_version"]
+        instruction["构思设定框架版本"] = frozen["setting_frame_version"]
+        instruction["设定框架用法"] = frame["guide"]
+    elif category["id"] == "world":
+        profile = _setting_profile(worker.genre_snapshot(), project)
         context["设定框架"] = setting_framework(profile)
         instruction["设定框架用法"] = (
             "以主类型条目为底稿，辅类型只取与主线相交的规则，机制按适用场景挂载。"
@@ -630,6 +678,8 @@ def publish(worker, result, frozen, categories, source_evidence=None, model_revi
         content["issues"] = bundle_issues(frozen, categories)
     if model_review is not None:
         content["model_review"] = model_review
+    if version := frozen.get("setting_frame_version"):
+        basis["setting_frame_version"] = version
     if project := frozen.get("confirmed_project"):
         basis["project_confirmation_id"] = project["id"]
         basis["project_revision"] = project["revision"]
