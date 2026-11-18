@@ -83,6 +83,7 @@ export async function calculateOfflineRules(
       id: string
       title: string
       state: 'open' | 'due' | 'review'
+      required?: true
       chapter?: { position: number; title: string }
     }[],
     outlineIssue: outline.restorePending?.reason,
@@ -125,14 +126,35 @@ export async function calculateOfflineRules(
     const record = row?.version.record
     const seed = version.promise_sources[id]
     const title = record?.title ?? seed?.title ?? id
-    if (row && (row.invalidReasons.length || row.version.archived || record?.kind !== 'promise')) {
+    const invalid = !!(
+      row &&
+      (row.invalidReasons.length || row.version.archived || record?.kind !== 'promise')
+    )
+    const closes = directory.get(window.closes_chapter_id)!
+    const opens = directory.get(window.opens_chapter_id)!
+    const latest = record?.kind === 'promise' ? record.stages.at(-1) : undefined
+    if (window.fulfillment === 'author_required') {
+      const fulfilled =
+        !invalid &&
+        latest?.status === 'resolved' &&
+        row?.version.evidence.stages.at(-1)?.some(({ chapter_id }) => {
+          const position = directory.get(chapter_id)?.position
+          return position !== undefined && position >= opens.position && position <= closes.position
+        })
+      if (fulfilled) continue
+      if (progress >= closes.position)
+        result.promises.push({ id, title, state: 'due', chapter: closes, required: true })
+      else if (invalid) result.promises.push({ id, title, state: 'review', required: true })
+      else if (progress >= opens.position)
+        result.promises.push({ id, title, state: 'open', chapter: closes, required: true })
+      continue
+    }
+    if (invalid) {
       result.promises.push({ id, title, state: 'review' })
       continue
     }
-    const status = record?.kind === 'promise' ? record.stages.at(-1)?.status : seed?.stages[0].status
+    const status = latest?.status ?? seed?.stages[0].status
     if (status !== 'planned' && status !== 'planted' && status !== 'reinforced') continue
-    const closes = directory.get(window.closes_chapter_id)!
-    const opens = directory.get(window.opens_chapter_id)!
     if (progress >= closes.position) result.promises.push({ id, title, state: 'due', chapter: closes })
     else if (progress >= opens.position) result.promises.push({ id, title, state: 'open', chapter: closes })
   }

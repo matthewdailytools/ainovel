@@ -13,12 +13,14 @@ import {
   listLocalChapters,
   listLocalProjects,
   maxManuscriptBytes,
+  readLocalChapterRestore,
   readLocalHistory,
   readLocalOutline,
   readLocalRulePreview,
   readLocalSourceRevision,
   readLocalSettings,
   readLocalStory,
+  restoreLocalChapter,
   saveLocalChapter,
   type LocalChapter,
   type LocalProject,
@@ -34,6 +36,7 @@ import { OfflineWorkflowHistory } from './OfflineWorkflowHistory'
 import { OfflineReferenceHistory } from './OfflineReferenceHistory'
 import { OfflineStory } from './OfflineStory'
 import { OfflineRulePreview } from './OfflineRulePreview'
+import { ChapterRestorePreview } from './ChapterRestorePreview'
 import { discardOwnDraft, readDraft, writeDraft, type Draft } from './drafts'
 
 type EditorState = {
@@ -78,7 +81,8 @@ export function OfflineWorkspace() {
   const [selected, setSelected] = useState<LocalProject>()
   const [chapters, setChapters] = useState<LocalChapter[]>([])
   const [editor, setEditor] = useState<EditorState>()
-  const [preview, setPreview] = useState<LocalRevision>()
+  const [historyTarget, setHistoryTarget] = useState('')
+  const [preview, setPreview] = useState<Awaited<ReturnType<typeof readLocalChapterRestore>>>()
   const [conflict, setConflict] = useState<LocalRevision[]>()
   const [recovery, setRecovery] = useState<Draft>()
   const [draftNotice, setDraftNotice] = useState('')
@@ -219,6 +223,7 @@ export function OfflineWorkspace() {
     setConflict(undefined)
     setRecovery(undefined)
     setDraftNotice('')
+    setHistoryTarget('')
     setPreview(undefined)
     setIncludedExcerpts([])
   }
@@ -247,6 +252,7 @@ export function OfflineWorkspace() {
     setConflict(undefined)
     setRecovery(undefined)
     setDraftNotice('')
+    setHistoryTarget('')
     setPreview(undefined)
     try {
       const saved = await readDraft(`offline/${selected.branch.id}/${chapter.id}`)
@@ -256,7 +262,29 @@ export function OfflineWorkspace() {
     }
   }
 
-  async function save(restore?: LocalRevision) {
+  async function prepareRestore(revisionId: string) {
+    setPreview(undefined)
+    if (!selected || !editor || !revisionId) return
+    setPreview(await readLocalChapterRestore(selected.novel.id, editor.chapter.id, revisionId))
+  }
+
+  function acceptSaved(revision: LocalRevision, history: LocalRevision[]) {
+    if (!editor) return
+    setEditor({ ...editor, history, base: revision, text: revision.content })
+    setChapters((rows) =>
+      rows.map((row) => (row.id === editor.chapter.id ? { ...row, revision: revision.revision } : row)),
+    )
+    setConflict(undefined)
+    setHistoryTarget('')
+    setPreview(undefined)
+    setStatus(`本地已保存 · 修订 ${revision.revision}`)
+    refreshWorkbench()
+    setRecovery(undefined)
+    setDraftNotice('')
+    if (draftId) void discardOwnDraft(draftId).catch(() => undefined)
+  }
+
+  async function save() {
     if (!selected || !editor) return
     try {
       const revision = await saveLocalChapter(
@@ -264,26 +292,38 @@ export function OfflineWorkspace() {
         editor.chapter.id,
         editor.base.id,
         editor.text,
-        restore?.id,
       )
       const history = editor.history.some((old) => old.id === revision.id)
         ? editor.history
         : [...editor.history, revision]
-      setEditor({ ...editor, history, base: revision, text: revision.content })
-      setChapters((rows) =>
-        rows.map((row) => (row.id === editor.chapter.id ? { ...row, revision: revision.revision } : row)),
-      )
-      setConflict(undefined)
-      setPreview(undefined)
-      setStatus(`本地已保存 · 修订 ${revision.revision}`)
-      refreshWorkbench()
-      setRecovery(undefined)
-      setDraftNotice('')
-      if (draftId) void discardOwnDraft(draftId).catch(() => undefined)
+      acceptSaved(revision, history)
     } catch (reason) {
       if (reason instanceof OfflineStoreError && reason.code === 'conflict') {
         setConflict(await readLocalHistory(selected.novel.id, editor.chapter.id))
       }
+      throw reason
+    }
+  }
+
+  async function restore() {
+    if (!selected || !editor || !preview || dirty || recovery || conflict) return
+    try {
+      const revision = await restoreLocalChapter(
+        selected.novel.id,
+        editor.chapter.id,
+        preview.target.id,
+        preview.basis,
+      )
+      const known = [
+        ...new Map([...editor.history, preview.current, revision].map((row) => [row.id, row])).values(),
+      ]
+      const history = await readLocalHistory(selected.novel.id, editor.chapter.id).catch(() => known)
+      acceptSaved(
+        revision,
+        history.filter((row) => row.revision <= revision.revision),
+      )
+    } catch (reason) {
+      if (reason instanceof OfflineStoreError && reason.code === 'conflict') setPreview(undefined)
       throw reason
     }
   }
@@ -584,10 +624,13 @@ export function OfflineWorkspace() {
                 <label>
                   历史修订
                   <select
-                    value={preview?.id ?? ''}
-                    onChange={(event) =>
-                      setPreview(editor.history.find((item) => item.id === event.target.value))
-                    }
+                    value={historyTarget}
+                    disabled={busy}
+                    onChange={(event) => {
+                      const revisionId = event.target.value
+                      setHistoryTarget(revisionId)
+                      void run(() => prepareRestore(revisionId))
+                    }}
                   >
                     <option value="">选择修订</option>
                     {[...editor.history].reverse().map((item) => (
@@ -597,13 +640,21 @@ export function OfflineWorkspace() {
                     ))}
                   </select>
                 </label>
+                {historyTarget && !preview && !busy && (
+                  <button type="button" onClick={() => void run(() => prepareRestore(historyTarget))}>
+                    重新读取恢复预览
+                  </button>
+                )}
                 {preview && (
                   <>
-                    <pre>{preview.content || '空稿'}</pre>
+                    <ChapterRestorePreview {...preview} />
+                    {(dirty || recovery || conflict) && <p>请先处理当前输入或并发稿件，再恢复历史稿。</p>}
                     <button
                       type="button"
-                      disabled={busy || dirty || preview.id === editor.base.id}
-                      onClick={() => void run(() => save(preview))}
+                      disabled={
+                        busy || dirty || !!recovery || !!conflict || preview.current.id === preview.target.id
+                      }
+                      onClick={() => void run(restore)}
                     >
                       恢复为最新修订
                     </button>

@@ -79,6 +79,27 @@ test('采纳后章节重载期间历史入口禁用，就绪后可打开并逐�
     const accepted = await (await page.request.get(`/api/chapters/${chapter.id}`)).json()
     expect(accepted.revision).toBe(2)
     expect(accepted.content).toContain('旧尺')
+    const graphRoute = `/api/branches/${novel.branch_id}`
+    const graph = await (await page.request.get(`${graphRoute}/story-graph`)).json()
+    const start = accepted.content.indexOf('旧尺')
+    const promiseRecord = await page.request.post(`${graphRoute}/story-records`, {
+      headers,
+      data: {
+        base_story_revision: graph.story_revision,
+        record: {
+          kind: 'promise',
+          title: '旧尺从何处来',
+          stages: [
+            { status: 'planned' },
+            {
+              status: 'planted',
+              sources: [{ chapter_id: chapter.id, revision: 2, start, end: start + 2, quote: '旧尺' }],
+            },
+          ],
+        },
+      },
+    })
+    expect(promiseRecord.ok(), await promiseRecord.text()).toBe(true)
     release.release()
     await expect(history).toBeEnabled()
     await history.click()
@@ -100,11 +121,45 @@ test('采纳后章节重载期间历史入口禁用，就绪后可打开并逐�
     expect((await (await page.request.get(`/api/chapters/${chapters[1].id}`)).json()).content).toBe(
       originals[1],
     )
-    await original.getByRole('button', { name: '恢复为新修订', exact: true }).click()
+    const previewTrigger = original.getByRole('button', { name: '预览恢复', exact: true })
+    await previewTrigger.press('Enter')
+    const preview = original.getByRole('region', { name: '章节恢复预览' })
+    await expect(preview).toBeVisible()
+    await expect(preview.locator('[aria-label="历史稿 · 修订 1"]')).toContainText('甲章原稿😀𠮷。')
+    await expect(preview.locator('[aria-label="当前稿 · 修订 2"]')).toContainText('旧尺')
+    const impact = preview.getByRole('region', { name: '引用与伏笔影响' })
+    await expect(impact.getByText(/伏笔 · 旧尺从何处来 · 已埋设/)).toBeVisible()
+    await expect(impact.locator('blockquote pre')).toHaveText('旧尺')
+    await expect(impact.locator('blockquote')).toContainText('修订 2')
+    expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).revision).toBe(2)
+
+    const interveningText = '作者在另一窗口保留的新稿。'
+    const intervening = await page.request.put(`/api/chapters/${chapter.id}`, {
+      headers,
+      data: { base_revision: 2, content: interveningText },
+    })
+    expect(intervening.ok(), await intervening.text()).toBe(true)
+    const apply = original.getByRole('button', { name: '确认恢复为新修订', exact: true })
+    await apply.press('Enter')
+    await expect(page.locator('.history').getByRole('alert')).toContainText('请重新读取恢复预览')
+    await expect(apply).toBeDisabled()
+    const reread = original.getByRole('button', { name: '重新读取恢复预览' })
+    await expect(reread).toBeFocused()
+    expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content).toBe(
+      interveningText,
+    )
+    await reread.press('Enter')
+    await expect(preview.locator('[aria-label="当前稿 · 修订 3"]')).toContainText(interveningText)
+    await page.setViewportSize({ width: 360, height: 800 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+    await apply.press('Enter')
     await expect
       .poll(async () => (await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content)
       .toBe(originals[0])
-    expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).revision).toBe(3)
+    expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).revision).toBe(4)
+    await expect(history).toBeFocused()
+    const retained = await (await page.request.get(`/api/chapters/${chapter.id}/history`)).json()
+    expect(retained.find((row: { revision: number }) => row.revision === 3).content).toBe(interveningText)
   } finally {
     release.release()
   }

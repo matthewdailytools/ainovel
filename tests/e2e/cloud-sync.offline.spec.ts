@@ -111,7 +111,7 @@ test('桌面和离线 Web 同章修改产生可解决冲突，历史稿仍可查
     await web.getByText('本章版本历史', { exact: true }).click()
     const history = web.getByRole('combobox', { name: '历史修订', exact: true })
     await history.selectOption({ label: '修订 2 · 作者编辑' })
-    await expect(web.getByText('Web 版本：学徒拾铃。', { exact: true })).toBeVisible()
+    await expect(web.locator('[aria-label="历史稿 · 修订 2"]')).toHaveText('Web 版本：学徒拾铃。')
     await history.selectOption({ label: '修订 1 · 作者编辑' })
     await web.getByRole('button', { name: '恢复为最新修订', exact: true }).click()
     await expect(editor).toHaveValue('原稿：找到了铜铃。')

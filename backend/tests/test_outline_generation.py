@@ -145,3 +145,52 @@ def test_live_directory_change_preserves_stale_candidate_but_blocks_use(client, 
     )
     assert attempted.status_code == 409, attempted.text
     assert client.get(endpoint).json()["draft"] is None
+
+
+def test_generated_outline_cannot_declare_or_change_author_required_promise(client, domain, settings, story):
+    endpoint, prompt, _, _ = prepare(client, domain, story)
+    assert client.post(endpoint + "/generation", json=prompt).status_code == 202
+
+    class Candidate(Model):
+        async def generate(self, *args, **kwargs):
+            output = await super().generate(*args, **kwargs)
+            if len(self.requests) == 1:
+                plan = json.loads(output["text"])
+                plan["promises"][0]["fulfillment"] = "author_required"
+                output["text"] = dumps(plan)
+            return {**output, "call_id": f"outline-required-{len(self.requests)}"}
+
+    provider = Candidate()
+    assert asyncio.run(Worker(settings, provider).run_once())
+    finished = client.get(endpoint + "/generation").json()[0]
+    assert finished["status"] == "succeeded", finished
+    assert len(provider.requests) == 2
+    assert "必达承诺须由作者声明" in provider.requests[1]["修正要求"]
+    artifact = client.get(endpoint + "/generation/" + finished["artifact_id"]).json()
+    plan = artifact["plan"]
+    assert "fulfillment" not in plan["promises"][0]
+    plan["promises"][0].update(
+        fulfillment="author_required",
+        opens_chapter_id=story["chapter_id"],
+        closes_chapter_id=story["chapter_id"],
+    )
+    saved = client.put(
+        endpoint,
+        json={"base_revision": 0, "confirmation_id": prompt["confirmation_id"], "plan": plan},
+    )
+    assert saved.status_code == 200, saved.text
+    confirmed = client.post(
+        endpoint + "/confirm",
+        json={"base_revision": saved.json()["draft"]["revision"], "acknowledge_required_promises": True},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    prompt.update(base_revision=confirmed.json()["confirmed"]["revision"], client_request_id=uuid4().hex)
+    queued = client.post(endpoint + "/generation", json=prompt)
+    assert queued.status_code == 202, queued.text
+    assert asyncio.run(Worker(settings, Model()).run_once())
+    generated = next(
+        row for row in client.get(endpoint + "/generation").json() if row["id"] == queued.json()["id"]
+    )
+    assert generated["status"] == "succeeded", generated
+    artifact = client.get(endpoint + "/generation/" + generated["artifact_id"]).json()
+    assert artifact["plan"]["promises"] == plan["promises"]

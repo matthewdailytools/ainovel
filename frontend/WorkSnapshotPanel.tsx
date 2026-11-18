@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type Chapter } from './api'
+import { api, ApiError, type Chapter } from './api'
+import { RestoreReportList, type RestoreAffectedReport } from './ChapterRestorePreview'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 
 type Scope = 'book' | 'volume' | 'chapter'
@@ -25,7 +26,7 @@ type Preview = {
   }[]
   in_place_blockers: string[]
   shared_changes: { definitions: string[]; conception: boolean; outline: boolean }
-  reports: Record<string, string>
+  affected_reports: RestoreAffectedReport[]
   notes: string[]
 }
 type ChapterDiff = {
@@ -45,9 +46,6 @@ const objectNames: Record<string, string> = {
   characters: '人物设定',
   outline: '旧版规划',
   project_brief: '立项',
-  workflow_inspection: '体检单',
-  book_completion: '完本记录',
-  author_finalization: '作者定稿',
 }
 
 export function WorkSnapshotPanel({
@@ -70,12 +68,22 @@ export function WorkSnapshotPanel({
   const [mode, setMode] = useState<Mode>('in_place')
   const [branchName, setBranchName] = useState('')
   const [confirmed, setConfirmed] = useState(false)
+  const [previewStale, setPreviewStale] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const previewButton = useRef<HTMLButtonElement>(null)
+  const previewRegion = useRef<HTMLElement>(null)
   const pending = useRef<{ signature: string; key: string } | null>(null)
   const route = `/branches/${branchId}/work-snapshots`
   useLeaveGuard(!!label.trim() || (!!preview && (!!branchName.trim() || confirmed)), '未提交的作品快照操作')
+
+  useEffect(() => {
+    if (preview && !previewStale) previewRegion.current?.focus()
+  }, [preview, previewStale])
+  useEffect(() => {
+    if (previewStale && !busy) previewButton.current?.focus()
+  }, [previewStale, busy])
 
   useEffect(() => {
     let active = true
@@ -98,6 +106,7 @@ export function WorkSnapshotPanel({
     setDiff(undefined)
     setConfirmed(false)
     setBranchName('')
+    setPreviewStale(false)
     pending.current = null
   }
 
@@ -126,13 +135,18 @@ export function WorkSnapshotPanel({
 
   async function compare() {
     const selected = await api<Preview>(`${route}/${snapshotId}/preview`)
-    resetPreview()
-    setMode(selected.in_place_blockers.length ? 'new_branch' : 'in_place')
+    setDiff(undefined)
+    setConfirmed(false)
+    pending.current = null
+    if (!previewStale) setBranchName('')
+    if (selected.in_place_blockers.length) setMode('new_branch')
+    else if (!previewStale) setMode('in_place')
+    setPreviewStale(false)
     setPreview(selected)
   }
 
   async function restore() {
-    if (!preview || !confirmed) return
+    if (!preview || !confirmed || previewStale) return
     const request = {
       basis_sha256: preview.basis_sha256,
       mode,
@@ -140,10 +154,19 @@ export function WorkSnapshotPanel({
     }
     const signature = JSON.stringify([snapshotId, request])
     if (pending.current?.signature !== signature) pending.current = { signature, key: crypto.randomUUID() }
-    const receipt = await api<RestoreReceipt>(`${route}/${snapshotId}/restore`, 'POST', {
-      ...request,
-      idempotency_key: pending.current.key,
-    })
+    let receipt: RestoreReceipt
+    try {
+      receipt = await api<RestoreReceipt>(`${route}/${snapshotId}/restore`, 'POST', {
+        ...request,
+        idempotency_key: pending.current.key,
+      })
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'snapshot_changed') {
+        setConfirmed(false)
+        setPreviewStale(true)
+      }
+      throw error
+    }
     resetPreview()
     setMessage(
       mode === 'new_branch'
@@ -163,6 +186,7 @@ export function WorkSnapshotPanel({
   }
 
   const choices = scope === 'volume' ? volumes : chapters
+  const scopeNames = new Map([...chapters, ...volumes].map(({ id, title }) => [id, title]))
   const definitionChanges = preview?.shared_changes.definitions.map((kind) => objectNames[kind] || kind) ?? []
   return (
     <section className="card" aria-label="作品快照与回滚" style={{ overflowWrap: 'anywhere' }}>
@@ -231,14 +255,19 @@ export function WorkSnapshotPanel({
             ))}
           </select>
         </label>
-        <button type="button" disabled={busy || !snapshotId} onClick={() => void perform(compare)}>
+        <button
+          ref={previewButton}
+          type="button"
+          disabled={busy || !snapshotId}
+          onClick={() => void perform(compare)}
+        >
           预览恢复差异
         </button>
       </div>
       {error && <p role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}
       {preview && (
-        <section aria-label="恢复差异预览">
+        <section aria-label="恢复差异预览" ref={previewRegion} tabIndex={-1}>
           <h3>
             {preview.snapshot.label} · {scopes[preview.snapshot.scope]}
           </h3>
@@ -286,15 +315,12 @@ export function WorkSnapshotPanel({
               ].join('、')}
             </p>
           )}
-          {Object.keys(preview.reports).length > 0 && (
-            <p>
-              恢复后需复检{' '}
-              {Object.keys(preview.reports)
-                .map((kind) => objectNames[kind] || kind)
-                .join('、')}
-              。
-            </p>
+          {mode === 'in_place' ? (
+            <RestoreReportList reports={preview.affected_reports} scopeNames={scopeNames} />
+          ) : (
+            <p>在新分支重新体检，来源工作版本的报告仍可在来源分支查看。</p>
           )}
+          {previewStale && <p>这份预览已过期。请重新预览恢复差异。</p>}
           {preview.in_place_blockers.map((note) => (
             <p className="notice" key={note}>
               {note}
@@ -314,7 +340,7 @@ export function WorkSnapshotPanel({
               void perform(restore)
             }}
           >
-            <fieldset disabled={busy}>
+            <fieldset disabled={busy || previewStale}>
               <legend>提交恢复</legend>
               <label>
                 恢复方式

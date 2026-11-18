@@ -69,9 +69,10 @@ export function OfflineRulePreview({
           {data.outlineRevision ? (
             data.promises.length ? (
               <ul>
-                {data.promises.map(({ id, title, state, chapter }) => (
+                {data.promises.map(({ id, title, state, chapter, required }) => (
                   <li key={id}>
                     {title} · {reminder[state]}
+                    {required ? ' · 必达承诺尚未兑现' : ''}
                     {chapter ? ' · 最迟第 ' + chapter.position + ' 章 ' + chapter.title : ''}
                   </li>
                 ))}

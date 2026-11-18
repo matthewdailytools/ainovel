@@ -410,6 +410,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/chapters/{chapter_id}/history/{revision_id}/restore-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Preview Chapter Restore */
+    get: operations['preview_chapter_restore_api_chapters__chapter_id__history__revision_id__restore_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/chapters/{chapter_id}/history/{revision_id}/restore': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Restore Chapter Revision */
+    post: operations['restore_chapter_revision_api_chapters__chapter_id__history__revision_id__restore_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/desktop-sync': {
     parameters: {
       query?: never
@@ -2784,6 +2818,25 @@ export interface components {
       /** Idempotency Key */
       idempotency_key: string
     }
+    /** AffectedReport */
+    AffectedReport: {
+      /** Id */
+      id: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'workflow_inspection' | 'book_completion' | 'author_finalization' | 'setting_review'
+      /**
+       * Scope
+       * @enum {string}
+       */
+      scope: 'chapter' | 'volume' | 'book'
+      /** Scope Id */
+      scope_id: string | null
+      /** Check Ids */
+      check_ids: string[]
+    }
     /** AggregateCount */
     AggregateCount: {
       /** Chapter Id */
@@ -3168,6 +3221,28 @@ export interface components {
       /** Reference Cards */
       reference_cards?: components['schemas']['OutlineCardReference'][]
     }
+    /** ChapterRestoreInput */
+    ChapterRestoreInput: {
+      /** Basis Sha256 */
+      basis_sha256: string
+    }
+    /** ChapterRestorePreview */
+    ChapterRestorePreview: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Title */
+      title: string
+      current: components['schemas']['RestoreRevision']
+      target: components['schemas']['RestoreRevision']
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** References */
+      references: components['schemas']['RestoreReference'][]
+      /** Promises */
+      promises: components['schemas']['RestorePromise'][]
+      /** Affected Reports */
+      affected_reports: components['schemas']['AffectedReport'][]
+    }
     /** Character */
     Character: {
       /** Title */
@@ -3450,6 +3525,11 @@ export interface components {
     ConfirmOutline: {
       /** Base Revision */
       base_revision: number
+      /**
+       * Acknowledge Required Promises
+       * @default false
+       */
+      acknowledge_required_promises: boolean
     }
     /** ConfirmProject */
     ConfirmProject: {
@@ -4296,6 +4376,8 @@ export interface components {
       opens_chapter_id: string
       /** Closes Chapter Id */
       closes_chapter_id: string
+      /** Fulfillment */
+      fulfillment?: 'author_required' | null
       /** Title */
       title: string
       /**
@@ -4716,6 +4798,8 @@ export interface components {
       opens_chapter_id: string
       /** Closes Chapter Id */
       closes_chapter_id: string
+      /** Fulfillment */
+      fulfillment?: 'author_required' | null
       /** Promise Id */
       promise_id: string
     }
@@ -5110,6 +5194,51 @@ export interface components {
       /** Title */
       title: string
     }
+    /** RestorePromise */
+    RestorePromise: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Status */
+      status: string
+      /** Sources */
+      sources: components['schemas']['RestoreSource'][]
+      window: components['schemas']['RestorePromiseWindow'] | null
+    }
+    /** RestorePromiseWindow */
+    RestorePromiseWindow: {
+      /** Plant Chapter Id */
+      plant_chapter_id: string
+      /** Opens Chapter Id */
+      opens_chapter_id: string
+      /** Closes Chapter Id */
+      closes_chapter_id: string
+    }
+    /** RestoreReference */
+    RestoreReference: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'outline' | 'setting' | 'reference_card' | 'story_record' | 'fact' | 'scene_time'
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      source: components['schemas']['RestoreSource'] | null
+    }
+    /** RestoreRevision */
+    RestoreRevision: {
+      /** Id */
+      id: string
+      /** Revision */
+      revision: number
+      /** Content */
+      content: string
+      /** Sha256 */
+      sha256: string
+    }
     /** RestoreSettingItem */
     RestoreSettingItem: {
       /** Base Revision */
@@ -5120,6 +5249,19 @@ export interface components {
       idempotency_key: string
       /** Source Workspace Id */
       source_workspace_id: string
+    }
+    /** RestoreSource */
+    RestoreSource: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Revision */
+      revision: number
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Quote */
+      quote: string
     }
     /** ResumeInput */
     ResumeInput: {
@@ -5526,6 +5668,33 @@ export interface components {
       scope: 'chapter' | 'volume' | 'book'
       /** Scope Id */
       scope_id?: string | null
+    }
+    /** SnapshotRestorePreview */
+    SnapshotRestorePreview: {
+      /** Snapshot */
+      snapshot: {
+        [key: string]: components['schemas']['JsonValue']
+      }
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Changes */
+      changes: {
+        [key: string]: components['schemas']['JsonValue']
+      }[]
+      /** In Place Blockers */
+      in_place_blockers: string[]
+      /** Shared Changes */
+      shared_changes: {
+        [key: string]: components['schemas']['JsonValue']
+      }
+      /** Reports */
+      reports: {
+        [key: string]: string
+      }
+      /** Affected Reports */
+      affected_reports: components['schemas']['AffectedReport'][]
+      /** Notes */
+      notes: string[]
     }
     /** Source */
     Source: {
@@ -6660,7 +6829,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': unknown
+          'application/json': components['schemas']['SnapshotRestorePreview']
         }
       }
       /** @description Validation Error */
@@ -6722,6 +6891,74 @@ export interface operations {
       cookie?: never
     }
     requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_chapter_restore_api_chapters__chapter_id__history__revision_id__restore_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        chapter_id: string
+        revision_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ChapterRestorePreview']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  restore_chapter_revision_api_chapters__chapter_id__history__revision_id__restore_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        chapter_id: string
+        revision_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ChapterRestoreInput']
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {

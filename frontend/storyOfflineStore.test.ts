@@ -7,9 +7,11 @@ import {
   createLocalProject,
   exportLocalManuscript,
   manuscriptHash,
+  readLocalChapterRestore,
   readLocalHistory,
   readLocalPublications,
   readLocalStory,
+  restoreLocalChapter,
   saveLocalChapter,
   syncObjectSignature,
   validateManuscript,
@@ -54,6 +56,59 @@ it('作者确认故事和原文依据时原子追加历史及待发，旧选区�
     }),
   ).rejects.toThrow('引用章节已有新保存版本')
   expect((await readLocalStory(work.novel.id)).history).toHaveLength(1)
+})
+
+it('单章恢复预览也绑定本章采用的新故事证据和同步队列', async () => {
+  const work = await createLocalProject('恢复预览依据 · 铜铃')
+  const projectId = work.novel.id
+  const chapter = await createLocalChapter(projectId, '拾铃')
+  const [original] = await readLocalHistory(projectId, chapter.id)
+  const current = await saveLocalChapter(projectId, chapter.id, original.id, '铃😀响')
+  const preview = await readLocalChapterRestore(projectId, chapter.id, original.id)
+  expect(preview.references).toEqual([])
+
+  const story = await readLocalStory(projectId)
+  await confirmLocalStory(projectId, {
+    record: parseStoryRecord({ kind: 'event', title: '铜铃响起', status: 'actual' }),
+    record_id: 'bell-event',
+    archived: false,
+    baseStoryRevision: story.storyRevision,
+    baseVersionId: null,
+    evidence: { record: [await captureStoryEvidence(current, 1, 3)], stages: [] },
+  })
+  const withEvent = await readLocalStory(projectId)
+  await confirmLocalStory(projectId, {
+    record: parseStoryRecord({
+      kind: 'promise',
+      title: '铃为何响起',
+      depends_on: ['bell-event'],
+      stages: [{ status: 'planned' }],
+    }),
+    record_id: 'bell-promise',
+    archived: false,
+    baseStoryRevision: withEvent.storyRevision,
+    baseVersionId: null,
+    evidence: { record: [], stages: [[]] },
+  })
+  const pending = await readLocalPublications(work.branch.id)
+  await expect(restoreLocalChapter(projectId, chapter.id, original.id, preview.basis)).rejects.toMatchObject({
+    code: 'conflict',
+  })
+  expect(await readLocalHistory(projectId, chapter.id)).toEqual([original, current])
+  expect(await readLocalPublications(work.branch.id)).toEqual(pending)
+
+  const updated = await readLocalChapterRestore(projectId, chapter.id, original.id)
+  expect(updated.references).toMatchObject([
+    {
+      kind: 'story_record',
+      id: 'bell-event',
+      source: { revision: current.revision, start: 1, end: 3, quote: '😀' },
+    },
+  ])
+  expect(updated.promises).toMatchObject([{ id: 'bell-promise', sources: [], status: 'planned' }])
+  const restored = await restoreLocalChapter(projectId, chapter.id, original.id, updated.basis)
+  expect(restored).toMatchObject({ content: original.content, parent_id: current.id })
+  expect((await readLocalStory(projectId)).records[0].invalidReasons).not.toEqual([])
 })
 
 it('远端源稿只有正式采用为同全文原稿后才可激活实际记录，归档保留绑定', async () => {

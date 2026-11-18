@@ -457,12 +457,28 @@ def _evaluate(tx, branch_id, scope, scope_id):
     scenes = _scene_rows(tx, branch_id, chapters, graph)
     scenes_stale = any(row["stale"] for row in scenes)
     promises = [row for row in records if row["kind"] == "promise"]
+    required_open = [
+        window
+        for window in windows
+        if window.get("fulfillment") == "author_required" and not window.get("fulfillment_met")
+    ]
+    required_overdue = [window for window in required_open if window["due"] == "due"]
+    promise_summary = f"当前范围关联 {len(promises)} 条已维护承诺，按埋设、回收窗口与阶段记录核对。"
     promise_status = _record_status(promises)
     if promise_status != "outdated" and promises:
         if all(row["stages"][-1]["status"] in {"resolved", "retained", "abandoned"} for row in promises):
             promise_status = "green"
         elif scope == "book" or any(row["due"] for row in windows):
             promise_status = "yellow"
+    if required_overdue:
+        promise_status = "red"
+        promise_summary += "必达承诺到期仍缺回收窗口内的有效原文：" + "、".join(
+            row["title"] for row in required_overdue
+        )
+    elif required_open:
+        if promise_status != "outdated":
+            promise_status = "yellow"
+        promise_summary += "待兑现的必达承诺：" + "、".join(row["title"] for row in required_open)
     issues, _ = _known_issues(tx, branch_id, graph["story_revision"], chapters)
     invalid = [
         {"id": row["id"], "title": row["title"], "issues": row["invalid_reasons"]}
@@ -532,7 +548,7 @@ def _evaluate(tx, branch_id, scope, scope_id):
         ),
         item(
             "07",
-            f"当前范围关联 {len(promises)} 条已维护承诺，按埋设、回收窗口与阶段记录核对。",
+            promise_summary,
             {"records": promises, "windows": windows, "outline_id": plan_basis["outline_id"]},
             promise_status,
             can_mark_not_applicable=not promises and not windows and not outline["stale"],

@@ -26,6 +26,7 @@ type OutlineRevision = {
 export type OutlineView = {
   draft: OutlineRevision | null
   confirmed: OutlineRevision | null
+  requires_promise_confirmation?: boolean
   stale: string[]
   chapters: { id: string; title: string; position: number }[]
   promise_options: { id: string; title: string }[]
@@ -164,6 +165,7 @@ export function OutlineWorkspace({
   const [editing, setEditing] = useState<OutlinePlan>()
   const [settingId, setSettingId] = useState<string | null>(null)
   const [generationId, setGenerationId] = useState<string>()
+  const [agreedPromiseRevision, setAgreedPromiseRevision] = useState<number>()
   const [cut, setCut] = useState<number>()
   const [previous, setPrevious] = useState<OutlineRevision>()
   const [busy, setBusy] = useState(false)
@@ -185,6 +187,7 @@ export function OutlineWorkspace({
       .then(([data, available, referenceCards]) => {
         if (!active) return
         setView(data)
+        setAgreedPromiseRevision(undefined)
         setSettings(available)
         setCards(referenceCards)
         setEditing(data.draft?.plan ?? { summary: '', volumes: [], promises: [] })
@@ -257,6 +260,7 @@ export function OutlineWorkspace({
     ))
   }
   const fullWindows = (editing.promises?.length ?? 0) + (editing.new_promises?.length ?? 0) >= 250
+  const agreesToPromises = agreedPromiseRevision === view.draft?.revision
 
   return (
     <div className="records" id="bench-outline" tabIndex={-1}>
@@ -628,6 +632,21 @@ export function OutlineWorkspace({
                     plan.promises![index][field] = id
                   }),
                 )}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={window.fulfillment === 'author_required'}
+                    onChange={(event) => {
+                      const required = event.target.checked
+                      edit((plan) => {
+                        const window = plan.promises![index]
+                        if (required) window.fulfillment = 'author_required'
+                        else delete window.fulfillment
+                      })
+                    }}
+                  />
+                  必须在回收窗口内兑现
+                </label>
                 <button type="button" onClick={() => edit((plan) => plan.promises?.splice(index, 1))}>
                   移除窗口
                 </button>
@@ -682,6 +701,21 @@ export function OutlineWorkspace({
                     plan.new_promises![index][field] = id
                   }),
                 )}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={window.fulfillment === 'author_required'}
+                    onChange={(event) => {
+                      const required = event.target.checked
+                      edit((plan) => {
+                        const window = plan.new_promises![index]
+                        if (required) window.fulfillment = 'author_required'
+                        else delete window.fulfillment
+                      })
+                    }}
+                  />
+                  必须在回收窗口内兑现
+                </label>
                 <button
                   type="button"
                   onClick={() =>
@@ -719,6 +753,18 @@ export function OutlineWorkspace({
             {!!editing.new_promises?.length && (
               <p className="small">确认大纲会把新伏笔加入台账，初始状态为「计划」。</p>
             )}
+            {view.requires_promise_confirmation && !dirty && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={agreesToPromises}
+                  onChange={(event) =>
+                    setAgreedPromiseRevision(event.target.checked ? view.draft?.revision : undefined)
+                  }
+                />
+                我已核对必达承诺的新增、调整或撤销
+              </label>
+            )}
             <p>
               <button type="submit" className="primary" disabled={!dirty}>
                 保存大纲草稿
@@ -738,13 +784,22 @@ export function OutlineWorkspace({
               )}
               <button
                 type="button"
-                disabled={dirty || !view.draft || view.draft.confirmed}
+                disabled={
+                  dirty ||
+                  !view.draft ||
+                  view.draft.confirmed ||
+                  (view.requires_promise_confirmation && !agreesToPromises)
+                }
                 onClick={() => {
                   void run(async () => {
                     const updated = await api<OutlineView>(root + '/confirm', 'POST', {
                       base_revision: view.draft!.revision,
+                      ...(view.requires_promise_confirmation
+                        ? { acknowledge_required_promises: agreesToPromises }
+                        : {}),
                     })
                     setView(updated)
+                    setAgreedPromiseRevision(undefined)
                     setEditing(updated.draft?.plan)
                     setNotice(`已确认大纲修订 ${updated.confirmed?.revision}。`)
                   })
@@ -785,10 +840,19 @@ export function OutlineWorkspace({
                   修订 {previous.revision} · {previous.confirmed ? '已确认' : '草稿'}
                 </h3>
                 <p>{previous.plan.summary}</p>
+                {previous.plan.promises
+                  ?.filter((window) => window.fulfillment === 'author_required')
+                  .map((window) => (
+                    <p key={window.promise_id}>
+                      必达承诺 {window.promise_id} · {chapterName(window.opens_chapter_id)} 至{' '}
+                      {chapterName(window.closes_chapter_id)}
+                    </p>
+                  ))}
                 {previous.plan.new_promises?.map((window) => (
                   <p key={window.title}>
                     {window.title} · {chapterName(window.plant_chapter_id)} 至{' '}
                     {chapterName(window.closes_chapter_id)}
+                    {window.fulfillment === 'author_required' ? ' · 必达承诺' : ''}
                   </p>
                 ))}
                 {(previous.plan.volumes ?? []).map((volume) => (

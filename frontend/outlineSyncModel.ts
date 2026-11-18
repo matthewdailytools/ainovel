@@ -37,7 +37,10 @@ export type OutlineChapterPlan = Record<ChapterText, string> & {
 }
 export type OutlineUnit = { id: string; title: string; summary: string; chapters: OutlineChapterPlan[] }
 export type OutlineVolume = { id: string; title: string; summary: string; units: OutlineUnit[] }
-export type OutlineWindow = Record<WindowPart, string> & { promise_id: string }
+export type OutlineWindow = Record<WindowPart, string> & {
+  promise_id: string
+  fulfillment?: 'author_required'
+}
 export type OutlinePlan = { summary: string; volumes: OutlineVolume[]; promises: OutlineWindow[] }
 export type OutlinePromiseSeed = {
   kind: 'promise'
@@ -229,13 +232,30 @@ function parseVolume(value: unknown): OutlineVolume {
 }
 
 function parseWindow(value: unknown): OutlineWindow {
-  const row = object(value, [...outlineWindowFields.map(([key]) => key), 'promise_id'])
+  const row = object(value, [...outlineWindowFields.map(([key]) => key), 'promise_id', 'fulfillment'])
+  if (row.fulfillment !== undefined && row.fulfillment !== 'author_required')
+    invalid('无法识别伏笔的必达约定。')
   return {
     promise_id: identifier(row.promise_id),
     plant_chapter_id: identifier(row.plant_chapter_id),
     opens_chapter_id: identifier(row.opens_chapter_id),
     closes_chapter_id: identifier(row.closes_chapter_id),
+    ...(row.fulfillment === 'author_required' ? { fulfillment: row.fulfillment } : {}),
   }
+}
+
+export function requiredPromiseSignature(plan?: OutlinePlan): string {
+  return JSON.stringify(
+    (plan?.promises ?? [])
+      .filter((window) => window.fulfillment === 'author_required')
+      .map(({ promise_id, plant_chapter_id, opens_chapter_id, closes_chapter_id }) => [
+        promise_id,
+        plant_chapter_id,
+        opens_chapter_id,
+        closes_chapter_id,
+      ])
+      .sort(([first], [second]) => first.localeCompare(second)),
+  )
 }
 
 export const outlineChapterPlans = (plan: OutlinePlan) =>
@@ -561,6 +581,7 @@ export function describeOutlineVersion(version: OutlineVersion) {
     const title = version.promise_sources[window.promise_id]?.title ?? window.promise_id
     lines.push(
       `伏笔 ${title} · ${window.plant_chapter_id} → ${window.opens_chapter_id} → ${window.closes_chapter_id}`,
+      ...(window.fulfillment === 'author_required' ? ['作者约定 · 必须在回收窗口内兑现'] : []),
     )
   }
   return lines.join('\n')

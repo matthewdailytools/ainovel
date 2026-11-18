@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   api,
+  ApiError,
   label,
   type Artifact,
   type Branch,
@@ -13,6 +14,7 @@ import {
 } from './api'
 import type { Notify } from './App'
 import { Difference, Editor, type Selection } from './Editor'
+import { ChapterRestorePreview, type ChapterRestorePreviewProps } from './ChapterRestorePreview'
 import { readDraft, writeDraft, type Draft } from './drafts'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
@@ -204,6 +206,29 @@ export function Writing({
   const [showHistory, setShowHistory] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
   const historyRequest = useRef(0)
+  const [restorePreview, setRestorePreview] = useState<
+    | (ChapterRestorePreviewProps & { basis_sha256: string; revisionId: string; editorRevision: number })
+    | undefined
+  >()
+  const [restoreError, setRestoreError] = useState('')
+  const [restoreStale, setRestoreStale] = useState(false)
+  const restoreTrigger = useRef<HTMLButtonElement>(null)
+  const restorePanel = useRef<HTMLDivElement>(null)
+  const rereadRestore = useRef<HTMLButtonElement>(null)
+  const historyToggle = useRef<HTMLButtonElement>(null)
+  const focusHistoryAfterRestore = useRef(false)
+  useEffect(() => {
+    if (restorePreview) restorePanel.current?.focus()
+  }, [restorePreview])
+  useEffect(() => {
+    if (restoreStale && !busy && !historyLoading) rereadRestore.current?.focus()
+  }, [restoreStale, busy, historyLoading])
+  useEffect(() => {
+    if (focusHistoryAfterRestore.current && !busy && !opening) {
+      focusHistoryAfterRestore.current = false
+      historyToggle.current?.focus()
+    }
+  }, [busy, opening])
   const candidateRequest = useRef(0)
   const [rename, setRename] = useState('')
   const current = useRef<Chapter | undefined>(undefined)
@@ -223,6 +248,7 @@ export function Writing({
     const token = ++loadSequence.current
     ++historyRequest.current
     setHistoryLoading(false)
+    clearRestorePreview()
     setOpening(true)
     try {
       const row = await api<Chapter>(`/chapters/${id}`)
@@ -477,6 +503,11 @@ export function Writing({
   }
   async function toggleHistory() {
     if (busy || opening || historyLoading || !current.current) return
+    if (showHistory) {
+      clearRestorePreview()
+      setShowHistory(false)
+      return
+    }
     const chapterId = current.current.id
     const sequence = loadSequence.current
     const request = ++historyRequest.current
@@ -497,12 +528,70 @@ export function Writing({
       const versions = await api<typeof history>(`/chapters/${chapterId}/history`)
       if (!matchesTarget()) return
       setHistory(versions)
-      setShowHistory((shown) => !shown)
+      setShowHistory(true)
     } catch (error) {
       if (alive.current && historyRequest.current === request) notify(error)
     } finally {
       if (alive.current && historyRequest.current === request) setHistoryLoading(false)
     }
+  }
+  function clearRestorePreview() {
+    setRestorePreview(undefined)
+    setRestoreError('')
+    setRestoreStale(false)
+  }
+  async function readRestorePreview(revisionId: string, trigger?: HTMLButtonElement) {
+    const row = current.current
+    if (!row || busy || opening || historyLoading || recovery || draftText.current !== row.content) return
+    if (trigger) restoreTrigger.current = trigger
+    const request = ++historyRequest.current
+    const matchesTarget = () =>
+      alive.current && historyRequest.current === request && current.current?.id === row.id
+    setHistoryLoading(true)
+    setRestoreError('')
+    try {
+      const preview = await api<ChapterRestorePreviewProps & { basis_sha256: string }>(
+        `/chapters/${row.id}/history/${revisionId}/restore-preview`,
+      )
+      if (!matchesTarget()) return
+      setRestorePreview({ ...preview, revisionId, editorRevision: row.revision })
+      setRestoreStale(false)
+    } catch (error) {
+      if (matchesTarget()) setRestoreError(error instanceof Error ? error.message : '暂无法读取恢复预览。')
+    } finally {
+      if (matchesTarget()) setHistoryLoading(false)
+    }
+  }
+  async function restoreChapter() {
+    const row = current.current
+    if (
+      !row ||
+      !restorePreview ||
+      restoreStale ||
+      historyLoading ||
+      recovery ||
+      draftText.current !== row.content ||
+      restorePreview.editorRevision !== row.revision
+    )
+      return
+    await doAction(async () => {
+      setRestoreError('')
+      try {
+        await api(`/chapters/${row.id}/history/${restorePreview.revisionId}/restore`, 'POST', {
+          basis_sha256: restorePreview.basis_sha256,
+        })
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'chapter_restore_changed') {
+          setRestoreStale(true)
+          setRestoreError('章稿或关联依据已变化。请重新读取恢复预览并再次核对。')
+          return
+        }
+        throw error
+      }
+      focusHistoryAfterRestore.current = true
+      await loadChapter(row.id, 0, true)
+      await refresh()
+    })
   }
   async function createChapter() {
     await doAction(async () => {
@@ -708,6 +797,11 @@ export function Writing({
         )
       : []
   const cards = plannedChapter ? chapterCards(outline?.confirmed, plannedChapter.chapter) : []
+  const restoreBlocked = !!recovery || text !== chapter?.content
+  const restorePreviewChanged =
+    !!restorePreview && (restoreStale || restorePreview.editorRevision !== chapter?.revision)
+  const restoreTargetCurrent =
+    !!restorePreview && restorePreview.current.revision === restorePreview.target.revision
 
   function openChapter(id: string) {
     if (id === current.current?.id) {
@@ -934,9 +1028,11 @@ export function Writing({
             保存
           </button>
           <button
+            ref={historyToggle}
             onClick={() => void toggleHistory()}
             disabled={!chapter || busy || opening || historyLoading}
             aria-busy={historyLoading}
+            aria-expanded={showHistory}
           >
             版本历史
           </button>
@@ -1003,7 +1099,9 @@ export function Writing({
             )}
             {showHistory && (
               <div className="history">
-                <h3>恢复会生成新修订，当前稿保留在历史中</h3>
+                <h3>章稿版本历史</h3>
+                {restoreError && <p role="alert">{restoreError}</p>}
+                {restoreBlocked && <p>请先保存正文或处理浏览器草稿，再预览恢复。</p>}
                 {history.map((h) => (
                   <details key={h.id}>
                     <summary>
@@ -1011,21 +1109,51 @@ export function Writing({
                     </summary>
                     <pre>{h.content || '（空稿）'}</pre>
                     <button
-                      disabled={busy}
-                      onClick={() =>
-                        void doAction(async () => {
-                          const row = await save()
-                          await api(`/chapters/${chapter.id}/restore`, 'POST', {
-                            base_revision: row.revision,
-                            revision_id: h.id,
-                          })
-                          await loadChapter(chapter.id, 0, true)
-                          await refresh()
-                        })
-                      }
+                      disabled={busy || historyLoading || restoreBlocked}
+                      onClick={(event) => void readRestorePreview(h.id, event.currentTarget)}
                     >
-                      恢复为新修订
+                      预览恢复
                     </button>
+                    {restorePreview?.revisionId === h.id && (
+                      <div ref={restorePanel} tabIndex={-1}>
+                        <ChapterRestorePreview {...restorePreview} />
+                        {restorePreviewChanged && <p>此预览已过期，恢复前需重新核对。</p>}
+                        {restoreTargetCurrent && <p>所选历史修订已是当前稿。</p>}
+                        <div className="actions">
+                          {restorePreviewChanged && (
+                            <button
+                              ref={rereadRestore}
+                              disabled={busy || historyLoading || restoreBlocked}
+                              onClick={() => void readRestorePreview(h.id)}
+                            >
+                              重新读取恢复预览
+                            </button>
+                          )}
+                          <button
+                            className="primary"
+                            disabled={
+                              busy ||
+                              historyLoading ||
+                              restoreBlocked ||
+                              restorePreviewChanged ||
+                              restoreTargetCurrent
+                            }
+                            onClick={() => void restoreChapter()}
+                          >
+                            确认恢复为新修订
+                          </button>
+                          <button
+                            disabled={busy || historyLoading}
+                            onClick={() => {
+                              clearRestorePreview()
+                              restoreTrigger.current?.focus()
+                            }}
+                          >
+                            取消恢复
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </details>
                 ))}
               </div>

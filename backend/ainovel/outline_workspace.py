@@ -2,7 +2,7 @@
 
 import json
 from time import time
-from typing import Annotated
+from typing import Annotated, Literal
 from unicodedata import normalize
 
 from pydantic import Field, StringConstraints
@@ -66,6 +66,9 @@ class ChapterWindow(Input):
     plant_chapter_id: Identifier
     opens_chapter_id: Identifier
     closes_chapter_id: Identifier
+    fulfillment: Literal["author_required"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class PromiseWindow(ChapterWindow):
@@ -95,6 +98,7 @@ class SaveOutline(Input):
 
 class ConfirmOutline(Input):
     base_revision: int = Field(ge=1, strict=True)
+    acknowledge_required_promises: bool = Field(default=False, strict=True)
 
 
 def _latest(tx, branch_id, confirmed=False):
@@ -262,6 +266,20 @@ def _check_base(row, base_revision):
         raise DomainError("outline_conflict", "大纲已在别处更新，请保留编辑内容并重新比较。", 409)
 
 
+def required_promise_windows(plan):
+    return {
+        window["promise_id"]: window
+        for window in (plan or {}).get("promises", [])
+        if window.get("fulfillment") == "author_required"
+    }
+
+
+def _required_promises_changed(before, after):
+    return required_promise_windows(before) != required_promise_windows(after) or any(
+        window.get("fulfillment") == "author_required" for window in after.get("new_promises", [])
+    )
+
+
 def save_outline(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
         return save_outline_tx(tx, branch_id, data, before_write=before_write)
@@ -322,7 +340,7 @@ def confirm_outline(domain, branch_id, data, *, before_write=None):
         return confirm_outline_tx(tx, branch_id, data, before_write=before_write)
 
 
-def confirm_outline_tx(tx, branch_id, data, *, before_write=None):
+def confirm_outline_tx(tx, branch_id, data, *, before_write=None, source_confirmed=False):
     if before_write is not None:
         before_write(tx)
     row = _latest(tx, branch_id)
@@ -338,8 +356,14 @@ def confirm_outline_tx(tx, branch_id, data, *, before_write=None):
         _check_project(tx, branch_id, basis)
         graph = graph_snapshot(tx, branch_id)
         plan = draft["plan"]
+        previous = _decode(_latest(tx, branch_id, True))
+        requirement_changed = _required_promises_changed(previous["plan"] if previous else None, plan)
+        if requirement_changed and not (data.acknowledge_required_promises or source_confirmed):
+            raise DomainError("outline_required_promises", "请核对必达承诺变更后再确认大纲。", 409)
         _validate(graph, plan, basis, True)
         basis["outline_story_receipt"] = _materialize_promises(tx, graph, plan, draft["revision"])
+        if requirement_changed:
+            basis["required_promises_confirmation"] = "formal_source" if source_confirmed else "author"
         _insert(tx, branch_id, data.base_revision + 1, True, plan, basis)
         from .work_snapshot import checkpoint_tx
 
@@ -368,7 +392,13 @@ def _materialize_promises(tx, graph, plan, draft_revision):
                 },
             ),
         )
-        plan["promises"].append({"promise_id": identifier, **{key: pending[key] for key in WINDOW_CHAPTERS}})
+        plan["promises"].append(
+            {
+                "promise_id": identifier,
+                **{key: pending[key] for key in WINDOW_CHAPTERS},
+                **({"fulfillment": pending["fulfillment"]} if pending.get("fulfillment") else {}),
+            }
+        )
         created_ids.append(identifier)
     return {
         "draft_revision": draft_revision,
@@ -407,6 +437,13 @@ def _view(tx, branch_id):
     return {
         "draft": draft,
         "confirmed": confirmed,
+        **(
+            {"requires_promise_confirmation": True}
+            if draft
+            and not draft["confirmed"]
+            and _required_promises_changed(confirmed["plan"] if confirmed else None, draft["plan"])
+            else {}
+        ),
         "stale": stale,
         "story_revision": graph["story_revision"],
         "chapters": [row for row in graph["chapters"] if not row["archived"]],
@@ -466,11 +503,25 @@ def _ledgers(tx, graph, plan, basis, current):
         valid = row and not row["archived"] and not row["invalid_reasons"]
         stages = row["payload"]["stages"] if row else []
         state = stages[-1]["status"] if valid else "stale"
+        required = window.get("fulfillment") == "author_required"
+        opens = chapter_positions.get(window["opens_chapter_id"])
+        closes = chapter_positions.get(window["closes_chapter_id"])
+        fulfilled = (
+            required
+            and state == "resolved"
+            and opens is not None
+            and closes is not None
+            and any(
+                source["chapter_id"] in chapter_positions
+                and opens <= chapter_positions[source["chapter_id"]] <= closes
+                for source in stages[-1]["sources"]
+            )
+        )
         due = None
-        if current and state in {"planned", "planted", "reinforced"}:
-            if progress >= chapter_positions[window["closes_chapter_id"]]:
+        if (required and not fulfilled) or (current and state in {"planned", "planted", "reinforced"}):
+            if closes is not None and progress >= closes:
                 due = "due"
-            elif progress >= chapter_positions[window["opens_chapter_id"]]:
+            elif opens is not None and progress >= opens:
                 due = "open"
         promises.append(
             {
@@ -479,6 +530,7 @@ def _ledgers(tx, graph, plan, basis, current):
                 "state": state,
                 "stages": stages,
                 "due": due,
+                **({"fulfillment_met": bool(fulfilled)} if required else {}),
             }
         )
     return {"settings": settings, "promises": promises}

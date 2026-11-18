@@ -190,12 +190,25 @@ def _evaluate(tx, branch_id, data=None):
         )
         manuscript = manuscript and length_status == "green"
         manuscript_detail += length_detail
+    required_open = {
+        row["promise_id"]: row["title"]
+        for row in outline["promises"]
+        if row.get("fulfillment") == "author_required" and not row.get("fulfillment_met")
+    }
     open_promises = [
         row["payload"]["title"]
         for row in promises
-        if row["invalid_reasons"]
-        or row["payload"]["stages"][-1]["status"] not in {"resolved", "retained", "abandoned"}
+        if row["id"] not in required_open
+        and (
+            row["invalid_reasons"]
+            or row["payload"]["stages"][-1]["status"] not in {"resolved", "retained", "abandoned"}
+        )
     ]
+    promise_details = []
+    if required_open:
+        promise_details.append("仍待兑现的必达承诺：" + "、".join(required_open.values()) + "。")
+    if open_promises:
+        promise_details.append("仍待处理：" + "、".join(open_promises) + "。")
     inspection_ok = bool(
         report
         and report["current"]
@@ -228,9 +241,9 @@ def _evaluate(tx, branch_id, data=None):
         _check(
             "promises",
             "伏笔与读者承诺",
-            "仍待处理：" + "、".join(open_promises) if open_promises else "核对已处理的承诺并记录依据。",
-            _evidence(data.promises if data else None, by_id) and not open_promises,
-            bool(open_promises),
+            "".join(promise_details) or "核对已处理的承诺并记录依据。",
+            _evidence(data.promises if data else None, by_id) and not open_promises and not required_open,
+            bool(open_promises or required_open),
         ),
         _check(
             "inspection",

@@ -10,6 +10,8 @@ export type OutlinePromise = {
   opens_chapter_id: string
   closes_chapter_id: string
   state: PromiseState
+  fulfillment?: 'author_required'
+  fulfillment_met?: boolean
   due: 'open' | 'due' | null
   stages: PromiseStage[]
 }
@@ -38,6 +40,11 @@ export function OutlinePromiseProgress({
     <>
       <p>
         {promise.title} · {labels[promise.state]}
+        {promise.fulfillment === 'author_required'
+          ? promise.fulfillment_met
+            ? ' · 必达承诺已兑现'
+            : ' · 必达承诺尚未兑现'
+          : ''}
         {promise.due === 'open' ? ' · 已进入回收窗口' : promise.due === 'due' ? ' · 回收已到期' : ''}
       </p>
       <p>

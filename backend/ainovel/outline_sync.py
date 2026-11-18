@@ -366,4 +366,6 @@ def apply_outline_head(tx, branch_id, value, receipt):
             "head_change_id": receipt.change_id,
         },
     )
-    confirm_outline_tx(tx, branch_id, ConfirmOutline(base_revision=saved["draft"]["revision"]))
+    confirm_outline_tx(
+        tx, branch_id, ConfirmOutline(base_revision=saved["draft"]["revision"]), source_confirmed=True
+    )

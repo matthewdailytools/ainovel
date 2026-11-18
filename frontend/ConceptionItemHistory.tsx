@@ -222,7 +222,9 @@ export function ConceptionItemHistory({
               ) : unchanged ? (
                 <p className="small">此历史版本与当前条目一致。</p>
               ) : (
-                <p className="small">恢复会保存为新的设定草稿。确认及引用它的当前结果需要重新核对。</p>
+                <p className="small">
+                  恢复会保存为新的设定草稿。原条目和作者确认版保留在历史中，当前设定须重新确认，依赖它的大纲、写作依据与体检结果须复核。
+                </p>
               )}
               <button
                 type="button"

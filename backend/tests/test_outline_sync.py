@@ -578,12 +578,23 @@ def test_desktop_outline_cloud_conflict_and_synchronized_graph_dependency(client
         )
         settings_id = setting_confirmation(client, branch)
         content = plan(chapter_plan(chapter["id"], "辨认铃声"))
-        content["new_promises"] = [{"title": "铜铃最终归谁", **window(chapter["id"])}]
-        accepted = put_and_confirm(
-            client,
-            f"/api/branches/{branch}/outline-workspace",
-            {"base_revision": 0, "confirmation_id": settings_id, "plan": content},
+        content["new_promises"] = [
+            {"title": "铜铃最终归谁", "fulfillment": "author_required", **window(chapter["id"])}
+        ]
+        outline = f"/api/branches/{branch}/outline-workspace"
+        drafted = client.put(
+            outline, json={"base_revision": 0, "confirmation_id": settings_id, "plan": content}
         )
+        assert drafted.status_code == 200, drafted.text
+        confirmed = client.post(
+            outline + "/confirm",
+            json={
+                "base_revision": drafted.json()["draft"]["revision"],
+                "acknowledge_required_promises": True,
+            },
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        accepted = confirmed.json()
         base_id = accepted["confirmed"]["id"]
         promise_id = accepted["promises"][0]["promise_id"]
         assert not left.run(branch, origin, left_token)["conflicts"]
@@ -592,9 +603,12 @@ def test_desktop_outline_cloud_conflict_and_synchronized_graph_dependency(client
         assert synced["outline_source"]["id"] == base_id
         mirrored = read_outline(receiver, branch)
         assert mirrored["confirmed"]["id"] != base_id and not mirrored["stale"]
+        assert mirrored["confirmed"]["setting_basis"]["required_promises_confirmation"] == "formal_source"
         assert mirrored["settings"][0]["setting"]["id"] == "bell"
         assert mirrored["promises"][0]["state"] == "planned"
         assert mirrored["promises"][0]["promise_id"] == promise_id
+        assert mirrored["promises"][0]["fulfillment_met"] is False
+        assert mirrored["promises"][0]["due"] == "due"
         assert receiver.chapter(chapter["id"])["content"] == chapter["content"]
         ordered = cloud.get(
             endpoint + "/pull",
@@ -689,10 +703,12 @@ def test_desktop_outline_cloud_conflict_and_synchronized_graph_dependency(client
         assert not left.run(branch, origin, left_token)["conflicts"]
         synchronized = right.run(branch, origin, right_token)
         assert not synchronized["deferred"] and not synchronized["conflicts"], synchronized
-        assert {(row["promise_id"], row["state"]) for row in read_outline(receiver, branch)["promises"]} == {
+        promises = read_outline(receiver, branch)["promises"]
+        assert {(row["promise_id"], row["state"]) for row in promises} == {
             (promise_id, "resolved"),
             (later_promise_id, "resolved"),
         }
+        assert next(row for row in promises if row["promise_id"] == promise_id)["fulfillment_met"] is True
         assert {row["id"] for row in graph(receiver, branch)["records"]} == {promise_id, later_promise_id}
         with receiver.db.connect() as tx:
             assert outline_sync.read_outline_head(tx, branch) == later

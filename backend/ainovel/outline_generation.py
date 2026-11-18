@@ -20,6 +20,7 @@ from .outline_workspace import (
     _latest,
     _settings,
     _validate,
+    required_promise_windows,
 )
 from .story_graph import graph_snapshot
 
@@ -90,6 +91,8 @@ def freeze_tx(tx, branch_id, request):
         basis["reference_cards"] = list(
             {_card_key(card): card for card in [*basis.get("reference_cards", []), *approved]}.values()
         )
+    confirmed = _decode(_latest(tx, branch_id, True))
+    required = required_promise_windows(confirmed["plan"] if confirmed else None)
     return {
         "base_revision": request["base_revision"],
         "outline": previous["plan"] if previous else None,
@@ -97,6 +100,7 @@ def freeze_tx(tx, branch_id, request):
         "project": confirmed_project_tx(tx, branch_id),
         "chapters": chapters,
         "promises": records,
+        **({"required_promise_windows": required} if required else {}),
         **({"reference_cards": references} if references else {}),
     }
 
@@ -231,6 +235,7 @@ async def run(worker, request, frozen):
     else:
         schema["properties"]["promises"]["maxItems"] = 0
     for window_kind in ("PromiseWindow", "NewPromisePlan"):
+        definitions[window_kind]["properties"].pop("fulfillment")
         for field in WINDOW_CHAPTERS:
             definitions[window_kind]["properties"][field]["enum"] = chapter_ids
     instruction = {
@@ -247,6 +252,7 @@ async def run(worker, request, frozen):
             "卷与单元的 id 使用互不相同的简短字母数字编号。"
             "按需引用现有设定与伏笔编号。缺少合适记录时，在 new_promises 提议新伏笔，填写唯一标题和计划说明。"
             "新旧伏笔窗口均须使用目录章号，按埋设、进入回收窗口、最迟回收排列。"
+            "必达承诺由作者选择和确认，候选不能新增或调整必达约定。"
             "这是规划候选，不能把计划写成已发生的事实。"
         ),
     }
@@ -265,12 +271,22 @@ async def run(worker, request, frozen):
         for _, _, row in _chapter_plans(frozen["outline"] or {"volumes": []})
         if row.get("reference_cards")
     }
+    required = frozen.get("required_promise_windows", {})
     for attempt in range(2):
         value = await worker.call(
             instruction, schema=OutlinePlan, context={}, contract=schema, max_output=8192
         )
         plan = OutlinePlan.model_validate(value).model_dump()
         try:
+            if any(
+                window.get("fulfillment") for window in [*plan["promises"], *plan.get("new_promises", [])]
+            ):
+                raise DomainError("outline_required_promises", "必达承诺须由作者声明，候选只能提出普通伏笔。")
+            if required:
+                plan["promises"] = [
+                    *required.values(),
+                    *(window for window in plan["promises"] if window["promise_id"] not in required),
+                ]
             for _, _, row in _chapter_plans(plan):
                 chosen = row.get("reference_cards", [])
                 if not {_card_key(ref) for ref in chosen} <= eligible:

@@ -672,6 +672,9 @@ def _outline(worker, state):
                 ),
                 before_write=_guard(worker, state),
             )
+        if view.get("requires_promise_confirmation"):
+            _checkpoint(worker, "needs_review", "请在大纲台核对必达承诺变更并确认后再继续。")
+            return
         view = confirm_outline(
             worker.domain,
             branch,

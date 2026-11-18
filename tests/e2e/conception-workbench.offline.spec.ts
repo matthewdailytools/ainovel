@@ -262,8 +262,22 @@ test('设定条目历史对照后只恢复所选条目，并在保存版变化�
   const restore = history.getByRole('button', { name: '恢复所选版本为设定草稿' })
   await restore.click()
   await expect(history.getByRole('alert')).toContainText('构思或故事记录已更新')
+  const basis = await readWorkbench(page, base)
+  const signed = await page.request.post(base + '/confirm', {
+    headers,
+    data: {
+      base_revision: basis.revision,
+      base_story_revision: basis.story_revision,
+      idempotency_key: 'confirmed-before-item-recovery',
+    },
+  })
+  expect(signed.ok(), await signed.text()).toBe(true)
+  const confirmation = ((await signed.json()) as ConceptionState).confirmation
+  expect(confirmation?.id).toBeTruthy()
   await history.getByRole('button', { name: '重新读取设定和历史' }).click()
   await expect(history.getByRole('region', { name: '当前保存版 · 修订 3' })).toContainText('潮响五次开锁。')
+  await expect(history.getByText(/原条目和作者确认版保留在历史中/)).toBeVisible()
+  await expect(history.getByText(/依赖它的大纲、写作依据与体检结果须复核/)).toBeVisible()
   await restore.click()
   await expect(history.getByText('条目已恢复为设定草稿修订 4。可核对后重新确认。')).toBeVisible()
   const updated = await readWorkbench(page, base)
@@ -271,7 +285,16 @@ test('设定条目历史对照后只恢复所选条目，并在保存版变化�
     { id: 'tide-lock', detail: '潮响三次开锁。' },
     { id: 'dock-guard', detail: '轮岗之前核对铜牌。' },
   ])
-  expect(updated.confirmation).toBeNull()
+  expect(updated.confirmation).toMatchObject({
+    id: confirmation?.id,
+    current: false,
+    revision: basis.revision,
+  })
+  const preserved = await page.request.get(`/api/artifacts/${confirmation?.id}`)
+  expect(preserved.ok(), await preserved.text()).toBe(true)
+  expect(
+    (await preserved.json()).payload.categories.find(({ id }: { id: string }) => id === 'world').items,
+  ).toMatchObject([{ id: 'tide-lock', detail: '潮响五次开锁。' }, { id: 'dock-guard' }])
   await expect(page.getByRole('button', { name: '确认当前构思', exact: true })).toBeEnabled()
 })
 

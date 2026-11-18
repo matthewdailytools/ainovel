@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('作品快照预览保留旧章稿，检查并发基线后原位产生新修订', async ({ page }) => {
+test('卷快照预览列出受影响报告，检查并发基线后仅恢复该卷稿件', async ({ page }) => {
   await page.goto('/')
   const session = await (await page.request.get('/api/session')).json()
   const headers = { 'X-Ainovel-CSRF': session.csrf }
@@ -10,12 +10,14 @@ test('作品快照预览保留旧章稿，检查并发基线后原位产生新�
   })
   expect(created.ok()).toBe(true)
   const novel = await created.json()
-  const chapterResponse = await page.request.post(`/api/branches/${novel.branch_id}/chapters`, {
-    headers,
-    data: { title: '铃响' },
-  })
-  expect(chapterResponse.ok()).toBe(true)
-  const chapter = await chapterResponse.json()
+  const branch = `/api/branches/${novel.branch_id}`
+  async function createChapter(title: string) {
+    const response = await page.request.post(`${branch}/chapters`, { headers, data: { title } })
+    expect(response.ok(), await response.text()).toBe(true)
+    return (await response.json()) as { id: string; title: string }
+  }
+  const chapter = await createChapter('铃响')
+  const otherChapter = await createChapter('守灯')
   const first = '师姐在门内接过铜铃。😀'
   async function save(base_revision: number, content: string): Promise<number> {
     const response = await page.request.put(`/api/chapters/${chapter.id}`, {
@@ -26,19 +28,74 @@ test('作品快照预览保留旧章稿，检查并发基线后原位产生新�
     return (await response.json()).revision
   }
   const firstRevision = await save(0, first)
+  const otherText = '守门人把油灯放在桥下。'
+  const otherSaved = await page.request.put(`/api/chapters/${otherChapter.id}`, {
+    headers,
+    data: { base_revision: 0, content: otherText },
+  })
+  expect(otherSaved.ok(), await otherSaved.text()).toBe(true)
+  const volumes = [chapter, otherChapter].map(({ id, title }, index) => ({
+    id: `volume-${index + 1}`,
+    title: `${title}卷`,
+    summary: `围绕${title}寻找线索。`,
+    units: [
+      {
+        id: `unit-${index + 1}`,
+        title,
+        summary: '发现可核对的线索。',
+        chapters: [
+          { chapter_id: id, goal: '找线索', obstacle: '夜暗', turn: '有人引路', result: '看清线索' },
+        ],
+      },
+    ],
+  }))
+  const outlinePath = `${branch}/outline-workspace`
+  const planned = await page.request.put(outlinePath, {
+    headers,
+    data: { base_revision: 0, plan: { summary: '学徒循铃声和灯寻找回路。', volumes } },
+  })
+  expect(planned.ok(), await planned.text()).toBe(true)
+  const { draft } = await planned.json()
+  const signed = await page.request.post(`${outlinePath}/confirm`, {
+    headers,
+    data: { base_revision: draft.revision },
+  })
+  expect(signed.ok(), await signed.text()).toBe(true)
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
   const panel = page.getByRole('region', { name: '作品快照与回滚', exact: true })
+  await panel.getByRole('combobox', { name: '快照范围' }).selectOption('volume')
+  await panel.getByRole('combobox', { name: '快照所用卷' }).selectOption(volumes[0].id)
   await panel.getByRole('textbox', { name: '快照名称', exact: true }).fill('首稿检查点')
   await panel.getByRole('button', { name: '保存快照', exact: true }).press('Enter')
   await expect(panel.getByRole('status')).toHaveText('已保存作品快照。')
 
   const second = '学徒在门外收起铜铃。'
   const secondRevision = await save(firstRevision, second)
+  const reportsPath = `${branch}/workflow-inspections`
+  const reportPath = (id: string) => `${reportsPath}?scope=volume&scope_id=${id}`
+  async function inspect(id: string) {
+    const { preview } = await (await page.request.get(reportPath(id))).json()
+    const report = await page.request.post(reportsPath, {
+      headers,
+      data: { scope: 'volume', scope_id: id, basis_sha256: preview.basis_sha256 },
+    })
+    expect(report.ok(), await report.text()).toBe(true)
+    return (await report.json()) as { id: string; current: boolean }
+  }
+  const firstReport = await inspect(volumes[0].id)
+  const otherReport = await inspect(volumes[1].id)
+  expect(firstReport.current && otherReport.current).toBe(true)
   await panel.getByRole('button', { name: '预览恢复差异' }).click()
   const effect = panel.getByRole('region', { name: '恢复差异预览' })
+  await expect(effect).toBeFocused()
   await expect(effect.getByRole('listitem').filter({ hasText: '恢复快照稿' })).toHaveCount(1)
+  const affected = effect.getByRole('region', { name: '受影响报告' })
+  await expect(affected).toContainText(firstReport.id)
+  await expect(affected).toContainText('铃响卷')
+  await expect(affected).not.toContainText(otherReport.id)
+  await expect(affected).not.toContainText('守灯卷')
   await effect.getByRole('button', { name: '比较铃响正文' }).click()
   const compare = effect.getByRole('region', { name: '章稿对照' })
   await expect(compare.getByText(first)).toBeVisible()
@@ -50,8 +107,13 @@ test('作品快照预览保留旧章稿，检查并发基线后原位产生新�
   await effect.getByRole('checkbox', { name: '我已核对恢复影响' }).check()
   await submit.click()
   await expect(panel.getByRole('alert')).toContainText('请重新预览')
+  await expect(panel.getByRole('button', { name: '预览恢复差异' })).toBeFocused()
+  await expect(submit).toBeDisabled()
+  await expect(effect.getByRole('checkbox', { name: '我已核对恢复影响' })).not.toBeChecked()
+  const currentFirstReport = await inspect(volumes[0].id)
 
   await panel.getByRole('button', { name: '预览恢复差异' }).click()
+  await expect(affected).toContainText(currentFirstReport.id)
   await effect.getByRole('checkbox', { name: '我已核对恢复影响' }).check()
   const committed = page.waitForResponse(
     (response) => response.request().method() === 'POST' && response.url().endsWith('/restore'),
@@ -66,4 +128,10 @@ test('作品快照预览保留旧章稿，检查并发基线后原位产生新�
   expect(after.revision).toBeGreaterThan(thirdRevision)
   const history = await (await page.request.get(`/api/chapters/${chapter.id}/history`)).json()
   expect(history.find((row: { revision: number }) => row.revision === thirdRevision).content).toBe(third)
+  expect((await (await page.request.get(`/api/chapters/${otherChapter.id}`)).json()).content).toBe(otherText)
+  expect((await (await page.request.get(reportPath(volumes[0].id))).json()).latest.current).toBe(false)
+  expect((await (await page.request.get(reportPath(volumes[1].id))).json()).latest).toMatchObject({
+    id: otherReport.id,
+    current: true,
+  })
 })

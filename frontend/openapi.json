@@ -781,7 +781,9 @@
         "responses": {
           "200": {
             "description": "Successful Response",
-            "content": { "application/json": { "schema": {} } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SnapshotRestorePreview" } }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -856,6 +858,78 @@
             "schema": { "type": "string", "title": "Chapter Id" }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapters/{chapter_id}/history/{revision_id}/restore-preview": {
+      "get": {
+        "summary": "Preview Chapter Restore",
+        "operationId": "preview_chapter_restore_api_chapters__chapter_id__history__revision_id__restore_preview_get",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Revision Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ChapterRestorePreview" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapters/{chapter_id}/history/{revision_id}/restore": {
+      "post": {
+        "summary": "Restore Chapter Revision",
+        "operationId": "restore_chapter_revision_api_chapters__chapter_id__history__revision_id__restore_post",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Revision Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ChapterRestoreInput" } }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -5573,6 +5647,23 @@
         "required": ["base_story_revision", "candidate_revision", "selected_ids", "idempotency_key"],
         "title": "AdoptExtraction"
       },
+      "AffectedReport": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "kind": {
+            "type": "string",
+            "enum": ["workflow_inspection", "book_completion", "author_finalization", "setting_review"],
+            "title": "Kind"
+          },
+          "scope": { "type": "string", "enum": ["chapter", "volume", "book"], "title": "Scope" },
+          "scope_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Scope Id" },
+          "check_ids": { "items": { "type": "string" }, "type": "array", "title": "Check Ids" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "kind", "scope", "scope_id", "check_ids"],
+        "title": "AffectedReport"
+      },
       "AggregateCount": {
         "properties": {
           "chapter_id": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Chapter Id" },
@@ -6188,6 +6279,52 @@
         "required": ["chapter_id", "goal", "obstacle", "turn", "result"],
         "title": "ChapterPlan"
       },
+      "ChapterRestoreInput": {
+        "properties": {
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["basis_sha256"],
+        "title": "ChapterRestoreInput"
+      },
+      "ChapterRestorePreview": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "title": { "type": "string", "title": "Title" },
+          "current": { "$ref": "#/components/schemas/RestoreRevision" },
+          "target": { "$ref": "#/components/schemas/RestoreRevision" },
+          "basis_sha256": { "type": "string", "title": "Basis Sha256" },
+          "references": {
+            "items": { "$ref": "#/components/schemas/RestoreReference" },
+            "type": "array",
+            "title": "References"
+          },
+          "promises": {
+            "items": { "$ref": "#/components/schemas/RestorePromise" },
+            "type": "array",
+            "title": "Promises"
+          },
+          "affected_reports": {
+            "items": { "$ref": "#/components/schemas/AffectedReport" },
+            "type": "array",
+            "title": "Affected Reports"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chapter_id",
+          "title",
+          "current",
+          "target",
+          "basis_sha256",
+          "references",
+          "promises",
+          "affected_reports"
+        ],
+        "title": "ChapterRestorePreview"
+      },
       "Character": {
         "properties": {
           "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
@@ -6646,7 +6783,14 @@
         "title": "ConfirmConception"
       },
       "ConfirmOutline": {
-        "properties": { "base_revision": { "type": "integer", "minimum": 1, "title": "Base Revision" } },
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 1, "title": "Base Revision" },
+          "acknowledge_required_promises": {
+            "type": "boolean",
+            "title": "Acknowledge Required Promises",
+            "default": false
+          }
+        },
         "additionalProperties": false,
         "type": "object",
         "required": ["base_revision"],
@@ -7875,6 +8019,10 @@
             "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Closes Chapter Id"
           },
+          "fulfillment": {
+            "anyOf": [{ "type": "string", "const": "author_required" }, { "type": "null" }],
+            "title": "Fulfillment"
+          },
           "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
           "notes": { "type": "string", "maxLength": 4000, "title": "Notes", "default": "" }
         },
@@ -8578,6 +8726,10 @@
             "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Closes Chapter Id"
           },
+          "fulfillment": {
+            "anyOf": [{ "type": "string", "const": "author_required" }, { "type": "null" }],
+            "title": "Fulfillment"
+          },
           "promise_id": {
             "type": "string",
             "maxLength": 128,
@@ -9110,6 +9262,62 @@
         "required": ["title"],
         "title": "RenameInput"
       },
+      "RestorePromise": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "title": { "type": "string", "title": "Title" },
+          "status": { "type": "string", "title": "Status" },
+          "sources": {
+            "items": { "$ref": "#/components/schemas/RestoreSource" },
+            "type": "array",
+            "title": "Sources"
+          },
+          "window": { "anyOf": [{ "$ref": "#/components/schemas/RestorePromiseWindow" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title", "status", "sources", "window"],
+        "title": "RestorePromise"
+      },
+      "RestorePromiseWindow": {
+        "properties": {
+          "plant_chapter_id": { "type": "string", "title": "Plant Chapter Id" },
+          "opens_chapter_id": { "type": "string", "title": "Opens Chapter Id" },
+          "closes_chapter_id": { "type": "string", "title": "Closes Chapter Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["plant_chapter_id", "opens_chapter_id", "closes_chapter_id"],
+        "title": "RestorePromiseWindow"
+      },
+      "RestoreReference": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["outline", "setting", "reference_card", "story_record", "fact", "scene_time"],
+            "title": "Kind"
+          },
+          "id": { "type": "string", "title": "Id" },
+          "title": { "type": "string", "title": "Title" },
+          "source": { "anyOf": [{ "$ref": "#/components/schemas/RestoreSource" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "id", "title", "source"],
+        "title": "RestoreReference"
+      },
+      "RestoreRevision": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "content": { "type": "string", "title": "Content" },
+          "sha256": { "type": "string", "title": "Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "revision", "content", "sha256"],
+        "title": "RestoreRevision"
+      },
       "RestoreSettingItem": {
         "properties": {
           "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
@@ -9132,6 +9340,19 @@
         "type": "object",
         "required": ["base_revision", "base_story_revision", "idempotency_key", "source_workspace_id"],
         "title": "RestoreSettingItem"
+      },
+      "RestoreSource": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "start": { "type": "integer", "title": "Start" },
+          "end": { "type": "integer", "title": "End" },
+          "quote": { "type": "string", "title": "Quote" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "revision", "start", "end", "quote"],
+        "title": "RestoreSource"
       },
       "ResumeInput": {
         "properties": {
@@ -9735,6 +9956,54 @@
         "type": "object",
         "required": ["label"],
         "title": "SnapshotInput"
+      },
+      "SnapshotRestorePreview": {
+        "properties": {
+          "snapshot": {
+            "additionalProperties": { "$ref": "#/components/schemas/JsonValue" },
+            "type": "object",
+            "title": "Snapshot"
+          },
+          "basis_sha256": { "type": "string", "title": "Basis Sha256" },
+          "changes": {
+            "items": {
+              "additionalProperties": { "$ref": "#/components/schemas/JsonValue" },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Changes"
+          },
+          "in_place_blockers": {
+            "items": { "type": "string" },
+            "type": "array",
+            "title": "In Place Blockers"
+          },
+          "shared_changes": {
+            "additionalProperties": { "$ref": "#/components/schemas/JsonValue" },
+            "type": "object",
+            "title": "Shared Changes"
+          },
+          "reports": { "additionalProperties": { "type": "string" }, "type": "object", "title": "Reports" },
+          "affected_reports": {
+            "items": { "$ref": "#/components/schemas/AffectedReport" },
+            "type": "array",
+            "title": "Affected Reports"
+          },
+          "notes": { "items": { "type": "string" }, "type": "array", "title": "Notes" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "snapshot",
+          "basis_sha256",
+          "changes",
+          "in_place_blockers",
+          "shared_changes",
+          "reports",
+          "affected_reports",
+          "notes"
+        ],
+        "title": "SnapshotRestorePreview"
       },
       "Source": {
         "properties": {

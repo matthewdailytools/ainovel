@@ -86,7 +86,7 @@ test('离线重开可写，双标签冲突留稿，清理浏览器后从交换�
   await expect(other.getByLabel('章节正文')).toHaveValue(conflicting)
   await other.getByText('本章版本历史').click()
   await other.getByLabel('历史修订').selectOption({ label: '修订 1 · 作者编辑' })
-  await expect(other.locator('pre')).toHaveText(original)
+  await expect(other.locator('[aria-label="历史稿 · 修订 1"]')).toHaveText(original)
   const again = other.waitForEvent('download')
   await other.getByRole('button', { name: '导出稿件交换包' }).click()
   const roundTrip = await again

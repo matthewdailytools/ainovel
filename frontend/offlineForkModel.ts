@@ -214,6 +214,7 @@ function forkOutline(
           })),
         })),
         promises: version.plan.promises.map((window) => ({
+          ...window,
           promise_id: idOf(records, window.promise_id),
           plant_chapter_id: idOf(chapters, window.plant_chapter_id),
           opens_chapter_id: idOf(chapters, window.opens_chapter_id),

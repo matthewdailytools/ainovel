@@ -156,9 +156,7 @@ test('恢复低位云账本后旧键及换号仍挡写，独立 Web 可读回受
     await newWeb
       .getByRole('combobox', { name: '历史修订', exact: true })
       .selectOption({ label: '修订 1 · 作者编辑' })
-    await expect(newWeb.getByRole('region', { name: '离线正文', exact: true }).locator('pre')).toHaveText(
-      seed,
-    )
+    await expect(newWeb.locator('[aria-label="历史稿 · 修订 1"]')).toHaveText(seed)
 
     let newCursor = restored.cursor
     const replacementProse: string[] = []

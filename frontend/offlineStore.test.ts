@@ -11,9 +11,11 @@ import {
   importLocalManuscript,
   listLocalProjects,
   manuscriptHash,
+  readLocalChapterRestore,
   readLocalPublications,
   readLocalHistory,
   readLocalProjectBrief,
+  restoreLocalChapter,
   saveLocalChapter,
   validateManuscript,
   validateSyncedObject,
@@ -45,7 +47,8 @@ test('formal writes preserve authorship, parent IDs and older revisions across c
   expect(history).toHaveLength(2)
   expect(history[1]).toMatchObject({ revision: 1, parent_id: root.id })
   expect(history[1].sha256).toBe(await manuscriptHash(history[1].content))
-  const restored = await saveLocalChapter(a.novel.id, chapter.id, history[1].id, '', root.id)
+  const preview = await readLocalChapterRestore(a.novel.id, chapter.id, root.id)
+  const restored = await restoreLocalChapter(a.novel.id, chapter.id, root.id, preview.basis)
   expect(restored).toMatchObject({ revision: 2, parent_id: history[1].id, content: root.content })
   expect((await readLocalHistory(a.novel.id, chapter.id)).slice(0, 2)).toEqual(history)
 })
@@ -282,8 +285,9 @@ test('an older comparison cannot adopt over a newer local publication with the s
   const objectId = `chapter:${chapter.id}`
   const shown = (await readLocalPublications(branchId)).find((entry) => entry.objectId === objectId)!
 
-  const edit = await saveLocalChapter(key, chapter.id, old.id, '一稿内容。')
-  const restored = await saveLocalChapter(key, chapter.id, edit.id, '', old.id)
+  await saveLocalChapter(key, chapter.id, old.id, '一稿内容。')
+  const preview = await readLocalChapterRestore(key, chapter.id, old.id)
+  const restored = await restoreLocalChapter(key, chapter.id, old.id, preview.basis)
   expect(restored.sha256).toBe(old.sha256)
   const earlier = JSON.stringify([
     'chapter',

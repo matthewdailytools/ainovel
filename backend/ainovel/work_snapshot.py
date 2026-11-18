@@ -6,7 +6,7 @@ import json
 from time import time
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import Field, JsonValue, StringConstraints, model_validator
 
 from .conception import (
     BUILTINS,
@@ -31,6 +31,7 @@ from .outline_workspace import (
 )
 from .project_brief import KIND as PROJECT, confirmed_project_tx
 from .reference_fork import fork_reference_cards
+from .restore_impact import AffectedReport, forecast, invalidated_reports, report_basis
 from .setting_review import confirmed_world_basis
 from .story_extraction import rewrite_references
 from .story_graph import graph_snapshot, sources
@@ -67,6 +68,17 @@ class RestoreInput(Input):
         if (self.mode == "new_branch") != (self.branch_name is not None):
             raise ValueError("新分支须提供名称。")
         return self
+
+
+class SnapshotRestorePreview(Input):
+    snapshot: dict[str, JsonValue]
+    basis_sha256: str
+    changes: list[dict[str, JsonValue]]
+    in_place_blockers: list[str]
+    shared_changes: dict[str, JsonValue]
+    reports: dict[str, str]
+    affected_reports: list[AffectedReport]
+    notes: list[str]
 
 
 def _hash(value):
@@ -338,7 +350,11 @@ def _restore_plan(snapshot, current):
     return wanted, currently_scoped, outside, shared, blockers
 
 
-def _preview(snapshot, current):
+def _restore_basis(snapshot, current, reports):
+    return _hash(dumps([snapshot["id"], current, reports]))
+
+
+def _preview(snapshot, current, reports):
     wanted, scoped, _, shared, blockers = _restore_plan(snapshot, current)
     historical = snapshot["manifest"]
     previous = {chapter["id"]: chapter for chapter in historical["chapters"]}
@@ -383,7 +399,7 @@ def _preview(snapshot, current):
         cautions.append("本次恢复范围内的篇幅目标将随快照恢复，旧修订仍可追溯。")
     return {
         "snapshot": _summary(snapshot),
-        "basis_sha256": _hash(dumps(current)),
+        "basis_sha256": _restore_basis(snapshot, current, reports),
         "changes": changes,
         "in_place_blockers": blockers,
         "shared_changes": {
@@ -397,6 +413,7 @@ def _preview(snapshot, current):
             "outline": _changed(historical, current, "confirmed_outline"),
         },
         "reports": current["reports"],
+        "affected_reports": [],
         "notes": cautions,
     }
 
@@ -907,7 +924,7 @@ def restore(domain, branch_id, snapshot_id, data):
         branch = _branch(tx, branch_id)
         snapshot = _read_snapshot(tx, branch_id, snapshot_id)
         current = _capture(tx, branch_id)
-        if _hash(dumps(current)) != data.basis_sha256:
+        if _restore_basis(snapshot, current, report_basis(tx, branch_id)) != data.basis_sha256:
             raise DomainError("snapshot_changed", "工作版本已有变化，请重新预览影响后恢复。", 409)
         recovery = _save_snapshot(tx, branch, "恢复前检查点", "book", None, current, "pre_restore")
         result = _execute_restore(tx, domain, branch, snapshot, current, data)
@@ -943,10 +960,26 @@ def register_routes(app, domain):
             return _summary(_read_snapshot(tx, branch_id, identifier))
 
     @app.get(endpoint + "/{snapshot_id}/preview")
-    def preview_work_snapshot(branch_id: str, snapshot_id: str):
-        with domain.db.connect() as tx:
-            tx.execute("BEGIN")
-            return _preview(_read_snapshot(tx, branch_id, snapshot_id), _capture(tx, branch_id))
+    def preview_work_snapshot(branch_id: str, snapshot_id: str) -> SnapshotRestorePreview:
+        with domain.db.connect(True) as tx:
+            branch = _branch(tx, branch_id)
+            snapshot = _read_snapshot(tx, branch_id, snapshot_id)
+            current = _capture(tx, branch_id)
+            checked = report_basis(tx, branch_id)
+            preview = _preview(snapshot, current, checked)
+            if checked and not preview["in_place_blockers"]:
+                simulated = RestoreInput(
+                    basis_sha256=preview["basis_sha256"], mode="in_place", idempotency_key="forecast-only"
+                )
+                try:
+                    with forecast(tx):
+                        _execute_restore(tx, domain, branch, snapshot, current, simulated)
+                        preview["affected_reports"] = invalidated_reports(
+                            checked, report_basis(tx, branch_id)
+                        )
+                except DomainError as error:
+                    preview["in_place_blockers"].append(error.message)
+            return preview
 
     @app.post(endpoint + "/{snapshot_id}/restore", status_code=201)
     def restore_work_snapshot(branch_id: str, snapshot_id: str, data: RestoreInput):

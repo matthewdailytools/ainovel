@@ -139,6 +139,7 @@ def create_app(settings=None, schema_only=False):
 
     register_book_completion_routes(app, domain)
     register_workflow_inspection_routes(app, domain)
+    from .chapter_restore import register_routes as register_chapter_restore_routes
     from .manuscript_backup import BACKUP_IMPORT_PATH, MAX_BACKUP_BYTES, size_error as backup_size_error
     from .manuscript_backup import register_routes as register_manuscript_backup_routes
     from .manuscript_exchange import register_routes as register_manuscript_package_routes
@@ -147,6 +148,7 @@ def create_app(settings=None, schema_only=False):
     register_manuscript_package_routes(app, domain)
     register_manuscript_backup_routes(app, domain)
     register_work_snapshot_routes(app, domain)
+    register_chapter_restore_routes(app, domain)
     from .desktop_sync import register_routes as register_desktop_sync_routes
     from .desktop_sync import _origin as normalize_sync_origin
 

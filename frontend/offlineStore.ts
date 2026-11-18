@@ -47,6 +47,8 @@ import {
 import { createStoryOfflineStore, storyReadStores, storyWriteStores } from './storyOfflineStore'
 import { buildOfflineFork, type OfflineForkSelection } from './offlineForkModel'
 import { calculateOfflineRules } from './offlineRules'
+import type { ChapterRestorePreviewProps, RestoreAffectedReport } from './ChapterRestorePreview'
+import { settingIsAdopted } from './conception'
 import {
   createEditedReferenceVersion,
   referenceCardKey,
@@ -263,6 +265,7 @@ const settingsDependencyStores = [
   'settingsHeads',
   'settingsVersions',
 ] satisfies Store[]
+const chapterRestoreStores = [...new Set([...outlineReadStores, ...storyReadStores, ...workflowStores])]
 
 export class OfflineStoreError extends Error {
   constructor(
@@ -572,48 +575,310 @@ export function readLocalHistory(projectId: string, chapterId: string): Promise<
   })
 }
 
+function chapterHead(tx: IDBTransaction, chapter: LocalChapter) {
+  return result<LocalRevision | undefined>(
+    tx.objectStore('revisions').index('byRevision').get([chapter.id, chapter.revision]),
+  )
+}
+
+async function writeChapterRevision(
+  tx: IDBTransaction,
+  project: LocalProject,
+  chapter: LocalChapter,
+  head: LocalRevision,
+  body: string,
+  sha256: string,
+  cause: string,
+) {
+  const revision = {
+    id: newId(),
+    chapter_id: chapter.id,
+    revision: head.revision + 1,
+    parent_id: head.id,
+    content: body,
+    sha256,
+    cause,
+    created: now(),
+  }
+  chapter.revision = revision.revision
+  chapter.stale = 0
+  project.branch.story_revision += 1
+  await result(tx.objectStore('revisions').add(revision))
+  await result(tx.objectStore('chapters').put(chapter))
+  await result(tx.objectStore('projects').put(project))
+  await markPublication(tx, chapter.branch_id, `revision:${revision.id}`, `chapter:${chapter.id}`)
+  return revision
+}
+
 export async function saveLocalChapter(
   projectId: string,
   chapterId: string,
   baseId: string,
   text: string,
-  restoreId?: string,
 ): Promise<LocalRevision> {
-  if (restoreId) {
-    const previous = (await readLocalHistory(projectId, chapterId)).find((item) => item.id === restoreId)
-    if (!previous) throw new OfflineStoreError('missing', '历史稿件已不存在。')
-    text = previous.content
-  }
   const body = content(text, 250_000, '正文')
   const sha256 = await manuscriptHash(body)
   return transact(['projects', 'chapters', 'revisions', 'publications'], 'readwrite', async (tx) => {
     const project = await readProject(tx, projectId)
     const chapter = await readChapter(tx, project, chapterId)
-    const versions = tx.objectStore('revisions')
-    const head = await result<LocalRevision | undefined>(
-      versions.index('byRevision').get([chapterId, chapter.revision]),
-    )
+    const head = await chapterHead(tx, chapter)
     if (!head || head.id !== baseId)
       throw new OfflineStoreError('conflict', '本章已有新修订。当前输入保留，请查看已保存的新稿后另行处理。')
-    if (head.content === body && !restoreId) return head
-    const revision = {
-      id: newId(),
-      chapter_id: chapterId,
-      revision: head.revision + 1,
-      parent_id: head.id,
-      content: body,
-      sha256,
-      cause: restoreId ? '恢复历史为新修订' : '作者编辑',
-      created: now(),
+    if (head.content === body) return head
+    return writeChapterRevision(tx, project, chapter, head, body, sha256, '作者编辑')
+  })
+}
+
+async function localRestorePreview(
+  tx: IDBTransaction,
+  project: LocalProject,
+  chapter: LocalChapter,
+  id: string,
+) {
+  const branchId = project.branch.id
+  const [current, target, outline, story, reports] = await Promise.all([
+    chapterHead(tx, chapter),
+    result<LocalRevision | undefined>(tx.objectStore('revisions').get(id)),
+    outlineStore.readOutlineTx(tx, project),
+    storyStore.readStoryTx(tx, project),
+    readWorkflowHistory(tx, branchId),
+  ])
+  if (!current || target?.chapter_id !== chapter.id)
+    throw new OfflineStoreError('missing', '当前稿或历史修订已不存在。')
+
+  const references: ChapterRestorePreviewProps['references'][number][] = []
+  const promises: ChapterRestorePreviewProps['promises'][number][] = []
+  const storyRevisions: string[] = []
+  const affected_reports: RestoreAffectedReport[] = []
+  type EvidenceSource = NonNullable<ChapterRestorePreviewProps['references'][number]['source']>
+  async function quote(evidence: { chapter_id: string; revision_id: string; start: number; end: number }) {
+    const original = await sourceRevision(tx, branchId, evidence.revision_id)
+    if (original?.chapter_id !== evidence.chapter_id) return
+    return {
+      chapter_id: original.chapter_id,
+      revision: original.revision,
+      start: evidence.start,
+      end: evidence.end,
+      quote: original.content.slice(evidence.start, evidence.end),
+    } satisfies EvidenceSource
+  }
+
+  const adopted = outline.current?.version
+  const windows = adopted?.plan.promises ?? []
+  if (adopted) {
+    for (const volume of adopted.plan.volumes) {
+      for (const unit of volume.units) {
+        const plan = unit.chapters.find(({ chapter_id }) => chapter_id === chapter.id)
+        if (!plan) continue
+        references.push({
+          kind: 'outline',
+          id: adopted.id,
+          title: `${volume.title} / ${unit.title}`,
+          source: null,
+        })
+        for (const card of adopted.reference_cards) {
+          if (
+            !plan.reference_cards?.some(
+              ({ session_id, card_id, revision, version_id }) =>
+                session_id === card.session_id &&
+                card_id === card.card_id &&
+                revision === card.revision &&
+                version_id === card.version_id,
+            )
+          )
+            continue
+          references.push({
+            kind: 'reference_card',
+            id: card.version_id ?? card.card_id,
+            title: card.technique,
+            source: null,
+          })
+        }
+        const frozenSettings = adopted.settings_version_id
+          ? (await getSettingsVersion(tx, branchId, adopted.settings_version_id))?.version
+          : undefined
+        for (const category of frozenSettings?.categories ?? []) {
+          for (const item of category.items) {
+            if (plan.setting_ids.includes(item.id))
+              references.push({ kind: 'setting', id: item.id, title: item.title, source: null })
+          }
+        }
+      }
     }
-    chapter.revision = revision.revision
-    chapter.stale = 0
-    project.branch.story_revision += 1
-    await result(versions.add(revision))
-    await result(tx.objectStore('chapters').put(chapter))
-    await result(tx.objectStore('projects').put(project))
-    await markPublication(tx, chapter.branch_id, `revision:${revision.id}`, `chapter:${chapter.id}`)
-    return revision
+  }
+  for (const category of outline.settings?.categories ?? []) {
+    if (category.skipped) continue
+    for (const item of category.items) {
+      const source = outline.settings?.origins[item.id]?.evidence
+      if (settingIsAdopted(item) && source?.chapter_id === chapter.id)
+        references.push({
+          kind: 'setting',
+          id: item.id,
+          title: item.title,
+          source: (await quote(source)) ?? null,
+        })
+    }
+  }
+  const windowById = new Map(windows.map((window) => [window.promise_id, window]))
+  const records = story.records
+    .filter(({ version }) => !version.archived)
+    .map(({ version, invalidReasons }) => {
+      const sources = [version.evidence.record, ...version.evidence.stages].flat()
+      return {
+        version,
+        invalidReasons,
+        sources,
+        localSources: sources.filter(({ chapter_id }) => chapter_id === chapter.id),
+      }
+    })
+  const dependents = new Map<string, string[]>()
+  for (const { version } of records) {
+    for (const dependency of Object.keys(version.dependencies)) {
+      const linked = dependents.get(dependency)
+      if (linked) linked.push(version.record_id)
+      else dependents.set(dependency, [version.record_id])
+    }
+  }
+  const affected = new Set(
+    records.filter(({ localSources }) => localSources.length).map(({ version }) => version.record_id),
+  )
+  for (const identifier of affected) {
+    for (const dependent of dependents.get(identifier) ?? []) affected.add(dependent)
+  }
+  for (const { version, invalidReasons, sources, localSources } of records) {
+    const { record } = version
+    const window = windowById.get(version.record_id)
+    if (record.kind === 'promise') {
+      if (
+        affected.has(version.record_id) ||
+        (window &&
+          [window.plant_chapter_id, window.opens_chapter_id, window.closes_chapter_id].includes(chapter.id))
+      ) {
+        storyRevisions.push(version.id)
+        promises.push({
+          id: version.record_id,
+          title: record.title,
+          status: invalidReasons.length ? 'stale' : (record.stages.at(-1)?.status ?? 'planned'),
+          sources: (await Promise.all(sources.map(quote))).filter((source) => source !== undefined),
+          window: window ?? null,
+        })
+      }
+      windowById.delete(version.record_id)
+    } else if (affected.has(version.record_id)) {
+      storyRevisions.push(version.id)
+      const selected = localSources.length ? localSources : [null]
+      for (const evidence of selected)
+        references.push({
+          kind: 'story_record',
+          id: version.record_id,
+          title: record.title,
+          source: evidence ? ((await quote(evidence)) ?? null) : null,
+        })
+    }
+  }
+  for (const row of outline.promises) {
+    const window = windowById.get(row.id)
+    if (
+      !row.archived &&
+      window &&
+      [window.plant_chapter_id, window.opens_chapter_id, window.closes_chapter_id].includes(chapter.id)
+    )
+      promises.push({ id: row.id, title: row.title, status: 'planned', sources: [], window })
+  }
+
+  const active = new Map(outline.chapters.filter(({ archived }) => !archived).map((row) => [row.id, row]))
+  const heads = new Map<string, Promise<LocalRevision | undefined>>()
+  async function isCurrent(binding: ArchivedInspection['chapter_bindings'][number]) {
+    const bound = active.get(binding.id)
+    if (!bound || bound.stale) return false
+    if (!heads.has(bound.id)) heads.set(bound.id, chapterHead(tx, bound))
+    const saved = await heads.get(bound.id)
+    return (
+      saved?.sha256 === binding.sha256 &&
+      (saved.id === binding.revision_id ||
+        Boolean(
+          await result(
+            tx.objectStore('storyChapterAliases').getKey([branchId, binding.revision_id, saved.id]),
+          ),
+        ))
+    )
+  }
+  const inspected = new Set<string>()
+  for (const { id, report, chapter_bindings } of reports.inspections.sort(
+    (a, b) => b.created - a.created || a.id.localeCompare(b.id),
+  )) {
+    const scope = `${report.scope}:${report.scope_id ?? ''}`
+    if (inspected.has(scope) || (report.scope === 'book' && chapter_bindings.length !== active.size)) continue
+    const direct = chapter_bindings.some((link) => link.id === chapter.id)
+    const couldChange = report.items.filter(
+      (item) =>
+        !['pending', 'outdated'].includes(item.status) &&
+        (direct ||
+          item.author_review?.evidence.some(
+            (src) => src.chapter_id === chapter.id && src.revision === current.revision,
+          )),
+    )
+    if (!couldChange.length || !(await Promise.all(chapter_bindings.map(isCurrent))).every(Boolean)) continue
+    inspected.add(scope)
+    affected_reports.push({
+      id,
+      kind: 'workflow_inspection',
+      scope: report.scope,
+      scope_id: report.scope_id,
+      check_ids: couldChange.map(({ check_id }) => check_id),
+    })
+  }
+  for (const { id, chapter_bindings } of reports.completions) {
+    if (
+      chapter_bindings.length === active.size &&
+      chapter_bindings.some((link) => link.id === chapter.id) &&
+      (await Promise.all(chapter_bindings.map(isCurrent))).every(Boolean)
+    )
+      affected_reports.push({ id, kind: 'book_completion', scope: 'book', scope_id: null, check_ids: [] })
+  }
+
+  const basis = JSON.stringify([
+    chapter.id,
+    chapter.title,
+    current.id,
+    current.sha256,
+    target.id,
+    target.sha256,
+    outline.projectVersionId,
+    adopted?.id,
+    outline.settings?.id,
+    storyRevisions,
+    references,
+    promises,
+    affected_reports,
+  ])
+  return { current, target, references, promises, affected_reports, basis }
+}
+
+export function readLocalChapterRestore(projectId: string, chapterId: string, revisionId: string) {
+  return transact(chapterRestoreStores, 'readonly', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const chapter = await readChapter(tx, project, chapterId)
+    return localRestorePreview(tx, project, chapter, revisionId)
+  })
+}
+
+export function restoreLocalChapter(projectId: string, chapterId: string, revisionId: string, basis: string) {
+  return transact([...chapterRestoreStores, 'publications'], 'readwrite', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const chapter = await readChapter(tx, project, chapterId)
+    const { current, target, basis: active } = await localRestorePreview(tx, project, chapter, revisionId)
+    if (active !== basis || current.id === target.id)
+      throw new OfflineStoreError('conflict', '正文或相关依据已有变化。请重新读取恢复预览。')
+    return writeChapterRevision(
+      tx,
+      project,
+      chapter,
+      current,
+      target.content,
+      target.sha256,
+      '恢复历史为新修订',
+    )
   })
 }
 

@@ -9,6 +9,7 @@ import {
   outlinePromiseSeed,
   outlineWindowFields,
   prepareOutlineVersion,
+  requiredPromiseSignature,
   validateOutlineVersionSources,
   type OutlineArchivePending,
   type OutlineCard,
@@ -131,6 +132,7 @@ export function OfflineOutline({
   const [data, setData] = useState<OfflineOutlineData>()
   const [draft, setDraft] = useState<OutlineVersion>()
   const [restoringId, setRestoringId] = useState<string>()
+  const [agreedPromiseChange, setAgreedPromiseChange] = useState<string>()
   const [promiseTitle, setPromiseTitle] = useState('')
   const [promiseNotes, setPromiseNotes] = useState('')
   const [nextPromise, setNextPromise] = useState('')
@@ -141,6 +143,13 @@ export function OfflineOutline({
   const recoveryFocus = useRef<HTMLTextAreaElement>(null)
   const request = useRef(0)
   const current = data?.current?.version
+  const currentPromises = requiredPromiseSignature(current?.plan)
+  const draftPromises = requiredPromiseSignature(draft?.plan)
+  const promiseChange =
+    draft && currentPromises !== draftPromises
+      ? JSON.stringify([draft.id, currentPromises, draftPromises])
+      : undefined
+  const agreesToPromises = !promiseChange || agreedPromiseChange === promiseChange
   const activeSettings = data?.settings?.project_version_id === data?.projectVersionId ? data?.settings : null
   const stale =
     !!draft &&
@@ -278,7 +287,7 @@ export function OfflineOutline({
   }
 
   async function confirm() {
-    if (!draft || !data || stale) return
+    if (!draft || !data || stale || !agreesToPromises) return
     setBusy(true)
     setError('')
     try {
@@ -298,6 +307,7 @@ export function OfflineOutline({
       await validateCurrentSources(version)
       await onConfirm(draft.parent_id, version)
       setDraft(undefined)
+      setAgreedPromiseChange(undefined)
       setRestoringId(undefined)
       setStatus(restoringId ? '已确认历史内容为新的大纲修订。' : '已确认并保存大纲修订。')
     } catch (failure) {
@@ -582,6 +592,19 @@ export function OfflineOutline({
                       onChange={(id) => update({ ...window, [key]: id })}
                     />
                   ))}
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={window.fulfillment === 'author_required'}
+                      onChange={(event) =>
+                        update({
+                          ...window,
+                          fulfillment: event.target.checked ? 'author_required' : undefined,
+                        })
+                      }
+                    />
+                    必须在回收窗口内兑现
+                  </label>
                   <button
                     type="button"
                     onClick={() =>
@@ -647,7 +670,17 @@ export function OfflineOutline({
               添加新伏笔计划
             </button>
           </fieldset>
-          <button type="button" disabled={stale} onClick={() => void confirm()}>
+          {promiseChange && (
+            <label>
+              <input
+                type="checkbox"
+                checked={agreesToPromises}
+                onChange={(event) => setAgreedPromiseChange(event.target.checked ? promiseChange : undefined)}
+              />
+              我已核对必达承诺的新增、调整或撤销
+            </label>
+          )}
+          <button type="button" disabled={stale || !agreesToPromises} onClick={() => void confirm()}>
             确认大纲并保存到浏览器
           </button>
           <button
@@ -655,6 +688,7 @@ export function OfflineOutline({
             onClick={() => {
               if (window.confirm('放弃本次未确认的大纲修改？')) {
                 setDraft(undefined)
+                setAgreedPromiseChange(undefined)
                 setRestoringId(undefined)
                 setError('')
               }

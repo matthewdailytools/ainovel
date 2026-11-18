@@ -7,9 +7,11 @@ import {
   exportLocalManuscript,
   importLocalManuscript,
   manuscriptHash,
+  readLocalChapterRestore,
   readLocalHistory,
   readLocalPublications,
   readLocalWorkflowHistory,
+  restoreLocalChapter,
   saveLocalChapter,
 } from './offlineStore'
 import { httpSyncTransport, syncWebManuscript } from './manuscriptSync'
@@ -152,8 +154,9 @@ test.each([false, true])(
     expect(cloud.latest.get(id)?.payload?.head).toMatchObject({ id: next.id, content: next.content })
     expect(await readLocalPublications(scope.workId)).toEqual([])
 
-    const intermediate = await saveLocalChapter(key, chapter.id, next.id, '短暂的第三稿')
-    const restore = await saveLocalChapter(key, chapter.id, intermediate.id, '', next.id)
+    await saveLocalChapter(key, chapter.id, next.id, '短暂的第三稿')
+    const preview = await readLocalChapterRestore(key, chapter.id, next.id)
+    const restore = await restoreLocalChapter(key, chapter.id, next.id, preview.basis)
     expect(restore.sha256).toBe(next.sha256)
     await syncWebManuscript(project, scope, cloud.transport)
     expect(cloud.latest.get(id)?.payload?.head).toMatchObject({ id: restore.id })

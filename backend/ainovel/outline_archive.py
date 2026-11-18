@@ -192,7 +192,12 @@ def restore_outline_archive(tx, branch_id):
                     "recorded_device_id": row["source_device"],
                 },
             )
-            confirm_outline_tx(tx, branch_id, ConfirmOutline(base_revision=pending["draft"]["revision"]))
+            confirm_outline_tx(
+                tx,
+                branch_id,
+                ConfirmOutline(base_revision=pending["draft"]["revision"]),
+                source_confirmed=True,
+            )
         except DomainError as error:
             tx.execute("ROLLBACK TO restore_manuscript_outline")
             reason = error.message
