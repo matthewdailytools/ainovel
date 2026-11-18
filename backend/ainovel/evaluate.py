@@ -8,20 +8,28 @@ from pathlib import Path
 from time import time
 
 from .backups import create_backup, verify_backup
-from .db import Database, dumps, uid
-from .domain import Domain
+from .db import DomainError, dumps, uid
 from .library import Library
 from .models import WorkflowInput
+from .runtime import data_directory_gate, register, unregister
 from .settings import ROOT, Settings
 from .worker import Worker
 
 
 async def evaluate(args):
     settings = Settings.load()
-    db = Database(settings.data_dir / "manuscripts.sqlite")
-    domain = Domain(db)
-    Library(db, settings.data_dir)
-    worker = Worker(settings)
+    with data_directory_gate(settings.data_dir, wait=True):
+        worker = Worker(settings)
+        Library(worker.db, settings.data_dir)
+        token = register(worker.db, "worker")
+    try:
+        await _run_evaluation(args, worker)
+    finally:
+        unregister(worker.db, token)
+
+
+async def _run_evaluation(args, worker):
+    settings, db, domain = worker.settings, worker.db, worker.domain
     story = json.loads((ROOT / "fixtures/original-story.json").read_text("utf-8"))
     folder = settings.data_dir / "acceptance"
     folder.mkdir(exist_ok=True)
@@ -164,7 +172,10 @@ def main():
     args = parser.parse_args()
     if not args.execute:
         parser.error("需显式 --execute；本命令会调用付费模型。")
-    asyncio.run(evaluate(args))
+    try:
+        asyncio.run(evaluate(args))
+    except DomainError as error:
+        parser.error(error.message)
 
 
 if __name__ == "__main__":
