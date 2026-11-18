@@ -23,6 +23,10 @@ type ReferenceOption = {
   revision: number
   payload: { goal: string; source: { title: string; quote: string } }
 }
+type CardOptions =
+  | { state: 'loading' }
+  | { state: 'ready'; cards: SelectedOutlineCard[] }
+  | { state: 'unavailable'; error: string }
 type Stage =
   'project' | 'reference' | 'settings' | 'outline' | 'writing' | 'inspection' | 'completion' | 'done'
 type Run = Task & {
@@ -76,7 +80,7 @@ export function SevenStageRunPanel({
   const [settings, setSettings] = useState<ConceptionState>()
   const [reviewSources, setReviewSources] = useState<ReviewSources>()
   const [references, setReferences] = useState<ReferenceOption[]>([])
-  const [availableCards, setAvailableCards] = useState<SelectedOutlineCard[]>([])
+  const [cardOptions, setCardOptions] = useState<CardOptions>({ state: 'loading' })
   const [runs, setRuns] = useState<Run[]>([])
   const [runId, setRunId] = useState('')
   const [from, setFrom] = useState<StartFrom>()
@@ -93,35 +97,49 @@ export function SevenStageRunPanel({
   const [error, setError] = useState('')
   const [pollError, setPollError] = useState('')
   const alive = useRef(true)
+  const cardsRequest = useRef(0)
   const pending = useRef<{ signature: string; key: string } | undefined>(undefined)
 
   const refreshSources = useCallback(async () => {
-    const [concept, plan, savedReferences, sources, cards] = await Promise.all([
+    const [concept, plan, savedReferences, sources] = await Promise.all([
       api<ConceptionState>(`${prefix}/conception`),
       api<OutlineState>(`${prefix}/outline-workspace`),
       api<ReferenceOption[]>(`/reference-sessions?branch_id=${encodeURIComponent(branchId)}`),
       api<ReviewSources>(`${endpoint}/sources`),
-      api<SelectedOutlineCard[]>(`${prefix}/outline-workspace/reference-options`),
     ])
     if (!alive.current) return
     setSettings(concept)
     setOutline(plan)
     setReviewSources(sources)
-    setAvailableCards(cards)
     setReferences(
       savedReferences.filter((entry) => entry.payload.goal.trim() && entry.payload.source.quote.trim()),
     )
   }, [branchId, endpoint, prefix])
+
+  const refreshCards = useCallback(async () => {
+    const current = ++cardsRequest.current
+    setCardOptions({ state: 'loading' })
+    let result: CardOptions
+    try {
+      const cards = await api<SelectedOutlineCard[]>(`${prefix}/outline-workspace/reference-options`)
+      if (!Array.isArray(cards)) throw new Error('本机服务返回的手法卡清单格式不正确。')
+      result = { state: 'ready', cards }
+    } catch (failure) {
+      result = { state: 'unavailable', error: failure instanceof Error ? failure.message : '' }
+    }
+    if (alive.current && current === cardsRequest.current) setCardOptions(result)
+  }, [prefix])
 
   useEffect(() => {
     alive.current = true
     void refreshSources().catch((failure: Error) => {
       if (alive.current) setError(failure.message)
     })
+    void refreshCards()
     return () => {
       alive.current = false
     }
-  }, [refreshSources])
+  }, [refreshCards, refreshSources])
   useEffect(() => {
     let active = true
     let timer: ReturnType<typeof setTimeout>
@@ -169,12 +187,14 @@ export function SevenStageRunPanel({
   const reference = usingExcerpt
     ? references.find((entry) => `${entry.id}/${entry.revision}` === referenceChoice)
     : undefined
-  const selectedReferences = usingCards
-    ? selectedCards.flatMap((id) => {
-        const card = availableCards.find((entry) => selectedOutlineCardKey(entry) === id)
-        return card ? [selectedOutlineCardReference(card)] : []
-      })
-    : []
+  const availableCards = cardOptions.state === 'ready' ? cardOptions.cards : undefined
+  const selectedReferences =
+    usingCards && availableCards
+      ? selectedCards.flatMap((id) => {
+          const card = availableCards.find((entry) => selectedOutlineCardKey(entry) === id)
+          return card ? [selectedOutlineCardReference(card)] : []
+        })
+      : []
   const activeRun = runs.some((entry) => unresolved.includes(entry.status))
   const status = run?.result.seven_stage_run
   const permitted = origin === 'idea' ? !!blank && !!idea.trim() : !!sources[origin]
@@ -232,7 +252,8 @@ export function SevenStageRunPanel({
       entry = await api<Run>(endpoint, 'POST', { ...body, client_request_id: pending.current.key })
     } catch (failure) {
       if (failure instanceof ApiError && failure.code === 'reference_changed') {
-        await refreshSources().catch(notify)
+        if (usingCards) await refreshCards()
+        else await refreshSources().catch(notify)
       }
       throw failure
     }
@@ -248,6 +269,11 @@ export function SevenStageRunPanel({
     if (alive.current) setEntry(entry)
   }
 
+  async function refreshStartingPoint() {
+    void refreshCards()
+    await refreshSources()
+  }
+
   return (
     <section className="card" aria-label="七台自动接力">
       <h2>七台自动接力</h2>
@@ -258,7 +284,7 @@ export function SevenStageRunPanel({
         按阶段把选定资料和保存稿发送给当前账户。开篇简介只参考首章，最终完本由作者确认。
       </p>
       <div className="actions">
-        <button type="button" disabled={busy} onClick={() => void execute(refreshSources)}>
+        <button type="button" disabled={busy} onClick={() => void execute(refreshStartingPoint)}>
           核对接力起点
         </button>
       </div>
@@ -324,17 +350,30 @@ export function SevenStageRunPanel({
               onChange={(event) => setReferenceMode(event.target.value as ReferenceMode)}
             >
               <option value="skip">跳过拆解</option>
-              <option value="cards">选用已保存的手法卡</option>
+              <option value="cards" disabled={!availableCards}>
+                选用已保存的手法卡
+              </option>
               <option value="analyze">重新拆解保存的原文选段</option>
             </select>
           </label>
+        )}
+        {plansRemaining && cardOptions.state === 'loading' && (
+          <p className="small">正在读取已保存的手法卡…</p>
+        )}
+        {plansRemaining && cardOptions.state === 'unavailable' && (
+          <div>
+            <p role="alert">已保存的手法卡暂时无法读取。{cardOptions.error}</p>
+            <button type="button" onClick={() => void refreshCards()}>
+              重新读取手法卡
+            </button>
+          </div>
         )}
         {plansRemaining && existingReferenceCount > 0 && (
           <p className="small">
             大纲生成会发送最近保存的大纲及其 {existingReferenceCount} 张既有引用的手法摘要和固定修订。
           </p>
         )}
-        {usingCards && (
+        {usingCards && availableCards && (
           <SelectedOutlineCards cards={availableCards} selected={selectedCards} onChange={setSelectedCards} />
         )}
         {usingExcerpt && (

@@ -384,6 +384,7 @@ async function setup(context: BrowserContext, page: Page) {
             promises: [],
           })
         if (action === 'conception') return reply(conception)
+        if (action === 'outline-workspace/reference-options') return reply([])
         if (action === 'seven-stage-runs/sources') return reply({ writing_id: null, inspection_id: null })
         if (action === 'seven-stage-runs') return reply([])
       }

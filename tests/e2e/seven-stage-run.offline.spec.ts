@@ -342,6 +342,46 @@ test('接力停在拆解台时可采用局部重拆的正式卡并继续到大�
   expect(preparation?.payload.outline_generation.reference_cards).toEqual([expect.objectContaining(selected)])
 })
 
+test('手法卡读取失败时仍可跳过拆解启动接力，重试后可选卡', async ({ page }) => {
+  const branch = await createEmptyWork(page, '后台验证 · 可选手法卡读取恢复')
+  const project = await authorProject(page, branch, '学徒将复测记录交给守闸人。')
+  let unavailable = true
+  await page.route(`**${branch}/outline-workspace/reference-options`, (route) =>
+    unavailable
+      ? route.fulfill({ status: 503, json: { code: 'offline', message: '隔离替身暂时无法提供手法卡。' } })
+      : route.continue(),
+  )
+  await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  const panel = page.getByRole('region', { name: '七台自动接力', exact: true })
+  const warning = panel.getByText('已保存的手法卡暂时无法读取。', { exact: false })
+  const cards = panel.getByRole('option', { name: '选用已保存的手法卡', exact: true })
+  await expect(warning).toBeVisible()
+  await expect(cards).toBeDisabled()
+  await expect(panel.getByLabel('拆解资料的用法')).toHaveValue('skip')
+  await expect(panel.getByLabel('接力起点')).toHaveValue('project')
+  await panel.getByLabel('新建章节数').fill('1')
+  await panel.getByLabel('本次接力总预算（所选账户币种）').fill('1')
+
+  const started = await startFromPanel(page, branch)
+  expect(started.status(), await started.text()).toBe(202)
+  const request = started.request().postDataJSON()
+  expect(request).toMatchObject({ start_from: 'project', source_id: project.id, chapter_count: 1 })
+  expect(request).not.toHaveProperty('reference_cards')
+  expect(request).not.toHaveProperty('reference_session_id')
+  await expect(panel.getByRole('status')).toHaveText('设定 · 等待处理检查点')
+
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await panel.getByRole('button', { name: '停止本次接力', exact: true }).click()
+  const retry = panel.getByRole('button', { name: '重新读取手法卡', exact: true })
+  await expect(retry).toBeEnabled()
+  unavailable = false
+  await retry.press('Enter')
+  await expect(cards).toBeEnabled()
+  await expect(warning).toHaveCount(0)
+  await expect(panel.getByLabel('接力起点')).toHaveValue('project')
+  await expect(panel.getByLabel('本次接力总预算（所选账户币种）')).toHaveValue('1')
+})
+
 test('从页面提交已确认立项，拒绝旧修订后只执行设定及其后续任务', async ({ page }) => {
   const branch = await createEmptyWork(page, '后台验证 · 从已确认立项接力')
   const old = await authorProject(page, branch, '学徒把复测记录留在门房。')
