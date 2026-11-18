@@ -1,6 +1,6 @@
 """Isolated SQLite sync service for explicitly provisioned works and devices."""
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from hashlib import sha256
 import json
 import os
@@ -267,12 +267,25 @@ class SyncStore:
                 f"PRAGMA application_id={APP_ID};\nPRAGMA user_version=1;\nCOMMIT;"
             )
 
+    def check_readiness(self):
+        database = self.path.absolute().as_uri() + "?mode=ro"
+        try:
+            with closing(sqlite3.connect(database, uri=True, timeout=1)) as tx:
+                identifier = tx.execute("PRAGMA application_id").fetchone()[0]
+                version = tx.execute("PRAGMA user_version").fetchone()[0]
+                if identifier != APP_ID or version != 1:
+                    raise sqlite3.DatabaseError("unexpected synchronization schema")
+                tx.execute("SELECT id, sequence FROM sync_works LIMIT 1").fetchone()
+        except sqlite3.Error as error:
+            raise DomainError("sync_storage", "同步存储暂不可读。", 503) from error
+
     @contextmanager
     def transaction(self, *, write=False, snapshot=False):
         tx = sqlite3.connect(self.path, isolation_level=None, timeout=10)
         tx.row_factory = sqlite3.Row
-        tx.execute("PRAGMA foreign_keys=ON")
         try:
+            tx.execute("PRAGMA foreign_keys=ON")
+            tx.execute("PRAGMA temp_store=MEMORY")
             if write:
                 tx.execute("BEGIN IMMEDIATE")
             elif snapshot:
@@ -787,6 +800,7 @@ def create_sync_app(database_path: Path, provisioning_token: str, browser_origin
 
     @app.get("/api/sync/health")
     def sync_health():
+        store.check_readiness()
         return {"status": "ready", "format": "ainovel-sync/1"}
 
     @app.post(prefix + "/devices", status_code=201)

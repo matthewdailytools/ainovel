@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ainovel import cloud_sync_server
+from ainovel.cloud_sync import SyncStore, create_sync_app
 
 
 @pytest.mark.parametrize(
@@ -62,3 +63,28 @@ def test_local_loopback_uses_isolated_sync_factory_without_proxy_headers(tmp_pat
     monkeypatch.setattr(cloud_sync_server.uvicorn.Server, "run", verify)
     cloud_sync_server.main(["--port", "41234"])
     assert ledger.is_file()
+
+
+def test_health_checks_real_sqlite_without_creating_or_disclosing_storage(tmp_path):
+    ledger = tmp_path / "sync # database.sqlite"
+    saved = tmp_path / "isolated-copy.sqlite"
+    with TestClient(create_sync_app(ledger, "readiness-test-only-provision-key")) as client:
+        assert client.get("/api/sync/health").status_code == 200
+        ledger.replace(saved)
+        missing = client.get("/api/sync/health")
+        assert missing.status_code == 503 and not ledger.exists()
+        assert missing.json() == {"code": "sync_storage", "message": "同步存储暂不可读。"}
+        ledger.write_text("synthetic replacement for the database", encoding="utf-8")
+        invalid = client.get("/api/sync/health")
+        assert invalid.status_code == 503 and invalid.json() == missing.json()
+        assert invalid.headers["Cache-Control"] == "no-store"
+        saved.replace(ledger)
+        ready = client.get("/api/sync/health")
+        assert ready.status_code == 200
+        assert ready.json() == {"status": "ready", "format": "ainovel-sync/1"}
+
+
+def test_transient_sqlite_pages_are_configured_for_memory(tmp_path):
+    store = SyncStore(tmp_path / "sync.sqlite")
+    with store.transaction() as tx:
+        assert tx.execute("PRAGMA temp_store").fetchone()[0] == 2
