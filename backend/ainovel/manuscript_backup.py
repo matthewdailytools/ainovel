@@ -32,6 +32,7 @@ HISTORIES = {
     "workflow_history": ("inspections", "completions"),
     "story_history": ("adopted_heads", "versions", "source_devices", "native_history"),
     "reference_history": ("adopted_heads", "versions", "source_devices", "excerpts"),
+    "setting_use_history": ("adopted_heads", "versions"),
 }
 
 

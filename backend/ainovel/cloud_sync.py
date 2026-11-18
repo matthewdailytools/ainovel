@@ -29,6 +29,12 @@ from .models import Input
 from .project_sync import ProjectVersionObject, parse_project_object
 from .reference_portability import ReferenceCardVersionObject
 from .reference_sync import parse_reference_object, validate_version_parent as validate_reference_parent
+from .setting_use_portability import (
+    SettingUseVersionObject,
+    parse_setting_use_object,
+    validate_head as validate_setting_use_head,
+    validate_version_sources as validate_setting_use_sources,
+)
 from .settings_sync import SettingsVersionObject, parse_settings_object, validate_version_sources
 from .story_sync import StoryVersionObject, parse_story_object
 from .story_sync import validate_version_sources as validate_story_sources
@@ -558,6 +564,7 @@ class SyncStore:
                     OutlineVersionObject,
                     StoryVersionObject,
                     ReferenceCardVersionObject,
+                    SettingUseVersionObject,
                 ),
             ):
                 if data.parent_revision is not None:
@@ -615,18 +622,26 @@ class SyncStore:
             "outline": ("大纲", OutlineVersionObject, parse_outline_object),
             "story": ("故事记录", StoryVersionObject, parse_story_object),
             "reference-card": ("手法卡", ReferenceCardVersionObject, parse_reference_object),
+            "setting-use": ("设定的正文使用证据", SettingUseVersionObject, parse_setting_use_object),
         }
         if family not in contracts:
             return None
         title, immutable, parse = contracts[family]
         value = parse(work, object_id, payload, tombstone)
-        error_code = "sync_reference" if family == "reference-card" else f"sync_{family}"
+        error_code = f"sync_{'reference' if family == 'reference-card' else family.replace('-', '_')}"
 
         def source(object_id, model):
             head = self._head(tx, work, object_id)
             return model.model_validate_json(self._change(tx, work, head)["payload"]) if head else None
 
+        def setting_use(identifier):
+            stored = source(f"setting-use-version:{identifier}", SettingUseVersionObject)
+            return stored.version if stored else None
+
         if not isinstance(value, immutable):
+            if family == "setting-use":
+                validate_setting_use_head(work, value.slot_id, value.revision_id, setting_use)
+                return value
             stored = source(f"{family}-version:{value.revision_id}", immutable)
             if not stored or (family == "story" and stored.version.record_id != value.record_id):
                 raise DomainError(error_code, f"尚未收到要采用的{title}修订。", 409)
@@ -653,6 +668,25 @@ class SyncStore:
 
         if family == "settings":
             validate_version_sources(version, project_exists, revision)
+
+        def settings(identifier):
+            stored = source(f"settings-version:{identifier}", SettingsVersionObject)
+            return stored.version if stored else None
+
+        if family == "setting-use":
+
+            def outline(identifier):
+                stored = source(f"outline-version:{identifier}", OutlineVersionObject)
+                return stored.version if stored else None
+
+            validate_setting_use_sources(
+                work,
+                version,
+                use_lookup=setting_use,
+                revision_lookup=revision,
+                settings_lookup=settings,
+                outline_lookup=outline,
+            )
         if family == "reference-card":
 
             def card(identifier):
@@ -668,10 +702,6 @@ class SyncStore:
 
             validate_story_sources(version, story, revision)
         if family == "outline":
-
-            def settings(identifier):
-                stored = source(f"settings-version:{identifier}", SettingsVersionObject)
-                return stored.version if stored else None
 
             def reference(identifier):
                 stored = source(f"reference-card-version:{identifier}", ReferenceCardVersionObject)

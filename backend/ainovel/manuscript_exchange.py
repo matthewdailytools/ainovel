@@ -17,6 +17,7 @@ from .outline_portability import OutlineHistory
 from .project_portability import Identifier, ProjectHistory
 from .project_sync import export_project_history, restore_project_history
 from .reference_portability import HashId as ReferenceVersionId, ReferenceHistory
+from .setting_use_portability import SettingUseHistory
 from .settings_portability import SettingsHistory
 from .story_portability import PortableStoryArchive
 from .workflow_archive import WorkflowHistory
@@ -110,6 +111,9 @@ class ManuscriptPackage(Input):
     story_history: PortableStoryArchive | None = Field(default=None, exclude_if=lambda value: value is None)
     workflow_history: WorkflowHistory | None = Field(default=None, exclude_if=lambda value: value is None)
     reference_history: ReferenceHistory | None = Field(default=None, exclude_if=lambda value: value is None)
+    setting_use_history: SettingUseHistory | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 def _digest(text):
@@ -253,7 +257,22 @@ def _index(package):
         from .workflow_archive import validate_workflow_history
 
         validate_workflow_history(package.workflow_history, package.branch.id, revisions)
+    _validate_setting_uses(package, revisions)
     return histories
+
+
+def _validate_setting_uses(package, revisions):
+    if package.setting_use_history:
+        from .setting_use_archive import validate_setting_use_history
+
+        validate_setting_use_history(
+            package.setting_use_history,
+            package.branch.id,
+            package.chapters,
+            revisions,
+            package.settings_history,
+            package.outline_history,
+        )
 
 
 def _evidence(tx, branch_id):
@@ -362,6 +381,7 @@ def store_portable_evidence(tx, branch_id, document):
 def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), before_read=None):
     from .outline_archive import export_outline_history, validate_outline_history
     from .reference_sync import export_reference_archive
+    from .setting_use_archive import export_setting_use_history
     from .settings_archive import export_settings_history, validate_settings_history
     from .story_archive import export_story_archive, validate_story_archive
     from .workflow_archive import (
@@ -420,6 +440,7 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), b
                 "reference_history": export_reference_archive(
                     tx, branch_id, include_evidence_for=include_reference_evidence_for
                 ),
+                "setting_use_history": export_setting_use_history(tx, branch_id),
             }
         )
         if package.settings_history:
@@ -436,13 +457,14 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), b
                 package.chapters,
                 package.reference_history,
             )
-        if package.story_history or package.workflow_history:
+        if package.story_history or package.workflow_history or package.setting_use_history:
             native = {row.id: row for row in package.revisions}
             revisions = {**native, **{row.id: row for row in package.source_revisions}}
             if package.story_history:
                 validate_story_archive(package.story_history, branch_id, revisions, native)
             if package.workflow_history:
                 validate_workflow_history(package.workflow_history, branch_id, revisions)
+            _validate_setting_uses(package, revisions)
         return package
 
 
@@ -522,6 +544,10 @@ def import_manuscript(domain, package):
             from .outline_archive import import_outline_history
 
             outline = import_outline_history(tx, branch.id, package.outline_history)
+        if package.setting_use_history:
+            from .setting_use_archive import import_setting_use_history
+
+            import_setting_use_history(tx, branch.id, package.setting_use_history)
         if package.workflow_history:
             from .workflow_archive import import_workflow_history
 

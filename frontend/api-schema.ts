@@ -4339,6 +4339,7 @@ export interface components {
       story_history?: components['schemas']['PortableStoryArchive'] | null
       workflow_history?: components['schemas']['WorkflowHistory'] | null
       reference_history?: components['schemas']['ReferenceHistory'] | null
+      setting_use_history?: components['schemas']['SettingUseHistory'] | null
     }
     /** Mapping */
     Mapping: {
@@ -5885,6 +5886,14 @@ export interface components {
       /** Affected Reports */
       affected_reports: components['schemas']['AffectedReport'][]
     }
+    /** SettingUseArchiveEntry */
+    SettingUseArchiveEntry: {
+      version: components['schemas']['SettingUseVersion']
+      /** Created */
+      created: number
+      /** Source Device */
+      source_device?: string | null
+    }
     /** SettingUseBasis */
     SettingUseBasis: {
       /** Outline Version Id */
@@ -5913,6 +5922,15 @@ export interface components {
       evidence: components['schemas']['SettingsEvidence']
       /** Idempotency Key */
       idempotency_key: string
+    }
+    /** SettingUseHistory */
+    SettingUseHistory: {
+      /** Adopted Heads */
+      adopted_heads: {
+        [key: string]: string
+      }
+      /** Versions */
+      versions: components['schemas']['SettingUseArchiveEntry'][]
     }
     /** SettingUseOption */
     SettingUseOption: {

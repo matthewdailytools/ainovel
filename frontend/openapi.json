@@ -2185,7 +2185,13 @@
             "name": "chapter_id",
             "in": "path",
             "required": true,
-            "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Chapter Id" }
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Chapter Id"
+            }
           },
           {
             "name": "before_id",
@@ -2224,7 +2230,13 @@
             "name": "chapter_id",
             "in": "path",
             "required": true,
-            "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Chapter Id" }
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Chapter Id"
+            }
           }
         ],
         "requestBody": {
@@ -2258,7 +2270,13 @@
             "name": "chapter_id",
             "in": "path",
             "required": true,
-            "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Chapter Id" }
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Chapter Id"
+            }
           },
           {
             "name": "use_id",
@@ -2292,7 +2310,13 @@
             "name": "chapter_id",
             "in": "path",
             "required": true,
-            "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Chapter Id" }
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Chapter Id"
+            }
           },
           {
             "name": "use_id",
@@ -8166,6 +8190,9 @@
           },
           "reference_history": {
             "anyOf": [{ "$ref": "#/components/schemas/ReferenceHistory" }, { "type": "null" }]
+          },
+          "setting_use_history": {
+            "anyOf": [{ "$ref": "#/components/schemas/SettingUseHistory" }, { "type": "null" }]
           }
         },
         "additionalProperties": false,
@@ -10482,21 +10509,41 @@
         ],
         "title": "SettingRestorePreview"
       },
+      "SettingUseArchiveEntry": {
+        "properties": {
+          "version": { "$ref": "#/components/schemas/SettingUseVersion" },
+          "created": { "type": "number", "minimum": 0, "title": "Created" },
+          "source_device": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Source Device"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["version", "created"],
+        "title": "SettingUseArchiveEntry"
+      },
       "SettingUseBasis": {
         "properties": {
           "outline_version_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Outline Version Id"
           },
           "settings_version_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Settings Version Id"
           },
           "chapter_revision_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Chapter Revision Id"
           },
           "chapter_revision": { "type": "integer", "title": "Chapter Revision" },
@@ -10517,15 +10564,25 @@
         "properties": {
           "outline_version_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Outline Version Id"
           },
           "settings_version_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Settings Version Id"
           },
-          "item_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Item Id" },
+          "item_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Item Id"
+          },
           "parent_id": {
             "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }],
             "title": "Parent Id"
@@ -10552,11 +10609,44 @@
         ],
         "title": "SettingUseConfirm"
       },
+      "SettingUseHistory": {
+        "properties": {
+          "adopted_heads": {
+            "patternProperties": { "^[0-9a-f]{64}$": { "type": "string", "pattern": "^[0-9a-f]{64}$" } },
+            "type": "object",
+            "maxProperties": 20000,
+            "title": "Adopted Heads"
+          },
+          "versions": {
+            "items": { "$ref": "#/components/schemas/SettingUseArchiveEntry" },
+            "type": "array",
+            "maxItems": 20000,
+            "minItems": 1,
+            "title": "Versions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["adopted_heads", "versions"],
+        "title": "SettingUseHistory"
+      },
       "SettingUseOption": {
         "properties": {
-          "item_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Item Id" },
+          "item_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Item Id"
+          },
           "title": { "type": "string", "title": "Title" },
-          "category_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Category Id" },
+          "category_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Category Id"
+          },
           "category_title": { "type": "string", "title": "Category Title" },
           "head_id": {
             "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }],
@@ -10593,15 +10683,25 @@
           },
           "outline_version_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Outline Version Id"
           },
           "settings_version_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Settings Version Id"
           },
-          "item_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Item Id" },
+          "item_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Item Id"
+          },
           "evidence": { "$ref": "#/components/schemas/SettingsEvidence" },
           "chapter_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Chapter Sha256" },
           "action": { "type": "string", "enum": ["confirmed", "withdrawn"], "title": "Action" },
@@ -10624,7 +10724,13 @@
       },
       "SettingUseView": {
         "properties": {
-          "chapter_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "title": "Chapter Id" },
+          "chapter_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Chapter Id"
+          },
           "basis": { "anyOf": [{ "$ref": "#/components/schemas/SettingUseBasis" }, { "type": "null" }] },
           "options": {
             "items": { "$ref": "#/components/schemas/SettingUseOption" },

@@ -1,25 +1,24 @@
 """Author-confirmed uses of non-world settings in saved manuscript passages."""
 
-from hashlib import sha256
 import json
 from time import time
 from typing import Annotated, Literal
 
 from fastapi import Query
-from pydantic import Field, StringConstraints
+from pydantic import Field
 
 from .db import DomainError, dumps
 from .manuscript_exchange import native_revision, source_revision
 from .models import Input
 from .outline_sync import read_outline_head
 from .outline_workspace import _latest as latest_outline, chapter_basis
+from .project_portability import Identifier
+from .setting_use_portability import Digest, SettingUseVersion, canonical_digest, version_id
 from .settings_portability import SettingsEvidence
 from .settings_sync import _evidence_quote, settings_source_id
 from .story_sync import _adopted_chapter_revision
 
 KIND = "setting_use"
-Identifier = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
-Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 
 class SettingUseBasis(Input):
@@ -44,18 +43,6 @@ class SettingUseWithdraw(Input):
     idempotency_key: str = Field(min_length=8, max_length=128)
 
 
-class SettingUseVersion(Input):
-    id: Digest
-    parent_id: Digest | None
-    outline_version_id: Identifier
-    settings_version_id: Identifier
-    item_id: Identifier
-    evidence: SettingsEvidence
-    chapter_sha256: Digest
-    action: Literal["confirmed", "withdrawn"]
-    actor: Literal["author"]
-
-
 class SettingUseRecord(Input):
     version: SettingUseVersion
     status: Literal["current", "outdated", "superseded", "withdrawn", "missing"]
@@ -77,15 +64,6 @@ class SettingUseView(Input):
     options: list[SettingUseOption]
     records: list[SettingUseRecord]
     next_before_id: Digest | None
-
-
-def _digest(value):
-    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def version_id(branch_id, version):
-    return _digest([branch_id, version])
 
 
 def _chapter(tx, chapter_id):
@@ -280,7 +258,7 @@ def _confirm(tx, chapter, data):
     branch_id = chapter["branch_id"]
     chapter_id = chapter["id"]
     payload = data.model_dump(exclude={"idempotency_key"}) | {"action": "confirmed", "actor": "author"}
-    fingerprint = _digest([branch_id, chapter_id, payload])
+    fingerprint = canonical_digest([branch_id, chapter_id, payload])
     if row := _replay(tx, chapter, data.idempotency_key, fingerprint):
         return row
     basis, options, saved = _context(tx, chapter)
@@ -305,7 +283,7 @@ def _confirm(tx, chapter, data):
 
 
 def _withdraw(tx, chapter, identifier, data):
-    fingerprint = _digest([chapter["branch_id"], chapter["id"], identifier, "withdrawn"])
+    fingerprint = canonical_digest([chapter["branch_id"], chapter["id"], identifier, "withdrawn"])
     if row := _replay(tx, chapter, data.idempotency_key, fingerprint):
         return row
     row = _lookup(tx, chapter, identifier)

@@ -1,33 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
+import type { components } from './api-schema'
+import type { Selection } from './Editor'
 import { digest } from './sourceCorrection'
 
-type SelectedText = { start: number; end: number; text: string }
-type Basis = {
-  outline_version_id: string
-  settings_version_id: string
-  chapter_revision_id: string
-  chapter_revision: number
-  chapter_sha256: string
-}
-type Option = { item_id: string; title: string; category_title: string; head_id: string | null }
-type Proof = {
-  version: {
-    id: string
-    item_id: string
-    action: 'confirmed' | 'withdrawn'
-    settings_version_id: string
-    evidence: { chapter_id: string; revision_id: string; start: number; end: number }
-  }
-  status: 'current' | 'outdated' | 'superseded' | 'withdrawn' | 'missing'
-  quote: string | null
-}
-type View = {
-  basis: Basis | null
-  options: Option[]
-  records: Proof[]
-  next_before_id: string | null
-}
+type View = components['schemas']['SettingUseView']
+type Proof = components['schemas']['SettingUseRecord']
 
 const proofLabels: Record<Proof['status'], string> = {
   current: '当前正文证据',
@@ -47,7 +25,7 @@ export function SettingUsePanel({
   chapterId: string
   revision: number
   content: string
-  selection: SelectedText
+  selection: Selection
   saved: boolean
 }) {
   const endpoint = `/chapters/${encodeURIComponent(chapterId)}/setting-uses`
