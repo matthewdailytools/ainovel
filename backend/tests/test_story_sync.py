@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from ainovel import story_sync
 from ainovel.cloud_sync import create_sync_app
 from ainovel.db import Database, DomainError
-from ainovel.desktop_sync import DesktopSync, Resolve
+from ainovel.desktop_sync import DesktopSync, Resolve, _headers
 from ainovel.domain import Domain
 from ainovel.manuscript_exchange import (
     export_manuscript,
@@ -57,8 +57,8 @@ def linked_cloud(source, receiver, branch, tmp_path):
             assert response.status_code == 201, response.text
             return response.json()["token"]
 
-        def transport(_, token, method, path, payload):
-            response = cloud.request(method, path, headers={"Authorization": f"Bearer {token}"}, json=payload)
+        def transport(_, token, method, path, payload, *, ledger_id=None):
+            response = cloud.request(method, path, headers=_headers(token, ledger_id), json=payload)
             result = response.json()
             if not response.is_success:
                 raise DomainError(result["code"], result["message"], response.status_code)

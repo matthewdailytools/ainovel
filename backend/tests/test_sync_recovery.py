@@ -1,10 +1,13 @@
 from urllib.parse import parse_qs, urlsplit
 
+from fastapi.testclient import TestClient
 import httpx
 import pytest
 
+from ainovel.cloud_sync import create_sync_app
+from ainovel.cloud_sync_backup import create_backup, restore_backup
 from ainovel.db import Database, DomainError, uid
-from ainovel.desktop_sync import DesktopSync, Resolve, _network
+from ainovel.desktop_sync import DesktopSync, ForkChapter, Resolve, _headers, _network
 from ainovel.domain import Domain
 from ainovel.manuscript_exchange import export_manuscript, import_manuscript
 from ainovel.outline_workspace import read_outline
@@ -142,13 +145,13 @@ def test_dependent_volume_rollback_sync_resumes_from_last_durable_pull_page(clie
         transport = right.transport
         attempts = []
 
-        def disconnect_between_pages(origin, token, method, target, payload):
+        def disconnect_between_pages(origin, token, method, target, payload, *, ledger_id=None):
             if "/pull?" in target:
                 attempts.append(int(parse_qs(urlsplit(target).query)["after"][0]))
                 if len(attempts) == 2:
                     raise DomainError("sync_transport", "拉取第二页前断线。", 502)
                 target = target.replace("limit=50", "limit=1")
-            return transport(origin, token, method, target, payload)
+            return transport(origin, token, method, target, payload, ledger_id=ledger_id)
 
         right.transport = disconnect_between_pages
         with pytest.raises(DomainError, match="拉取第二页前断线"):
@@ -266,12 +269,196 @@ def test_stop_and_admin_revoke_keep_local_manuscript_and_resume_after_reprovisio
         assert not right._state(branch)["pending"]
 
 
+def test_restored_cloud_cannot_rebind_desktop_at_same_cursor_or_replay_old_conflict(domain, story, tmp_path):
+    branch, chapter = story["branch_id"], story["chapter_id"]
+    provisioning = "isolated-story-sync-access-0123456789"
+    archive = tmp_path / "prior-cloud-copy.sqlite"
+    restored = tmp_path / "restored-cloud.sqlite"
+    with chapter_conflict(domain, story, tmp_path) as (receiver, linked, compared, conflict_id, stamp):
+        left, right, origin, left_token, token, old_cloud, endpoint, lost = linked
+        comparison_path = f"{endpoint}/conflicts/{conflict_id}"
+        backup_source = tmp_path / "story-cloud.sqlite"
+        original_checkpoint = verify(old_cloud.get(endpoint + "/checkpoint", headers=_headers(token)))
+        create_backup(backup_source, archive)
+        clean_copy = export_manuscript(domain, branch)
+
+        newer = domain.create_chapter(branch, "只在原服务提交的章节")
+        domain.save(newer["id"], 0, "原服务备份后先推进。")
+        left.run(branch, origin, left_token)
+        durable = right.run(branch, origin, token)
+        assert durable["cursor"] > original_checkpoint["cursor"]
+        pending = receiver.create_chapter(branch, "等待回执的本机章节")
+        pending_text = receiver.save(pending["id"], 0, "这份本机正文必须保留。")["content"]
+        lost["next"] = f"chapter:{pending['id']}"
+        with pytest.raises(DomainError, match="响应中断"):
+            right.run(branch, origin, token)
+        uncertain = lost["receipt"]
+        before = right._state(branch)
+        assert before["cursor"] == durable["cursor"] and before["pending"] and before["conflicts"]
+
+        def local_sync_rows():
+            with receiver.db.connect() as tx:
+                return {
+                    table: [tuple(row) for row in tx.execute(f"SELECT * FROM {table} ORDER BY rowid")]
+                    for table in (
+                        "desktop_sync",
+                        "desktop_sync_ledgers",
+                        "desktop_sync_conflicts",
+                        "desktop_sync_objects",
+                        "desktop_sync_dirty",
+                        "desktop_sync_outbox",
+                        "desktop_sync_prose_merges",
+                    )
+                }
+
+        rows_before = local_sync_rows()
+        assert rows_before["desktop_sync_outbox"]
+        restore_backup(archive, restored)
+        with TestClient(create_sync_app(restored, provisioning)) as replacement:
+            assert replacement.get(endpoint + "/checkpoint", headers=_headers(token)).status_code == 401
+
+            def grant(name):
+                return verify(
+                    replacement.post(
+                        endpoint + "/devices", headers=_headers(provisioning), json={"device_id": name}
+                    ),
+                    201,
+                )["token"]
+
+            reissued = grant("story-right")
+            new_token = grant("recovered-desktop")
+            replacement_checkpoint = verify(
+                replacement.get(endpoint + "/checkpoint", headers=_headers(reissued))
+            )
+            assert replacement_checkpoint["cursor"] == original_checkpoint["cursor"] < before["cursor"]
+            assert replacement_checkpoint["ledger_id"] != original_checkpoint["ledger_id"]
+
+            requests = []
+
+            def replaced_transport(sync_origin, credential, method, target, payload, *, ledger_id=None):
+                requests.append((method, target, ledger_id))
+                response = replacement.request(
+                    method, target, headers=_headers(credential, ledger_id), json=payload
+                )
+                if not response.is_success:
+                    error = response.json()
+                    raise DomainError(error["code"], error["message"], response.status_code)
+                return response.json()
+
+            fresh = Domain(Database(tmp_path / "fresh-desktop.sqlite"))
+            import_manuscript(fresh, clean_copy)
+            unbound = DesktopSync(fresh, replaced_transport)
+            assert unbound._state(branch)["ledger_id"] is None
+            assert (
+                unbound.enable(branch, origin, new_token)["ledger_id"] == replacement_checkpoint["ledger_id"]
+            )
+            assert unbound.run(branch, origin, new_token)["cursor"] == original_checkpoint["cursor"]
+            assert (
+                fresh.chapter(chapter)["content"]
+                == compared["remote"]["current"]["payload"]["head"]["content"]
+            )
+            different = fresh.create_chapter(branch, "恢复后另一份独立章节")
+            fresh.save(different["id"], 0, "数字相同，提交历史不同。")
+            caught_up = unbound.run(branch, origin, new_token)
+            assert caught_up["cursor"] == before["cursor"]
+
+            old = DesktopSync(receiver, replaced_transport)
+            merge = Resolve(
+                **{**stamp, "token": reissued},
+                choice="merge",
+                content="先前比较编辑出的稿件。",
+                idempotency_key="old-comparison-merge",
+            )
+            fork = ForkChapter(
+                **{**stamp, "token": reissued},
+                choice="incoming",
+                branch_name="试图引用旧账本",
+                idempotency_key="old-conflict-fork",
+            )
+            requests.clear()
+            for operation in (
+                lambda: old.enable(branch, origin, reissued),
+                lambda: old.run(branch, origin, reissued),
+                lambda: old.compare(branch, origin, reissued, conflict_id),
+                lambda: old.resolve(branch, origin, reissued, conflict_id, merge),
+                lambda: old.fork(branch, origin, reissued, conflict_id, fork),
+            ):
+                with pytest.raises(DomainError) as rejected:
+                    operation()
+                assert (rejected.value.code, rejected.value.status) == ("sync_ledger_replaced", 409)
+            assert requests == [("GET", endpoint + "/checkpoint", None)] * 5
+
+            assert old._state(branch) == before and local_sync_rows() == rows_before
+            assert receiver.chapter(chapter)["content"] == compared["local"]["head"]["content"]
+            assert receiver.chapter(pending["id"])["content"] == pending_text
+            assert {revision.content for revision in export_manuscript(receiver, branch).revisions} >= {
+                pending_text,
+                compared["local"]["head"]["content"],
+            }
+            replacement_header = _headers(reissued, replacement_checkpoint["ledger_id"])
+            remote = verify(replacement.get(comparison_path, headers=replacement_header))
+            assert remote["resolved_by"] is None and remote["head_revision"] == stamp["parent_revision"]
+            assert (
+                verify(replacement.get(endpoint + "/checkpoint", headers=replacement_header))["cursor"]
+                == before["cursor"]
+            )
+            receipt = endpoint + f"/receipts/{uncertain['change_id']}"
+            assert replacement.get(receipt, headers=replacement_header).status_code == 404
+            assert verify(old_cloud.get(receipt, headers=_headers(token))) == uncertain
+
+            def replace_after_checkpoint(sync_origin, credential, method, target, payload, *, ledger_id=None):
+                if target == endpoint + "/checkpoint":
+                    return right.transport(sync_origin, token, method, target, payload, ledger_id=ledger_id)
+                return replaced_transport(
+                    sync_origin, credential, method, target, payload, ledger_id=ledger_id
+                )
+
+            requests.clear()
+            guarded = DesktopSync(receiver, replace_after_checkpoint)
+            for operation in (
+                lambda: guarded.run(branch, origin, reissued),
+                lambda: guarded.compare(branch, origin, reissued, conflict_id),
+                lambda: guarded.resolve(branch, origin, reissued, conflict_id, merge),
+            ):
+                with pytest.raises(DomainError) as rejected:
+                    operation()
+                assert (rejected.value.code, rejected.value.status) == ("sync_ledger_replaced", 409)
+            old_id = original_checkpoint["ledger_id"]
+            assert requests == [
+                ("GET", endpoint + f"/pull?after={before['cursor']}&limit=50", old_id),
+                ("GET", comparison_path, old_id),
+                ("GET", comparison_path, old_id),
+            ]
+            assert local_sync_rows() == rows_before
+
+
+def test_desktop_binding_without_checkpoint_identity_is_not_reused(domain, story, tmp_path):
+    branch, chapter = story["branch_id"], story["chapter_id"]
+    domain.save(chapter, 0, "仍可从本机导出的原文。")
+    receiver = paired(domain, branch, tmp_path / "older-desktop.sqlite")
+    with linked_cloud(domain, receiver, branch, tmp_path) as linked:
+        _, original, origin, _, token, *_ = linked
+        with receiver.db.connect(True) as tx:
+            tx.execute("DELETE FROM desktop_sync_ledgers WHERE branch_id=?", (branch,))
+        legacy = DesktopSync(receiver, original.transport)
+        before = legacy._state(branch)
+        assert before["bound"] and before["ledger_id"] is None
+        for operation in (legacy.run, legacy.enable):
+            with pytest.raises(DomainError) as rejected:
+                operation(branch, origin, token)
+            assert (rejected.value.code, rejected.value.status) == ("sync_ledger_replaced", 409)
+        assert legacy._state(branch) == before
+        assert receiver.chapter(chapter)["content"] == "仍可从本机导出的原文。"
+        assert not legacy.disable(branch)["enabled"]
+
+
 @pytest.mark.parametrize(
     ("remote_code", "status", "expected_code", "keep_pending"),
     [
         ("sync_history", 409, "sync_history", False),
         ("sync_history", 502, "sync_remote", True),
         ("sync_auth", 401, "sync_auth", True),
+        ("sync_ledger_replaced", 409, "sync_ledger_replaced", True),
     ],
 )
 def test_native_http_distinguishes_rejected_merge_from_uncertain_receipt(
@@ -285,17 +472,19 @@ def test_native_http_distinguishes_rejected_merge_from_uncertain_receipt(
 
         def mock_request(request):
             assert request.url.path.endswith("/resolve")
+            assert request.headers["X-Ainovel-Ledger"] == right._state(branch)["ledger_id"]
             return httpx.Response(status, json={"code": remote_code, "message": "private remote text"})
 
         monkeypatch.setattr(
             "ainovel.desktop_sync.httpx.Client",
             lambda **options: client(transport=httpx.MockTransport(mock_request), **options),
         )
-        right.transport = lambda origin, token, method, path, payload: (
-            _network(origin, token, method, path, payload)
-            if path.endswith("/resolve")
-            else transport(origin, token, method, path, payload)
-        )
+
+        def reject_resolution(origin, token, method, path, payload, *, ledger_id=None):
+            send = _network if path.endswith("/resolve") else transport
+            return send(origin, token, method, path, payload, ledger_id=ledger_id)
+
+        right.transport = reject_resolution
         merge = Resolve(**stamp, choice="merge", content="确认合并后的正文。", idempotency_key="http-merge")
         with pytest.raises(DomainError) as failed:
             right.resolve(branch, origin, token, conflict_id, merge)

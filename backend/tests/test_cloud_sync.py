@@ -1,11 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from hashlib import sha256
 import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
 
-from ainovel import cloud_sync
+from ainovel import cloud_ledger, cloud_sync
 from ainovel.cloud_attachments import CHUNK_BYTES
 from ainovel.db import DomainError
 
@@ -70,6 +71,68 @@ def test_provision_opt_in_authentication_scope_rotation_and_revoke(service):
         stored = [row[0] for row in tx.execute("SELECT token_sha256 FROM sync_devices")]
     assert all(len(row) == 64 for row in stored)
     assert rotated["Authorization"].split(" ", 1)[1] not in stored
+
+
+def test_checkpoint_is_authenticated_work_scoped_stable_and_available_through_allowed_cors(tmp_path):
+    path = tmp_path / "sync.sqlite"
+    provisioning = ADMIN["Authorization"].split(" ", 1)[1]
+    with TestClient(cloud_sync.create_sync_app(path, provisioning, ("https://writer.example",))) as client:
+        desktop = grant(client, "desktop")
+        unrelated = grant(client, "desktop", "/api/sync/works/other")
+        route = WORK + "/checkpoint"
+        for unauthorized in ({}, ADMIN, unrelated):
+            assert client.get(route, headers=unauthorized).status_code == 401
+        initial = client.get(route, headers=desktop).json()
+        assert initial["cursor"] == 0
+        assert len(initial["ledger_id"]) == 32 and set(initial["ledger_id"]) <= set("0123456789abcdef")
+        wrong = {**desktop, cloud_ledger.LEDGER_HEADER: initial["ledger_id"].upper() + "X"}
+        assert client.get(WORK + "/pull", headers=wrong).json()["code"] == "sync_ledger_replaced"
+        assert client.get(WORK + "/pull", headers={cloud_ledger.LEDGER_HEADER: "foreign"}).status_code == 401
+        first = push(client, desktop, parent("first"))
+        bound = {**desktop, cloud_ledger.LEDGER_HEADER: initial["ledger_id"]}
+        assert client.get(WORK + "/pull", headers=bound).json()["changes"] == [first]
+        preflight = client.options(
+            WORK + "/pull",
+            headers={
+                "Origin": "https://writer.example",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": f"authorization,{cloud_ledger.LEDGER_HEADER.lower()}",
+            },
+        )
+        assert preflight.status_code == 200
+        assert cloud_ledger.LEDGER_HEADER.lower() in preflight.headers["Access-Control-Allow-Headers"].lower()
+
+    with TestClient(cloud_sync.create_sync_app(path, provisioning)) as reopened:
+        assert reopened.get(route, headers=desktop).json() == {**initial, "cursor": 1}
+
+
+def test_pre_generation_service_db_preserves_history_and_corrupt_current_identity_fails_closed(tmp_path):
+    path = tmp_path / "sync.sqlite"
+    provisioning = ADMIN["Authorization"].split(" ", 1)[1]
+    with TestClient(cloud_sync.create_sync_app(path, provisioning)) as client:
+        desktop = grant(client, "desktop")
+        first = push(client, desktop, parent("original"))
+        old_ledger = client.get(WORK + "/checkpoint", headers=desktop).json()["ledger_id"]
+
+    # Reproduce the pre-generation layout while keeping the same real authenticated history.
+    with closing(sqlite3.connect(path)) as tx, tx:
+        tx.execute("DROP TABLE sync_ledger")
+        tx.execute("PRAGMA user_version=1")
+
+    with TestClient(cloud_sync.create_sync_app(path, provisioning)) as upgraded:
+        frozen = upgraded.get(WORK + "/checkpoint", headers=desktop).json()
+        assert frozen["ledger_id"] != old_ledger and frozen["cursor"] == 1
+        current = {**desktop, cloud_ledger.LEDGER_HEADER: frozen["ledger_id"]}
+        assert upgraded.get(WORK + "/pull", headers=desktop).json()["code"] == "sync_ledger_replaced"
+        assert upgraded.get(WORK + "/pull", headers=current).json()["changes"] == [first]
+
+    with closing(sqlite3.connect(path)) as tx, tx:
+        tx.execute("DELETE FROM sync_ledger")
+    with pytest.raises(DomainError, match="账本身份"):
+        cloud_sync.SyncStore(path)
+    with closing(sqlite3.connect(path)) as tx:
+        assert tx.execute("SELECT count(*) FROM sync_ledger").fetchone() == (0,)
+        assert tx.execute("SELECT change_id FROM sync_changes").fetchone() == ("original",)
 
 
 def test_device_can_revoke_only_its_own_work_session_and_repeat_lost_receipt(service):

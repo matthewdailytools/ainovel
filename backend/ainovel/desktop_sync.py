@@ -21,7 +21,8 @@ from .chapter_conflicts import (
     fork_receipt,
     verified_chapter,
 )
-from .cloud_sync import ComparedConflict, MAX_CURSOR, MAX_OBJECT_BYTES, Pulled, Receipt
+from .cloud_ledger import LEDGER_HEADER
+from .cloud_sync import Checkpoint, ComparedConflict, MAX_CURSOR, MAX_OBJECT_BYTES, Pulled, Receipt
 from .db import DomainError, dumps, uid
 from .manuscript_exchange import (
     PortableBranch,
@@ -53,6 +54,7 @@ from .workflow_privacy import REFERENCE_SCOPE, sync_completion_report, sync_has_
 
 FORMAT = "ainovel-manuscript-sync/1"
 RESPONSE_LIMIT = 8 * 1024 * 1024
+LEDGER_REPLACED = "无法确认此同步记录属于当前云账本。原工作版本可继续编辑和备份，请从独立副本连接当前云端。"
 CONFLICT_REJECTIONS = {"sync_head_changed": 409, "sync_conflict_resolved": 409}
 PROSE_MERGE_REJECTIONS = {
     **CONFLICT_REJECTIONS,
@@ -74,6 +76,9 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS desktop_sync(
  branch_id TEXT PRIMARY KEY REFERENCES branches(id),
  origin_sha256 TEXT NOT NULL, enabled INTEGER NOT NULL, cursor INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS desktop_sync_ledgers(
+ branch_id TEXT PRIMARY KEY REFERENCES desktop_sync(branch_id),
+ ledger_id TEXT NOT NULL CHECK(length(ledger_id)=32 AND ledger_id NOT GLOB '*[^a-f0-9]*'));
 CREATE TABLE IF NOT EXISTS desktop_sync_objects(
  branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
  remote_revision TEXT NOT NULL, sequence INTEGER NOT NULL, local_sha256 TEXT NOT NULL,
@@ -249,11 +254,18 @@ def _origin(value):
     return f"{uri.scheme}://{formatted}" + (f":{port}" if port is not None else "")
 
 
-def _network(origin, token, method, path, payload=None):
+def _headers(token, ledger_id=None):
+    headers = {"Authorization": f"Bearer {token}"}
+    if ledger_id is not None:
+        headers[LEDGER_HEADER] = ledger_id
+    return headers
+
+
+def _network(origin, token, method, path, payload=None, *, ledger_id=None):
     try:
         with httpx.Client(trust_env=False, follow_redirects=False, timeout=15) as client:
             with client.stream(
-                method, origin + path, headers={"Authorization": f"Bearer {token}"}, json=payload
+                method, origin + path, headers=_headers(token, ledger_id), json=payload
             ) as response:
                 body = bytearray()
                 for chunk in response.iter_bytes():
@@ -265,6 +277,8 @@ def _network(origin, token, method, path, payload=None):
                 result = json.loads(body)
                 if not response.is_success:
                     code = result.get("code") if isinstance(result, dict) else None
+                    if code == "sync_ledger_replaced" and response.status_code == 409:
+                        raise DomainError(code, LEDGER_REPLACED, 409)
                     if isinstance(code, str) and code in WORKFLOW_REJECTIONS:
                         raise DomainError(code, WORKFLOW_REJECTIONS[code], response.status_code)
                     if isinstance(code, str) and (
@@ -689,7 +703,7 @@ class DesktopSync:
         self.domain.branch(branch_id)
         with self.domain.db.connect() as tx:
             tx.execute("BEGIN")
-            row = tx.execute("SELECT * FROM desktop_sync WHERE branch_id=?", (branch_id,)).fetchone()
+            row = self._binding(tx, branch_id)
             pending = tx.execute(
                 "SELECT count(*) FROM (SELECT object_id FROM desktop_sync_outbox WHERE branch_id=? "
                 "UNION SELECT object_id FROM desktop_sync_dirty WHERE branch_id=?)",
@@ -700,6 +714,7 @@ class DesktopSync:
                 "enabled": bool(row and row["enabled"]),
                 "work_id": branch_id,
                 "cursor": row["cursor"] if row else 0,
+                "ledger_id": row["ledger_id"] if row else None,
                 "pending": pending,
                 "project_source": current_project_source(tx, branch_id),
                 "settings_source": settings_sync.current_settings_source(tx, branch_id),
@@ -725,37 +740,65 @@ class DesktopSync:
                 ],
             }
 
+    @staticmethod
+    def _binding(tx, branch_id):
+        return tx.execute(
+            "SELECT s.*, l.ledger_id FROM desktop_sync s LEFT JOIN desktop_sync_ledgers l USING(branch_id) "
+            "WHERE s.branch_id=?",
+            (branch_id,),
+        ).fetchone()
+
     def _bound(self, branch_id, origin, *, allow_disabled=False):
         with self.domain.db.connect() as tx:
-            row = tx.execute("SELECT * FROM desktop_sync WHERE branch_id=?", (branch_id,)).fetchone()
+            row = self._binding(tx, branch_id)
             if not row or row["origin_sha256"] != _sha(origin) or (not row["enabled"] and not allow_disabled):
                 raise DomainError("sync_binding", "请先为此版本启用对应的同步地址。", 409)
-            return row["cursor"]
+            return row
 
-    def _call(self, branch_id, origin, token, path, schema, *, method="GET", data=None):
-        raw = self.transport(origin, token, method, f"/api/sync/works/{branch_id}{path}", data)
+    def _call(self, branch_id, origin, token, path, schema, *, method="GET", data=None, ledger_id=None):
+        raw = self.transport(
+            origin, token, method, f"/api/sync/works/{branch_id}{path}", data, ledger_id=ledger_id
+        )
         try:
             return TypeAdapter(schema).validate_python(raw)
         except ValidationError as error:
             raise DomainError("sync_response", "同步服务返回了无法核验的回执。", 502) from error
 
+    @staticmethod
+    def _check_ledger(binding, checkpoint):
+        if binding and (
+            binding["ledger_id"] != checkpoint.ledger_id or checkpoint.cursor < binding["cursor"]
+        ):
+            raise DomainError("sync_ledger_replaced", LEDGER_REPLACED, 409)
+
+    def _verified_ledger(self, branch_id, origin, token):
+        binding = self._bound(branch_id, origin)
+        if not binding["ledger_id"]:
+            raise DomainError("sync_ledger_replaced", LEDGER_REPLACED, 409)
+        checkpoint = self._call(branch_id, origin, token, "/checkpoint", Checkpoint)
+        self._check_ledger(binding, checkpoint)
+        return binding["ledger_id"]
+
     def enable(self, branch_id, origin, token):
         with self._operation():
             self.domain.branch(branch_id)
-            self._call(branch_id, origin, token, "/pull?after=0&limit=1", Pulled)
+            checkpoint = self._call(branch_id, origin, token, "/checkpoint", Checkpoint)
             with self.domain.db.connect(True) as tx:
-                row = tx.execute(
-                    "SELECT origin_sha256 FROM desktop_sync WHERE branch_id=?", (branch_id,)
-                ).fetchone()
+                row = self._binding(tx, branch_id)
                 if row and row["origin_sha256"] != _sha(origin):
                     raise DomainError(
                         "sync_binding", "此版本已有另一同步历史，请使用独立工作版本连接新服务。", 409
                     )
+                self._check_ledger(row, checkpoint)
                 tx.execute(
                     "INSERT INTO desktop_sync(branch_id,origin_sha256,enabled) VALUES(?,?,1) "
                     "ON CONFLICT(branch_id) DO UPDATE SET enabled=1",
                     (branch_id, _sha(origin)),
                 )
+                if not row:
+                    tx.execute(
+                        "INSERT INTO desktop_sync_ledgers VALUES(?,?)", (branch_id, checkpoint.ledger_id)
+                    )
                 tx.execute("INSERT OR IGNORE INTO desktop_sync_dirty VALUES(?,'bootstrap')", (branch_id,))
             return self._state(branch_id)
 
@@ -931,10 +974,12 @@ class DesktopSync:
                 tx.execute("RELEASE apply_sync_object")
         _remember(tx, branch_id, incoming, _digest(_local(tx, branch_id, object_id)))
 
-    def _pull(self, branch_id, origin, token):
+    def _pull(self, branch_id, origin, token, ledger_id):
         for _ in range(8):
-            cursor = self._bound(branch_id, origin)
-            page = self._call(branch_id, origin, token, f"/pull?after={cursor}&limit=50", Pulled)
+            cursor = self._bound(branch_id, origin)["cursor"]
+            page = self._call(
+                branch_id, origin, token, f"/pull?after={cursor}&limit=50", Pulled, ledger_id=ledger_id
+            )
             sequences = [row.sequence for row in page.changes]
             if (
                 not 0 <= page.cursor <= MAX_CURSOR
@@ -1124,7 +1169,7 @@ class DesktopSync:
             objects[object_id] = value
         return objects
 
-    def _push(self, branch_id, origin, token):
+    def _push(self, branch_id, origin, token, ledger_id):
         with self.domain.db.connect() as tx:
             todo = [
                 dict(row)
@@ -1146,7 +1191,9 @@ class DesktopSync:
                         continue
             path = f"/conflicts/{row['conflict_id']}/resolve" if row["conflict_id"] else "/push"
             try:
-                result = self._call(branch_id, origin, token, path, Receipt, method="POST", data=request)
+                result = self._call(
+                    branch_id, origin, token, path, Receipt, method="POST", data=request, ledger_id=ledger_id
+                )
             except DomainError as error:
                 known_rejections = PROSE_MERGE_REJECTIONS if _is_prose_merge(row) else CONFLICT_REJECTIONS
                 if row["conflict_id"] and known_rejections.get(error.code) == error.status:
@@ -1194,16 +1241,18 @@ class DesktopSync:
 
     def run(self, branch_id, origin, token):
         with self._operation():
-            self._bound(branch_id, origin)
-            self._pull(branch_id, origin, token)
+            ledger_id = self._verified_ledger(branch_id, origin, token)
+            self._pull(branch_id, origin, token, ledger_id)
             self._prepare(branch_id)
-            self._push(branch_id, origin, token)
-            self._pull(branch_id, origin, token)
+            self._push(branch_id, origin, token, ledger_id)
+            self._pull(branch_id, origin, token, ledger_id)
             return self._state(branch_id)
 
     def compare(self, branch_id, origin, token, identifier):
-        self._bound(branch_id, origin)
-        remote = self._call(branch_id, origin, token, f"/conflicts/{identifier}", ComparedConflict)
+        ledger_id = self._verified_ledger(branch_id, origin, token)
+        remote = self._call(
+            branch_id, origin, token, f"/conflicts/{identifier}", ComparedConflict, ledger_id=ledger_id
+        )
         with self.domain.db.connect() as tx:
             tx.execute("BEGIN")
             local = _local(tx, branch_id, remote.object_id)
@@ -1235,7 +1284,7 @@ class DesktopSync:
 
     def resolve(self, branch_id, origin, token, identifier, data):
         with self._operation():
-            self._bound(branch_id, origin)
+            ledger_id = self._verified_ledger(branch_id, origin, token)
             merge = data.choice == "merge"
             fingerprint = (
                 _sha(dumps([identifier, data.parent_revision, data.local_sha256, data.content]))
@@ -1248,7 +1297,9 @@ class DesktopSync:
                 )
             if record and record["receipt"]:
                 return {**self._state(branch_id), "merge_receipt": json.loads(record["receipt"])}
-            remote = self._call(branch_id, origin, token, f"/conflicts/{identifier}", ComparedConflict)
+            remote = self._call(
+                branch_id, origin, token, f"/conflicts/{identifier}", ComparedConflict, ledger_id=ledger_id
+            )
             with self.domain.db.connect(True) as tx:
                 record = (
                     _prose_merge_record(tx, branch_id, data.idempotency_key, fingerprint) if merge else None
@@ -1348,8 +1399,8 @@ class DesktopSync:
                             identifier,
                         ),
                     )
-            self._push(branch_id, origin, token)
-            self._pull(branch_id, origin, token)
+            self._push(branch_id, origin, token, ledger_id)
+            self._pull(branch_id, origin, token, ledger_id)
             state = self._state(branch_id)
             if merge:
                 with self.domain.db.connect() as tx:
@@ -1367,7 +1418,10 @@ class DesktopSync:
                 prior = fork_receipt(tx, data.idempotency_key, fingerprint)
             if prior:
                 return prior
-            remote = self._call(branch_id, origin, token, f"/conflicts/{identifier}", ComparedConflict)
+            ledger_id = self._verified_ledger(branch_id, origin, token)
+            remote = self._call(
+                branch_id, origin, token, f"/conflicts/{identifier}", ComparedConflict, ledger_id=ledger_id
+            )
             if remote.head_revision != data.parent_revision or remote.resolved_by:
                 raise DomainError("sync_compare", "云端内容已变化，请重新比较。", 409)
             with self.domain.db.connect(True) as tx:

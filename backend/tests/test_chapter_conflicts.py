@@ -49,8 +49,8 @@ def test_manual_merge_keeps_exact_sources_and_returns_one_receipt(domain, story,
         )
         transport = right.transport
 
-        def lose_response(*args):
-            result = transport(*args)
+        def lose_response(*args, **kwargs):
+            result = transport(*args, **kwargs)
             if args[3].endswith("/resolve"):
                 right.transport = transport
                 raise DomainError("sync_transport", "模拟合并回执中断。", 502)
@@ -171,11 +171,11 @@ def test_cloud_merge_receipt_preserves_a_local_edit_made_during_transmission(dom
         transport = right.transport
         later = "第一个合并请求发出时，本机另写的末句。"
 
-        def edit_during_request(*args):
+        def edit_during_request(*args, **kwargs):
             if args[3].endswith("/resolve"):
                 other.save(chapter, other.chapter(chapter)["revision"], later)
                 right.transport = transport
-            return transport(*args)
+            return transport(*args, **kwargs)
 
         right.transport = edit_during_request
         merge = Resolve(**stamp, choice="merge", content="合并终稿", idempotency_key="merge-with-local-race")

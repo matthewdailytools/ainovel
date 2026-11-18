@@ -1,5 +1,6 @@
 """Explicitly selected, resumable attachments in the isolated work sync service."""
 
+from contextlib import contextmanager
 from hashlib import sha256
 from time import time
 from typing import Annotated
@@ -7,7 +8,9 @@ from typing import Annotated
 from fastapi import Body, Header
 from fastapi.responses import Response, StreamingResponse
 from pydantic import Field, StringConstraints, field_validator
+from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 
+from . import cloud_ledger
 from .db import DomainError
 from .models import Input
 
@@ -58,13 +61,42 @@ def _file(row):
     return {key: row[key] for key in ("sha256", "name", "size", "created", "sealed")}
 
 
+class AttachmentDownload(StreamingResponse):
+    def __init__(self, snapshot):
+        super().__init__(
+            (),
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": 'attachment; filename="ainovel-attachment"',
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+        self.snapshot = snapshot
+
+    async def __call__(self, scope, receive, send):
+        # Open and check the snapshot before sending headers. Keep it alive until streaming ends or aborts.
+        size, parts = await run_in_threadpool(self.snapshot.__enter__)
+        try:
+            self.headers["Content-Length"] = str(size)
+            self.body_iterator = iterate_in_threadpool(parts)
+            await super().__call__(scope, receive, send)
+        finally:
+            self.snapshot.__exit__(None, None, None)
+
+
 def register_routes(app, store, credential):
     prefix = "/api/sync/works/{work_id}/attachments"
 
+    def authorize(tx, work_id, authorization, ledger_id):
+        store._authorize(tx, work_id, credential(authorization))
+        cloud_ledger.verify_header(tx, ledger_id)
+
     @app.get(prefix)
-    def attachments(work_id: WorkId, authorization: Authorization = ""):
+    def attachments(
+        work_id: WorkId, authorization: Authorization = "", ledger_id: cloud_ledger.LedgerHeader = None
+    ):
         with store.transaction(snapshot=True) as tx:
-            store._authorize(tx, work_id, credential(authorization))
+            authorize(tx, work_id, authorization, ledger_id)
             return {
                 "chunk_bytes": CHUNK_BYTES,
                 "max_file_bytes": FILE_BYTES,
@@ -78,9 +110,14 @@ def register_routes(app, store, credential):
             }
 
     @app.post(prefix)
-    def begin(work_id: WorkId, data: BeginUpload, authorization: Authorization = ""):
+    def begin(
+        work_id: WorkId,
+        data: BeginUpload,
+        authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
+    ):
         with store.transaction(write=True) as tx:
-            store._authorize(tx, work_id, credential(authorization))
+            authorize(tx, work_id, authorization, ledger_id)
             current = tx.execute(
                 "SELECT * FROM sync_attachments WHERE work_id=? AND sha256=?", (work_id, data.sha256)
             ).fetchone()
@@ -114,11 +151,12 @@ def register_routes(app, store, credential):
         data: Annotated[bytes, Body(media_type="application/octet-stream")],
         authorization: Authorization = "",
         content_type: Annotated[str, Header(max_length=128)] = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
     ):
-        if content_type.split(";", 1)[0].strip().casefold() != "application/octet-stream":
-            raise DomainError("sync_attachment_content_type", "附件分片须使用二进制正文。", 415)
         with store.transaction(write=True) as tx:
-            store._authorize(tx, work_id, credential(authorization))
+            authorize(tx, work_id, authorization, ledger_id)
+            if content_type.split(";", 1)[0].strip().casefold() != "application/octet-stream":
+                raise DomainError("sync_attachment_content_type", "附件分片须使用二进制正文。", 415)
             row = _row(tx, work_id, digest)
             if not 0 <= slot < _parts(row["size"]) or len(data) != min(
                 CHUNK_BYTES, row["size"] - slot * CHUNK_BYTES
@@ -138,9 +176,14 @@ def register_routes(app, store, credential):
         return Response(status_code=204)
 
     @app.post(prefix + "/{digest}/seal")
-    def seal(work_id: WorkId, digest: Digest, authorization: Authorization = ""):
+    def seal(
+        work_id: WorkId,
+        digest: Digest,
+        authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
+    ):
         with store.transaction(write=True) as tx:
-            store._authorize(tx, work_id, credential(authorization))
+            authorize(tx, work_id, authorization, ledger_id)
             row = _row(tx, work_id, digest)
             if not row["sealed"]:
                 checksum = sha256()
@@ -160,37 +203,37 @@ def register_routes(app, store, credential):
             return _file(row)
 
     @app.delete(prefix + "/{digest}", status_code=204)
-    def cancel(work_id: WorkId, digest: Digest, authorization: Authorization = ""):
+    def cancel(
+        work_id: WorkId,
+        digest: Digest,
+        authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
+    ):
         with store.transaction(write=True) as tx:
-            store._authorize(tx, work_id, credential(authorization))
+            authorize(tx, work_id, authorization, ledger_id)
             tx.execute(
                 "DELETE FROM sync_attachments WHERE work_id=? AND sha256=? AND sealed=0", (work_id, digest)
             )
         return Response(status_code=204)
 
     @app.get(prefix + "/{digest}/content")
-    def download(work_id: WorkId, digest: Digest, authorization: Authorization = ""):
-        with store.transaction(snapshot=True) as tx:
-            store._authorize(tx, work_id, credential(authorization))
-            row = _row(tx, work_id, digest)
-            if not row["sealed"]:
-                raise DomainError("sync_attachment_missing", "附件尚未通过完整性检查。", 404)
-            size = row["size"]
-
-        def parts():
-            with store.transaction(snapshot=True) as tx:
-                for part in tx.execute(
+    def download(
+        work_id: WorkId,
+        digest: Digest,
+        authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
+    ):
+        @contextmanager
+        def snapshot():
+            with store.transaction(snapshot=True, streaming=True) as tx:
+                authorize(tx, work_id, authorization, ledger_id)
+                row = _row(tx, work_id, digest)
+                if not row["sealed"]:
+                    raise DomainError("sync_attachment_missing", "附件尚未通过完整性检查。", 404)
+                parts = tx.execute(
                     "SELECT data FROM sync_attachment_parts WHERE work_id=? AND sha256=? ORDER BY slot",
                     (work_id, digest),
-                ):
-                    yield part["data"]
+                )
+                yield row["size"], (part["data"] for part in parts)
 
-        return StreamingResponse(
-            parts(),
-            media_type="application/octet-stream",
-            headers={
-                "Content-Length": str(size),
-                "Content-Disposition": 'attachment; filename="ainovel-attachment"',
-                "X-Content-Type-Options": "nosniff",
-            },
-        )
+        return AttachmentDownload(snapshot())

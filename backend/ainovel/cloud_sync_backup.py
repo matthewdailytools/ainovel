@@ -13,9 +13,11 @@ import sqlite3
 from tempfile import TemporaryDirectory
 from time import monotonic
 
+from . import cloud_ledger
 from .cloud_attachments import CHUNK_BYTES, FILE_BYTES, SCHEMA as ATTACHMENT_SCHEMA
 from .cloud_sync import APP_ID, MAX_CURSOR, SCHEMA
 from .cloud_sync_storage import StorageProofError, verify_storage
+from .db import DomainError
 
 
 class SyncBackupError(ValueError):
@@ -69,10 +71,14 @@ def _expected_schema():
 def _check_schema(tx):
     if (
         tx.execute("PRAGMA application_id").fetchone()[0] != APP_ID
-        or tx.execute("PRAGMA user_version").fetchone()[0] != 1
+        or tx.execute("PRAGMA user_version").fetchone()[0] != cloud_ledger.DB_VERSION
         or _schema(tx) != _expected_schema()
     ):
         raise SyncBackupError("文件不是当前格式的独立云同步数据库。")
+    try:
+        return cloud_ledger.identity(tx)
+    except DomainError as error:
+        raise SyncBackupError("云同步数据库的账本身份缺失或无效。") from error
 
 
 def _check_ledger(tx):
@@ -147,7 +153,9 @@ def verify_backup(path, expected_sha256=None):
     if expected_sha256 is not None and digest != expected_sha256.lower():
         raise SyncBackupError("备份文件 SHA-256 与指定值不一致。")
     with _readonly(path, standalone=True) as tx:
-        _check_schema(tx)
+        _, requires_header = _check_schema(tx)
+        if not requires_header or tx.execute("SELECT 1 FROM sync_devices WHERE active=1 LIMIT 1").fetchone():
+            raise SyncBackupError("备份须为独立账本，且没有仍可使用的设备凭据。")
         if (
             tx.execute("PRAGMA integrity_check").fetchone() != ("ok",)
             or tx.execute("PRAGMA foreign_key_check").fetchone()
@@ -158,7 +166,7 @@ def verify_backup(path, expected_sha256=None):
         return {"sha256": digest, "works": tx.execute("SELECT count(*) FROM sync_works").fetchone()[0]}
 
 
-def _rekey_device_rows(path):
+def _detach_identity(path):
     # Keep the stable device IDs used by receipts while invalidating even the old token's self-revoke path.
     with closing(sqlite3.connect(path, timeout=5)) as tx:
         tx.execute("PRAGMA temp_store=MEMORY")
@@ -167,6 +175,7 @@ def _rekey_device_rows(path):
         if tx.execute("PRAGMA journal_mode=DELETE").fetchone() != ("delete",):
             raise SyncBackupError("无法将备份转换为独立的 SQLite 文件。")
         with tx:
+            cloud_ledger.rotate(tx)
             tx.execute("UPDATE sync_devices SET active=0,token_sha256=lower(hex(randomblob(32)))")
 
 
@@ -205,7 +214,7 @@ def create_backup(source, target, *, require_encrypted_storage=False):
         snapshot = Path(scratch) / "ledger.sqlite"
         snapshot.touch(mode=0o600, exist_ok=False)
         _copy_live(source, snapshot)
-        _rekey_device_rows(snapshot)
+        _detach_identity(snapshot)
         result = verify_backup(snapshot)
         _publish(target, snapshot)
         return result
@@ -221,7 +230,7 @@ def restore_backup(archive, target, *, expected_sha256=None, require_encrypted_s
         restored.touch(mode=0o600, exist_ok=False)
         shutil.copyfile(archive, restored)
         verify_backup(restored, expected_sha256)
-        _rekey_device_rows(restored)
+        _detach_identity(restored)
         result = verify_backup(restored)
         _publish(target, restored)
         return result

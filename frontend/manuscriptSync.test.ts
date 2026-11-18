@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import {
   confirmLocalProjectBrief,
@@ -12,8 +12,9 @@ import {
   readLocalWorkflowHistory,
   saveLocalChapter,
 } from './offlineStore'
-import { syncWebManuscript } from './manuscriptSync'
+import { httpSyncTransport, syncWebManuscript } from './manuscriptSync'
 import {
+  pushSyncPending,
   queueSyncChange,
   queueSyncResolution,
   readSyncState,
@@ -27,6 +28,52 @@ import { inspectionExcerptTransferReason } from './workflowPrivacy'
 beforeEach(() => {
   globalThis.indexedDB = new IDBFactory()
 })
+afterEach(() => vi.restoreAllMocks())
+
+test.each([false, true])(
+  'replacing the ledger preserves an old queued submit, lost response=%s',
+  async (lost) => {
+    const scope = { service: 'http://127.0.0.1:8888', workId: 'work', deviceId: 'old-device' }
+    const original = 'a'.repeat(32)
+    const recovered = 'b'.repeat(32)
+    let ledger = original
+    const requests: { path: string; ledger: string | null }[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const path = new URL(String(url)).pathname.split(`/works/${scope.workId}`)[1]
+      const header = new Headers(init?.headers).get('X-Ainovel-Ledger')
+      requests.push({ path, ledger: header })
+      if (path === '/checkpoint') return Response.json({ ledger_id: ledger, cursor: 9 })
+      if (header !== ledger) return Response.json({ code: 'sync_ledger_replaced' }, { status: 409 })
+      expect(path).toBe('/push')
+      ledger = recovered
+      throw new Error('原服务写入后响应丢失')
+    })
+    const transport = httpSyncTransport(scope, 'a'.repeat(32))
+    await transport.enable()
+    await queueSyncChange(
+      scope,
+      {
+        object_id: 'chapter:old',
+        parent_revision: null,
+        payload: { content: '保留原请求' },
+        tombstone: false,
+      },
+      'original-request',
+    )
+    const before = await readSyncState(scope)
+    if (!lost) ledger = recovered
+    await expect(pushSyncPending(scope, transport)).rejects.toMatchObject({ code: 'ledger' })
+    expect(await readSyncState(scope)).toEqual(before)
+    expect(requests).toEqual([
+      { path: '/checkpoint', ledger: null },
+      { path: '/push', ledger: original },
+      ...(lost ? [{ path: '/receipts/original-request', ledger: original }] : []),
+    ])
+    await expect(transport.verifyLedger?.()).rejects.toMatchObject({ code: 'ledger' })
+    const other = httpSyncTransport({ ...scope, deviceId: 'replacement-device' }, 'b'.repeat(32))
+    await expect(other.enable()).rejects.toMatchObject({ code: 'ledger' })
+  },
+)
 
 function service(device: string, objectId: string, acceptedBeforeDisconnect: boolean) {
   const submitted: PushChange[] = []

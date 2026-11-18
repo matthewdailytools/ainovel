@@ -15,6 +15,7 @@ type SyncStatus = {
   enabled: boolean
   work_id: string
   cursor: number
+  ledger_id?: string | null
   pending: number
   project_source?: FormalSource | null
   settings_source?: FormalSource | null
@@ -457,6 +458,7 @@ export function DesktopSyncPanel({
         workId={branchId}
         service={credential.origin}
         token={credential.token}
+        ledgerId={status?.ledger_id}
         inactive={!status?.enabled || busy}
         onBusy={setAttachmentBusy}
       />

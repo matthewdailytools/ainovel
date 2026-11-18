@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import Field, JsonValue, StringConstraints, ValidationError, model_validator
 
+from . import cloud_ledger
 from .db import DomainError
 from .chapter_conflicts import verified_chapter
 from .cloud_attachments import SCHEMA as ATTACHMENT_SCHEMA, register_routes as register_attachments
@@ -50,7 +51,9 @@ Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, patt
 Authorization = Annotated[str, Header(max_length=512)]
 Payload = dict[str, JsonValue]
 
-SCHEMA = """
+SCHEMA = (
+    cloud_ledger.SCHEMA
+    + """
 CREATE TABLE IF NOT EXISTS sync_works(
  id TEXT PRIMARY KEY, sequence INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS sync_devices(
@@ -76,6 +79,7 @@ CREATE TABLE IF NOT EXISTS sync_heads(
 CREATE INDEX IF NOT EXISTS sync_pending ON sync_changes(work_id,sequence)
  WHERE status='conflict' AND resolved_by IS NULL;
 """
+)
 
 
 class BoundedRequests:
@@ -180,6 +184,11 @@ class Pulled(Input):
     cursor: int
     has_more: bool
     changes: list[Receipt]
+
+
+class Checkpoint(Input):
+    ledger_id: cloud_ledger.LedgerId
+    cursor: int = Field(ge=0, le=MAX_CURSOR, strict=True)
 
 
 class Conflict(Input):
@@ -305,10 +314,10 @@ class SyncStore:
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.transaction() as tx:
+        with self.transaction(snapshot=True) as tx:
             identifier = tx.execute("PRAGMA application_id").fetchone()[0]
             version = tx.execute("PRAGMA user_version").fetchone()[0]
-            if identifier not in (0, APP_ID) or version > 1:
+            if (identifier, version) not in {(0, 0), (APP_ID, 1), (APP_ID, cloud_ledger.DB_VERSION)}:
                 raise DomainError("sync_schema", "同步数据库格式无法读取。")
             if (
                 identifier == 0
@@ -317,11 +326,16 @@ class SyncStore:
                 ).fetchone()
             ):
                 raise DomainError("sync_schema", "请选择独立的同步数据库。")
+            tx.commit()
             tx.execute("PRAGMA journal_mode=WAL")
-            tx.executescript(
-                f"BEGIN IMMEDIATE;\n{SCHEMA}\n{ATTACHMENT_SCHEMA}\n"
-                f"PRAGMA application_id={APP_ID};\nPRAGMA user_version=1;\nCOMMIT;"
-            )
+            if version < cloud_ledger.DB_VERSION:
+                tx.executescript(f"BEGIN IMMEDIATE;\n{SCHEMA}\n{ATTACHMENT_SCHEMA}")
+                # A simultaneous startup may have already assigned this database its identity.
+                cloud_ledger.initialize(tx, requires_header=identifier == APP_ID)
+                tx.execute(f"PRAGMA application_id={APP_ID}")
+                tx.execute(f"PRAGMA user_version={cloud_ledger.DB_VERSION}")
+            cloud_ledger.identity(tx)
+            tx.commit()
 
     def check_readiness(self):
         database = self.path.absolute().as_uri() + "?mode=ro"
@@ -329,15 +343,16 @@ class SyncStore:
             with closing(sqlite3.connect(database, uri=True, timeout=1)) as tx:
                 identifier = tx.execute("PRAGMA application_id").fetchone()[0]
                 version = tx.execute("PRAGMA user_version").fetchone()[0]
-                if identifier != APP_ID or version != 1:
+                if identifier != APP_ID or version != cloud_ledger.DB_VERSION:
                     raise sqlite3.DatabaseError("unexpected synchronization schema")
+                cloud_ledger.identity(tx)
                 tx.execute("SELECT id, sequence FROM sync_works LIMIT 1").fetchone()
         except sqlite3.Error as error:
             raise DomainError("sync_storage", "同步存储暂不可读。", 503) from error
 
     @contextmanager
-    def transaction(self, *, write=False, snapshot=False):
-        tx = sqlite3.connect(self.path, isolation_level=None, timeout=10)
+    def transaction(self, *, write=False, snapshot=False, streaming=False):
+        tx = sqlite3.connect(self.path, isolation_level=None, timeout=10, check_same_thread=not streaming)
         tx.row_factory = sqlite3.Row
         try:
             tx.execute("PRAGMA foreign_keys=ON")
@@ -472,9 +487,10 @@ class SyncStore:
             )
         return _receipt(self._change(tx, work, data.change_id))
 
-    def push(self, work, digest, data):
+    def push(self, work, digest, data, *, ledger_id=None):
         with self.transaction(write=True) as tx:
             device = self._authorize(tx, work, digest)
+            cloud_ledger.verify_header(tx, ledger_id)
             _check_reserved(data.object_id, data.change_id, payload=data.payload)
             if self._private_payload(tx, work, data.payload, {}):
                 raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
@@ -665,25 +681,35 @@ class SyncStore:
             raise
         return self._append(tx, work, device, data, fingerprint, payload, data.change_id, "applied")
 
-    def receipt(self, work, digest, change_id):
+    def checkpoint(self, work, digest):
+        with self.transaction(snapshot=True) as tx:
+            self._authorize(tx, work, digest)
+            ledger_id, _ = cloud_ledger.identity(tx)
+            cursor = tx.execute("SELECT sequence FROM sync_works WHERE id=?", (work,)).fetchone()[0]
+            return Checkpoint(ledger_id=ledger_id, cursor=cursor)
+
+    def receipt(self, work, digest, change_id, *, ledger_id=None):
         with self.transaction(snapshot=True) as tx:
             device = self._authorize(tx, work, digest)
+            cloud_ledger.verify_header(tx, ledger_id, receipt_lookup=True)
             row = self._change(tx, work, change_id)
             if not row or row["device_id"] != device:
                 raise DomainError("sync_receipt", "该设备没有对应回执。", 404)
             return self._public_receipt(tx, work, row)
 
-    def change(self, work, digest, change_id):
+    def change(self, work, digest, change_id, *, ledger_id=None):
         with self.transaction(snapshot=True) as tx:
             self._authorize(tx, work, digest)
+            cloud_ledger.verify_header(tx, ledger_id, receipt_lookup=True)
             row = self._change(tx, work, change_id)
             if not row:
                 raise DomainError("sync_change", "找不到所选变更。", 404)
             return self._public_receipt(tx, work, row)
 
-    def pull(self, work, digest, after, limit):
+    def pull(self, work, digest, after, limit, *, ledger_id=None):
         with self.transaction(snapshot=True) as tx:
             self._authorize(tx, work, digest)
+            cloud_ledger.verify_header(tx, ledger_id)
             bound = tx.execute("SELECT sequence FROM sync_works WHERE id=?", (work,)).fetchone()[0]
             if after > bound:
                 raise DomainError("sync_cursor", "拉取游标超出当前作品的变更记录。", 409)
@@ -734,9 +760,10 @@ class SyncStore:
             if event and event["payload"] is not None
         )
 
-    def conflicts(self, work, digest, after, limit):
+    def conflicts(self, work, digest, after, limit, *, ledger_id=None):
         with self.transaction(snapshot=True) as tx:
             self._authorize(tx, work, digest)
+            cloud_ledger.verify_header(tx, ledger_id)
             rows = list(
                 tx.execute(
                     "SELECT * FROM sync_changes WHERE work_id=? AND sequence>? AND status='conflict' AND resolved_by IS NULL "
@@ -757,9 +784,10 @@ class SyncStore:
             cursor = examined[-1]["sequence"] if examined else after
             return Conflicts(conflicts=result, cursor=cursor, has_more=len(rows) > limit)
 
-    def comparison(self, work, digest, identifier):
+    def comparison(self, work, digest, identifier, *, ledger_id=None):
         with self.transaction(snapshot=True) as tx:
             self._authorize(tx, work, digest)
+            cloud_ledger.verify_header(tx, ledger_id)
             row = self._change(tx, work, identifier)
             summary = self._conflict(tx, work, row)
             head, base = self._compared_rows(tx, work, summary)
@@ -770,9 +798,10 @@ class SyncStore:
                 base=self._public_receipt(tx, work, base) if base else None,
             )
 
-    def resolve(self, work, digest, identifier, data):
+    def resolve(self, work, digest, identifier, data, *, ledger_id=None):
         with self.transaction(write=True) as tx:
             device = self._authorize(tx, work, digest)
+            cloud_ledger.verify_header(tx, ledger_id)
             _check_reserved(data.change_id, payload=data.payload)
             request = data.model_dump(exclude={"content"} if data.choice != "merge_prose" else None)
             fingerprint = _digest(_encoded(["resolve", device, identifier, request]))
@@ -899,7 +928,7 @@ def create_sync_app(database_path: Path, provisioning_token: str, browser_origin
             CORSMiddleware,
             allow_origins=list(browser_origins),
             allow_methods=["GET", "POST", "DELETE"],
-            allow_headers=["Authorization", "Content-Type"],
+            allow_headers=["Authorization", "Content-Type", cloud_ledger.LEDGER_HEADER],
         )
     prefix = "/api/sync/works/{work_id}"
 
@@ -948,9 +977,18 @@ def create_sync_app(database_path: Path, provisioning_token: str, browser_origin
         store.revoke_current(work_id, _credential(authorization), device_id)
         return Response(status_code=204)
 
+    @app.get(prefix + "/checkpoint")
+    def checkpoint(work_id: Identifier, authorization: Authorization = "") -> Checkpoint:
+        return store.checkpoint(work_id, _credential(authorization))
+
     @app.post(prefix + "/push")
-    def push(work_id: Identifier, data: Push, authorization: Authorization = "") -> Receipt:
-        return store.push(work_id, _credential(authorization), data)
+    def push(
+        work_id: Identifier,
+        data: Push,
+        authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
+    ) -> Receipt:
+        return store.push(work_id, _credential(authorization), data, ledger_id=ledger_id)
 
     @app.get(prefix + "/pull")
     def pull(
@@ -958,16 +996,27 @@ def create_sync_app(database_path: Path, provisioning_token: str, browser_origin
         after: Annotated[int, Query(ge=0, le=MAX_CURSOR)] = 0,
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
         authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
     ) -> Pulled:
-        return store.pull(work_id, _credential(authorization), after, limit)
+        return store.pull(work_id, _credential(authorization), after, limit, ledger_id=ledger_id)
 
     @app.get(prefix + "/receipts/{change_id}")
-    def receipt(work_id: Identifier, change_id: Identifier, authorization: Authorization = "") -> Receipt:
-        return store.receipt(work_id, _credential(authorization), change_id)
+    def receipt(
+        work_id: Identifier,
+        change_id: Identifier,
+        authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
+    ) -> Receipt:
+        return store.receipt(work_id, _credential(authorization), change_id, ledger_id=ledger_id)
 
     @app.get(prefix + "/changes/{change_id}")
-    def change(work_id: Identifier, change_id: Identifier, authorization: Authorization = "") -> Receipt:
-        return store.change(work_id, _credential(authorization), change_id)
+    def change(
+        work_id: Identifier,
+        change_id: Identifier,
+        authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
+    ) -> Receipt:
+        return store.change(work_id, _credential(authorization), change_id, ledger_id=ledger_id)
 
     @app.get(prefix + "/conflicts")
     def conflicts(
@@ -975,16 +1024,18 @@ def create_sync_app(database_path: Path, provisioning_token: str, browser_origin
         after: Annotated[int, Query(ge=0, le=MAX_CURSOR)] = 0,
         limit: Annotated[int, Query(ge=1, le=50)] = 20,
         authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
     ) -> Conflicts:
-        return store.conflicts(work_id, _credential(authorization), after, limit)
+        return store.conflicts(work_id, _credential(authorization), after, limit, ledger_id=ledger_id)
 
     @app.get(prefix + "/conflicts/{conflict_id}")
     def comparison(
         work_id: Identifier,
         conflict_id: Identifier,
         authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
     ) -> ComparedConflict:
-        return store.comparison(work_id, _credential(authorization), conflict_id)
+        return store.comparison(work_id, _credential(authorization), conflict_id, ledger_id=ledger_id)
 
     @app.post(prefix + "/conflicts/{conflict_id}/resolve")
     def resolve(
@@ -992,8 +1043,9 @@ def create_sync_app(database_path: Path, provisioning_token: str, browser_origin
         conflict_id: Identifier,
         data: Resolution,
         authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
     ) -> Receipt:
-        return store.resolve(work_id, _credential(authorization), conflict_id, data)
+        return store.resolve(work_id, _credential(authorization), conflict_id, data, ledger_id=ledger_id)
 
     register_attachments(app, store, _credential)
     return app

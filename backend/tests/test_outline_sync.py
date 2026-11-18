@@ -7,7 +7,7 @@ from ainovel import outline_archive, outline_sync, project_sync, reference_sync,
 from ainovel.api import create_app
 from ainovel.cloud_sync import create_sync_app
 from ainovel.db import Database, DomainError
-from ainovel.desktop_sync import DesktopSync, Resolve
+from ainovel.desktop_sync import DesktopSync, Resolve, _headers
 from ainovel.domain import Domain
 from ainovel.manuscript_exchange import ManuscriptPackage, export_manuscript, import_manuscript
 from ainovel.outline_workspace import ConfirmOutline, SaveOutline, confirm_outline, read_outline, save_outline
@@ -163,8 +163,8 @@ def test_restored_formal_card_keeps_exact_address_through_outline_package_and_cl
             assert result.status_code == 201, result.text
             return result.json()["token"]
 
-        def transport(sync_origin, token, method, route, payload):
-            result = cloud.request(method, route, headers={"Authorization": f"Bearer {token}"}, json=payload)
+        def transport(sync_origin, token, method, route, payload, *, ledger_id=None):
+            result = cloud.request(method, route, headers=_headers(token, ledger_id), json=payload)
             if not result.is_success:
                 error = result.json()
                 raise DomainError(error["code"], error["message"], result.status_code)
@@ -554,10 +554,8 @@ def test_desktop_outline_cloud_conflict_and_synchronized_graph_dependency(client
             assert result.status_code == 201, result.text
             return result.json()["token"]
 
-        def transport(sync_origin, token, method, route, payload):
-            response = cloud.request(
-                method, route, headers={"Authorization": f"Bearer {token}"}, json=payload
-            )
+        def transport(sync_origin, token, method, route, payload, *, ledger_id=None):
+            response = cloud.request(method, route, headers=_headers(token, ledger_id), json=payload)
             if not response.is_success:
                 error = response.json()
                 raise DomainError(error["code"], error["message"], response.status_code)

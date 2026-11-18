@@ -27,9 +27,9 @@ def test_desktop_self_revoke_keeps_local_outbox_draft_and_cursor(domain, story, 
         transport = right.transport
         attempts = []
 
-        def revoke_transport(origin, token, method, target, payload):
+        def revoke_transport(origin, token, method, target, payload, *, ledger_id=None):
             if method != "DELETE":
-                return transport(origin, token, method, target, payload)
+                return transport(origin, token, method, target, payload, ledger_id=ledger_id)
             attempts.append(target)
             response = cloud.delete(target, headers={"Authorization": f"Bearer {token}"})
             assert response.status_code == 204 and response.content == b""

@@ -8,22 +8,22 @@ import { describeProjectVersion } from './projectSyncModel'
 import { describeSettingsVersion, type SettingsConflictMerge } from './settingsSyncModel'
 import { describeStoryVersion } from './storySyncModel'
 import { describeReferenceVersion } from './referenceArchive'
-import { readSyncState, setSyncEnabled, type SyncPayload } from './syncClient'
+import { setSyncEnabled, type SyncPayload } from './syncClient'
 import {
   cloudScope,
   forkWebConflict,
   httpSyncTransport,
   prepareWebResolution,
   prepareWebSettingsMerge,
+  readWebManuscriptSyncState,
   resolveWebManuscript,
   syncWebManuscript,
   webForkChoices,
   type WebForkChoice,
 } from './manuscriptSync'
 
-type State = Awaited<ReturnType<typeof readSyncState>> & {
+type State = Awaited<ReturnType<typeof readWebManuscriptSyncState>> & {
   deferred?: { object_id: string; reason: string }[]
-  localPending?: number
 }
 type Comparison = Awaited<ReturnType<typeof prepareWebResolution>>
 
@@ -103,7 +103,7 @@ export function WebSyncPanel({
     setCompared(undefined)
     if (ready) {
       try {
-        void readSyncState(cloudScope(service, project.branch.id, device.trim()))
+        void readWebManuscriptSyncState(cloudScope(service, project.branch.id, device.trim()))
           .then((value) => {
             if (active) setStatus(value)
           })
@@ -133,7 +133,7 @@ export function WebSyncPanel({
       if (action === 'disable') {
         await setSyncEnabled(scope, false)
         setCompared(undefined)
-        setStatus(await readSyncState(scope))
+        setStatus(await readWebManuscriptSyncState(scope))
         return
       }
       if (action === 'compare' && value) {
@@ -159,14 +159,13 @@ export function WebSyncPanel({
         await setSyncEnabled(scope, false)
         setToken('')
         setCompared(undefined)
-        setStatus(await readSyncState(scope))
+        setStatus(await readWebManuscriptSyncState(scope))
         setNotice('已撤销此设备在云端的凭据。本机作品与待同步记录仍可使用。')
         return
       }
       if (action === 'enable') {
-        await transport.pull(0)
-        await setSyncEnabled(scope, true)
-        setStatus(await readSyncState(scope))
+        await transport.enable()
+        setStatus(await readWebManuscriptSyncState(scope))
         return
       }
       if (unsaved) throw new Error('请先保存当前章稿、立项或设定修改，再进行同步或合并。')
@@ -197,7 +196,7 @@ export function WebSyncPanel({
       setMessage(error instanceof Error ? error.message : '同步未完成。')
       if (ready) {
         try {
-          setStatus(await readSyncState(cloudScope(service, project.branch.id, device.trim())))
+          setStatus(await readWebManuscriptSyncState(cloudScope(service, project.branch.id, device.trim())))
         } catch {
           /*保留已显示状态*/
         }
@@ -276,7 +275,7 @@ export function WebSyncPanel({
         <p role="status">
           {status.enabled ? '已启用' : '本地模式'} · 游标 {status.cursor} · {status.pending.length}{' '}
           条待发送或确认
-          {!!status.localPending && ` · ${status.localPending} 项正式保存仍待同步`}
+          {!!status.localPending && status.enabled && ` · ${status.localPending} 项正式保存仍待同步`}
         </p>
       )}
       {!!status?.deferred?.length && (
@@ -452,6 +451,7 @@ export function WebSyncPanel({
         workId={project.branch.id}
         service={service}
         token={token}
+        ledgerId={status?.ledgerId}
         inactive={!status?.enabled || busy || hasConflictDraft}
         onBusy={setAttachmentBusy}
       />

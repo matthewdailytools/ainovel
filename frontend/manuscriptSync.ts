@@ -33,6 +33,7 @@ import type { SettingsConflictMerge } from './settingsSyncModel'
 import { referenceCardKey, referenceHeadObjectId } from './referenceArchive'
 import {
   approveSyncResolution,
+  enableSyncLedger,
   listSyncHeads,
   markSyncBaseline,
   pendingPayloads,
@@ -43,6 +44,8 @@ import {
   readPublicationReceipts,
   readSyncConflict,
   readSyncState,
+  requireSyncLedger,
+  SyncLedgerChanged,
   SyncResolutionChanged,
   type SyncPayload,
   type SyncScope,
@@ -68,10 +71,10 @@ export function cloudScope(service: string, workId: string, deviceId: string): S
 export function httpSyncTransport(
   scope: SyncScope,
   token: string,
-): SyncTransport & { revokeDevice(): Promise<void> } {
+): SyncTransport & { enable(): Promise<void>; revokeDevice(): Promise<void> } {
   if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) throw new Error('请输入同步服务签发的设备凭据。')
   const endpoint = `${scope.service}/api/sync/works/${encodeURIComponent(scope.workId)}`
-  function send(path: string, method: 'GET' | 'POST' | 'DELETE', payload?: unknown) {
+  function send(path: string, method: 'GET' | 'POST' | 'DELETE', payload?: unknown, ledgerId?: string) {
     return fetch(endpoint + path, {
       method,
       credentials: 'omit',
@@ -79,6 +82,7 @@ export function httpSyncTransport(
       cache: 'no-store',
       headers: {
         Authorization: `Bearer ${token}`,
+        ...(ledgerId ? { 'X-Ainovel-Ledger': ledgerId } : {}),
         ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
       signal: AbortSignal.timeout(15_000),
@@ -86,10 +90,12 @@ export function httpSyncTransport(
     })
   }
   async function request(path: string, payload?: unknown, optional = false) {
-    const response = await send(path, payload === undefined ? 'GET' : 'POST', payload)
+    const ledgerId = path === '/checkpoint' ? undefined : await requireSyncLedger(scope)
+    const response = await send(path, payload === undefined ? 'GET' : 'POST', payload, ledgerId)
     if (optional && response.status === 404) return null
     const result = await response.json()
     if (!response.ok) {
+      if (response.status === 409 && result.code === 'sync_ledger_replaced') throw new SyncLedgerChanged()
       if (response.status === 409 && ['sync_head_changed', 'sync_conflict_resolved'].includes(result.code)) {
         throw new SyncResolutionChanged('云端版本已更新。请再次同步并重新比较。')
       }
@@ -98,6 +104,12 @@ export function httpSyncTransport(
     return result
   }
   return {
+    async enable() {
+      await enableSyncLedger(scope, await request('/checkpoint'))
+    },
+    async verifyLedger() {
+      await requireSyncLedger(scope, await request('/checkpoint'))
+    },
     push: (change) => request('/push', change),
     pull: (after) => request(`/pull?after=${after}&limit=50`),
     receipt: (id) => request('/receipts/' + encodeURIComponent(id), undefined, true),
@@ -557,9 +569,15 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
   return { unsent, privacy }
 }
 
+export async function readWebManuscriptSyncState(scope: SyncScope) {
+  const [state, publications] = await Promise.all([readSyncState(scope), readLocalPublications(scope.workId)])
+  return { ...state, localPending: publications.length }
+}
+
 export async function syncWebManuscript(project: LocalProject, scope: SyncScope, transport: SyncTransport) {
   if (scope.workId !== project.branch.id) throw new Error('同步范围与当前工作版本不一致。')
   async function exchange() {
+    await transport.verifyLedger?.()
     await pull(scope, transport)
     await acknowledgePublications(scope)
     const deferred = await reconcile(project, scope)
@@ -569,8 +587,7 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
     await acknowledgePublications(scope)
     const remaining = await reconcile(project, scope)
     return {
-      ...(await readSyncState(scope)),
-      localPending: (await readLocalPublications(scope.workId)).length,
+      ...(await readWebManuscriptSyncState(scope)),
       deferred: [...new Map([...unsent, ...remaining, ...privacy.deferred])].map(([object_id, reason]) => ({
         object_id,
         reason,
@@ -725,6 +742,8 @@ export async function resolveWebManuscript(
   compared: WebComparison,
   choice: 'current' | 'incoming' | 'local' | { choice: 'merge_prose'; content: string },
 ) {
+  // A comparison can be opened offline. Only a current ledger may receive its approval.
+  await transport.verifyLedger?.()
   const id = compared.incoming.conflict_id!
   if (typeof choice === 'object') {
     const waiting = (await readSyncState(scope)).pending.find(

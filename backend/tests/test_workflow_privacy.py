@@ -167,11 +167,11 @@ def test_desktop_retires_unsafe_outbox_and_cloud_rejects_older_client_payloads(
     base = f"/api/sync/works/{branch}"
     emitted = []
 
-    def transport(origin, token, method, target, payload):
+    def transport(origin, token, method, target, payload, *, ledger_id=None):
         if method == "POST" and target.endswith("/push"):
             emitted.append(payload["object_id"])
             assert EXCERPT not in dumps(payload)
-        return _network(origin, token, method, target, payload)
+        return _network(origin, token, method, target, payload, ledger_id=ledger_id)
 
     left, right = DesktopSync(domain, transport), DesktopSync(receiving_domain)
     left.enable(branch, origin, writer)

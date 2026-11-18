@@ -113,7 +113,9 @@ uv run python -m ainovel.cloud_sync_backup verify --file 'D:/sync-backups/ledger
 uv run python -m ainovel.cloud_sync_backup restore --file 'D:/sync-backups/ledger.sqlite' --target 'E:/sync-restore/ledger.sqlite' --sha256 '<原备份 SHA-256>' --require-encrypted-storage
 ```
 
-备份与恢复副本中的旧设备凭据均失效。启用恢复库时，由管理员按原设备编号重新签发凭据。备份点已有的作品修订、附件、冲突和回执可继续核对。若设备游标晚于备份点，先核对本机副本与恢复点，再安排后续同步。[云账本恢复验收](docs/acceptance/七台云同步验收.md)
+在线备份副本和恢复库各有独立的账本身份，原库身份保持稳定。副本中的旧设备凭据均失效。启用恢复库时，由管理员为待连接的设备重新签发凭据。备份点已有的修订、附件、冲突和回执可继续核对。
+
+启用时，客户端通过带作品权限的 `GET /api/sync/works/{work_id}/checkpoint` 核对账本身份。恢复库要求在拉取、推送、处理冲突及附件请求中提交相符的 `X-Ainovel-Ledger`。旧副本即使拿到新凭据，也会保留旧账本绑定、本机稿和待同步记录。用独立浏览器配置或隔离的 `AINOVEL_DATA_DIR` 打开新副本，再选择连接恢复库。保留原端和独立备份以核对恢复点之后的编辑及回执。[云账本恢复步骤](docs/acceptance/七台云同步验收.md)
 
 ### 备份、恢复与付费验收
 

@@ -32,12 +32,14 @@ export function CloudAttachments({
   workId,
   service,
   token,
+  ledgerId,
   inactive,
   onBusy,
 }: {
   workId: string
   service: string
   token: string
+  ledgerId?: string | null
   inactive?: boolean
   onBusy: (busy: boolean) => void
 }) {
@@ -49,8 +51,9 @@ export function CloudAttachments({
   const [error, setError] = useState('')
   const active = useRef<AbortController | undefined>(undefined)
   useEffect(() => () => active.current?.abort(), [])
-  const ready = !inactive && !!service.trim() && /^[A-Za-z0-9_-]{32,128}$/.test(token.trim())
+  const ready = !inactive && !!ledgerId && !!service.trim() && /^[A-Za-z0-9_-]{32,128}$/.test(token.trim())
   async function request(path = '', method = 'GET', body?: Blob | object) {
+    if (!ledgerId) throw new Error('请先核对作品的云端连接。')
     const origin = new URL(service.trim())
     if (
       !(
@@ -74,6 +77,7 @@ export function CloudAttachments({
         cache: 'no-store',
         headers: {
           Authorization: `Bearer ${token.trim()}`,
+          'X-Ainovel-Ledger': ledgerId,
           ...(body ? { 'Content-Type': sign ? 'application/octet-stream' : 'application/json' } : {}),
         },
         ...(body ? { body: sign ? body : JSON.stringify(body) } : {}),

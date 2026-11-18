@@ -122,8 +122,8 @@ def test_formal_archive_is_immutable_and_pulls_into_independent_desktop_history(
 
     dropped = []
 
-    def drop_after_completion(origin, token, method, target, payload):
-        reply = _network(origin, token, method, target, payload)
+    def drop_after_completion(origin, token, method, target, payload, *, ledger_id=None):
+        reply = _network(origin, token, method, target, payload, ledger_id=ledger_id)
         if (
             target.endswith("/push")
             and payload["object_id"].startswith("workflow-completion:")

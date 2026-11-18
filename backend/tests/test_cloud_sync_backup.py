@@ -10,6 +10,7 @@ import pytest
 
 from ainovel import cloud_sync_backup as backup
 from ainovel.cloud_attachments import CHUNK_BYTES
+from ainovel.cloud_ledger import LEDGER_HEADER
 from ainovel.cloud_sync import Push, SyncStore, create_sync_app
 from ainovel.cloud_sync_storage import StorageProofError
 from test_cloud_sync import ADMIN, WORK, grant, parent, push
@@ -27,6 +28,8 @@ def test_online_backup_includes_committed_wal_and_recovers_author_history_withou
         reader.execute("BEGIN")
         assert reader.execute("SELECT count(*) FROM sync_changes").fetchone() == (0,)
         desktop, peer = grant(source, "desk"), grant(source, "peer")
+        original_identity = source.get(WORK + "/checkpoint", headers=peer).json()
+        assert original_identity["cursor"] == 0
         foreign_work = "/api/sync/works/another"
         foreign = grant(source, "desk", foreign_work)
         original = parent("first-draft", payload={"text": "第一份作者稿。"})
@@ -80,6 +83,7 @@ def test_online_backup_includes_committed_wal_and_recovers_author_history_withou
                 )
                 created = worker.submit(backup.create_backup, live, archive).result(timeout=12)
         assert source.get(WORK + "/pull", headers=peer).json()["cursor"] == 4
+        assert source.get(WORK + "/checkpoint", headers=peer).json() == {**original_identity, "cursor": 4}
         assert source.get(receipt_path, headers=desktop).json() == first
         assert source.delete(WORK + "/devices/desk", headers=ADMIN).status_code == 204
         assert backup.verify_backup(archive, created["sha256"]) == created
@@ -88,6 +92,14 @@ def test_online_backup_includes_committed_wal_and_recovers_author_history_withou
             not archive.with_name(archive.name + suffix).exists() for suffix in ("-wal", "-shm", "-journal")
         )
         with closing(sqlite3.connect(archive)) as copy, closing(sqlite3.connect(live)) as current:
+            archive_identity, required = copy.execute(
+                "SELECT ledger_id,requires_header FROM sync_ledger"
+            ).fetchone()
+            assert archive_identity != original_identity["ledger_id"] and required == 1
+            assert current.execute("SELECT ledger_id,requires_header FROM sync_ledger").fetchone() == (
+                original_identity["ledger_id"],
+                0,
+            )
             desensitized = dict(copy.execute("SELECT id,token_sha256 FROM sync_devices WHERE work_id='bell'"))
             old = dict(current.execute("SELECT id,token_sha256 FROM sync_devices WHERE work_id='bell'"))
             assert desensitized.keys() == old.keys() and all(desensitized[key] != old[key] for key in old)
@@ -101,19 +113,124 @@ def test_online_backup_includes_committed_wal_and_recovers_author_history_withou
                 assert recovered.delete(WORK + "/device-session", headers=old_token).status_code == 401
             assert recovered.get(foreign_work + "/pull", headers=foreign).status_code == 401
             new_desktop = grant(recovered, "desk")
-            pull = recovered.get(WORK + "/pull", headers=new_desktop).json()
+            identity = recovered.get(WORK + "/checkpoint", headers=new_desktop).json()
+            assert identity["cursor"] == 3
+            assert identity["ledger_id"] not in {original_identity["ledger_id"], archive_identity}
+            bound = {**new_desktop, LEDGER_HEADER: identity["ledger_id"]}
+            pull = recovered.get(WORK + "/pull", headers=bound).json()
             assert pull["cursor"] == 3
             assert pull["changes"] == [first, head, conflict]
-            assert recovered.get(WORK + "/pull?after=4", headers=new_desktop).status_code == 409
-            assert recovered.get(compare_path, headers=new_desktop).json() == compared
+            assert recovered.get(WORK + "/pull?after=4", headers=bound).json()["code"] == "sync_cursor"
+            assert recovered.get(compare_path, headers=bound).json() == compared
             assert recovered.get(receipt_path, headers=new_desktop).json() == first
-            assert push(recovered, new_desktop, original) == first
-            assert recovered.get(file_path + "/content", headers=new_desktop).content == material
+            assert push(recovered, bound, original) == first
+            download = recovered.get(file_path + "/content", headers=bound)
+            assert download.content == material
+            assert download.headers["Content-Length"] == str(len(material))
             assert recovered.get(foreign_work + "/pull", headers=new_desktop).status_code == 401
         assert source.get(WORK + "/pull", headers=peer).json()["cursor"] == 4
         assert source.get(WORK + "/pull", headers=desktop).status_code == 401
         assert source.get(WORK + "/pull", headers=new_desktop).status_code == 401
         assert backup.verify_backup(archive) == created
+
+
+def test_old_ledger_cannot_read_or_write_a_recovered_sequence_that_has_regrown(tmp_path):
+    live, archive, restored = (
+        tmp_path / name for name in ("live.sqlite", "archive.sqlite", "restored.sqlite")
+    )
+    provisioning = ADMIN["Authorization"].split(" ", 1)[1]
+    with TestClient(create_sync_app(live, provisioning)) as source:
+        desktop = grant(source, "desk")
+        original = source.get(WORK + "/checkpoint", headers=desktop).json()["ledger_id"]
+        bound = {**desktop, LEDGER_HEADER: original}
+        push(source, bound, parent("base", payload={"text": "共同初稿。"}))
+        archive_sha = backup.create_backup(live, archive)["sha256"]
+        legitimate = push(source, bound, parent("original-two", "base", {"text": "原账本写作进度。"}))
+        assert legitimate["sequence"] == 2
+
+        backup.restore_backup(archive, restored, expected_sha256=archive_sha)
+        with TestClient(create_sync_app(restored, provisioning)) as recovered:
+            desk, peer = grant(recovered, "desk"), grant(recovered, "peer")
+            ledger = recovered.get(WORK + "/checkpoint", headers=desk).json()["ledger_id"]
+            desk_now, peer_now = ({**headers, LEDGER_HEADER: ledger} for headers in (desk, peer))
+            head = push(recovered, desk_now, parent("another-two", "base", {"text": "恢复副本的不同正文。"}))
+            assert head["sequence"] == legitimate["sequence"] and head["change_id"] != legitimate["change_id"]
+            competing = push(recovered, peer_now, parent("fork-conflict", "base"))
+            comparison = f"{WORK}/conflicts/{competing['change_id']}"
+            resolution = {
+                "change_id": "stale-resolution",
+                "parent_revision": "another-two",
+                "choice": "incoming",
+            }
+
+            material = "原本准备上传的资料".encode()
+            digest = sha256(material).hexdigest()
+            attachments = f"{WORK}/attachments"
+            path = f"{attachments}/{digest}"
+            binary = {"Content-Type": "application/octet-stream"}
+            manifest = {"name": "创作资料.txt", "sha256": digest, "size": len(material)}
+            assert recovered.post(attachments, headers=desk_now, json=manifest).is_success
+            operations = (
+                ("GET", WORK + "/pull?after=2", {}),
+                ("GET", WORK + "/conflicts", {}),
+                ("GET", comparison, {}),
+                ("POST", WORK + "/push", {"json": parent("stale-write", "another-two")}),
+                ("POST", comparison + "/resolve", {"json": resolution}),
+                ("GET", attachments, {}),
+                ("POST", attachments, {"json": manifest}),
+                ("POST", path + "/parts/0", {"content": material}),
+                ("POST", path + "/seal", {}),
+                ("DELETE", path, {}),
+                ("GET", path + "/content", {}),
+            )
+            for headers in (desk, {**desk, LEDGER_HEADER: original}, {**desk, LEDGER_HEADER: "unrecognized"}):
+                for method, route, arguments in operations:
+                    response = recovered.request(
+                        method,
+                        route,
+                        headers={**headers, **(binary if "content" in arguments else {})},
+                        **arguments,
+                    )
+                    assert (
+                        response.status_code == 409 and response.json()["code"] == "sync_ledger_replaced"
+                    ), (method, route, response.text)
+                    assert "待同步记录已保留" in response.json()["message"]
+
+            for prefix in ("receipts", "changes"):
+                known = f"{WORK}/{prefix}/another-two"
+                assert recovered.get(known, headers=desk).json() == head
+                assert (
+                    recovered.get(known, headers={**desk, LEDGER_HEADER: original}).json()["code"]
+                    == "sync_ledger_replaced"
+                )
+            assert recovered.get(WORK + "/checkpoint", headers=desk).json() == {
+                "ledger_id": ledger,
+                "cursor": 3,
+            }
+            assert recovered.get(WORK + "/pull?after=2", headers=desk_now).json()["changes"] == [competing]
+            assert recovered.get(comparison, headers=desk_now).json()["resolved_by"] is None
+            assert recovered.post(attachments, headers=desk_now, json=manifest).json()["received"] == []
+            assert (
+                recovered.post(
+                    path + "/parts/0", headers={**desk_now, **binary}, content=material
+                ).status_code
+                == 204
+            )
+            assert recovered.post(path + "/seal", headers=desk_now).is_success
+            assert recovered.get(path + "/content", headers=desk_now).content == material
+            assert (
+                recovered.delete(
+                    WORK + "/device-session", headers={**desk, LEDGER_HEADER: original}
+                ).status_code
+                == 204
+            )
+
+        assert source.get(WORK + "/checkpoint", headers=desktop).json() == {
+            "ledger_id": original,
+            "cursor": 2,
+        }
+        assert source.get(WORK + "/pull?after=1", headers=bound).json()["changes"] == [legitimate]
+        assert backup.verify_backup(archive, archive_sha)["sha256"] == archive_sha
 
 
 def test_wrong_hash_foreign_file_sidecars_and_raced_targets_do_not_publish(tmp_path, monkeypatch):
@@ -182,6 +299,23 @@ def test_integrity_guard_rejects_modified_cover_or_attachment_and_storage_prefli
         tx.execute("UPDATE sync_works SET sequence=10")
     with pytest.raises(backup.SyncBackupError, match="游标"):
         backup.verify_backup(tampered)
+    shutil.copyfile(archive, tampered)
+    with closing(sqlite3.connect(tampered)) as tx, tx:
+        tx.execute("UPDATE sync_ledger SET requires_header=0")
+    with pytest.raises(backup.SyncBackupError, match="独立账本"):
+        backup.verify_backup(tampered)
+    shutil.copyfile(archive, tampered)
+    with closing(sqlite3.connect(tampered)) as tx, tx:
+        tx.execute("DELETE FROM sync_ledger")
+    with pytest.raises(backup.SyncBackupError, match="账本身份"):
+        backup.verify_backup(tampered)
+    shutil.copyfile(archive, tampered)
+    with closing(sqlite3.connect(tampered)) as tx, tx:
+        tx.execute("DROP TABLE sync_ledger")
+        tx.execute("PRAGMA user_version=1")
+    with pytest.raises(backup.SyncBackupError, match="当前格式"):
+        backup.restore_backup(tampered, tmp_path / "old-format-rejected.sqlite")
+    assert not (tmp_path / "old-format-rejected.sqlite").exists()
     shutil.copyfile(archive, tampered)
     with closing(sqlite3.connect(tampered)) as tx, tx:
         tx.execute("CREATE TRIGGER sqlitefixture AFTER UPDATE ON sync_devices BEGIN SELECT 1; END")

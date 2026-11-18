@@ -3,7 +3,7 @@ import pytest
 
 from ainovel.cloud_sync import create_sync_app
 from ainovel.db import Database, DomainError
-from ainovel.desktop_sync import DesktopSync, Resolve
+from ainovel.desktop_sync import DesktopSync, Resolve, _headers
 from ainovel.domain import Domain
 from ainovel.manuscript_exchange import export_manuscript, import_manuscript
 
@@ -32,10 +32,8 @@ def test_two_independent_sqlite_workspaces_sync_and_keep_competing_revisions(cli
             assert response.status_code == 201, response.text
             return response.json()["token"]
 
-        def transport(origin, token, method, target, payload):
-            response = service.request(
-                method, target, headers={"Authorization": "Bearer " + token}, json=payload
-            )
+        def transport(origin, token, method, target, payload, *, ledger_id=None):
+            response = service.request(method, target, headers=_headers(token, ledger_id), json=payload)
             if not response.is_success:
                 raise DomainError(response.json()["code"], response.json()["message"], response.status_code)
             if (

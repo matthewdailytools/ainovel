@@ -70,9 +70,13 @@ test('浏览器重开后用原变更编号重试，并保留等待同步的新�
     await save.click()
     await expect(web.getByText(/本地已保存 · 修订 2/)).toBeVisible()
     await sync.click()
+    await expect.poll(() => requests.length).toBe(2)
+    await expect(sync).toBeEnabled()
+    await expect(web.getByRole('alert')).toHaveCount(0)
     await expect(web.getByText(/正式保存仍待同步/)).toBeVisible()
     expect(requests.slice(0, 2)).toEqual([requests[0], requests[0]])
     await sync.click()
+    await expect.poll(() => requests.length).toBe(3)
     await expect(web.getByText(/正式保存仍待同步/)).toHaveCount(0)
     await expect(sync).toBeEnabled()
     const pulled = await page.request.get(service + '/pull', {

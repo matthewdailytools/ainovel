@@ -36,6 +36,7 @@ export type SyncTransport = {
   pull: (after: number) => Promise<unknown>
   receipt: (changeId: string) => Promise<unknown | null>
   resolve: (conflictId: string, request: ResolutionRequest) => Promise<unknown>
+  verifyLedger?: () => Promise<void>
 }
 
 type Pending =
@@ -52,6 +53,8 @@ export function pendingPayloads(pending: readonly Pending[]): [string, SyncPaylo
 
 export class SyncResolutionChanged extends Error {}
 type Replica = { key: string; enabled: boolean; cursor: number; serial: number }
+type LedgerBinding = { workId: string; service: string; ledgerId: string }
+type LedgerCheckpoint = { ledger_id: string; cursor: number }
 type Queued = { key: string; id: string; position: number; pending: Pending }
 type Log = { key: string; id: string; receipt: SyncReceipt; pending?: Pending }
 type Baseline = { revision: string; signature: string; sequence?: number }
@@ -69,15 +72,25 @@ type Head = {
 type Conflict = { key: string; id: string; objectId: string; opened?: boolean; resolvedBy?: string }
 
 const DATABASE = 'ainovel-sync-client'
-const STORES = ['replicas', 'outbox', 'receipts', 'heads', 'conflicts']
+const SYNC_LOG_STORES = ['outbox', 'receipts', 'heads', 'conflicts']
+const STORES = ['replicas', 'ledgers', ...SYNC_LOG_STORES]
 const BODY_LIMIT = 1024 * 1024
 
 export class SyncClientError extends Error {
   constructor(
-    readonly code: 'disabled' | 'invalid' | 'storage' | 'conflict',
+    readonly code: 'disabled' | 'invalid' | 'storage' | 'conflict' | 'ledger',
     message: string,
   ) {
     super(message)
+  }
+}
+
+export class SyncLedgerChanged extends SyncClientError {
+  constructor() {
+    super(
+      'ledger',
+      '云端账本与此作品的同步历史不一致。本机稿和待同步记录已保留，请用独立副本连接恢复后的服务。',
+    )
   }
 }
 
@@ -170,6 +183,19 @@ function readPage(value: unknown, after: number) {
   return { changes, cursor: after + changes.length, has_more: page.has_more }
 }
 
+function readCheckpoint(value: unknown): LedgerCheckpoint {
+  const { ledger_id, cursor } = plain(value)
+  if (
+    typeof ledger_id !== 'string' ||
+    !/^[a-f0-9]{32}$/.test(ledger_id) ||
+    typeof cursor !== 'number' ||
+    !Number.isSafeInteger(cursor) ||
+    cursor < 0
+  )
+    invalid('无法核对云端账本身份或游标。')
+  return { ledger_id, cursor }
+}
+
 const wait = <T>(request: IDBRequest<T>) =>
   new Promise<T>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result)
@@ -177,11 +203,14 @@ const wait = <T>(request: IDBRequest<T>) =>
   })
 
 function openDatabase(): Promise<IDBDatabase> {
-  const request = indexedDB.open(DATABASE, 1)
-  request.onupgradeneeded = () => {
-    request.result.createObjectStore('replicas', { keyPath: 'key' })
-    for (const store of STORES.slice(1))
-      request.result.createObjectStore(store, { keyPath: ['key', 'id'] }).createIndex('byReplica', 'key')
+  const request = indexedDB.open(DATABASE, 2)
+  request.onupgradeneeded = ({ oldVersion }) => {
+    if (oldVersion === 0) {
+      request.result.createObjectStore('replicas', { keyPath: 'key' })
+      for (const store of SYNC_LOG_STORES)
+        request.result.createObjectStore(store, { keyPath: ['key', 'id'] }).createIndex('byReplica', 'key')
+    }
+    request.result.createObjectStore('ledgers', { keyPath: 'workId' })
   }
   return wait(request)
 }
@@ -236,6 +265,60 @@ export async function setSyncEnabled(scope: SyncScope, enabled: boolean): Promis
   const key = scopeKey(scope)
   await transact('readwrite', async (tx) => {
     await wait(tx.objectStore('replicas').put({ ...(await replica(tx, key)), enabled }))
+  })
+}
+
+function ledgerBinding(tx: IDBTransaction, workId: string) {
+  return wait<LedgerBinding | undefined>(tx.objectStore('ledgers').get(workId))
+}
+
+export async function enableSyncLedger(scope: SyncScope, value: unknown) {
+  const key = scopeKey(scope)
+  const checkpoint = readCheckpoint(value)
+  await transact('readwrite', async (tx) => {
+    const state = await replica(tx, key)
+    const binding = await ledgerBinding(tx, scope.workId)
+    if (binding) {
+      if (
+        binding.service !== scope.service ||
+        binding.ledgerId !== checkpoint.ledger_id ||
+        checkpoint.cursor < state.cursor
+      )
+        throw new SyncLedgerChanged()
+    } else {
+      const existing = await wait<Replica[]>(tx.objectStore('replicas').getAll())
+      if (
+        existing.some(
+          (entry) =>
+            JSON.parse(entry.key)[1] === scope.workId && (entry.enabled || entry.cursor || entry.serial),
+        )
+      )
+        throw new SyncLedgerChanged()
+      await wait(
+        tx.objectStore('ledgers').add({
+          workId: scope.workId,
+          service: scope.service,
+          ledgerId: checkpoint.ledger_id,
+        } satisfies LedgerBinding),
+      )
+    }
+    await wait(tx.objectStore('replicas').put({ ...state, enabled: true }))
+  })
+}
+
+export async function requireSyncLedger(scope: SyncScope, value?: unknown) {
+  const key = scopeKey(scope)
+  const checkpoint = value === undefined ? undefined : readCheckpoint(value)
+  return transact('readonly', async (tx) => {
+    const binding = await ledgerBinding(tx, scope.workId)
+    const state = await replica(tx, key)
+    if (
+      !binding ||
+      binding.service !== scope.service ||
+      (checkpoint && (binding.ledgerId !== checkpoint.ledger_id || checkpoint.cursor < state.cursor))
+    )
+      throw new SyncLedgerChanged()
+    return binding.ledgerId
   })
 }
 
@@ -373,15 +456,17 @@ async function record(tx: IDBTransaction, key: string, receipt: SyncReceipt, pen
 export async function readSyncState(scope: SyncScope) {
   const key = scopeKey(scope)
   return transact('readonly', async (tx) => {
-    const [state, pending, conflicts] = await Promise.all([
+    const [state, pending, conflicts, ledger] = await Promise.all([
       replica(tx, key),
       wait<Queued[]>(tx.objectStore('outbox').index('byReplica').getAll(key)),
       wait<Conflict[]>(tx.objectStore('conflicts').index('byReplica').getAll(key)),
+      ledgerBinding(tx, scope.workId),
     ])
     const unresolved = conflicts.filter((entry) => entry.opened && !entry.resolvedBy)
     return {
       enabled: state.enabled,
       cursor: state.cursor,
+      ledgerId: ledger?.service === scope.service ? ledger.ledgerId : null,
       pending: pending.sort((left, right) => left.position - right.position).map((entry) => entry.pending),
       conflicts: unresolved.map((entry) => entry.id),
       blockedObjects: [...new Set(unresolved.map((entry) => entry.objectId))],
@@ -514,8 +599,12 @@ export async function pushSyncPending(
           ? await transport.push(pending.request)
           : await transport.resolve(pending.conflict_id, pending.request)
     } catch (error) {
+      if (error instanceof SyncLedgerChanged) throw error
       // The request may have committed. Recover its original receipt before any caller retry.
-      response = await transport.receipt(pending.request.change_id).catch(() => null)
+      response = await transport.receipt(pending.request.change_id).catch((reason: unknown) => {
+        if (reason instanceof SyncLedgerChanged) throw reason
+        return null
+      })
       if (response === null) {
         if (pending.kind === 'resolve' && error instanceof SyncResolutionChanged) {
           await transact('readwrite', async (tx) => {

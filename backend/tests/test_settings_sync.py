@@ -11,7 +11,7 @@ from ainovel import conception, project_sync, settings_sync
 from ainovel.api import create_app
 from ainovel.cloud_sync import create_sync_app
 from ainovel.db import Database, DomainError
-from ainovel.desktop_sync import DesktopSync, Resolve
+from ainovel.desktop_sync import DesktopSync, Resolve, _headers
 from ainovel.domain import Domain
 from ainovel.manuscript_exchange import ManuscriptPackage, export_manuscript, import_manuscript
 from ainovel.project_brief import ConfirmProject, confirm
@@ -367,10 +367,8 @@ def test_formal_settings_sync_conflict_and_pending_project_with_real_cloud(domai
             assert granted.status_code == 201, granted.text
             return granted.json()["token"]
 
-        def transport(sync_origin, token, method, route, payload):
-            response = cloud.request(
-                method, route, headers={"Authorization": f"Bearer {token}"}, json=payload
-            )
+        def transport(sync_origin, token, method, route, payload, *, ledger_id=None):
+            response = cloud.request(method, route, headers=_headers(token, ledger_id), json=payload)
             if not response.is_success:
                 detail = response.json()
                 raise DomainError(detail["code"], detail["message"], response.status_code)

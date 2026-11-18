@@ -1,6 +1,7 @@
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { beforeEach, expect, test, vi } from 'vitest'
 import {
+  enableSyncLedger,
   pullSyncPage,
   pushSyncPending,
   queueSyncChange,
@@ -8,6 +9,7 @@ import {
   readSyncConflict,
   readSyncHead,
   readSyncState,
+  requireSyncLedger,
   setSyncEnabled,
   type PushChange,
   type SyncReceipt,
@@ -18,6 +20,8 @@ import {
 const first = { service: 'isolated', workId: 'work', deviceId: 'first' }
 const second = { ...first, deviceId: 'second' }
 const chapter = 'chapter:one'
+const originalLedger = { ledger_id: 'a'.repeat(32), cursor: 1 }
+const recoveredLedger = { ledger_id: 'b'.repeat(32), cursor: 1 }
 
 beforeEach(() => vi.stubGlobal('indexedDB', new IDBFactory()))
 
@@ -93,6 +97,61 @@ async function pullAll(scope: SyncScope, transport: SyncTransport) {
     // Each cursor is durable before the next page.
   }
 }
+
+test('ledger identity is bound to the work across devices, pauses and new tabs', async () => {
+  await enableSyncLedger(first, originalLedger)
+  await setSyncEnabled(first, false)
+  const attempts = [first, second, { ...second, service: 'restored-elsewhere' }]
+  for (const scope of attempts) {
+    await expect(enableSyncLedger(scope, recoveredLedger)).rejects.toMatchObject({ code: 'ledger' })
+  }
+  await expect(readSyncState(first)).resolves.toMatchObject({ enabled: false })
+  await expect(readSyncState(second)).resolves.toMatchObject({ enabled: false })
+  await enableSyncLedger(second, originalLedger)
+  await expect(requireSyncLedger(second, originalLedger)).resolves.toBe(originalLedger.ledger_id)
+  const independent = { ...second, workId: 'independent-work' }
+  await enableSyncLedger(independent, recoveredLedger)
+  await expect(requireSyncLedger(independent, recoveredLedger)).resolves.toBe(recoveredLedger.ledger_id)
+})
+
+test('upgrading an existing browser replica preserves its old outbox and does not guess its ledger', async () => {
+  const key = JSON.stringify([first.service, first.workId, first.deviceId])
+  const opened = indexedDB.open('ainovel-sync-client', 1)
+  opened.onupgradeneeded = () => {
+    const db = opened.result
+    db.createObjectStore('replicas', { keyPath: 'key' }).put({ key, enabled: true, cursor: 6, serial: 1 })
+    for (const name of ['outbox', 'receipts', 'heads', 'conflicts']) {
+      const store = db.createObjectStore(name, { keyPath: ['key', 'id'] })
+      store.createIndex('byReplica', 'key')
+      if (name === 'outbox') {
+        store.put({
+          key,
+          id: 'old-send',
+          position: 1,
+          pending: { kind: 'push', request: { ...write('旧设备待同步章稿'), change_id: 'old-send' } },
+        })
+      }
+    }
+  }
+  const old = await new Promise<IDBDatabase>((resolve, reject) => {
+    opened.onsuccess = () => resolve(opened.result)
+    opened.onerror = () => reject(opened.error)
+  })
+  old.close()
+  const before = await readSyncState(first)
+  expect(before).toMatchObject({
+    cursor: 6,
+    ledgerId: null,
+    pending: [{ request: { change_id: 'old-send' } }],
+  })
+  for (const scope of [first, second]) {
+    await expect(enableSyncLedger(scope, { ...recoveredLedger, cursor: 8 })).rejects.toMatchObject({
+      code: 'ledger',
+    })
+    await expect(requireSyncLedger(scope)).rejects.toMatchObject({ code: 'ledger' })
+  }
+  expect(await readSyncState(first)).toEqual(before)
+})
 
 test('a withheld-only cloud page advances the Web cursor and the following chapter remains usable', async () => {
   const cloud = isolatedCloud()

@@ -6,7 +6,7 @@ import pytest
 
 from ainovel.cloud_sync import create_sync_app
 from ainovel.db import Database, DomainError
-from ainovel.desktop_sync import DesktopSync, Resolve
+from ainovel.desktop_sync import DesktopSync, Resolve, _headers
 from ainovel.domain import Domain
 from ainovel.manuscript_exchange import export_manuscript, import_manuscript
 from ainovel.project_brief import ConfirmProject, confirm
@@ -45,10 +45,8 @@ def test_formal_project_sync_uses_native_confirmation_and_preserves_cas_competit
             assert response.status_code == 201
             return response.json()["token"]
 
-        def transport(origin, token, method, route, payload):
-            response = cloud.request(
-                method, route, headers={"Authorization": f"Bearer {token}"}, json=payload
-            )
+        def transport(origin, token, method, route, payload, *, ledger_id=None):
+            response = cloud.request(method, route, headers=_headers(token, ledger_id), json=payload)
             if not response.is_success:
                 detail = response.json()
                 raise DomainError(detail["code"], detail["message"], response.status_code)
