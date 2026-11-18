@@ -5,6 +5,7 @@ export type Draft = {
   updated: number
   fromOtherWindow?: boolean
   requiresConfirmation?: boolean
+  savedToService?: boolean
 }
 const windowId = sessionStorage.getItem('ainovel-draft-window') || crypto.randomUUID()
 sessionStorage.setItem('ainovel-draft-window', windowId)

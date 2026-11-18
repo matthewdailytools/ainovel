@@ -40,6 +40,7 @@ test('双窗口保存冲突：保留中文本地输入与先提交原稿，刷�
     other.once('dialog', (dialog) => dialog.accept())
     await other.reload()
     await expect(other.getByText('浏览器草稿与服务中的修订不同。', { exact: true })).toBeVisible()
+    await expect(other.getByRole('textbox', { name: '章节正文', exact: true })).not.toBeEditable()
     await expect(
       other.getByRole('textbox', { name: '章节正文', exact: true }).locator('.cm-line'),
     ).toHaveText(first.split('\n'))

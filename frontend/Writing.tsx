@@ -126,6 +126,7 @@ export function Writing({
   const [recovery, setRecovery] = useState<Draft>()
   const [saveConflict, setSaveConflict] = useState(false)
   const [mergeNeedsSave, setMergeNeedsSave] = useState(false)
+  const pendingDraftChoice = recovery?.savedToService === false || !!recovery?.requiresConfirmation
   const [action, setAction] = useState<ModuleInput['action']>(
     feedbackHandoff ? 'writing.rewrite_selection' : 'writing.advise',
   )
@@ -192,8 +193,16 @@ export function Writing({
     try {
       const row = await api<Chapter>(`/chapters/${id}`)
       if (!alive.current || token !== loadSequence.current) return
-      if (authoritative) await writeDraft({ id, base: row.revision, text: row.content, updated: Date.now() })
-      const draft = await readDraft(id)
+      if (authoritative)
+        await writeDraft({
+          id,
+          base: row.revision,
+          text: row.content,
+          updated: Date.now(),
+          savedToService: true,
+        })
+      const storedDraft = await readDraft(id)
+      const draft = storedDraft?.savedToService ? undefined : storedDraft
       if (!alive.current || token !== loadSequence.current) return
       if (directionBasis && directionBasis.chapter_id !== id) {
         setDirectionBasis(undefined)
@@ -278,13 +287,20 @@ export function Writing({
           text: content,
           updated: Date.now(),
           requiresConfirmation: mergeNeedsSave,
+          savedToService: false,
         })
         const row: Chapter = await api<Chapter>(`/chapters/${snapshot.id}`, 'PUT', {
           base_revision: snapshot.revision,
           content,
         })
         current.current = row
-        await writeDraft({ id: row.id, base: row.revision, text: draftText.current, updated: Date.now() })
+        await writeDraft({
+          id: row.id,
+          base: row.revision,
+          text: draftText.current,
+          updated: Date.now(),
+          savedToService: row.content === draftText.current,
+        })
         if (alive.current) setChapter(row)
       }
       if (alive.current) {
@@ -317,6 +333,7 @@ export function Writing({
         text: value,
         updated: Date.now(),
         requiresConfirmation: mergeNeedsSave,
+        savedToService: false,
       }).catch(() => {
         setSaved('浏览器草稿保存失败，请立即保存或下载草稿')
       })
@@ -794,7 +811,7 @@ export function Writing({
                 await save(true)
               })
             }
-            disabled={!chapter || busy || opening || saveConflict || !!recovery}
+            disabled={!chapter || busy || opening || saveConflict || pendingDraftChoice}
           >
             保存
           </button>
@@ -866,6 +883,7 @@ export function Writing({
                         text: recovery.text,
                         updated: Date.now(),
                         requiresConfirmation: true,
+                        savedToService: false,
                       })
                       draftText.current = recovery.text
                       setText(recovery.text)
@@ -887,6 +905,7 @@ export function Writing({
                       base: chapter.revision,
                       text: chapter.content,
                       updated: Date.now(),
+                      savedToService: true,
                     })
                     setSaved('已保存')
                   }}
@@ -929,7 +948,7 @@ export function Writing({
               initial={text}
               cursor={cursor}
               restoredSelection={restoredSelection}
-              readOnly={busy || opening || !!recovery}
+              readOnly={busy || opening || pendingDraftChoice}
               onChange={change}
               onSelection={setSelection}
             />

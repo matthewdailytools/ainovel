@@ -267,7 +267,10 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await page.getByRole('button', { name: '回到写作页继续编辑或恢复版本' }).click()
   await showWritingReport(checkedSaved.id, passedTitle)
   const changedSaved = savedBefore.content + '\n作者更改了当前保存稿。'
-  await page.getByRole('textbox', { name: '章节正文', exact: true }).fill(changedSaved)
+  const savedEditor = page.getByRole('textbox', { name: '章节正文', exact: true })
+  await expect(savedEditor).toBeEditable()
+  await expect(page.getByText('浏览器草稿与服务中的修订不同。', { exact: true })).toHaveCount(0)
+  await savedEditor.fill(changedSaved)
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect
     .poll(async () => (await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).revision)
