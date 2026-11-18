@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   api,
+  ApiError,
   label,
   type Artifact,
   type Branch,
@@ -123,6 +124,8 @@ export function Writing({
   const [note, setNote] = useState('')
   const reading = useRef({ revision: 0 })
   const [recovery, setRecovery] = useState<Draft>()
+  const [saveConflict, setSaveConflict] = useState(false)
+  const [mergeNeedsSave, setMergeNeedsSave] = useState(false)
   const [action, setAction] = useState<ModuleInput['action']>(
     feedbackHandoff ? 'writing.rewrite_selection' : 'writing.advise',
   )
@@ -206,13 +209,15 @@ export function Writing({
       setCursor(at)
       setCandidateId('')
       setRecovery(undefined)
+      setSaveConflict(false)
       const recoverable =
         draft && !draft.fromOtherWindow && draft.text !== row.content && draft.base === row.revision
+      setMergeNeedsSave(!!(recoverable && draft.requiresConfirmation))
       draftText.current = recoverable ? draft.text : row.content
       setText(draftText.current)
       setEditorKey(id + ':' + row.revision + ':' + Date.now())
       if (recoverable) {
-        setSaved('已恢复浏览器草稿，尚未保存到本机服务')
+        setSaved(draft.requiresConfirmation ? '合并稿待手动保存' : '已恢复浏览器草稿，尚未保存到本机服务')
         setDirty((d) => d + 1)
       } else if (
         draft &&
@@ -258,15 +263,22 @@ export function Writing({
       active = false
     }
   }, [branch.id])
-  async function save(): Promise<Chapter> {
+  async function save(confirmMerge = false): Promise<Chapter> {
     if (saving.current) return saving.current
+    if (mergeNeedsSave && !confirmMerge) throw new Error('请核对合并稿并点「保存」后再继续。')
     const run = async (): Promise<Chapter> => {
       if (!current.current) throw new Error('请先新建或打开章节。')
       while (current.current!.content !== draftText.current) {
         const snapshot: Chapter = current.current!
         const content: string = draftText.current
         setSaved('保存中…')
-        await writeDraft({ id: snapshot.id, base: snapshot.revision, text: content, updated: Date.now() })
+        await writeDraft({
+          id: snapshot.id,
+          base: snapshot.revision,
+          text: content,
+          updated: Date.now(),
+          requiresConfirmation: mergeNeedsSave,
+        })
         const row: Chapter = await api<Chapter>(`/chapters/${snapshot.id}`, 'PUT', {
           base_revision: snapshot.revision,
           content,
@@ -276,6 +288,7 @@ export function Writing({
         if (alive.current) setChapter(row)
       }
       if (alive.current) {
+        setMergeNeedsSave(false)
         setSaved('已保存')
         await refresh()
       }
@@ -283,6 +296,7 @@ export function Writing({
     }
     saving.current = run()
       .catch((error) => {
+        if (error instanceof ApiError && error.code === 'revision_conflict') setSaveConflict(true)
         setSaved('保存失败，浏览器草稿保留；可下载草稿后比较')
         throw error
       })
@@ -294,7 +308,7 @@ export function Writing({
   function change(value: string) {
     draftText.current = value
     setText(value)
-    setSaved('未保存')
+    setSaved(mergeNeedsSave ? '合并稿待手动保存' : '未保存')
     setDirty((d) => d + 1)
     if (current.current)
       void writeDraft({
@@ -302,15 +316,16 @@ export function Writing({
         base: current.current.revision,
         text: value,
         updated: Date.now(),
+        requiresConfirmation: mergeNeedsSave,
       }).catch(() => {
         setSaved('浏览器草稿保存失败，请立即保存或下载草稿')
       })
   }
   useEffect(() => {
-    if (!dirty || recovery) return
+    if (!dirty || recovery || saveConflict || mergeNeedsSave) return
     const timer = setTimeout(() => void save().catch(notify), 900)
     return () => clearTimeout(timer)
-  }, [dirty, recovery])
+  }, [dirty, recovery, saveConflict, mergeNeedsSave])
   useEffect(() => {
     const leave = (event: BeforeUnloadEvent) => {
       if (current.current && draftText.current !== current.current.content) {
@@ -776,10 +791,10 @@ export function Writing({
           <button
             onClick={() =>
               void doAction(async () => {
-                await save()
+                await save(true)
               })
             }
-            disabled={!chapter || busy}
+            disabled={!chapter || busy || opening || saveConflict || !!recovery}
           >
             保存
           </button>
@@ -816,26 +831,55 @@ export function Writing({
                 {chapter.stale ? ' · 受前文修改影响，需重新审阅' : ''}
               </div>
             </div>
+            {saveConflict && (
+              <div className="notice">
+                <strong>第 {chapter.position} 章保存冲突</strong>
+                <p>本机服务已有较新的正文。比较两份稿件后，可以把浏览器草稿载入编辑区并合并。</p>
+                <button
+                  disabled={busy || opening}
+                  onClick={() => void doAction(() => loadChapter(chapter.id))}
+                >
+                  对照两份稿件
+                </button>
+              </div>
+            )}
             {recovery && (
               <div className="notice">
                 <strong>浏览器草稿与服务中的修订不同。</strong>
                 <p>
                   草稿基线 {recovery.base}，当前修订 {chapter.revision}。请比较后决定，服务稿尚未改动。
                 </p>
-                <Difference before={chapter.content} after={recovery.text} />
+                <p>左侧是本机服务稿，右侧是浏览器草稿。</p>
+                <Difference
+                  before={chapter.content}
+                  after={recovery.text}
+                  beforeLabel="本机服务稿"
+                  afterLabel="浏览器草稿"
+                />
                 <button
-                  onClick={() => {
-                    draftText.current = recovery.text
-                    setText(recovery.text)
-                    setEditorKey(chapter.id + ':recovered:' + Date.now())
-                    setRecovery(undefined)
-                    setDirty((d) => d + 1)
-                    setSaved('待保存的人工合并稿')
-                  }}
+                  disabled={busy || opening}
+                  onClick={() =>
+                    void doAction(async () => {
+                      await writeDraft({
+                        id: chapter.id,
+                        base: chapter.revision,
+                        text: recovery.text,
+                        updated: Date.now(),
+                        requiresConfirmation: true,
+                      })
+                      draftText.current = recovery.text
+                      setText(recovery.text)
+                      setEditorKey(chapter.id + ':recovered:' + Date.now())
+                      setMergeNeedsSave(true)
+                      setRecovery(undefined)
+                      setSaved('合并稿待手动保存')
+                    })
+                  }
                 >
                   将此草稿载入编辑区
                 </button>
                 <button
+                  disabled={busy || opening}
                   onClick={() => {
                     setRecovery(undefined)
                     void writeDraft({
@@ -885,7 +929,7 @@ export function Writing({
               initial={text}
               cursor={cursor}
               restoredSelection={restoredSelection}
-              readOnly={busy || opening}
+              readOnly={busy || opening || !!recovery}
               onChange={change}
               onSelection={setSelection}
             />

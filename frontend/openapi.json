@@ -3827,6 +3827,44 @@
           }
         }
       }
+    },
+    "/api/branches/{branch_id}/story-extractions/{artifact_id}/notes": {
+      "patch": {
+        "summary": "Notes",
+        "operationId": "notes_api_branches__branch_id__story_extractions__artifact_id__notes_patch",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Artifact Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/EditExtractionNotes" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4417,6 +4455,17 @@
         "type": "object",
         "required": ["base_revision", "mappings"],
         "title": "EditDraft"
+      },
+      "EditExtractionNotes": {
+        "properties": {
+          "proposal_id": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Proposal Id" },
+          "candidate_revision": { "type": "integer", "minimum": 0, "title": "Candidate Revision" },
+          "notes": { "type": "string", "maxLength": 4000, "title": "Notes" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["proposal_id", "candidate_revision", "notes"],
+        "title": "EditExtractionNotes"
       },
       "EditReference": {
         "properties": {

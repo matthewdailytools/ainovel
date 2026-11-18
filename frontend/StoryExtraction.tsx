@@ -191,6 +191,13 @@ export function StoryExtraction({
   const [message, setMessage] = useState('')
   const [loadingArtifact, setLoadingArtifact] = useState(false)
   const [artifactError, setArtifactError] = useState('')
+  const [noteDraft, setNoteDraft] = useState<{
+    artifactId: string
+    proposalId: string
+    revision: number
+    original: string
+    text: string
+  }>()
   const [repairContext, setRepairContext] = useState<{
     branchId: string
     artifactId: string
@@ -207,6 +214,7 @@ export function StoryExtraction({
   const inputSignature = JSON.stringify({ chosenChapters, includeScenes, maxOutputTokens })
   const [submittedInput, setSubmittedInput] = useState(inputSignature)
   useLeaveGuard(inputSignature !== submittedInput, '结构整理设置')
+  useLeaveGuard(!!noteDraft && noteDraft.text !== noteDraft.original, '结构候选说明')
   const artifact =
     loadedArtifact?.branchId === branchId && loadedArtifact.value.id === artifactId
       ? loadedArtifact.value
@@ -377,6 +385,19 @@ export function StoryExtraction({
   const stale = artifact && artifact.payload.source_story_revision !== storyRevision
   const reviewSourceStale =
     !!stale || !!(artifact && extractionSourcesStale(artifact.payload.source_manifest, chapters))
+  const editingNote = noteDraft?.artifactId === artifact?.id ? noteDraft : undefined
+  const editableNotes =
+    artifact?.status === 'candidate' &&
+    !repairReadOnly &&
+    !reviewSourceStale &&
+    currentRepairContext?.tasks.some(
+      (task) =>
+        task.id === artifact.task_id &&
+        task.kind === 'workflow' &&
+        ['needs_review', 'paused'].includes(task.status) &&
+        task.payload.adoption === 'manual' &&
+        task.result.waiting_structure === artifact.id,
+    )
   const nameFor = (id: string | null | undefined) =>
     id
       ? artifact?.payload.records.find((r) => r.id === id)?.record.title || recordNames[id] || id
@@ -487,7 +508,7 @@ export function StoryExtraction({
           保存的结构候选
           <select
             value={artifactId}
-            disabled={busy}
+            disabled={busy || !!editingNote}
             onChange={(e) => setArtifactSelection({ branchId, id: e.target.value })}
           >
             <option value="">请选择</option>
@@ -595,6 +616,74 @@ export function StoryExtraction({
                 <details>
                   <summary>核对具体内容、关联和原文</summary>
                   <p>{p.record.notes}</p>
+                  {editableNotes && !p.target_id && !editingNote && (
+                    <button
+                      disabled={busy || loadingArtifact}
+                      onClick={() =>
+                        setNoteDraft({
+                          artifactId: artifact.id,
+                          proposalId: p.id,
+                          revision: artifact.candidate_revision,
+                          original: p.record.notes || '',
+                          text: p.record.notes || '',
+                        })
+                      }
+                    >
+                      修改结构候选说明
+                    </button>
+                  )}
+                  {editingNote?.proposalId === p.id && (
+                    <div>
+                      <label>
+                        结构候选说明
+                        <textarea
+                          value={editingNote.text}
+                          maxLength={4000}
+                          rows={3}
+                          onChange={(e) => setNoteDraft({ ...editingNote, text: e.target.value })}
+                        />
+                      </label>
+                      {editingNote.revision !== artifact.candidate_revision && (
+                        <p role="status">候选说明的修订已改变。可复制当前输入，取消后重新核对新说明。</p>
+                      )}
+                      <button
+                        disabled={
+                          busy ||
+                          loadingArtifact ||
+                          !editableNotes ||
+                          editingNote.revision !== artifact.candidate_revision ||
+                          editingNote.text === editingNote.original
+                        }
+                        onClick={() =>
+                          void perform(async () => {
+                            const updated = await api<ExtractionArtifact>(
+                              `/branches/${branchId}/story-extractions/${artifact.id}/notes`,
+                              'PATCH',
+                              {
+                                proposal_id: p.id,
+                                candidate_revision: editingNote.revision,
+                                notes: editingNote.text,
+                              },
+                            )
+                            if (
+                              !alive.current ||
+                              currentTarget.current.branchId !== branchId ||
+                              currentTarget.current.artifactId !== artifact.id
+                            )
+                              return
+                            setLoadedArtifact({ branchId, value: updated })
+                            setNoteDraft(undefined)
+                            setMessage('候选说明已保存。核对后确认采用，后续章节使用这一版。')
+                          })
+                        }
+                      >
+                        保存候选说明
+                      </button>
+                      <button disabled={busy} onClick={() => setNoteDraft(undefined)}>
+                        取消修改说明
+                      </button>
+                    </div>
+                  )}
                   {p.record.kind === 'character' && (
                     <p>
                       别名：{p.record.aliases?.join('、')}；档案：{p.record.profile}
@@ -723,6 +812,7 @@ export function StoryExtraction({
                 busy ||
                 repairReadOnly ||
                 !!stale ||
+                !!editingNote ||
                 artifact.status !== 'candidate' ||
                 (!selected.length &&
                   !selectedScenes.length &&

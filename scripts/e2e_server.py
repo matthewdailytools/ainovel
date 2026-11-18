@@ -650,6 +650,7 @@ def main():
     from e2e_author_source_observation_fixture import register_author_source_observation_fixture
     from e2e_flow_policy_fixture import register_flow_policy_fixture
     from e2e_scene_unknown_reason_fixture import register_unknown_reason_fixture
+    from e2e_three_chapter_fixture import register_three_chapter_fixture, three_chapter_model
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8877)
@@ -681,6 +682,7 @@ def main():
         register_author_source_observation_fixture(app, settings, location)
         register_flow_policy_fixture(app, settings, location)
         register_unknown_reason_fixture(app, settings)
+        register_three_chapter_fixture(app, settings, location)
         original = app.router.lifespan_context
 
         @asynccontextmanager
@@ -693,7 +695,7 @@ def main():
                 model.observation_retry_app = app
                 model.flow_native_settings = settings
                 model.flow_native_sends = app.state.flow_native_transport_sends
-                worker = Worker(settings, model)
+                worker = Worker(settings, three_chapter_model(app, model))
 
                 async def execute():
                     while True:

@@ -19,6 +19,7 @@ test('双窗口保存冲突：保留中文本地输入与先提交原稿，刷�
   const otherContext = await browser.newContext()
   const other = await otherContext.newPage()
   try {
+    await other.clock.install()
     for (const tab of [page, other]) {
       await tab.goto('/')
       await tab.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
@@ -44,6 +45,15 @@ test('双窗口保存冲突：保留中文本地输入与先提交原稿，刷�
     ).toHaveText(first.split('\n'))
     await other.getByRole('button', { name: '将此草稿载入编辑区', exact: true }).click()
     await expect(other.getByRole('textbox', { name: '章节正文', exact: true })).toHaveText(second)
+    await expect(other.getByText('合并稿待手动保存', { exact: true })).toBeVisible()
+    await other.clock.fastForward(1200)
+    other.once('dialog', (dialog) => dialog.accept())
+    await other.reload()
+    await expect(other.getByText('合并稿待手动保存', { exact: true })).toBeVisible()
+    await expect(other.getByRole('textbox', { name: '章节正文', exact: true })).toHaveText(second)
+    await other.clock.fastForward(1200)
+    expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content).toBe(first)
+    await other.getByRole('button', { name: '保存', exact: true }).click()
     await expect
       .poll(async () => (await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content)
       .toBe(second)

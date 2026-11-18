@@ -77,6 +77,12 @@ class AdoptExtraction(Strict):
     idempotency_key: str = Field(min_length=8, max_length=128)
 
 
+class EditExtractionNotes(Strict):
+    proposal_id: str = Field(min_length=1, max_length=100)
+    candidate_revision: int = Field(ge=0, strict=True)
+    notes: str = Field(max_length=4000)
+
+
 def freeze_sources(domain, request):
     branch = domain.branch(request["branch_id"])
     ids = request.get("story_chapter_ids", [])
@@ -677,6 +683,106 @@ def adopt(domain, branch_id, artifact_id, data, attempt=None, character_review_t
         return result
 
 
+def edit_notes(domain, branch_id, artifact_id, data):
+    """Edit only a new proposal's explanation at a manual maintenance checkpoint."""
+    from .domain import utf16_slice
+    from .story_graph import sources
+
+    with domain.db.connect(True) as tx:
+        artifact = tx.execute(
+            "SELECT * FROM artifacts WHERE id=? AND branch_id=? AND kind='story_extraction'",
+            (artifact_id, branch_id),
+        ).fetchone()
+        if not artifact:
+            raise DomainError("not_found", "结构候选不存在或不属于当前版本。", 404)
+        payload, basis = json.loads(artifact["payload"]), json.loads(artifact["basis"])
+        revision = payload.get("_candidate_revision", 0)
+        if artifact["status"] != "candidate" or data.candidate_revision != revision:
+            raise DomainError("candidate_changed", "候选已改变或已处理，请保留编辑并重新核对。", 409)
+        owners = tx.execute(
+            "SELECT * FROM tasks WHERE branch_id=? AND kind='workflow' "
+            "AND json_extract(result,'$.waiting_structure')=? "
+            "AND json_extract(result,'$.pending_structure.artifact_id')=?",
+            (branch_id, artifact_id, artifact_id),
+        ).fetchall()
+        if len(owners) != 1:
+            raise DomainError("workflow_progress", "仅当前人工批次的待审结构可编辑说明。", 409)
+        owner = owners[0]
+        progress, policy = json.loads(owner["result"]), json.loads(owner["payload"])
+        if (
+            owner["status"] not in {"needs_review", "paused"}
+            or owner["cancel"]
+            or policy.get("adoption") != "manual"
+            or artifact["task_id"] != owner["id"]
+            or tx.execute(
+                "SELECT id FROM tasks WHERE branch_id=? AND status IN ('queued','running') LIMIT 1",
+                (branch_id,),
+            ).fetchone()
+        ):
+            raise DomainError("workflow_progress", "请先停到人工结构审阅检查点；未修改候选或执行状态。", 409)
+        current = tx.execute("SELECT story_revision FROM branches WHERE id=?", (branch_id,)).fetchone()[0]
+        pending = progress["pending_structure"]
+        manifest = payload.get("source_manifest", [])
+        if (
+            current != basis.get("story_revision")
+            or current != payload.get("source_story_revision")
+            or current != progress.get("expected_story_revision")
+            or not manifest
+            or not any(
+                c["id"] == pending["chapter_id"] and c["revision"] == pending["revision"] for c in manifest
+            )
+        ):
+            raise DomainError("story_changed", "故事或结构来源已改变，请重新核对，原候选保留。", 409)
+        for source in manifest:
+            chapter = tx.execute(
+                "SELECT * FROM chapters WHERE id=? AND branch_id=? AND archived=0",
+                (source["id"], branch_id),
+            ).fetchone()
+            if not chapter or chapter["revision"] != source["revision"] or chapter["stale"]:
+                raise DomainError("revision_conflict", "结构来源章节已改变或待复检，未保存候选编辑。", 409)
+        for item in payload["records"]:
+            for source in sources(item["record"]):
+                chapter = tx.execute(
+                    "SELECT * FROM chapters WHERE id=? AND branch_id=? AND archived=0",
+                    (source["chapter_id"], branch_id),
+                ).fetchone()
+                if not chapter or chapter["revision"] != source["revision"] or chapter["stale"]:
+                    raise DomainError("revision_conflict", "候选原文来源已改变，未保存编辑。", 409)
+                if utf16_slice(chapter["content"], source["start"], source["end"])[1] != source["quote"]:
+                    raise DomainError("evidence", "候选原文引用不再逐字匹配，未保存编辑。", 409)
+        proposal = next((p for p in payload["records"] if p["id"] == data.proposal_id), None)
+        if (
+            proposal is None
+            or proposal.get("target_id")
+            or tx.execute("SELECT id FROM story_records WHERE id=?", (data.proposal_id,)).fetchone()
+        ):
+            raise DomainError(
+                "story_selection", "仅可编辑本候选尚未采用的新记录说明，身份与正式更新保持。", 409
+            )
+        if proposal["record"]["notes"] == data.notes:
+            return domain.artifact(artifact_id)
+        previous = deepcopy(payload)
+        proposal["record"]["notes"] = data.notes
+        payload["_candidate_revision"] = revision + 1
+        # Old reviews retain their original candidate revision and become historical.
+        tx.execute("UPDATE artifacts SET payload=? WHERE id=?", (dumps(payload), artifact_id))
+        tx.execute("UPDATE tasks SET updated=? WHERE id=?", (time(), owner["id"]))
+        domain.db.event(
+            tx,
+            owner["id"],
+            "candidate_edited",
+            {
+                "artifact_id": artifact_id,
+                "candidate_revision": revision + 1,
+                "previous_revision": revision,
+                "edit_kind": "story_extraction_notes",
+                "proposal_id": data.proposal_id,
+                "previous_candidate": previous,
+            },
+        )
+    return domain.artifact(artifact_id)
+
+
 def register_routes(app, domain, provider_ready):
     @app.get("/api/branches/{branch_id}/story-extractions")
     def history(branch_id: str):
@@ -716,3 +822,7 @@ def register_routes(app, domain, provider_ready):
     @app.post("/api/branches/{branch_id}/story-extractions/{artifact_id}/adopt")
     def confirm(branch_id: str, artifact_id: str, data: AdoptExtraction):
         return adopt(domain, branch_id, artifact_id, data)
+
+    @app.patch("/api/branches/{branch_id}/story-extractions/{artifact_id}/notes")
+    def notes(branch_id: str, artifact_id: str, data: EditExtractionNotes):
+        return edit_notes(domain, branch_id, artifact_id, data)

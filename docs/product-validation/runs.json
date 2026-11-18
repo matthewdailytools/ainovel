@@ -8646,5 +8646,27 @@
     "result": "passed",
     "record": "2026-11-18-source-checkpoint-lineage-regression.md",
     "fix_of": "assisted4-clarified-lineage-false-cross-dispatch-20261118"
+  },
+  {
+    "id": "three-chapter-advice-hidden-20261118",
+    "date": "2026-11-18",
+    "commit": "working-tree",
+    "module": "三章工作台",
+    "scenario": "第1章暂停恢复后到达第2章，正文旁未显示审稿建议的引文和修法。初次整书替身复测另因引用通用稿件停止，相关日志与具体原因保留。",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-18-three-chapter-workbench.md",
+    "fix_of": ""
+  },
+  {
+    "id": "three-chapter-offline-workbench-20261118",
+    "date": "2026-11-18",
+    "commit": "working-tree",
+    "module": "三章工作台",
+    "scenario": "同一原创三章经界面完成逐步确认、409冲突对照与手动保存、维护后暂停恢复、键盘续写及导出。13次替身调用、6条采纳回执，恢复无重放。本轮9项无头专项通过，两条原12章与1692条用量记录保持，实付0。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-18-three-chapter-workbench.md",
+    "fix_of": "three-chapter-advice-hidden-20261118"
   }
 ]

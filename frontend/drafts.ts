@@ -1,4 +1,11 @@
-export type Draft = { id: string; base: number; text: string; updated: number; fromOtherWindow?: boolean }
+export type Draft = {
+  id: string
+  base: number
+  text: string
+  updated: number
+  fromOtherWindow?: boolean
+  requiresConfirmation?: boolean
+}
 const windowId = sessionStorage.getItem('ainovel-draft-window') || crypto.randomUUID()
 sessionStorage.setItem('ainovel-draft-window', windowId)
 type Stored = Draft & { chapter_id?: string; window_id?: string }

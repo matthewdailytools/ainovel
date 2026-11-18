@@ -30,6 +30,32 @@ function finding(value: unknown): value is Finding {
   )
 }
 
+function FindingEvidence({ value, fallback = '请结合引文核对。' }: { value: Finding; fallback?: string }) {
+  return (
+    <>
+      <blockquote>{value.quote}</blockquote>
+      <p>{value.reason}</p>
+      <p>建议修法：{value.repair || fallback}</p>
+    </>
+  )
+}
+
+export function CandidateReviewFindings({ report }: { report: unknown }) {
+  const findings = object(report) && Array.isArray(report.findings) ? report.findings.filter(finding) : []
+  if (!findings.length) return null
+  return (
+    <section aria-label="候选检查意见">
+      {findings.map((value, index) => (
+        <article className="excerpt" key={index}>
+          <strong>{value.severity === 'blocker' ? '报告标记为阻断' : '可选偏好建议'}</strong>
+          <p className="small">第 {value.chapter} 章 · 对应引文</p>
+          <FindingEvidence value={value} />
+        </article>
+      ))}
+    </section>
+  )
+}
+
 function Resolution({ value }: { value: unknown }) {
   if (!object(value)) return null
   const result = string(value.result)
@@ -155,7 +181,10 @@ export function RevisionPanel({
     return <RevisionTraceDetails trace={review.payload.revision_trace} />
   if (review.kind !== 'review') {
     return review.payload.review ? (
-      <p className="small muted">此检查针对未采纳候选。定向修订请先对已保存正文生成独立审稿报告。</p>
+      <>
+        <CandidateReviewFindings report={review.payload.review} />
+        <p className="small muted">此检查针对未采纳候选。定向修订请先对已保存正文生成独立审稿报告。</p>
+      </>
     ) : null
   }
   async function generate() {
@@ -257,9 +286,7 @@ export function RevisionPanel({
               />
               问题 {index + 1} · {value.severity === 'blocker' ? '报告标记为阻断' : '可选偏好建议'}
             </label>
-            <blockquote>{value.quote}</blockquote>
-            <p>{value.reason}</p>
-            <p>建议修法：{value.repair || '可在下方补充本次修订要求。'}</p>
+            <FindingEvidence value={value} fallback="可在下方补充本次修订要求。" />
             {!unique && <p className="small">引文未唯一定位到当前正文，请重新审稿取得明确位置。</p>}
             {unique && !localRange && (
               <p className="small">引文覆盖整章或超过800字，请先重审取得更小的原文定位。</p>

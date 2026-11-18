@@ -97,10 +97,12 @@ export function Difference({
   before,
   after,
   beforeLabel = '当前正文',
+  afterLabel = '建议正文',
 }: {
   before: string
   after: string
   beforeLabel?: string
+  afterLabel?: string
 }) {
   const mount = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -121,13 +123,13 @@ export function Difference({
           EditorState.readOnly.of(true),
           EditorView.editable.of(false),
           EditorView.lineWrapping,
-          EditorView.contentAttributes.of({ 'aria-label': '建议正文' }),
+          EditorView.contentAttributes.of({ 'aria-label': afterLabel }),
         ],
       },
       highlightChanges: true,
       gutter: true,
     })
     return () => view.destroy()
-  }, [before, after, beforeLabel])
+  }, [before, after, beforeLabel, afterLabel])
   return <div className="difference" ref={mount} />
 }

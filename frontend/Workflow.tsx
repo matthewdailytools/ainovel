@@ -22,6 +22,7 @@ import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './Plot
 import { plotAuditFromPayload } from './plotAudit'
 import { CONDITIONAL_REVIEW_VERSION, ConditionalReviewNotice } from './ConditionalReviewNotice'
 import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from './MemorySelection'
+import { CandidateReviewFindings } from './RevisionPanel'
 import { FrozenStructureOutputPolicy, StructureOutputSettings } from './StructureOutputSettings'
 import { PlanPreparationDetails, planPreparationNeedsReview } from './PlanPreparationDetails'
 import { PlanRestartPanel, PlanRestartReceipt } from './PlanRestartPanel'
@@ -619,7 +620,16 @@ export function WorkflowPage({
                     max={task.payload.chapters}
                     value={Math.min((task.result.next_chapter || 1) - 1, task.payload.chapters || 36)}
                   />
-                  <p role="status">{task.error || '生成、审查、事实和采纳分别留有记录。'}</p>
+                  <p role="status">
+                    {task.error ||
+                      (task.status === 'paused' && !waitingId && !task.result.pending_structure
+                        ? `已确认的内容已保留。从保存的检查点恢复后${
+                            (task.result.next_chapter || 1) <= (task.payload.chapters || 36)
+                              ? `继续第 ${task.result.next_chapter || 1} 章。`
+                              : '继续核对本批稿件。'
+                          }`
+                        : '生成、审查、事实和采纳分别留有记录。')}
+                  </p>
                   <p className="small muted">
                     {task.payload.completion_scope === 'segment'
                       ? '本次为阶段批次：范围检查通过只表示本批完成，未来终局与待回收承诺不被自动改为已闭合。'
@@ -831,17 +841,16 @@ export function WorkflowPage({
                     <input type="checkbox" checked={changes} onChange={(e) => setChanges(e.target.checked)} />
                     前文已修改时，从最早失效章重新检查并按需修订
                   </label>
-                  {task.result.conditional_book_policy_version === undefined &&
-                    ((task.status === 'needs_review' && !!waitingId) || !!task.result.pending_structure) && (
-                      <label className="check">
-                        <input
-                          type="checkbox"
-                          checked={pauseAfterMaintenance}
-                          onChange={(e) => setPauseAfterMaintenance(e.target.checked)}
-                        />
-                        完成已采纳章节维护后暂停
-                      </label>
-                    )}
+                  {((task.status === 'needs_review' && !!waitingId) || !!task.result.pending_structure) && (
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={pauseAfterMaintenance}
+                        onChange={(e) => setPauseAfterMaintenance(e.target.checked)}
+                      />
+                      完成已采纳章节维护后暂停
+                    </label>
+                  )}
                   {task.status === 'needs_review' &&
                     (waiting?.status === 'candidate' ||
                       (structureWaiting && waiting?.status === 'rejected')) && (
@@ -894,6 +903,7 @@ export function WorkflowPage({
                           candidate_revision: waiting?.candidate_revision ?? 0,
                           pause_after_maintenance: pauseAfterMaintenance,
                         })
+                        setPauseAfterMaintenance(false)
                         await refresh()
                       })
                     }
@@ -1182,6 +1192,7 @@ export function WorkflowPage({
                         candidateText={waiting.payload.text}
                         historical={waitingPlotAudit.historical}
                       />
+                      <CandidateReviewFindings report={waiting.payload.review} />
                       <details>
                         <summary>本章检查</summary>
                         <ConditionalReviewNotice value={waiting.payload.review} />

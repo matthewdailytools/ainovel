@@ -1959,6 +1959,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/story-extractions/{artifact_id}/notes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    /** Notes */
+    patch: operations['notes_api_branches__branch_id__story_extractions__artifact_id__notes_patch']
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -2384,6 +2401,15 @@ export interface components {
       base_revision: number
       /** Mappings */
       mappings: components['schemas']['Mapping'][]
+    }
+    /** EditExtractionNotes */
+    EditExtractionNotes: {
+      /** Proposal Id */
+      proposal_id: string
+      /** Candidate Revision */
+      candidate_revision: number
+      /** Notes */
+      notes: string
     }
     /** EditReference */
     EditReference: {
@@ -7815,6 +7841,42 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['AdoptExtraction']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  notes_api_branches__branch_id__story_extractions__artifact_id__notes_patch: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        artifact_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['EditExtractionNotes']
       }
     }
     responses: {
