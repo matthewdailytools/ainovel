@@ -71,6 +71,8 @@ class ResumeInput(Input):
     reason: str = Field(default="", max_length=2000)
     candidate_revision: int = Field(default=0, ge=0)
     pause_after_maintenance: bool = Field(default=False, strict=True)
+    source_observation_recheck_version: Literal["source-observation-recheck/1"] | None = None
+    source_observation_basis_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class ContinuationInput(Input):
@@ -687,6 +689,9 @@ def create_app(settings=None, schema_only=False):
     @app.post("/api/tasks/{task_id}/resume")
     def resume(task_id: str, data: ResumeInput):
         current = domain.task(task_id)
+        source_recheck = data.source_observation_recheck_version is not None
+        if (data.source_observation_basis_sha256 is not None) != source_recheck:
+            raise DomainError("source_observation_recheck", "来源重核须同时提供明确版本和当前来源基线。", 409)
         if data.pause_after_maintenance and (current["kind"] != "workflow" or data.regenerate_pending):
             raise DomainError(
                 "pause_after_maintenance",
@@ -811,7 +816,7 @@ def create_app(settings=None, schema_only=False):
         if data.pause_after_maintenance:
             result["pause_after_maintenance_requested"] = True
         with (
-            budget.db(True) if refresh_preparation_context else nullcontext() as usage,
+            budget.db(True) if refresh_preparation_context or source_recheck else nullcontext() as usage,
             db.connect(True) as tx,
         ):
             latest = tx.execute("SELECT status,updated FROM tasks WHERE id=?", (task_id,)).fetchone()
@@ -846,9 +851,16 @@ def create_app(settings=None, schema_only=False):
 
                 context_refresh = refresh_after_revision(domain, current, result, usage, data.reason)
                 db.event(tx, task_id, "preparation_context_refreshed", context_refresh)
+            if source_recheck:
+                from .source_observation_recheck import authorize
+
+                receipt = authorize(
+                    domain, budget, current, result, usage, data.model_dump(exclude_none=True)
+                )
+                db.event(tx, task_id, "source_observation_recheck_authorized", receipt)
             from .diagnostic_phase_recovery import resume_marker
 
-            resume_event = data.model_dump()
+            resume_event = data.model_dump(exclude_none=True)
             marker = resume_marker(domain, budget, settings, current, data)
             if marker is not None:
                 resume_event["diagnostic_feedback_recovery"] = marker

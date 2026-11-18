@@ -117,6 +117,25 @@ async def observe(worker, entry):
     version = worker.task["result"].get(execution.KEY, execution.LEGACY_VERSION)
     if version == execution.VERSION:
         execution.ensure_runtime(worker.task, worker.domain, worker.settings)
+    from .source_observation_recheck import output_version
+
+    output = output_version(worker)
+    if output is not None:
+        from .source_scope_observation import observe as observe_grouped
+
+        value = await observe_grouped(
+            worker, entry["text"], token=authored.token(entry, VERSION), source_kind="author_plot"
+        )
+        return {
+            "version": VERSION,
+            "input_sha256": authored.token(entry, VERSION),
+            "source_sha256": entry["sha256"],
+            "sources": authored.core.units(entry["text"]),
+            "inventory": value,
+            "status": "supported" if authored.core.inventory_supported(value) else "needs_review",
+            **execution.record_metadata(worker.task),
+            "source_observation_output_version": output,
+        }
     request = observation_request(entry, version)
     repair = request.pop("repair_feedback")
 

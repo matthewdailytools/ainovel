@@ -646,10 +646,13 @@ class Worker:
             return await self.call(
                 cache_alternative, schema, context, max_output, stream, structure_repairs, contract
             )
+        from .source_observation_recheck import before_dispatch
+
+        source_dispatch = before_dispatch(self, fingerprint, instruction)
         if replay_owner is not None:
             from .diagnostic_phase_recovery import permit_dispatch
 
-            if not permit_dispatch(self, fingerprint, instruction):
+            if not source_dispatch and not permit_dispatch(self, fingerprint, instruction):
                 raise DomainError(
                     "plan_preparation_unknown",
                     "写前准备已开始但完整结果无法从原步骤核实，未自动重发；请核对步骤和费用。",
@@ -809,6 +812,11 @@ class Worker:
                     **(
                         {"workflow_plan_recipient_scope_version": source_instruction["接收范围核对执行版本"]}
                         if "接收范围核对执行版本" in source_instruction
+                        else {}
+                    ),
+                    **(
+                        {"source_observation_output_version": source_instruction["来源观察输出契约版本"]}
+                        if "来源观察输出契约版本" in source_instruction
                         else {}
                     ),
                     **(

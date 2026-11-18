@@ -3063,6 +3063,10 @@ export interface components {
        * @default false
        */
       pause_after_maintenance: boolean
+      /** Source Observation Recheck Version */
+      source_observation_recheck_version?: 'source-observation-recheck/1' | null
+      /** Source Observation Basis Sha256 */
+      source_observation_basis_sha256?: string | null
     }
     /** SaveInput */
     SaveInput: {

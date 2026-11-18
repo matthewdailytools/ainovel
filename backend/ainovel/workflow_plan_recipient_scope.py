@@ -342,6 +342,23 @@ def bindings_supported(binding):
 
 
 async def observe(worker, source, *, version=VERSION):
+    from .source_observation_recheck import output_version
+
+    output = output_version(worker)
+    if output is not None:
+        from .source_scope_observation import observe as observe_grouped
+
+        token = sha({"version": version, "source": source})
+        inventory = await observe_grouped(worker, source, token=token, source_kind="workflow_plan")
+        return {
+            "version": version,
+            "input_sha256": token,
+            "source_sha256": sha(source),
+            "sources": units(source),
+            "inventory": inventory,
+            "status": "supported" if inventory_supported(inventory) else "needs_review",
+            "source_observation_output_version": output,
+        }
     if version == NEW_VERSION:
         from .workflow_plan_scope_classification import observe as observe_classification
 

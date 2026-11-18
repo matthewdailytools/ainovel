@@ -5232,6 +5232,14 @@
             "type": "boolean",
             "title": "Pause After Maintenance",
             "default": false
+          },
+          "source_observation_recheck_version": {
+            "anyOf": [{ "type": "string", "const": "source-observation-recheck/1" }, { "type": "null" }],
+            "title": "Source Observation Recheck Version"
+          },
+          "source_observation_basis_sha256": {
+            "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }],
+            "title": "Source Observation Basis Sha256"
           }
         },
         "additionalProperties": false,

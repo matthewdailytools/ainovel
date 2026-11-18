@@ -8580,5 +8580,16 @@
     "result": "blocked",
     "record": "2026-11-18-frozen-book-exit-source-stops.md",
     "fix_of": ""
+  },
+  {
+    "id": "frozen-source-stops-offline-recheck-20261118",
+    "date": "2026-11-18",
+    "commit": "working-tree",
+    "module": "半自动与全自动来源核对",
+    "scenario": "原两检查点各4场景通过：进入原解释、合法未知停止、超时查回执且不重复派发、3份无效返回后停止。隔离副本保留稿件及修订、旧来源阶段、旧回执与原费用。真实模型质量与整书另验。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-18-source-checkpoint-offline-validation.md",
+    "fix_of": "frozen-book-exit-source4-clarified-held-auto2-refreshed-20261118"
   }
 ]

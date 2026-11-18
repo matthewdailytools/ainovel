@@ -249,6 +249,9 @@ async def phase(worker, row, key, state, invoke, *, owner_ids=None):
         from .workflow_plan_context import validate as validate_creative_context
 
         validate_creative_context(worker, row, current=True)
+    from .source_observation_recheck import phase_end, prepare_phase
+
+    prepare_phase(worker, row, key)
     slots = row.setdefault("phases", {})
     slot = slots.get(key)
     history = []
@@ -258,6 +261,7 @@ async def phase(worker, row, key, state, invoke, *, owner_ids=None):
         if "response" in slot:
             if slot.get("response_sha256") != sha(slot["response"]):
                 raise DomainError("plan_preparation_changed", "写前准备步骤结果已改变，未复用。", 409)
+            phase_end(worker)
             return deepcopy(slot["response"])
         if slot["status"] == "not_sent" and (
             slot["owner_task_id"] != worker.task["id"] or slot["attempt"] != worker.attempt
@@ -298,6 +302,7 @@ async def phase(worker, row, key, state, invoke, *, owner_ids=None):
             worker.checkpoint(worker.task["result"])
         raise
     finally:
+        phase_end(worker)
         worker.__dict__.pop("_workflow_plan_replay", None)
         worker.__dict__.pop("_diagnostic_phase", None)
     slot.update(status="completed", response=deepcopy(response), response_sha256=sha(response))
