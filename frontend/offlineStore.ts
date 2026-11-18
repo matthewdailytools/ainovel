@@ -1,4 +1,5 @@
 import {
+  projectId as validateProjectId,
   validateProjectDraft,
   validateProjectHistory,
   validateProjectSyncObject,
@@ -1295,8 +1296,13 @@ export function confirmLocalProjectBrief(
   projectId: string,
   base: string | null,
   draft: Pick<ProjectVersion, 'idea' | 'brief'>,
+  revisionId = newId(),
 ) {
-  const version = { id: newId(), parent_id: base, ...validateProjectDraft(draft.idea, draft.brief) }
+  const version = {
+    id: validateProjectId(revisionId),
+    parent_id: base,
+    ...validateProjectDraft(draft.idea, draft.brief),
+  }
   return transact([...projectStores, 'publications'], 'readwrite', async (tx) => {
     const project = await readProject(tx, projectId)
     const branchId = project.branch.id

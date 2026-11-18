@@ -207,19 +207,27 @@ export function createOutlineOfflineStore({
     }
   }
 
-  async function assertCurrentBasis(tx: Tx, branchId: string, version: OutlineVersion) {
+  async function assertCurrentBasis(tx: Tx, branchId: string, version: OutlineVersion, authoring = false) {
     const [project, settings] = await Promise.all([
       getProjectHead(tx, branchId),
       getSettingsHead(tx, branchId),
     ])
+    const projectVersionId = project?.versionId ?? null
+    let settingsVersionId = settings?.versionId ?? null
+    if (authoring && settingsVersionId) {
+      const adopted = await getSettingsVersion(tx, branchId, settingsVersionId)
+      if (adopted?.version.project_version_id !== projectVersionId) settingsVersionId = null
+    }
     try {
       validateOutlineActiveBasis(version, {
-        projectVersionId: project?.versionId ?? null,
-        settingsVersionId: settings?.versionId ?? null,
+        projectVersionId,
+        settingsVersionId,
       })
     } catch (error) {
       fail('conflict', error instanceof Error ? error.message : '大纲的立项或设定依据已变化。')
     }
+    if (authoring && version.settings_version_id !== settingsVersionId)
+      fail('conflict', '本机采用的设定已有新确认，请重新核对大纲依据。')
   }
 
   async function moveHead(
@@ -331,7 +339,7 @@ export function createOutlineOfflineStore({
       const previous = await getHead(tx, branch)
       if ((previous?.versionId ?? null) !== base) fail('conflict', '本机已有另一版确认大纲，请重新核对。')
       await checkArchivedPromises(tx, branch, previous, version)
-      await assertCurrentBasis(tx, branch, version)
+      await assertCurrentBasis(tx, branch, version, true)
       await validateSources(tx, branch, version, true)
       await result(
         tx.objectStore('outlineVersions').add({ branchId: branch, version } satisfies StoredOutline),

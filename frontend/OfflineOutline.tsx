@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { createDraftOwner } from './drafts'
 import { useLeaveGuard } from './leaveGuard'
+import { useWorkbenchDraft, WorkbenchDraftRecovery } from './workbenchDrafts'
 import {
   describeOutlineVersion,
   eligibleOutlineSettings,
@@ -8,6 +10,7 @@ import {
   outlineChapterPlans,
   outlinePromiseSeed,
   outlineWindowFields,
+  parseOutlineDraft,
   prepareOutlineVersion,
   requiredPromiseSignature,
   validateOutlineVersionSources,
@@ -20,6 +23,7 @@ import {
   type OutlineVersion,
   type OutlineVersionRecord,
   type OutlineWindow,
+  type OutlineWorkbenchDraft,
 } from './outlineSyncModel'
 import type { SettingsVersion } from './settingsSyncModel'
 import type { ArchivedReferenceCard } from './referenceArchive'
@@ -37,6 +41,14 @@ export type OfflineOutlineData = {
 }
 
 type Choice = { id: string; title: string }
+const outlineDraftOwner = createDraftOwner('ainovel-outline-draft-window')
+
+function workbenchOutline(
+  version: OutlineVersion,
+  restoring_id: string | null = null,
+): OutlineWorkbenchDraft {
+  return { version, restoring_id, next_promise_id: '', promise_title: '', promise_notes: '' }
+}
 
 function Choices({
   label,
@@ -117,12 +129,14 @@ const newChapterPlan = (id: string): OutlineChapterPlan => ({
 })
 
 export function OfflineOutline({
+  branchId,
   read,
   onConfirm,
   refreshToken,
   disabled,
   onDirty,
 }: {
+  branchId: string
   read: () => Promise<OfflineOutlineData>
   onConfirm: (base: string | null, version: OutlineVersion) => Promise<void>
   refreshToken: number
@@ -130,17 +144,25 @@ export function OfflineOutline({
   onDirty: (dirty: boolean) => void
 }) {
   const [data, setData] = useState<OfflineOutlineData>()
-  const [draft, setDraft] = useState<OutlineVersion>()
-  const [restoringId, setRestoringId] = useState<string>()
+  const local = useWorkbenchDraft({
+    key: `outline:${branchId}`,
+    label: '大纲',
+    owner: outlineDraftOwner,
+    parse: parseOutlineDraft,
+  })
+  const draft = local.draft?.version
+  const restoringId = local.draft?.restoring_id
+  const promiseTitle = local.draft?.promise_title ?? ''
+  const promiseNotes = local.draft?.promise_notes ?? ''
+  const nextPromise = local.draft?.next_promise_id ?? ''
+  const pendingPromiseInput = !!(promiseTitle.trim() || promiseNotes.trim())
   const [agreedPromiseChange, setAgreedPromiseChange] = useState<string>()
-  const [promiseTitle, setPromiseTitle] = useState('')
-  const [promiseNotes, setPromiseNotes] = useState('')
-  const [nextPromise, setNextPromise] = useState('')
   const [selectedRevision, setSelectedRevision] = useState('')
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const recoveryFocus = useRef<HTMLTextAreaElement>(null)
+  const focusDraft = useRef(false)
   const request = useRef(0)
   const current = data?.current?.version
   const currentPromises = requiredPromiseSignature(current?.plan)
@@ -155,7 +177,7 @@ export function OfflineOutline({
     !!draft &&
     (draft.parent_id !== (current?.id ?? null) ||
       draft.project_version_id !== data?.projectVersionId ||
-      (draft.settings_version_id !== null && draft.settings_version_id !== activeSettings?.id))
+      draft.settings_version_id !== (activeSettings?.id ?? null))
   const dirty = !!draft
   const chapters =
     data?.chapters.filter((chapter) => !chapter.archived).sort((a, b) => a.position - b.position) ?? []
@@ -192,8 +214,11 @@ export function OfflineOutline({
     return () => onDirty(false)
   }, [dirty, onDirty])
   useEffect(() => {
-    if (restoringId) recoveryFocus.current?.focus()
-  }, [restoringId])
+    if (focusDraft.current && draft?.id) {
+      focusDraft.current = false
+      recoveryFocus.current?.focus()
+    }
+  }, [draft?.id])
 
   useEffect(() => {
     const attempt = ++request.current
@@ -211,17 +236,19 @@ export function OfflineOutline({
   }, [read, refreshToken])
 
   function start() {
-    if (!data || !chapters.length) return
-    setDraft({
-      id: crypto.randomUUID(),
-      parent_id: current?.id ?? null,
-      project_version_id: data.projectVersionId,
-      settings_version_id: activeSettings?.id ?? null,
-      plan: current?.plan ?? { summary: '', volumes: [], promises: [] },
-      reference_cards: current?.reference_cards ?? [],
-      promise_sources: current?.promise_sources ?? {},
-    })
-    setRestoringId(undefined)
+    if (!data || !chapters.length || !local.loaded || local.recovery) return
+    local.setDraft(
+      workbenchOutline({
+        id: crypto.randomUUID(),
+        parent_id: current?.id ?? null,
+        project_version_id: data.projectVersionId,
+        settings_version_id: activeSettings?.id ?? null,
+        plan: current?.plan ?? { summary: '', volumes: [], promises: [] },
+        reference_cards: current?.reference_cards ?? [],
+        promise_sources: current?.promise_sources ?? {},
+      }),
+    )
+    setAgreedPromiseChange(undefined)
     setError('')
     setStatus('')
   }
@@ -238,7 +265,7 @@ export function OfflineOutline({
   }
 
   async function restoreHistorical() {
-    if (!restoreSource || !compatibleBasis || draft) return
+    if (!restoreSource || !compatibleBasis || draft || !local.loaded || local.recovery) return
     setBusy(true)
     setError('')
     setStatus('')
@@ -249,8 +276,8 @@ export function OfflineOutline({
         parent_id: current?.id ?? null,
       })
       await validateCurrentSources(next)
-      setDraft(next)
-      setRestoringId(restoreSource.id)
+      focusDraft.current = true
+      local.setDraft(workbenchOutline(next, restoreSource.id))
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '暂时无法载入所选大纲历史。')
     } finally {
@@ -259,38 +286,69 @@ export function OfflineOutline({
   }
 
   function editPlan(transform: (plan: OutlineVersion['plan']) => OutlineVersion['plan']) {
-    setDraft((before) => before && { ...before, plan: transform(before.plan) })
+    local.setDraft((before) => {
+      if (!before) return before
+      const plan = transform(before.version.plan)
+      const refs = new Set(
+        outlineChapterPlans(plan).flatMap(({ reference_cards }) =>
+          (reference_cards ?? []).map(outlineCardKey),
+        ),
+      )
+      const promises = new Set(plan.promises.map(({ promise_id }) => promise_id))
+      return {
+        ...before,
+        version: {
+          ...before.version,
+          plan,
+          reference_cards: [...cardIndex.values()].filter((card) => refs.has(outlineCardKey(card))),
+          promise_sources: Object.fromEntries(
+            Object.entries(before.version.promise_sources).filter(([id]) => promises.has(id)),
+          ),
+        },
+      }
+    })
     setError('')
   }
 
-  function openWindow(id: string, seed?: OutlinePromiseSeed) {
+  function editPromiseInput(
+    values: Partial<Pick<OutlineWorkbenchDraft, 'next_promise_id' | 'promise_title' | 'promise_notes'>>,
+  ) {
+    local.setDraft((before) => before && { ...before, ...values })
+    setError('')
+  }
+
+  function openWindow(id: string, seed: OutlinePromiseSeed | undefined, newPromise = false) {
     if (!draft || !windowChapters.length || draft.plan.promises.some((window) => window.promise_id === id))
       return
     const first = windowChapters[0].id
-    setDraft({
-      ...draft,
-      plan: {
-        ...draft.plan,
-        promises: [
-          ...draft.plan.promises,
-          {
-            promise_id: id,
-            plant_chapter_id: first,
-            opens_chapter_id: first,
-            closes_chapter_id: first,
+    local.setDraft(
+      (before) =>
+        before && {
+          ...before,
+          version: {
+            ...draft,
+            plan: {
+              ...draft.plan,
+              promises: [
+                ...draft.plan.promises,
+                {
+                  promise_id: id,
+                  plant_chapter_id: first,
+                  opens_chapter_id: first,
+                  closes_chapter_id: first,
+                },
+              ],
+            },
+            promise_sources: seed ? { ...draft.promise_sources, [id]: seed } : draft.promise_sources,
           },
-        ],
-      },
-      promise_sources: seed ? { ...draft.promise_sources, [id]: seed } : draft.promise_sources,
-    })
-    setNextPromise('')
-    setPromiseTitle('')
-    setPromiseNotes('')
+          ...(newPromise ? { promise_title: '', promise_notes: '' } : { next_promise_id: '' }),
+        },
+    )
     setError('')
   }
 
   async function confirm() {
-    if (!draft || !data || stale || !agreesToPromises) return
+    if (!draft || !data || stale || !agreesToPromises || pendingPromiseInput) return
     setBusy(true)
     setError('')
     try {
@@ -309,9 +367,8 @@ export function OfflineOutline({
       })
       await validateCurrentSources(version)
       await onConfirm(draft.parent_id, version)
-      setDraft(undefined)
+      local.setDraft(undefined)
       setAgreedPromiseChange(undefined)
-      setRestoringId(undefined)
       setStatus(restoringId ? '已确认历史内容为新的大纲修订。' : '已确认并保存大纲修订。')
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '大纲未保存，当前输入已保留。')
@@ -326,7 +383,24 @@ export function OfflineOutline({
       <summary>大纲台</summary>
       {error && <p role="alert">{error}</p>}
       {status && <p role="status">{status}</p>}
+      {local.error && <p role="alert">{local.error}</p>}
+      {local.status && <p role="status">{local.status}</p>}
       {!data && !error && <p role="status">正在读取本机大纲…</p>}
+      {local.recovery && (
+        <WorkbenchDraftRecovery
+          label="大纲"
+          foreign={local.recovery.foreign}
+          disabled={disabled || busy || !data}
+          onDiscard={() => local.setDraft(undefined)}
+          onEdit={() => {
+            if (!local.recovery) return
+            focusDraft.current = true
+            setAgreedPromiseChange(undefined)
+            setError('')
+            local.setDraft(local.recovery.value)
+          }}
+        />
+      )}
       {data?.restorePending && !current && (
         <p className="small">
           已保留稿件包的大纲修订 {data.restorePending.revisionId}。{data.restorePending.reason}
@@ -341,7 +415,7 @@ export function OfflineOutline({
             ' · 采用依据已有变化'}
         </p>
       )}
-      {data && !draft && (
+      {data && local.loaded && !local.recovery && !draft && (
         <button type="button" disabled={disabled || busy || !chapters.length} onClick={start}>
           {current ? '编辑当前大纲' : '新建大纲'}
         </button>
@@ -626,7 +700,10 @@ export function OfflineOutline({
               <>
                 <label>
                   已有伏笔
-                  <select value={nextPromise} onChange={(event) => setNextPromise(event.target.value)}>
+                  <select
+                    value={nextPromise}
+                    onChange={(event) => editPromiseInput({ next_promise_id: event.target.value })}
+                  >
                     <option value="">选择已有伏笔</option>
                     {pendingPromises.map(({ id, title }) => (
                       <option key={id} value={id}>
@@ -652,7 +729,7 @@ export function OfflineOutline({
               <input
                 maxLength={200}
                 value={promiseTitle}
-                onChange={(event) => setPromiseTitle(event.target.value)}
+                onChange={(event) => editPromiseInput({ promise_title: event.target.value })}
               />
             </label>
             <label>
@@ -660,14 +737,18 @@ export function OfflineOutline({
               <textarea
                 maxLength={4000}
                 value={promiseNotes}
-                onChange={(event) => setPromiseNotes(event.target.value)}
+                onChange={(event) => editPromiseInput({ promise_notes: event.target.value })}
               />
             </label>
             <button
               type="button"
               disabled={!promiseTitle.trim() || !windowChapters.length || draft.plan.promises.length >= 250}
               onClick={() =>
-                openWindow(crypto.randomUUID(), outlinePromiseSeed(promiseTitle.trim(), promiseNotes.trim()))
+                openWindow(
+                  crypto.randomUUID(),
+                  outlinePromiseSeed(promiseTitle.trim(), promiseNotes.trim()),
+                  true,
+                )
               }
             >
               添加新伏笔计划
@@ -683,16 +764,30 @@ export function OfflineOutline({
               我已核对必达承诺的新增、调整或撤销
             </label>
           )}
-          <button type="button" disabled={stale || !agreesToPromises} onClick={() => void confirm()}>
+          {pendingPromiseInput && (
+            <p className="small">
+              确认大纲前，请添加新伏笔计划或清空尚未加入的伏笔输入。
+              <button
+                type="button"
+                onClick={() => editPromiseInput({ promise_title: '', promise_notes: '' })}
+              >
+                清空尚未加入的伏笔输入
+              </button>
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={stale || !agreesToPromises || pendingPromiseInput}
+            onClick={() => void confirm()}
+          >
             确认大纲并保存到浏览器
           </button>
           <button
             type="button"
             onClick={() => {
               if (window.confirm('放弃本次未确认的大纲修改？')) {
-                setDraft(undefined)
+                local.setDraft(undefined)
                 setAgreedPromiseChange(undefined)
-                setRestoringId(undefined)
                 setError('')
               }
             }}
@@ -748,7 +843,7 @@ export function OfflineOutline({
               {dirty && <p className="small">确认或放弃当前草稿后可选择其他恢复来源。</p>}
               <button
                 type="button"
-                disabled={disabled || busy || dirty || !compatibleBasis}
+                disabled={disabled || busy || dirty || !compatibleBasis || !local.loaded || !!local.recovery}
                 onClick={() => void restoreHistorical()}
               >
                 恢复所选版本为大纲草稿

@@ -167,10 +167,10 @@ function indexValues<T>(input: unknown, max: number, each: (value: unknown) => T
 
 const baseKeys = ['kind', 'title', 'notes', 'sources', 'depends_on', 'volume']
 
-function baseRecord(row: Record<string, unknown>): BaseRecord {
+function baseRecord(row: Record<string, unknown>, editing: boolean): BaseRecord {
   list(defaulted(row.sources, []), 0)
-  const title = text(row.title, 200, 1)
-  if (!hasText(title)) invalid('请填写故事记录名称。')
+  const title = text(row.title, 200, editing ? 0 : 1)
+  if (!editing && !hasText(title)) invalid('请填写故事记录名称。')
   return {
     title,
     notes: text(defaulted(row.notes, ''), 4000),
@@ -180,24 +180,31 @@ function baseRecord(row: Record<string, unknown>): BaseRecord {
   }
 }
 
-function stageRecord(input: unknown): StoryPromiseStage {
+function stageRecord(input: unknown, editing: boolean): StoryPromiseStage {
   const row = object(input, ['status', 'event_id', 'sources', 'note'])
   list(defaulted(row.sources, []), 0)
   const status = choice(row.status, storyPromiseStages)
   const note = text(defaulted(row.note, ''), 2000)
-  if ((status === 'retained' || status === 'abandoned') && !hasText(note))
+  if (!editing && (status === 'retained' || status === 'abandoned') && !hasText(note))
     invalid('作者保留或放弃伏笔时须写明理由。')
   return { status, event_id: optionalReference(row.event_id), sources: [], note }
 }
 
-export function parseStoryRecord(input: unknown): StoryRecord {
+function storyRecord(input: unknown, editing: boolean): StoryRecord {
   const { kind } = object(input)
+  const min = editing ? 0 : 1
+  const requiredReference = (value: unknown) => (editing && value === '' ? '' : identifier(value))
   if (kind === 'character') {
     const row = object(input, [...baseKeys, 'aliases', 'profile'])
+    const aliases = defaulted(row.aliases, [])
     return {
       kind,
-      ...baseRecord(row),
-      aliases: list(defaulted(row.aliases, []), 30).map((alias) => text(alias, 200)),
+      ...baseRecord(row, editing),
+      // Until confirmation the textarea may contain blank lines and overlong aliases.
+      aliases:
+        editing && Array.isArray(aliases) && aliases.every((value) => typeof value === 'string')
+          ? aliases
+          : list(aliases, 30).map((alias) => text(alias, 200)),
       profile: text(defaulted(row.profile, ''), 8000),
     }
   }
@@ -211,12 +218,17 @@ export function parseStoryRecord(input: unknown): StoryRecord {
       'participants',
       'after',
     ])
+    const order = row.story_order
     return {
       kind,
-      ...baseRecord(row),
+      ...baseRecord(row, editing),
       thread: text(defaulted(row.thread, '主线'), 100),
       story_order:
-        row.story_order === null || row.story_order === undefined ? null : integer(row.story_order),
+        order === null || order === undefined
+          ? null
+          : editing && typeof order === 'number' && Number.isFinite(order)
+            ? order
+            : integer(order),
       story_time: text(defaulted(row.story_time, '未知'), 200),
       status: choice(defaulted(row.status, 'planned'), truths),
       participants: referenceList(row.participants, 50),
@@ -237,12 +249,12 @@ export function parseStoryRecord(input: unknown): StoryRecord {
     ])
     return {
       kind,
-      ...baseRecord(row),
-      character_id: identifier(row.character_id),
-      event_id: identifier(row.event_id),
+      ...baseRecord(row, editing),
+      character_id: requiredReference(row.character_id),
+      event_id: requiredReference(row.event_id),
       category: choice(row.category, stateCategories),
-      key: text(row.key, 100, 1),
-      value: text(row.value, 4000, 1),
+      key: text(row.key, 100, min),
+      value: text(row.value, 4000, min),
       audience: choice(row.audience, audiences),
       truth: choice(defaulted(row.truth, 'actual'), truths),
       until_event_id: optionalReference(row.until_event_id),
@@ -252,10 +264,10 @@ export function parseStoryRecord(input: unknown): StoryRecord {
     const row = object(input, [...baseKeys, 'from_id', 'to_id', 'relation', 'event_id', 'truth'])
     return {
       kind,
-      ...baseRecord(row),
-      from_id: identifier(row.from_id),
-      to_id: identifier(row.to_id),
-      relation: text(row.relation, 500, 1),
+      ...baseRecord(row, editing),
+      from_id: requiredReference(row.from_id),
+      to_id: requiredReference(row.to_id),
+      relation: text(row.relation, 500, min),
       event_id: optionalReference(row.event_id),
       truth: choice(defaulted(row.truth, 'planned'), truths),
     }
@@ -264,12 +276,16 @@ export function parseStoryRecord(input: unknown): StoryRecord {
     const row = object(input, [...baseKeys, 'thread', 'stages'])
     return {
       kind,
-      ...baseRecord(row),
+      ...baseRecord(row, editing),
       thread: text(defaulted(row.thread, '主线'), 100),
-      stages: list(row.stages, 100, 1).map(stageRecord),
+      stages: list(row.stages, 100, 1).map((stage) => stageRecord(stage, editing)),
     }
   }
   return invalid('故事记录类型无效。')
+}
+
+export function parseStoryRecord(input: unknown): StoryRecord {
+  return storyRecord(input, false)
 }
 
 function structuralReferences(record: StoryRecord) {
@@ -314,6 +330,32 @@ function proofGroups<T>(value: unknown, parse: (item: unknown) => T) {
   return {
     record: group(defaulted(row.record, [])),
     stages: list(defaulted(row.stages, []), 100).map(group),
+  }
+}
+
+export function parseLocalStoryDraft(input: unknown) {
+  const row = object(input, [
+    'record_id',
+    'record',
+    'archived',
+    'evidence',
+    'baseVersionId',
+    'baseStoryRevision',
+  ])
+  const record = storyRecord(row.record, true)
+  const evidence = proofGroups(row.evidence, parseProof)
+  if (
+    typeof row.archived !== 'boolean' ||
+    evidence.stages.length !== (record.kind === 'promise' ? record.stages.length : 0)
+  )
+    return invalid('无法核对故事记录草稿的归档状态或阶段地址。')
+  return {
+    record_id: identifier(row.record_id),
+    record,
+    archived: row.archived,
+    evidence,
+    baseVersionId: row.baseVersionId === null ? null : hashId(row.baseVersionId),
+    baseStoryRevision: integer(row.baseStoryRevision, 0),
   }
 }
 

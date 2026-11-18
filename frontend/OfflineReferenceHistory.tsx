@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { confirmLocalReferenceCard, readLocalReferenceHistory } from './offlineStore'
+import { createDraftOwner } from './drafts'
 import { useLeaveGuard } from './leaveGuard'
-import type { ReferenceCardFields, ReferenceHistory } from './referenceArchive'
+import { parseLocalReferenceDraft, type ReferenceHistory } from './referenceArchive'
+import { useWorkbenchDraft, WorkbenchDraftRecovery } from './workbenchDrafts'
 
 const cardLabels = { ready: '可引用', incomplete: '未完成', archived: '已归档' }
 const cardFields = [
@@ -12,8 +14,10 @@ const cardFields = [
   ['exceptions', '须替换处'],
   ['evidence', '原文证据'],
 ] as const
+const owner = createDraftOwner('ainovel-reference-draft-window')
 
 export function OfflineReferenceHistory({
+  branchId,
   projectId,
   refreshToken,
   disabled,
@@ -22,6 +26,7 @@ export function OfflineReferenceHistory({
   includedExcerpts,
   setIncludedExcerpts,
 }: {
+  branchId: string
   projectId: string
   refreshToken: number
   disabled: boolean
@@ -33,7 +38,19 @@ export function OfflineReferenceHistory({
   const [archive, setArchive] = useState<ReferenceHistory>()
   const [selected, setSelected] = useState('')
   const [error, setError] = useState('')
-  const [draft, setDraft] = useState<{ base: string; card: ReferenceCardFields }>()
+  const {
+    draft,
+    setDraft,
+    recovery,
+    loaded,
+    error: draftError,
+    status: draftStatus,
+  } = useWorkbenchDraft({
+    key: `offline/reference-card/${branchId}`,
+    label: '手法卡',
+    owner,
+    parse: parseLocalReferenceDraft,
+  })
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
   const dirty = draft !== undefined
@@ -57,13 +74,21 @@ export function OfflineReferenceHistory({
       active = false
     }
   }, [projectId, refreshToken])
-  if (!archive) return error ? <p role="alert">{error}</p> : null
-  const adopted = new Set(archive.adopted_heads.map(({ revision_id }) => revision_id))
-  const versions = [...archive.versions].reverse()
-  const version =
-    versions.find(({ id }) => id === selected) ?? versions.find(({ id }) => adopted.has(id)) ?? versions[0]
-  const quote = archive.excerpts?.[version.id]
-  const stale = draft && !adopted.has(draft.base)
+  if (!archive && !draft && !recovery && !draftError) return error ? <p role="alert">{error}</p> : null
+  const adopted = new Set(archive?.adopted_heads.map(({ revision_id }) => revision_id))
+  const versions = [...(archive?.versions ?? [])].reverse()
+  const version = draft
+    ? versions.find(({ id }) => id === draft.base)
+    : (versions.find(({ id }) => id === selected) ??
+      versions.find(({ id }) => adopted.has(id)) ??
+      versions[0])
+  const quote = version && archive?.excerpts?.[version.id]
+  const stale =
+    !!draft &&
+    (!version ||
+      draft.session_id !== version.session_id ||
+      draft.card_id !== version.card_id ||
+      !adopted.has(draft.base))
 
   async function save() {
     if (!draft || stale || saving || disabled) return
@@ -87,39 +112,63 @@ export function OfflineReferenceHistory({
       <summary>手法卡历史</summary>
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
-      <label>
-        手法卡修订
-        <select disabled={dirty} value={version.id} onChange={(event) => setSelected(event.target.value)}>
-          {versions.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.card?.technique.slice(0, 60) ?? entry.card_id} · 修订 {entry.revision} ·{' '}
-              {cardLabels[entry.assessment]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="small">
-        {adopted.has(version.id) ? '采用版本' : '历史版本'} · {cardLabels[version.assessment]} ·{' '}
-        {version.id.slice(0, 8)}
-      </p>
-      {version.missing_fields.length > 0 && (
-        <p>
-          缺少
-          {cardFields
-            .filter(([key]) => version.missing_fields.includes(key))
-            .map(([, label]) => label)
-            .join('、')}
-        </p>
+      {draftError && <p role="alert">{draftError}</p>}
+      {draftStatus && <p role="status">{draftStatus}</p>}
+      {recovery && !draft && (
+        <WorkbenchDraftRecovery
+          label="手法卡"
+          foreign={recovery.foreign}
+          disabled={disabled || saving}
+          onDiscard={() => setDraft(undefined)}
+          onEdit={() => {
+            setError('')
+            setNotice('')
+            setDraft(recovery.value)
+          }}
+        />
       )}
-      {version.assessment === 'ready' && adopted.has(version.id) && version.card && !draft && (
+      {version && (
+        <>
+          <label>
+            手法卡修订
+            <select disabled={dirty} value={version.id} onChange={(event) => setSelected(event.target.value)}>
+              {versions.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.card?.technique.slice(0, 60) ?? entry.card_id} · 修订 {entry.revision} ·{' '}
+                  {cardLabels[entry.assessment]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="small">
+            {adopted.has(version.id) ? '采用版本' : '历史版本'} · {cardLabels[version.assessment]} ·{' '}
+            {version.id.slice(0, 8)}
+          </p>
+          {version.missing_fields.length > 0 && (
+            <p>
+              缺少
+              {cardFields
+                .filter(([key]) => version.missing_fields.includes(key))
+                .map(([, label]) => label)
+                .join('、')}
+            </p>
+          )}
+        </>
+      )}
+      {version?.assessment === 'ready' && adopted.has(version.id) && version.card && !draft && (
         <button
           type="button"
-          disabled={disabled}
+          disabled={disabled || !loaded || recovery?.foreign === false}
           onClick={() => {
             if (!version.card) return
             setError('')
             setNotice('')
-            setDraft({ base: version.id, card: { ...version.card } })
+            setDraft({
+              session_id: version.session_id,
+              card_id: version.card_id,
+              base: version.id,
+              card: { ...version.card },
+            })
           }}
         >
           编辑手法卡摘要
@@ -161,7 +210,7 @@ export function OfflineReferenceHistory({
           </button>
         </fieldset>
       )}
-      {version.card && version.citation && (
+      {version?.card && version.citation && (
         <>
           <dl>
             <dt>拆解目标</dt>

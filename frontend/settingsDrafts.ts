@@ -1,4 +1,4 @@
-import { discardOwnDraft, readDraft, writeDraft } from './drafts'
+import { createDraftOwner, discardOwnDraft, readDraft, writeDraft } from './drafts'
 import {
   readLocalSettingsDraftVersion,
   settingsId,
@@ -16,47 +16,7 @@ export type LocalSettingsDraft = {
   source?: LocalSettingsDraftSource
 }
 
-const ownerKey = 'ainovel-settings-draft-window'
-let owner: Promise<string> | undefined
-
-function draftOwner() {
-  return (owner ??= new Promise<string>((resolve) => {
-    const fresh = crypto.randomUUID()
-    if (!navigator.locks) {
-      resolve(fresh)
-      return
-    }
-    function claim(id: string) {
-      void navigator.locks
-        .request(`${ownerKey}-${id}`, { ifAvailable: true }, (lock) => {
-          if (!lock) return claim(fresh)
-          try {
-            sessionStorage.setItem(ownerKey, id)
-          } catch {
-            // Drafts remain available as recovery copies without a saved window identifier.
-          }
-          resolve(id)
-          return new Promise<void>((release) => {
-            function close(event: PageTransitionEvent) {
-              if (event.persisted) return
-              window.removeEventListener('pagehide', close)
-              release()
-            }
-            window.addEventListener('pagehide', close)
-          })
-        })
-        .catch(() => resolve(fresh))
-    }
-    let previous: string | null = null
-    try {
-      previous = sessionStorage.getItem(ownerKey)
-    } catch {
-      // An independent editor still has its own draft.
-    }
-    // A duplicated tab can share sessionStorage with a live editor until it claims a new owner.
-    claim(previous || fresh)
-  }))
-}
+const draftOwner = createDraftOwner('ainovel-settings-draft-window')
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('无法识别本机设定草稿。')

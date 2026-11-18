@@ -33,16 +33,27 @@ function rows(input: unknown, maximum: number, minimum = 0): unknown[] {
   return input
 }
 
-function text(value: unknown, maximum: number) {
+function text(value: unknown, maximum: number, allowEmpty = false) {
   if (
     typeof value !== 'string' ||
     value.length > maximum * 2 ||
     Array.from(value).length > maximum ||
     /\p{Surrogate}/u.test(value) ||
-    !value.trim()
+    (!allowEmpty && !value.trim())
   )
     return invalid('手法卡档案中的名称或内容无效。')
   return value
+}
+
+function parseCardFields(value: unknown, editing = false) {
+  const row = fields(value, cardFields)
+  return {
+    observation: text(row.observation, 2000, editing),
+    interpretation: text(row.interpretation, 2000, editing),
+    technique: text(row.technique, 2000, editing),
+    conditions: text(row.conditions, 2000, editing),
+    exceptions: text(row.exceptions, 2000, editing),
+  }
 }
 
 function identifier(value: unknown) {
@@ -122,7 +133,7 @@ function parseVersion(value: unknown) {
     (assessment !== 'incomplete' && missing_fields.length)
   )
     invalid('手法卡完成状态与记录的缺项不一致。')
-  const card = row.card == null ? null : fields(row.card, cardFields)
+  const card = row.card == null ? null : parseCardFields(row.card)
   const citation = row.citation == null ? null : parseCitation(row.citation)
   const goal = row.goal == null ? null : text(row.goal, 3000)
   if (assessment === 'ready' ? !card || !citation || !goal : card || citation || goal)
@@ -134,15 +145,7 @@ function parseVersion(value: unknown) {
     card_id: identifier(row.card_id),
     revision: offset(row.revision),
     assessment,
-    card: card
-      ? {
-          observation: text(card.observation, 2000),
-          interpretation: text(card.interpretation, 2000),
-          technique: text(card.technique, 2000),
-          conditions: text(card.conditions, 2000),
-          exceptions: text(card.exceptions, 2000),
-        }
-      : null,
+    card,
     citation,
     goal,
     missing_fields,
@@ -153,6 +156,15 @@ export type ArchivedReferenceCard = ReturnType<typeof parseVersion>
 export type ReferenceCardFields = NonNullable<ArchivedReferenceCard['card']>
 type Digest = (data: string) => Promise<string>
 export type ReferenceScope = { session_id: string; card_id: string }
+export function parseLocalReferenceDraft(value: unknown) {
+  const row = fields(value, ['session_id', 'card_id', 'base', 'card'])
+  return {
+    session_id: identifier(row.session_id),
+    card_id: identifier(row.card_id),
+    base: hash(row.base),
+    card: parseCardFields(row.card, true),
+  }
+}
 export type ReferenceCardHead = ReferenceScope & { revision_id: string }
 const format = 'ainovel-manuscript-sync/1' as const
 export type ReferenceCardVersionObject = {

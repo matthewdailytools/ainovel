@@ -15,6 +15,7 @@ export const briefFields = [
 type BriefField = (typeof briefFields)[number][0]
 export type ProjectBrief = Record<BriefField, string> & { genre_ids: string[] }
 export type ProjectVersion = { id: string; parent_id: string | null; idea: string; brief: ProjectBrief }
+export type ProjectDraft = Pick<ProjectVersion, 'id' | 'idea' | 'brief'> & { base: string | null }
 export type ProjectHistory = { adopted_revision_id: string | null; versions: ProjectVersion[] }
 export type ProjectVersionObject = {
   format: 'ainovel-manuscript-sync/1'
@@ -72,18 +73,35 @@ function text(value: unknown, maximum: number, title: string, required: boolean)
   return normalized
 }
 
-export function validateProjectDraft(idea: unknown, value: unknown): Pick<ProjectVersion, 'idea' | 'brief'> {
-  const brief = fields(value, ['genre_ids', ...briefFields.map(([key]) => key)])
-  const genre_ids = brief.genre_ids
+function genresForBrief(value: unknown, minimum: number): string[] {
   if (
-    !Array.isArray(genre_ids) ||
-    genre_ids.length < 1 ||
-    genre_ids.length > 3 ||
-    new Set(genre_ids).size !== genre_ids.length ||
-    genre_ids.some((id) => !projectGenres.some((genre) => genre.id === id))
+    !Array.isArray(value) ||
+    value.length < minimum ||
+    value.length > 3 ||
+    new Set(value).size !== value.length ||
+    value.some((id) => !projectGenres.some((genre) => genre.id === id))
   )
     throw new Error('请选择互不重复的现有题材，主类型放在第一位。')
-  const result: ProjectBrief = { ...blankProjectBrief, genre_ids }
+  return value
+}
+
+export function readLocalProjectDraft(value: unknown): ProjectDraft {
+  const saved = fields(value, ['format', 'id', 'base', 'idea', 'brief'])
+  if (saved.format !== 1) throw new Error('无法识别本机立项草稿格式。')
+  const brief = fields(saved.brief, ['genre_ids', ...briefFields.map(([key]) => key)])
+  const result: ProjectBrief = { ...blankProjectBrief, genre_ids: genresForBrief(brief.genre_ids, 0) }
+  for (const [key, title] of briefFields) result[key] = text(brief[key], 700, title, false)
+  return {
+    id: projectId(saved.id),
+    base: saved.base === null ? null : projectId(saved.base),
+    idea: text(saved.idea, 6000, '创作思路', false),
+    brief: result,
+  }
+}
+
+export function validateProjectDraft(idea: unknown, value: unknown): Pick<ProjectVersion, 'idea' | 'brief'> {
+  const brief = fields(value, ['genre_ids', ...briefFields.map(([key]) => key)])
+  const result: ProjectBrief = { ...blankProjectBrief, genre_ids: genresForBrief(brief.genre_ids, 1) }
   for (const [key, title, required] of briefFields) {
     const content = text(brief[key] ?? (required ? undefined : ''), 700, title, required)
     if (required && substantive.has(content.toLowerCase())) throw new Error(`${title}需要具体内容。`)

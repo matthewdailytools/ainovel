@@ -391,6 +391,7 @@ export function OfflineWorkspace() {
               <LocalProjectBrief
                 key={`project-${selected.branch.id}`}
                 projectId={selected.novel.id}
+                branchId={selected.branch.id}
                 refreshToken={workbenchRefresh}
                 disabled={busy}
                 onDirty={setProjectDirty}
@@ -411,6 +412,7 @@ export function OfflineWorkspace() {
               />
               <OfflineOutline
                 key={`outline-${selected.branch.id}`}
+                branchId={selected.branch.id}
                 read={loadOutline}
                 refreshToken={workbenchRefresh}
                 disabled={busy}
@@ -422,6 +424,7 @@ export function OfflineWorkspace() {
               />
               <OfflineStory
                 key={`story-${selected.branch.id}`}
+                branchId={selected.branch.id}
                 read={loadStory}
                 readChapter={async (id) => (await readLocalHistory(selected.novel.id, id)).at(-1)}
                 chapters={chapters}
@@ -435,6 +438,7 @@ export function OfflineWorkspace() {
               />
               <OfflineReferenceHistory
                 key={`reference-${selected.branch.id}`}
+                branchId={selected.branch.id}
                 projectId={selected.novel.id}
                 refreshToken={workbenchRefresh}
                 disabled={busy}

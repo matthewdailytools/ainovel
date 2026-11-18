@@ -16,6 +16,48 @@ const windowId = (() => {
     return fallback
   }
 })()
+
+export function createDraftOwner(ownerKey: string): () => Promise<string> {
+  let owner: Promise<string> | undefined
+  return () =>
+    (owner ??= new Promise<string>((resolve) => {
+      const fresh = crypto.randomUUID()
+      if (!navigator.locks) {
+        resolve(fresh)
+        return
+      }
+      function claim(id: string) {
+        void navigator.locks
+          .request(`${ownerKey}-${id}`, { ifAvailable: true }, (lock) => {
+            if (!lock) return claim(fresh)
+            try {
+              sessionStorage.setItem(ownerKey, id)
+            } catch {
+              // Drafts remain available as recovery copies without a saved window identifier.
+            }
+            resolve(id)
+            return new Promise<void>((release) => {
+              function close(event: PageTransitionEvent) {
+                if (event.persisted) return
+                window.removeEventListener('pagehide', close)
+                release()
+              }
+              window.addEventListener('pagehide', close)
+            })
+          })
+          .catch(() => resolve(fresh))
+      }
+      let previous: string | null = null
+      try {
+        previous = sessionStorage.getItem(ownerKey)
+      } catch {
+        // A new identifier is sufficient for writing this window's draft.
+      }
+      // Duplicated tabs can start with a copy of sessionStorage.
+      claim(previous || fresh)
+    }))
+}
+
 type Stored = Draft & { chapter_id?: string; window_id?: string }
 let connection: Promise<IDBDatabase> | undefined
 function open() {

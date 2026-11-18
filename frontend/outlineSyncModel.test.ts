@@ -3,6 +3,7 @@ import {
   describeOutlineVersion,
   outlineCardFromReference,
   outlinePromiseSeed,
+  parseOutlineDraft,
   prepareOutlineVersion,
   requiredPromiseSignature,
   validateOutlineActiveBasis,
@@ -94,6 +95,28 @@ async function setting(observed = false) {
 }
 
 describe('离线大纲正式版本', () => {
+  it('结构可读的未完成大纲能重开，正式确认仍校验语义和冻结摘要', () => {
+    const version = fixture()
+    version.plan.promises[0].closes_chapter_id = 'unassigned-chapter'
+    const input = {
+      version,
+      restoring_id: 'previous-outline',
+      next_promise_id: 'candidate',
+      promise_title: '  下一场排查 😀  ',
+      promise_notes: '',
+    }
+    expect(parseOutlineDraft(input)).toEqual(input)
+    expect(() => prepareOutlineVersion(input.version)).toThrow('按章序排列')
+
+    version.plan.volumes[0].units[0].chapters[0].result = ''
+    expect(parseOutlineDraft(input).version.plan.volumes[0].units[0].chapters[0].result).toBe('')
+    expect(() => prepareOutlineVersion(input.version)).toThrow()
+    expect(() => parseOutlineDraft({ ...input, version: { ...version, reference_cards: [] } })).toThrow(
+      '冻结摘要',
+    )
+    expect(() => parseOutlineDraft({ ...input, promise_title: 10 })).toThrow()
+  })
+
   it('保留四级计划、冻结卡和计划种子，并拒绝同修订地址错配与额外原文', () => {
     const input = fixture()
     const payload = {

@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
+import { createDraftOwner } from './drafts'
 import { useLeaveGuard } from './leaveGuard'
 import type { SettingsEvidence } from './settingsSyncModel'
 import type { ConfirmOfflineStory, createStoryOfflineStore } from './storyOfflineStore'
 import {
   captureStoryEvidence,
   describeStoryVersion,
+  parseLocalStoryDraft,
   storyPromiseStages,
   type StoryChapterRevision,
   type StoryPromiseStage,
   type StoryRecord,
 } from './storySyncModel'
+import { useWorkbenchDraft, WorkbenchDraftRecovery } from './workbenchDrafts'
 
 type OfflineStoryData = Awaited<ReturnType<ReturnType<typeof createStoryOfflineStore>['readLocalStory']>>
 type Kind = StoryRecord['kind']
@@ -34,6 +37,7 @@ const stageLabels: Record<StoryPromiseStage['status'], string> = {
 }
 const truthLabels = { planned: '计划', actual: '已发生', unknown: '未知', conflict: '待核对' } as const
 const defaultStage: StoryPromiseStage = { status: 'planned', event_id: null, note: '', sources: [] }
+const owner = createDraftOwner('ainovel-story-draft-window')
 
 function blankRecord(kind: Kind): StoryRecord {
   const base = { title: '', notes: '', volume: '', depends_on: [], sources: [] as [] }
@@ -455,6 +459,7 @@ function SpecificFields({
 }
 
 export function OfflineStory({
+  branchId,
   read,
   readChapter,
   chapters,
@@ -463,6 +468,7 @@ export function OfflineStory({
   disabled,
   onDirty,
 }: {
+  branchId: string
   read: () => Promise<OfflineStoryData>
   readChapter: ReadChapter
   chapters: Chapter[]
@@ -473,7 +479,19 @@ export function OfflineStory({
 }) {
   const [data, setData] = useState<OfflineStoryData>()
   const [kind, setKind] = useState<Kind>('promise')
-  const [draft, setDraft] = useState<ConfirmOfflineStory>()
+  const {
+    draft,
+    setDraft,
+    recovery,
+    loaded,
+    error: draftError,
+    status: draftStatus,
+  } = useWorkbenchDraft({
+    key: `offline/story-record/${branchId}`,
+    label: '故事记录',
+    owner,
+    parse: parseLocalStoryDraft,
+  })
   const [selected, setSelected] = useState('')
   const [historyId, setHistoryId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -490,8 +508,12 @@ export function OfflineStory({
     available
       .filter(({ version }) => !kind || version.record.kind === kind)
       .map(({ version }) => ({ id: version.record_id, title: version.record.title }))
-  const stale = draft && draft.baseStoryRevision !== data?.storyRevision
+  const currentVersion = data?.records.find(({ head }) => head.recordId === draft?.record_id)?.version.id
+  const stale =
+    !!draft &&
+    (draft.baseStoryRevision !== data?.storyRevision || draft.baseVersionId !== (currentVersion ?? null))
   const dirty = !!draft
+  const editingBlocked = disabled || busy || dirty || !loaded || recovery?.foreign === false
   useLeaveGuard(dirty, '离线故事记录')
   useEffect(() => {
     onDirty(dirty)
@@ -514,7 +536,7 @@ export function OfflineStory({
   }, [read, refreshToken])
 
   function start(record: StoryRecord, id: string, old?: NonNullable<typeof chosen>) {
-    if (!data) return
+    if (!data || editingBlocked) return
     setDraft({
       record,
       record_id: id,
@@ -561,6 +583,23 @@ export function OfflineStory({
       <summary>故事记录</summary>
       {error && <p role="alert">{error}</p>}
       {status && <p role="status">{status}</p>}
+      {draftError && <p role="alert">{draftError}</p>}
+      {draftStatus && <p role="status">{draftStatus}</p>}
+      {recovery && !draft && (
+        <WorkbenchDraftRecovery
+          label="故事记录"
+          foreign={recovery.foreign}
+          disabled={disabled || busy || !data}
+          onDiscard={() => setDraft(undefined)}
+          onEdit={() => {
+            setDraft(recovery.value)
+            setSelected(recovery.value.record_id)
+            setHistoryId('')
+            setError('')
+            setStatus('')
+          }}
+        />
+      )}
       {!data && !error && <p role="status">正在读取本机故事记录…</p>}
       {!!data?.records.length && (
         <StorySelect
@@ -585,7 +624,7 @@ export function OfflineStory({
           ))}
           <button
             type="button"
-            disabled={!!draft || disabled || busy}
+            disabled={editingBlocked}
             onClick={() => start(chosen.version.record, chosen.head.recordId, chosen)}
           >
             编辑所选故事记录
@@ -614,19 +653,14 @@ export function OfflineStory({
         <details>
           <summary>大纲中的伏笔计划</summary>
           {data.planned.map(({ id, seed }) => (
-            <button
-              key={id}
-              type="button"
-              disabled={!!draft || disabled || busy}
-              onClick={() => start(seed, id)}
-            >
+            <button key={id} type="button" disabled={editingBlocked} onClick={() => start(seed, id)}>
               记录「{seed.title}」的进展
             </button>
           ))}
         </details>
       )}
       {!draft && data && (
-        <fieldset disabled={disabled || busy}>
+        <fieldset disabled={editingBlocked}>
           <legend>新建故事记录</legend>
           <label>
             记录类型

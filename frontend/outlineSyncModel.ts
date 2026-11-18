@@ -61,6 +61,14 @@ export type OutlineVersion = {
   reference_cards: OutlineCard[]
   promise_sources: Record<string, OutlinePromiseSeed>
 }
+
+export type OutlineWorkbenchDraft = {
+  version: OutlineVersion
+  restoring_id: string | null
+  next_promise_id: string
+  promise_title: string
+  promise_notes: string
+}
 export type OutlineVersionObject = {
   format: typeof format
   kind: 'outline-version'
@@ -181,7 +189,7 @@ function parseCard(value: unknown): OutlineCard {
   return { ...cardAddress(row), technique, conditions, exceptions, source_title: text(row.source_title) }
 }
 
-function parseChapter(value: unknown): OutlineChapterPlan {
+function parseChapter(value: unknown, partial: boolean): OutlineChapterPlan {
   const row = object(value, [
     'chapter_id',
     'goal',
@@ -191,43 +199,49 @@ function parseChapter(value: unknown): OutlineChapterPlan {
     'setting_ids',
     'reference_cards',
   ])
-  const setting_ids = array(row.setting_ids === undefined ? [] : row.setting_ids, 40).map(identifier)
-  const cards = array(row.reference_cards === undefined ? [] : row.reference_cards, 8).map((card) =>
-    cardAddress(object(card, cardReferenceFields)),
+  const setting_ids = array(row.setting_ids === undefined ? [] : row.setting_ids, partial ? 240 : 40).map(
+    identifier,
+  )
+  const cards = array(row.reference_cards === undefined ? [] : row.reference_cards, partial ? 1000 : 8).map(
+    (card) => cardAddress(object(card, cardReferenceFields)),
   )
   if (
     new Set(setting_ids).size !== setting_ids.length ||
-    new Set(cards.map(({ session_id, card_id }) => `${session_id}/${card_id}`)).size !== cards.length
+    new Set(cards.map(partial ? outlineCardKey : ({ session_id, card_id }) => `${session_id}/${card_id}`))
+      .size !== cards.length
   )
     invalid('每章仅能引用一次设定，且同一手法卡只能选择一个修订。')
+  const chapterText = partial ? text : trimmed
   return {
     chapter_id: identifier(row.chapter_id),
-    goal: trimmed(row.goal, 4000),
-    obstacle: trimmed(row.obstacle, 4000),
-    turn: trimmed(row.turn, 4000),
-    result: trimmed(row.result, 4000),
+    goal: chapterText(row.goal, 4000),
+    obstacle: chapterText(row.obstacle, 4000),
+    turn: chapterText(row.turn, 4000),
+    result: chapterText(row.result, 4000),
     setting_ids,
     ...(cards.length ? { reference_cards: cards } : {}),
   }
 }
 
-function parseUnit(value: unknown): OutlineUnit {
+function parseUnit(value: unknown, partial: boolean): OutlineUnit {
   const row = object(value, ['id', 'title', 'summary', 'chapters'])
+  const unitText = partial ? text : trimmed
   return {
     id: identifier(row.id),
-    title: trimmed(row.title, 200),
-    summary: trimmed(row.summary, 4000),
-    chapters: array(row.chapters, 100, 1).map(parseChapter),
+    title: unitText(row.title, 200),
+    summary: unitText(row.summary, 4000),
+    chapters: array(row.chapters, 100, partial ? 0 : 1).map((chapter) => parseChapter(chapter, partial)),
   }
 }
 
-function parseVolume(value: unknown): OutlineVolume {
+function parseVolume(value: unknown, partial: boolean): OutlineVolume {
   const row = object(value, ['id', 'title', 'summary', 'units'])
+  const volumeText = partial ? text : trimmed
   return {
     id: identifier(row.id),
-    title: trimmed(row.title, 200),
-    summary: trimmed(row.summary, 4000),
-    units: array(row.units, 100, 1).map(parseUnit),
+    title: volumeText(row.title, 200),
+    summary: volumeText(row.summary, 4000),
+    units: array(row.units, 100, partial ? 0 : 1).map((unit) => parseUnit(unit, partial)),
   }
 }
 
@@ -271,12 +285,12 @@ export function requiredOutlineStoryRecord(
   )?.promise_id
 }
 
-function parsePlan(value: unknown): OutlinePlan {
+function parsePlan(value: unknown, partial: boolean): OutlinePlan {
   const row = object(value, ['summary', 'volumes', 'promises', 'new_promises'])
   if (row.new_promises !== undefined) array(row.new_promises, 0)
   const plan = {
-    summary: trimmed(row.summary, 4000),
-    volumes: array(row.volumes, 100, 1).map(parseVolume),
+    summary: (partial ? text : trimmed)(row.summary, 4000),
+    volumes: array(row.volumes, 100, partial ? 0 : 1).map((volume) => parseVolume(volume, partial)),
     promises: array(row.promises === undefined ? [] : row.promises, 250).map(parseWindow),
   }
   const chapterIds = outlineChapterPlans(plan).map(({ chapter_id }) => chapter_id)
@@ -291,7 +305,10 @@ function parsePlan(value: unknown): OutlinePlan {
     const plant = position.get(window.plant_chapter_id)
     const opens = position.get(window.opens_chapter_id)
     const closes = position.get(window.closes_chapter_id)
-    if (plant === undefined || opens === undefined || closes === undefined || plant > opens || opens > closes)
+    if (
+      !partial &&
+      (plant === undefined || opens === undefined || closes === undefined || plant > opens || opens > closes)
+    )
       invalid('伏笔埋设、开始回收和最迟回收须在当前大纲中按章序排列。')
   }
   return plan
@@ -338,7 +355,7 @@ function parseSeed(value: unknown): OutlinePromiseSeed {
   }
 }
 
-export function prepareOutlineVersion(value: unknown): OutlineVersion {
+function parseVersion(value: unknown, partial: boolean): OutlineVersion {
   const row = object(value, [
     'id',
     'parent_id',
@@ -353,7 +370,7 @@ export function prepareOutlineVersion(value: unknown): OutlineVersion {
   const project_version_id = nullableId(row.project_version_id)
   const settings_version_id = nullableId(row.settings_version_id)
   if (id === parent_id) invalid('大纲不能以自己为父版本。')
-  const plan = parsePlan(row.plan)
+  const plan = parsePlan(row.plan, partial)
   const reference_cards = array(row.reference_cards === undefined ? [] : row.reference_cards, 1000).map(
     parseCard,
   )
@@ -371,9 +388,24 @@ export function prepareOutlineVersion(value: unknown): OutlineVersion {
     [...selected].some((id) => !cards.has(id))
   )
     invalid('章纲的每张手法卡须有完整、对应的冻结摘要。')
-  if (!settings_version_id && chapters.some(({ setting_ids }) => setting_ids.length))
+  if (!partial && !settings_version_id && chapters.some(({ setting_ids }) => setting_ids.length))
     invalid('章纲引用的设定须有确认版本。')
   return { id, parent_id, project_version_id, settings_version_id, plan, reference_cards, promise_sources }
+}
+
+export function prepareOutlineVersion(value: unknown): OutlineVersion {
+  return parseVersion(value, false)
+}
+
+export function parseOutlineDraft(value: unknown): OutlineWorkbenchDraft {
+  const row = object(value, ['version', 'restoring_id', 'next_promise_id', 'promise_title', 'promise_notes'])
+  return {
+    version: parseVersion(row.version, true),
+    restoring_id: nullableId(row.restoring_id),
+    next_promise_id: row.next_promise_id === '' ? '' : identifier(row.next_promise_id),
+    promise_title: text(row.promise_title, 200),
+    promise_notes: text(row.promise_notes, 4000),
+  }
 }
 
 export function validateOutlineSyncObject(
