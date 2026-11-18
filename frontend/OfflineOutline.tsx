@@ -171,7 +171,10 @@ export function OfflineOutline({
   const compatibleBasis =
     restoreSource?.project_version_id === data?.projectVersionId &&
     restoreSource?.settings_version_id === (activeSettings?.id ?? null)
-  const settings = eligibleOutlineSettings(activeSettings)
+  const settings = eligibleOutlineSettings(activeSettings).map(({ id, title, category_title }) => ({
+    id,
+    title: category_title ? `${title} · ${category_title}` : title,
+  }))
   const cardIndex = new Map(
     [...(data?.cards ?? []), ...(draft?.reference_cards ?? [])].map((card) => [outlineCardKey(card), card]),
   )

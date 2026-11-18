@@ -406,17 +406,22 @@ export function outlineObjectSignature(object: OutlineHeadObject | OutlineVersio
   return JSON.stringify([object.kind, object.branch_id, version, seeds])
 }
 
-export function eligibleOutlineSettings(version: SettingsVersion | undefined | null): SettingsItem[] {
-  return (
-    version?.categories
-      .find(({ id, skipped }) => id === 'world' && !skipped)
-      ?.items.filter(
-        (item) =>
-          settingIsAdopted(item) &&
-          item.detail.replace(/[\p{White_Space}\x1c-\x1f]/gu, '') &&
-          Object.hasOwn(version.origins, item.id) &&
-          !version.origins[item.id].evidence,
-      ) ?? []
+export function eligibleOutlineSettings(
+  version: SettingsVersion | undefined | null,
+): (SettingsItem & { category_title?: string })[] {
+  if (!version) return []
+  return version.categories.flatMap(({ id, title, skipped, items }) =>
+    skipped
+      ? []
+      : items
+          .filter(
+            (item) =>
+              settingIsAdopted(item) &&
+              item.detail.replace(/[\p{White_Space}\x1c-\x1f]/gu, '') &&
+              Object.hasOwn(version.origins, item.id) &&
+              !version.origins[item.id].evidence,
+          )
+          .map((item) => (id === 'world' ? item : { ...item, category_title: title })),
   )
 }
 
@@ -471,7 +476,7 @@ export async function validateOutlineVersionSources(version: OutlineVersion, loo
   let position = 0
   for (const chapter of outlineChapterPlans(version.plan)) {
     if (chapter.setting_ids.some((id) => !eligible.has(id)))
-      invalid('章纲引用的设定须为所选版本中的有效世界设定。')
+      invalid('章纲引用的设定须在所选正式版本中已采用。')
     if (lookup.chapter) {
       const directory = await lookup.chapter(chapter.chapter_id)
       if (
@@ -574,6 +579,7 @@ export function describeOutlineVersion(version: OutlineVersion) {
       for (const chapter of unit.chapters) {
         lines.push(`章节 ${chapter.chapter_id}`)
         for (const [field, label] of outlineChapterFields) lines.push(`${label} ${chapter[field]}`)
+        if (chapter.setting_ids.length) lines.push(`章纲引用设定 ${chapter.setting_ids.join('、')}`)
       }
     }
   }

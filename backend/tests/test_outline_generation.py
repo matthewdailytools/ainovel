@@ -8,6 +8,9 @@ from ainovel.worker import Worker
 from test_outline_workspace import chapter_plan, setting_confirmation
 
 
+RESOURCE = {"id": "lamps", "title": "油灯库存", "detail": "库房只余两盏旧灯。", "adoption_state": "adopted"}
+
+
 class Model:
     def __init__(self, intervene=None):
         self.requests = []
@@ -19,6 +22,7 @@ class Model:
         self.requests.append(instruction)
         chapters = instruction["章节目录"]
         promise = instruction["可用伏笔"][0]
+        settings = [item["id"] for item in instruction["其他可引用设定"]]
         if self.intervene:
             self.intervene()
         plan = {
@@ -33,7 +37,10 @@ class Model:
                             "id": "u1",
                             "title": "求证",
                             "summary": "先试探，再确认",
-                            "chapters": [chapter_plan(c["id"], c["title"]) for c in chapters],
+                            "chapters": [
+                                {**chapter_plan(c["id"], c["title"]), "setting_ids": ["bell", *settings]}
+                                for c in chapters
+                            ],
                         }
                     ],
                 }
@@ -71,7 +78,9 @@ def prepare(client, domain, story):
             },
         ),
     )
-    setting_id = setting_confirmation(client, branch)
+    setting_id = setting_confirmation(
+        client, branch, [{"id": "resources", "title": "资源台账", "items": [RESOURCE]}]
+    )
     record = client.post(
         f"/api/branches/{branch}/story-records",
         json={
@@ -103,6 +112,13 @@ def test_outline_ai_candidate_is_reviewable_and_author_save_is_separate(client, 
     sent = provider.requests[0]
     assert sent["已确认立项"]["id"] == project["id"]
     assert sent["已确认世界设定"][0]["detail"] == "铜铃只在门内响。"
+    assert sent["其他可引用设定"] == [
+        {
+            **{key: RESOURCE[key] for key in ("id", "title", "detail")},
+            "category_id": "resources",
+            "category_title": "资源台账",
+        }
+    ]
     assert [item["id"] for item in sent["章节目录"]] == [story["chapter_id"], second["id"]]
     assert client.get(endpoint).json()["draft"] is None
     artifact = client.get(endpoint + "/generation/" + completed["artifact_id"]).json()
@@ -122,6 +138,13 @@ def test_outline_ai_candidate_is_reviewable_and_author_save_is_separate(client, 
     result = client.post(endpoint + "/confirm", json={"base_revision": saved.json()["draft"]["revision"]})
     assert result.status_code == 200, result.text
     assert result.json()["confirmed"]["plan"]["summary"] == "作者确认归还铜铃，再进入写作"
+    chosen = result.json()["confirmed"]
+    assert chosen["plan"]["volumes"][0]["units"][0]["chapters"][0]["setting_ids"] == ["bell", "lamps"]
+    assert chosen["setting_basis"]["confirmation_id"] == prompt["confirmation_id"]
+    assert chosen["setting_basis"]["items"][1] == sent["其他可引用设定"][0]
+    assert [item["id"] for item in client.get(endpoint + "/setting-options?scope=world").json()["items"]] == [
+        "bell"
+    ]
     assert result.json()["promises"][0]["state"] == "planned"
 
 

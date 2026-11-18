@@ -3,6 +3,13 @@ import { settingAdoptionLabels, type ConceptionItem } from './conception'
 import { ConceptionItemEditor } from './ConceptionItems'
 import { useLeaveGuard } from './leaveGuard'
 import {
+  discardSettingsDraft,
+  readSettingsDraft,
+  writeSettingsDraft,
+  type LocalSettingsDraft,
+  type LocalSettingsDraftSource,
+} from './settingsDrafts'
+import {
   blockingSettingsFindings,
   copyConflictSetting,
   createSettingsDraft,
@@ -186,6 +193,7 @@ function SettingsVersionPreview({ record }: { record: SettingsVersionRecord }) {
 }
 
 export function OfflineSettings({
+  branchId,
   read,
   onConfirm,
   refreshToken,
@@ -193,6 +201,7 @@ export function OfflineSettings({
   onDirty,
   ref,
 }: {
+  branchId: string
   read: () => Promise<OfflineSettingsData>
   onConfirm: (base: string | null, version: SettingsVersion) => Promise<void>
   refreshToken: number
@@ -202,8 +211,11 @@ export function OfflineSettings({
 }) {
   const [data, setData] = useState<OfflineSettingsData>()
   const [draft, setDraft] = useState<SettingsVersion>()
-  const [restoring, setRestoring] = useState<{ id: string; projectId: string | null }>()
-  const [merging, setMerging] = useState<{ context: SettingsConflictMerge; base: SettingsVersion }>()
+  const [source, setSource] = useState<LocalSettingsDraftSource>()
+  const [savedDraft, setSavedDraft] = useState<Awaited<ReturnType<typeof readSettingsDraft>>>()
+  const [draftLoaded, setDraftLoaded] = useState(false)
+  const [draftStatus, setDraftStatus] = useState('')
+  const [draftError, setDraftError] = useState('')
   const [review, setReview] = useState<Review>()
   const [categoryId, setCategoryId] = useState('world')
   const [selectedRevision, setSelectedRevision] = useState('')
@@ -213,7 +225,12 @@ export function OfflineSettings({
   const recoveryFocus = useRef<HTMLSelectElement>(null)
   const panel = useRef<HTMLDetailsElement>(null)
   const request = useRef(0)
+  const draftWrite = useRef(0)
   const current = data?.current?.version
+  const recovering = savedDraft && savedDraft.draft.version.id !== current?.id ? savedDraft : undefined
+  const hasOwnRecovery = recovering?.foreign === false
+  const restoring = source?.kind === 'history' ? source : undefined
+  const merging = source?.kind === 'merge' ? source : undefined
   const projectChanged = current && current.project_version_id !== data?.projectVersionId
   const stale =
     !!draft &&
@@ -241,11 +258,15 @@ export function OfflineSettings({
 
   useImperativeHandle(ref, () => ({
     beginConflictMerge(context) {
-      if (!data?.current || !current || draft || busy) throw new Error('请先确认或放弃当前设定草稿。')
+      if (!data?.current || !current || !draftLoaded || hasOwnRecovery || draft || busy)
+        throw new Error('请先确认或放弃当前设定草稿。')
       if (current.id !== context.localRevisionId || current.project_version_id !== data.projectVersionId)
         throw new Error('本机设定或立项已变化，请重新读取并比较。')
-      startDraft(data.current)
-      setMerging({ context, base: current })
+      edit(createSettingsDraft(crypto.randomUUID(), current.id, data.projectVersionId, data.current), {
+        kind: 'merge',
+        context,
+        base: current,
+      })
       if (panel.current) panel.current.open = true
     },
   }))
@@ -265,13 +286,49 @@ export function OfflineSettings({
     }
   }, [read, refreshToken])
 
-  function edit(next: SettingsVersion | undefined) {
+  useEffect(() => {
+    let active = true
+    void readSettingsDraft(branchId)
+      .then((saved) => {
+        if (active) setSavedDraft(saved)
+      })
+      .catch(() => {
+        if (active) setDraftError('无法读取本机设定草稿，可继续查看正式设定。')
+      })
+      .finally(() => {
+        if (active) setDraftLoaded(true)
+      })
+    return () => {
+      active = false
+      draftWrite.current++
+    }
+  }, [branchId])
+
+  function persist(next: LocalSettingsDraft | undefined) {
+    const attempt = ++draftWrite.current
+    setDraftStatus(next ? '正在暂存设定草稿…' : '')
+    setDraftError('')
+    void (next ? writeSettingsDraft(branchId, next) : discardSettingsDraft(branchId)).then(
+      () => {
+        if (attempt === draftWrite.current && next) setDraftStatus('设定草稿已暂存到本机。')
+      },
+      () => {
+        if (attempt !== draftWrite.current) return
+        setDraftStatus('')
+        setDraftError(next ? '无法暂存设定草稿，当前输入仍在本页。' : '未能清除本机草稿，请重开设定台核对。')
+      },
+    )
+  }
+
+  function edit(next: SettingsVersion | undefined, nextSource = source, nextCategory = categoryId) {
     setDraft(next)
-    if (!next) setRestoring(undefined)
-    if (!next) setMerging(undefined)
+    setSource(next ? nextSource : undefined)
+    setCategoryId(nextCategory)
+    setSavedDraft(undefined)
     setReview(undefined)
     setError('')
     setStatus('')
+    persist(next && { version: next, categoryId: nextCategory, source: nextSource })
   }
 
   function editItem(next: ConceptionItem) {
@@ -338,11 +395,15 @@ export function OfflineSettings({
     })
   }
 
-  function startDraft(source?: SettingsVersionRecord, restore = false) {
-    if (!data) return
-    edit(createSettingsDraft(crypto.randomUUID(), current?.id ?? null, data.projectVersionId, source))
-    const version = source?.version
-    setRestoring(restore && version ? { id: version.id, projectId: version.project_version_id } : undefined)
+  function startDraft(record?: SettingsVersionRecord, restore = false) {
+    if (!data || !draftLoaded || hasOwnRecovery) return
+    const version = record?.version
+    edit(
+      createSettingsDraft(crypto.randomUUID(), current?.id ?? null, data.projectVersionId, record),
+      restore && version
+        ? { kind: 'history', id: version.id, projectId: version.project_version_id }
+        : undefined,
+    )
   }
 
   async function run(operation: () => Promise<void>) {
@@ -394,11 +455,43 @@ export function OfflineSettings({
       <summary>设定台</summary>
       {error && <p role="alert">{error}</p>}
       {status && <p role="status">{status}</p>}
+      {draftError && <p role="alert">{draftError}</p>}
+      {draftStatus && <p role="status">{draftStatus}</p>}
       {!data && !error && <p role="status">正在读取本机设定…</p>}
+      {data && !draft && recovering && (
+        <section aria-label="本机设定草稿恢复">
+          <p>{recovering.foreign ? '另一窗口有未确认的设定草稿。' : '有未确认的本机设定草稿。'}</p>
+          <button
+            type="button"
+            disabled={disabled || busy}
+            onClick={() => {
+              const { version, source, categoryId } = recovering.draft
+              edit(recovering.foreign ? { ...version, id: crypto.randomUUID() } : version, source, categoryId)
+            }}
+          >
+            {recovering.foreign ? '取用另一窗口的设定草稿副本' : '继续编辑本机设定草稿'}
+          </button>
+          {hasOwnRecovery && (
+            <button
+              type="button"
+              disabled={disabled || busy}
+              onClick={() => {
+                if (window.confirm('放弃这份未确认的本机设定草稿？')) edit(undefined)
+              }}
+            >
+              放弃本机设定草稿
+            </button>
+          )}
+        </section>
+      )}
       {data && !current && !draft && (
         <>
           <p>本机还没有已确认设定。</p>
-          <button type="button" disabled={disabled || busy} onClick={() => startDraft()}>
+          <button
+            type="button"
+            disabled={disabled || busy || !draftLoaded || hasOwnRecovery}
+            onClick={() => startDraft()}
+          >
             开始建立设定
           </button>
         </>
@@ -410,7 +503,11 @@ export function OfflineSettings({
           </p>
           {projectChanged && <p className="small">采用的立项已变化。编辑并核对后可确认新的设定修订。</p>}
           {!draft && (
-            <button type="button" disabled={disabled || busy} onClick={() => startDraft(data.current)}>
+            <button
+              type="button"
+              disabled={disabled || busy || !draftLoaded || hasOwnRecovery}
+              onClick={() => startDraft(data.current)}
+            >
               编辑当前设定
             </button>
           )}
@@ -442,8 +539,7 @@ export function OfflineSettings({
                     historical={source.version}
                     onPick={(itemId, nextCategory) => {
                       try {
-                        edit(copyConflictSetting(draft, source, itemId))
-                        setCategoryId(nextCategory)
+                        edit(copyConflictSetting(draft, source, itemId), merging, nextCategory)
                       } catch (failure) {
                         setError(failure instanceof Error ? failure.message : '暂时无法取用所选条目。')
                       }
@@ -459,7 +555,10 @@ export function OfflineSettings({
             <select
               ref={recoveryFocus}
               value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
+              onChange={(event) => {
+                setCategoryId(event.target.value)
+                persist({ version: draft, categoryId: event.target.value, source })
+              }}
             >
               {categories.map((row) => (
                 <option key={row.id} value={row.id}>
@@ -509,7 +608,11 @@ export function OfflineSettings({
             <textarea
               value={draft.note}
               maxLength={4000 - (sourceNote ? sourceNote.length + 1 : 0)}
-              onChange={(event) => setDraft({ ...draft, note: event.target.value })}
+              onChange={(event) => {
+                const next = { ...draft, note: event.target.value }
+                setDraft(next)
+                persist({ version: next, categoryId, source })
+              }}
             />
           </label>
           <button
@@ -642,7 +745,7 @@ export function OfflineSettings({
               <SettingsRestorePreview current={current} historical={restoreSource.version} />
               <button
                 type="button"
-                disabled={disabled || busy || dirty}
+                disabled={disabled || busy || dirty || !draftLoaded || hasOwnRecovery}
                 onClick={() => startDraft(restoreSource, true)}
               >
                 恢复所选版本为设定草稿

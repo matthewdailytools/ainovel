@@ -53,6 +53,12 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
   settings.categories.find(({ id }: { id: string }) => id === 'world').items = [
     { id: 'mark', title: '铸记规则', detail: '潮锁以两道铸记区分产地。', links: [] },
   ]
+  const inventory = '库房只余两盏旧灯。'
+  settings.categories.push({
+    id: 'resources',
+    title: '资源台账',
+    items: [{ id: 'lamps', title: '油灯库存', detail: inventory }],
+  })
   const savedSettings = await page.request.put(settingsPath, {
     headers,
     data: {
@@ -152,7 +158,7 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
                 obstacle: '光线弱',
                 turn: '发现双笔',
                 result: '锁定产地',
-                setting_ids: ['mark'],
+                setting_ids: ['mark', 'lamps'],
               },
             ],
           },
@@ -229,6 +235,11 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
     await context.setOffline(true)
     await panel.getByRole('button', { name: '编辑当前大纲' }).click()
     await panel.getByRole('textbox', { name: '总纲', exact: true }).fill(webText)
+    await panel.getByText('引用设定 · 2 项', { exact: true }).click()
+    const resources = panel.getByRole('checkbox', { name: '油灯库存 · 资源台账', exact: true })
+    await expect(resources).toBeChecked()
+    await resources.uncheck()
+    await resources.check()
     await panel.getByText('手法卡摘要 · 0 项', { exact: true }).click()
     await panel.getByRole('checkbox', { name: technique + ' · 修订 1', exact: true }).check()
     await expect(panel.getByRole('combobox', { name: '最迟回收', exact: true })).toHaveValue(chapterId)
@@ -261,6 +272,19 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
     expect(result.deferred).toHaveLength(0)
     const adopted = await (await page.request.get(outlinePath)).json()
     expect(adopted.confirmed.plan.summary).toBe(webText)
+    expect(adopted.confirmed.setting_basis).toMatchObject({
+      confirmation_id: settingsId,
+      items: expect.arrayContaining([
+        {
+          id: 'lamps',
+          title: '油灯库存',
+          detail: inventory,
+          category_id: 'resources',
+          category_title: '资源台账',
+        },
+      ]),
+    })
+    expect(adopted.confirmed.plan.volumes[0].units[0].chapters[0].setting_ids).toEqual(['mark', 'lamps'])
     expect(adopted.confirmed.setting_basis.reference_cards).toEqual([ready])
     expect(adopted.confirmed.plan.volumes[0].units[0].chapters[0].reference_cards).toEqual([
       {
@@ -283,6 +307,7 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
     await expect(panel.getByLabel('所选大纲修订', { exact: true })).toContainText(desktopText)
     await panel.getByRole('button', { name: '查看上一大纲修订' }).click()
     await expect(panel.getByLabel('所选大纲修订', { exact: true })).toContainText(commonText)
+    await expect(panel.getByLabel('所选大纲修订', { exact: true })).toContainText('章纲引用设定 mark、lamps')
 
     const webProgress = '浏览器核对双笔铸记后回收。'
     const desktopProgress = '桌面补记保管人的证词。'
@@ -384,10 +409,14 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
       }
       await pending.getByText('大纲版本历史', { exact: true }).click()
       await expect(pending.getByLabel('所选大纲修订', { exact: true })).toContainText(commonText)
+      await expect(pending.getByLabel('所选大纲修订', { exact: true })).toContainText(
+        '章纲引用设定 mark、lamps',
+      )
       const download = archive.waitForEvent('download')
       await archive.getByRole('button', { name: '导出稿件交换包', exact: true }).click()
       const transported = JSON.parse(await readFile((await (await download).path())!, 'utf-8'))
       expect(transported.outline_history).toEqual(pack.outline_history)
+      expect(transported.settings_history).toEqual(pack.settings_history)
       expect(transported.story_history).toEqual(file.story_history)
       expect(transported.reference_history).toEqual(pack.reference_history)
     } finally {

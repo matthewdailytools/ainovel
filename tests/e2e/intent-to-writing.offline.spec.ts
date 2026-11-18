@@ -223,10 +223,18 @@ async function runAuthorTask(page: Page, testInfo: TestInfo, withDesigns: boolea
     .toBe(accepted.payload.text)
   await expect(editor).toContainText(accepted.payload.text)
   await expect(page.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
+  const beforeRestore = await (await page.request.get(`/api/chapters/${chapter.id}`)).json()
   await page.getByRole('button', { name: '版本历史', exact: true }).click()
-  const previous = page.locator('.history details').filter({ hasText: ORIGINAL })
+  const previous = page.locator('.history > details').filter({ hasText: ORIGINAL })
   await previous.locator('summary').click()
-  await previous.getByRole('button', { name: '恢复为新修订', exact: true }).click()
+  await previous.getByRole('button', { name: '预览恢复', exact: true }).click()
+  const preview = previous.getByRole('region', { name: '章节恢复预览', exact: true })
+  await expect(preview.locator('[aria-label^="历史稿 · 修订"] .cm-line')).toHaveText(ORIGINAL.split('\n'))
+  expect(await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).toMatchObject({
+    revision: beforeRestore.revision,
+    content: accepted.payload.text,
+  })
+  await previous.getByRole('button', { name: '确认恢复为新修订', exact: true }).click()
   await expect
     .poll(async () => (await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content)
     .toBe(ORIGINAL)

@@ -88,6 +88,12 @@ class ReaderAccess(Input):
     available_from: AwareDatetime | None
 
 
+class CompletionCoverage(Input):
+    chapter_id: Label
+    coverage: Literal["observed", "not_observed"]
+    definition: Definition | None = None
+
+
 class Cohort(Input):
     started_from: AwareDatetime
     started_before: AwareDatetime
@@ -99,6 +105,7 @@ class EventsImport(ReadingImport):
     window_hours: int = Field(default=168, strict=True, ge=1, le=24 * 90)
     read_definition: Definition
     completion_definition: Definition | None = None
+    completion_coverage: list[CompletionCoverage] = Field(default_factory=list, max_length=1000)
     cohort: Cohort | None = None
     access_mode: AccessMode | None = None
     reader_access: list[ReaderAccess] | None = Field(default=None, max_length=50_000)
@@ -113,6 +120,14 @@ class EventsImport(ReadingImport):
         if self.reader_access is not None and self.access_mode not in {None, "reader_eligibility"}:
             raise ValueError("提供读者资格时须使用 reader_eligibility 口径。")
         opened = {chapter.chapter_id: chapter.opening for chapter in self.chapters}
+        completion = {row.chapter_id: row for row in self.completion_coverage}
+        if len(completion) != len(self.completion_coverage) or not completion.keys() <= opened.keys():
+            raise ValueError("同一章节只能声明一次完读采集覆盖，章节须在发布清单中。")
+        if any(
+            row.coverage == "observed" and row.definition is None and self.completion_definition is None
+            for row in completion.values()
+        ):
+            raise ValueError("确认完读采集覆盖时，须提供该章或通用的完读事件定义。")
         access = {}
         for row in self.reader_access or []:
             key = (row.chapter_id, row.reader_key)
@@ -132,6 +147,9 @@ class EventsImport(ReadingImport):
             key = (event.chapter_id, event.reader_key)
             if key in access and (access[key] is None or event.at < access[key]):
                 raise ValueError("阅读事件与对应读者的目标章资格记录矛盾。")
+            coverage = completion.get(event.chapter_id)
+            if event.kind == "finish" and coverage and coverage.coverage == "not_observed":
+                raise ValueError("声明未采集完读的章节不能同时提供完读事件。")
         return self
 
 
@@ -214,6 +232,12 @@ class ReadingDiagnosis(Input):
     channel_breakdown: list[ChannelFollow] | None = None
 
 
+class ReportedCompletionCoverage(Input):
+    chapter_id: str
+    coverage: Literal["observed", "not_observed", "event_evidence", "unknown"]
+    definition: str | None
+
+
 class ReadingReport(Input):
     format: Literal["ainovel-reading/1"]
     mode: Literal["events", "aggregate"]
@@ -227,6 +251,9 @@ class ReadingReport(Input):
     publication_changes: list[PublicationChange] = Field(default_factory=list)
     read_definition: str
     completion_definition: str | None = None
+    completion_coverage: list[ReportedCompletionCoverage] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     cohort: Cohort | None = None
     access_mode: ReportedAccessMode | None = Field(default=None, exclude_if=lambda value: value is None)
     window_hours: int | None = None
@@ -355,7 +382,7 @@ def _transition(data, reads, source, target, kind, window, access, by_channel=No
     )
 
 
-def _completion(data, starts, finishes, chapter_id, window, covered):
+def _completion(data, starts, finishes, chapter_id, window, observed):
     numerator = denominator = incomplete = 0
     for reader, first in starts[chapter_id].items():
         if not _eligible(data, first):
@@ -368,7 +395,11 @@ def _completion(data, starts, finishes, chapter_id, window, covered):
         index = bisect_left(timestamps, first[0])
         numerator += index < len(timestamps) and timestamps[index] - first[0] <= window
     return _metric(
-        "chapter_completion", chapter_id, numerator if covered else None, denominator, incomplete=incomplete
+        "chapter_completion",
+        chapter_id,
+        numerator if observed or numerator else None,
+        denominator,
+        incomplete=incomplete,
     )
 
 
@@ -465,16 +496,23 @@ def _event_report(data):
         _transition(data, reads, first, target, "first_chapter_retention", window, access)
         for target in data.chapters[1:]
     ]
-    metrics += [
-        _completion(
-            data,
-            starts,
-            finishes,
-            chapter.chapter_id,
-            window,
-            data.completion_definition is not None or bool(finishes.get(chapter.chapter_id)),
+    declared = {row.chapter_id: row for row in data.completion_coverage}
+    completion_coverage = []
+    for chapter in data.chapters:
+        identifier = chapter.chapter_id
+        row = declared.get(identifier)
+        completion_coverage.append(
+            ReportedCompletionCoverage(
+                chapter_id=identifier,
+                coverage=row.coverage
+                if row
+                else ("event_evidence" if finishes.get(identifier) else "unknown"),
+                definition=(row.definition if row else None) or data.completion_definition,
+            )
         )
-        for chapter in data.chapters
+    metrics += [
+        _completion(data, starts, finishes, row.chapter_id, window, row.coverage == "observed")
+        for row in completion_coverage
     ]
     notes = [
         "追读和留存按发布清单的章节顺序计算。窗口从源章首读、目标章开放与读者获得资格三者较晚时点起算。",
@@ -493,13 +531,17 @@ def _event_report(data):
         notes.append("存在资格未知读者的章对保留可核对样本及渠道分解，暂不用于掉点基线。")
     if min(chapter.published_at for chapter in data.chapters) < data.observed_from:
         notes.append("观察期晚于部分章节发布，首读和既往阅读仅依据本次可见历史。")
-    if data.completion_definition is None:
-        notes.append("导入源未说明完读事件或阈值的定义。未提供完读事件的章节显示无可计算数据。")
+    notes.append(
+        "只有来源明确确认采集覆盖的章节，才将观察窗内无匹配完读计为零。采集覆盖未声明时，已有完读仅代表可见样本。"
+    )
+    if any(row.definition is None for row in completion_coverage):
+        notes.append("部分章节没有可核对的完读事件或阈值定义。")
     return {
         "access_mode": mode,
         "event_rows": len(data.events),
         "distinct_readers": len({event.reader_key for event in data.events}),
         "event_channels": sorted({event.channel for event in data.events}),
+        "completion_coverage": completion_coverage,
         "metrics": metrics,
         "diagnostics": _diagnose(data, adjacent, channel_counts),
         "notes": notes,
@@ -530,7 +572,10 @@ def _aggregate_report(data):
 
 def calculate_report(data):
     derived = _event_report(data) if isinstance(data, EventsImport) else _aggregate_report(data)
-    return ReadingReport(**data.model_dump(exclude={"events", "reader_access", "access_mode"}), **derived)
+    return ReadingReport(
+        **data.model_dump(exclude={"events", "reader_access", "access_mode", "completion_coverage"}),
+        **derived,
+    )
 
 
 def parse_import(blob):

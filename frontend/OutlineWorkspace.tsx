@@ -14,14 +14,14 @@ type OutlineCardReference = components['schemas']['OutlineCardReference']
 export type FrozenCard = Omit<OutlineCard, 'source_title'> & { source_title?: string }
 type SavedReferenceCard = components['schemas']['SavedReferenceCard']
 type ReferenceCardEvidence = components['schemas']['ReferenceCardEvidence']
-type Setting = { id: string; title: string; detail: string }
-export type ConfirmedWorldRules = { confirmation_id: string | null; revision?: number; items: Setting[] }
+type Setting = { id: string; title: string; detail: string; category_id?: string; category_title?: string }
+export type ConfirmedSettingBasis = { confirmation_id: string | null; revision?: number; items: Setting[] }
 type OutlineRevision = {
   id: string
   revision: number
   confirmed: boolean
   plan: OutlinePlan
-  setting_basis: ConfirmedWorldRules & { reference_cards?: OutlineCard[] }
+  setting_basis: ConfirmedSettingBasis & { reference_cards?: OutlineCard[] }
 }
 export type OutlineView = {
   draft: OutlineRevision | null
@@ -160,7 +160,7 @@ export function OutlineWorkspace({
 }) {
   const root = `/branches/${branchId}/outline-workspace`
   const [view, setView] = useState<OutlineView>()
-  const [settings, setSettings] = useState<ConfirmedWorldRules>()
+  const [settings, setSettings] = useState<ConfirmedSettingBasis>()
   const [cards, setCards] = useState<OutlineCard[]>([])
   const [editing, setEditing] = useState<OutlinePlan>()
   const [settingId, setSettingId] = useState<string | null>(null)
@@ -181,7 +181,7 @@ export function OutlineWorkspace({
     let active = true
     void Promise.all([
       api<OutlineView>(root),
-      api<ConfirmedWorldRules>(root + '/setting-options'),
+      api<ConfirmedSettingBasis>(root + '/setting-options'),
       api<OutlineCard[]>(root + '/reference-options'),
     ])
       .then(([data, available, referenceCards]) => {
@@ -338,7 +338,7 @@ export function OutlineWorkspace({
                   <option value={settingId}>旧设定修订 {frozen?.revision}</option>
                 )}
                 {settings.confirmation_id && (
-                  <option value={settings.confirmation_id}>世界设定修订 {settings.revision}</option>
+                  <option value={settings.confirmation_id}>已确认设定修订 {settings.revision}</option>
                 )}
               </select>
             </label>
@@ -450,6 +450,7 @@ export function OutlineWorkspace({
                                       }}
                                     />
                                     {item.title}
+                                    {item.category_title && ` · ${item.category_title}`}
                                   </label>
                                 ))}
                               </fieldset>
@@ -869,6 +870,17 @@ export function OutlineWorkspace({
                               {chapterName(chapter.chapter_id)} · {chapter.goal} · {chapter.obstacle} ·{' '}
                               {chapter.turn} · {chapter.result}
                             </p>
+                            {previous.setting_basis.items
+                              .filter((item) => chapter.setting_ids?.includes(item.id))
+                              .map((item) => (
+                                <details key={item.id}>
+                                  <summary>
+                                    {item.title}
+                                    {item.category_title && ` · ${item.category_title}`}
+                                  </summary>
+                                  <p>{item.detail}</p>
+                                </details>
+                              ))}
                             {chapterCards(previous, chapter).map((card) => (
                               <OutlineCardSource
                                 key={cardKey(card)}
@@ -898,7 +910,9 @@ export function OutlineWorkspace({
                 <button type="button" onClick={() => onWriting(chapter_id, evidence?.report_id)}>
                   {chapterName(chapter_id)}
                 </button>{' '}
-                {setting.title} · {evidence ? '已有正文对账证据' : '计划'}
+                {setting.title}
+                {setting.category_title && ` · ${setting.category_title}`} ·{' '}
+                {evidence ? '已有正文对账证据' : '计划'}
                 {evidence && <blockquote>{evidence.source.text}</blockquote>}
               </li>
             ))}

@@ -223,11 +223,11 @@ function integer(value: unknown, min: number) {
   return value
 }
 
-function parseItem(input: unknown): SettingsItem {
+function parseItem(input: unknown, editing: boolean): SettingsItem {
   const row = record(input, ['id', 'title', 'detail', 'links', 'setting_policy', 'adoption_state'])
   const item: SettingsItem = {
     id: settingsId(row.id),
-    title: title(row.title),
+    title: editing ? text(row.title, 200) : title(row.title),
     detail: text(row.detail === undefined ? '' : row.detail, 4_000),
     links: list(row.links === undefined ? [] : row.links, 30).map(settingsId),
   }
@@ -249,13 +249,13 @@ function parseItem(input: unknown): SettingsItem {
   return item
 }
 
-function parseCategories(value: unknown): SettingsCategory[] {
+function parseCategories(value: unknown, editing = false): SettingsCategory[] {
   const rows = list(value, 24, settingCategories.length).map((input) => {
     const row = record(input, ['id', 'title', 'items', 'skipped'])
     return {
       id: settingsId(row.id),
       title: title(row.title),
-      items: list(row.items === undefined ? [] : row.items, 40).map(parseItem),
+      items: list(row.items === undefined ? [] : row.items, 40).map((item) => parseItem(item, editing)),
       skipped: boolean(row.skipped === undefined ? false : row.skipped),
     }
   })
@@ -267,7 +267,7 @@ function parseCategories(value: unknown): SettingsCategory[] {
   const items = rows.flatMap((row) => row.items)
   if (items.length > 240 || new Set(items.map((item) => item.id)).size !== items.length)
     invalid('条目编号必须唯一，每个工作版本最多保存 240 项。')
-  if (new TextEncoder().encode(JSON.stringify(rows)).byteLength > 100_000)
+  if (!editing && new TextEncoder().encode(JSON.stringify(rows)).byteLength > 100_000)
     invalid('设定内容超过 100 KB，请缩减后再确认。')
   return rows
 }
@@ -432,18 +432,23 @@ function exactReview(proposed: string[], required: string[]) {
   )
 }
 
-export async function inspectSettingsDraft(
-  categoriesInput: unknown,
-  originsInput: unknown,
-  projectInput: unknown,
-) {
-  const categories = parseCategories(categoriesInput)
+function parseSettingsFields(categoriesInput: unknown, originsInput: unknown, editing = false) {
+  const categories = parseCategories(categoriesInput, editing)
   const origins = Object.fromEntries(
     Object.entries(record(originsInput)).map(([id, origin]) => [settingsId(id), parseOrigin(origin)]),
   )
   const items = categories.flatMap((category) => category.items)
   if (Object.keys(origins).length !== items.length || items.some((item) => !Object.hasOwn(origins, item.id)))
     invalid('每条设定需要原始来源，不能挂载其他条目的来源。')
+  return { categories, origins }
+}
+
+export async function inspectSettingsDraft(
+  categoriesInput: unknown,
+  originsInput: unknown,
+  projectInput: unknown,
+) {
+  const { categories, origins } = parseSettingsFields(categoriesInput, originsInput)
   const project_version_id = nullableId(projectInput)
   const projectImpacts = categories
     .filter((category) => !category.skipped && project_version_id)
@@ -459,6 +464,22 @@ export async function inspectSettingsDraft(
     project_version_id,
     projectImpacts,
     findings: await inspectCategories(categories),
+  }
+}
+
+export function readLocalSettingsDraftVersion(input: unknown): SettingsVersion {
+  const row = record(input)
+  const id = settingsId(row.id)
+  const parent_id = nullableId(row.parent_id)
+  if (parent_id === id) invalid('设定不能以自己为父版本。')
+  return {
+    id,
+    parent_id,
+    project_version_id: nullableId(row.project_version_id),
+    ...parseSettingsFields(row.categories, row.origins, true),
+    note: text(row.note, 4000),
+    reconciled_project_items: [],
+    reviewed_setting_findings: [],
   }
 }
 

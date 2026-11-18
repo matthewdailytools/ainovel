@@ -77,6 +77,13 @@ def test_only_absent_optional_material_can_be_marked_not_applicable(inspection_c
         verdict["evidence"] = []
     created = report(inspection_client, route, preview, author_reviews=authored)
     assert item(created, "05")["current_status"] == item(created, "07")["current_status"] == "not_applicable"
+    revised_chapter = domain.save(chapter["id"], chapter["revision"], "学徒携铃出门。")
+    after_prose = read(inspection_client, route)["latest"]
+    assert not after_prose["current"]
+    assert item(after_prose, "02")["current_status"] == "outdated"
+    for check_id in allowed:
+        assert item(after_prose, check_id)["current_status"] == "not_applicable"
+    assert revised_chapter["revision"] == chapter["revision"] + 1
 
     branch = story["branch_id"]
     conception = f"/api/branches/{branch}/conception"

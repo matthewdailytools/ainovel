@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, label, type Artifact, type Branch, type Task } from './api'
 import type { Notify } from './App'
 import { AuthorIntentPanel } from './AuthorIntent'
-import { ConceptionItemHistory } from './ConceptionItemHistory'
+import { ConceptionItemHistory, type SettingRestoreBasis } from './ConceptionItemHistory'
 import {
   ConceptionCandidateReview,
   ConceptionItemEditor,
@@ -295,10 +295,7 @@ export function ConceptionWorkspace({
     setHistoryItemId(id)
     historyPanel.current?.focus()
   }
-  async function restoreItem(
-    id: string,
-    basis: { base_revision: number; base_story_revision: number; source_workspace_id: string },
-  ) {
+  async function restoreItem(id: string, basis: SettingRestoreBasis) {
     if (draft) return
     const updated = await post<ConceptionState>(
       `items/${encodeURIComponent(id)}/restore`,

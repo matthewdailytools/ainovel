@@ -1,4 +1,4 @@
-"""Start the standalone synchronization server with an explicit transport boundary."""
+"""Start the standalone synchronization server with transport and storage preflight."""
 
 import argparse
 from ipaddress import ip_address
@@ -9,6 +9,7 @@ import ssl
 import uvicorn
 
 from .cloud_sync import sync_app_from_env
+from .cloud_sync_storage import StorageProofError, verify_storage
 from .db import DomainError
 
 
@@ -18,6 +19,12 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=8888, help="监听端口，默认 8888。")
     parser.add_argument("--tls-certfile", type=Path, help="PEM 格式的服务端证书与证书链。")
     parser.add_argument("--tls-keyfile", type=Path, help="与服务端证书匹配的私钥文件。")
+    parser.add_argument(
+        "--require-encrypted-storage",
+        action="store_true",
+        help="在启动前核验同步数据库和备份目录所在的存储已加密。",
+    )
+    parser.add_argument("--backup-dir", type=Path, help="启用静态加密核验时必填的现有备份目录。")
     args = parser.parse_args(argv)
 
     try:
@@ -30,9 +37,24 @@ def main(argv=None):
         parser.error("TLS 证书和私钥须同时提供。")
     if not host.is_loopback and args.tls_certfile is None:
         parser.error("非回环地址必须配置 TLS 证书和私钥。")
+    if args.require_encrypted_storage and args.backup_dir is None:
+        parser.error("--require-encrypted-storage 须提供 --backup-dir。")
+
+    def checked_app():
+        database = os.environ.get("AINOVEL_SYNC_DB")
+        if not database:
+            parser.error("静态加密核验需要独立同步数据库路径 AINOVEL_SYNC_DB。")
+        try:
+            # Match the actual path used by SyncStore before the verifier resolves the parent.
+            verify_storage(Path(database).absolute(), args.backup_dir)
+        except StorageProofError as error:
+            parser.error(f"静态加密核验未通过。{error}")
+        except OSError, ValueError:
+            parser.error("静态加密核验未通过。请检查数据库父目录与备份目录存在且可访问。")
+        return sync_app_from_env()
 
     config = uvicorn.Config(
-        sync_app_from_env,
+        checked_app if args.require_encrypted_storage else sync_app_from_env,
         factory=True,
         host=str(host),
         port=args.port,

@@ -61,10 +61,45 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
     },
   })
   expect(promise.ok(), await promise.text()).toBe(true)
+  const conception = `/api/branches/${branch_id}/conception`
+  const setup = await (await page.request.get(conception)).json()
+  setup.categories.find(({ id }: { id: string }) => id === 'world').items = [
+    { id: 'bell-rule', title: '铃声规则', detail: '铜铃只在门内响。' },
+  ]
+  const inventory = '库房只余两盏旧灯。'
+  setup.categories.push({
+    id: 'resources',
+    title: '资源台账',
+    items: [
+      { id: 'lamps', title: '油灯库存', detail: inventory },
+      { id: 'reserves', title: '待定储备', detail: '还要核对码头库存。', adoption_state: 'pending' },
+    ],
+  })
+  const settings = await page.request.put(conception, {
+    headers,
+    data: {
+      base_revision: setup.revision,
+      base_story_revision: setup.story_revision,
+      categories: setup.categories,
+    },
+  })
+  expect(settings.ok(), await settings.text()).toBe(true)
+  const draft = await settings.json()
+  const settingConfirmation = await page.request.post(conception + '/confirm', {
+    headers,
+    data: {
+      base_revision: draft.revision,
+      base_story_revision: draft.story_revision,
+      idempotency_key: 'outline-cite-custom-resources',
+    },
+  })
+  expect(settingConfirmation.ok(), await settingConfirmation.text()).toBe(true)
+  const { confirmation } = await settingConfirmation.json()
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(id)
   await page.getByRole('button', { name: '大纲与台账', exact: true }).click()
   await page.getByLabel('总纲', { exact: true }).fill('学徒查找失散的师姐。')
+  await page.getByRole('combobox', { name: '采用设定', exact: true }).selectOption(confirmation.id)
   await page.getByRole('button', { name: '新增卷', exact: true }).click()
   await page.getByLabel('卷名', { exact: true }).fill('拾铃卷')
   await page.getByLabel('卷纲', { exact: true }).fill('追索铃身的断痕。')
@@ -80,6 +115,8 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   })) {
     await page.getByLabel(field, { exact: true }).fill(value)
   }
+  await page.getByRole('checkbox', { name: '油灯库存 · 资源台账', exact: true }).check()
+  await expect(page.getByRole('checkbox', { name: '待定储备 · 资源台账', exact: true })).toHaveCount(0)
   await page.getByRole('combobox', { name: '加入手法卡', exact: true }).selectOption({
     label: '用少量线索引出下一步 · 遗铃写法样例.txt · 修订 1',
   })
@@ -101,6 +138,7 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   expect(beforeConfirm.records).toHaveLength(1)
   await page.getByRole('button', { name: '确认已保存大纲' }).click()
   await expect(page.getByText('已确认大纲修订 2', { exact: true })).toBeVisible()
+  await expect(page.getByRole('listitem').filter({ hasText: '油灯库存 · 资源台账 · 计划' })).toBeVisible()
   await expect(page.getByText(/铃声为何消失 · 计划/)).toBeVisible()
   await expect(page.getByText(/门上的旧记号由谁刻下 · 计划/)).toBeVisible()
   await expect(page.getByText('查看伏笔阶段与原文', { exact: true })).toHaveCount(0)
@@ -119,6 +157,15 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   const directory = page.getByRole('navigation', { name: '全书目录' })
   await expect(directory.getByText('拾铃卷', { exact: true })).toBeVisible()
   await expect(directory.getByRole('region', { name: '辨铃', exact: true })).toBeVisible()
+  await page.getByText('本章章纲引用的设定', { exact: true }).press('Enter')
+  await page.getByText(`油灯库存 · 资源台账 · 修订 ${confirmation.revision}`, { exact: true }).press('Enter')
+  await expect(page.getByText(inventory, { exact: true })).toBeVisible()
+  await page.getByText(`已确认世界设定 · 修订 ${confirmation.revision}`, { exact: true }).press('Enter')
+  await expect(page.getByText('铃声规则', { exact: true })).toBeVisible()
+  const world = await (
+    await page.request.get(`/api/branches/${branch_id}/outline-workspace/setting-options?scope=world`)
+  ).json()
+  expect(world.items.map(({ id }: { id: string }) => id)).toEqual(['bell-rule'])
   await page.getByText('本章章纲引用的手法卡', { exact: true }).press('Enter')
   await page.getByText('用少量线索引出下一步 · 手法卡修订 1', { exact: true }).press('Enter')
   await page.getByRole('button', { name: '查看手法卡原文依据' }).press('Enter')

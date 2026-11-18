@@ -97,13 +97,15 @@ uv run python -m ainovel
 # 隔离联调。默认只监听 127.0.0.1。
 uv run python -m ainovel.cloud_sync_server --port 8888
 
-# 非回环监听。路径替换为部署环境中的证书链和匹配私钥。
-uv run python -m ainovel.cloud_sync_server --host 0.0.0.0 --port 8443 --tls-certfile 'fullchain.pem' --tls-keyfile 'private-key.pem'
+# 生产监听示例。路径替换为实际证书链、私钥和已存在的加密备份目录。
+uv run python -m ainovel.cloud_sync_server --host 0.0.0.0 --port 8443 --tls-certfile 'fullchain.pem' --tls-keyfile 'private-key.pem' --require-encrypted-storage --backup-dir 'D:/sync-backups'
 ```
 
 启动入口要求非回环监听提供 TLS 证书和私钥，最低 TLS 1.2。加密私钥的口令可由 `AINOVEL_SYNC_TLS_KEY_PASSWORD` 注入。使用客户端访问实际同步地址的 `/api/sync/health` 核对证书链、主机名及 SQLite 结构和读取状态。活动库不可读或缺少服务所需结构时返回 `503 sync_storage`，运行中的同步请求保持缺失的恢复路径可用。再以独立设备凭据核对作品权限。本机工作台的 `AINOVEL_OFFLINE_SYNC_ORIGINS` 配置相应同步服务地址。
 
-生产部署使用静态加密存储。设置实际 `AINOVEL_SYNC_DB` 后，可用有系统状态查询权限的操作员运行 `uv run python -m ainovel.cloud_sync_storage --backup-dir <现有备份目录>`。预检读取数据库目录、现有数据库和 WAL／SHM，以及所指定的备份卷。附件跟随 SQLite 保存。支持 Windows 已完成且保护开启的本地 BitLocker 固定卷，以及 Linux 直接挂载在完整 AES-XTS dm-crypt 映射上的 ext4。无法验证的卷返回退出码 `2`。预检保持只读，密钥恢复、账户退出与数据保留还需针对实际部署验收。[七台云同步验收](docs/acceptance/七台云同步验收.md)
+生产部署可通过 `--require-encrypted-storage` 把静态加密核验设为启动条件，并用 `--backup-dir` 指定现有备份目录。设置实际 `AINOVEL_SYNC_DB`，提前准备数据库父目录，并为服务运行身份配置读取系统加密状态的权限。服务会在打开或创建 SQLite 及监听端口之前核验数据库目录、现有数据库和 WAL／SHM，以及所指定的备份卷。附件跟随 SQLite 保存。任何核验失败均退出 `2`。隔离联调可沿用上方的回环启动方式。[七台云同步验收](docs/acceptance/七台云同步验收.md)
+
+启动前也可单独运行 `uv run python -m ainovel.cloud_sync_storage --backup-dir <现有备份目录>` 做同一项只读核验。支持 Windows 已完成加密且保护开启的本地 BitLocker 固定卷，以及 Linux 直接挂载在完整 AES-XTS dm-crypt 映射上的 ext4。密钥恢复、账户退出与数据保留按实际部署验收。[静态加密验收](docs/acceptance/七台云同步验收.md)
 
 同步账本可在线生成一致性快照。`create` 使用当前 `AINOVEL_SYNC_DB`，`verify` 返回或比对原备份文件的 SHA-256。恢复目标须为独立的新文件。以下路径及摘要按操作环境替换。
 
@@ -116,6 +118,12 @@ uv run python -m ainovel.cloud_sync_backup restore --file 'D:/sync-backups/ledge
 在线备份副本和恢复库各有独立的账本身份，原库身份保持稳定。副本中的旧设备凭据均失效。启用恢复库时，由管理员为待连接的设备重新签发凭据。备份点已有的修订、附件、冲突和回执可继续核对。
 
 启用时，客户端通过带作品权限的 `GET /api/sync/works/{work_id}/checkpoint` 核对账本身份。恢复库要求在拉取、推送、处理冲突及附件请求中提交相符的 `X-Ainovel-Ledger`。旧副本即使拿到新凭据，也会保留旧账本绑定、本机稿和待同步记录。用独立浏览器配置或隔离的 `AINOVEL_DATA_DIR` 打开新副本，再选择连接恢复库。保留原端和独立备份以核对恢复点之后的编辑及回执。[云账本恢复步骤](docs/acceptance/七台云同步验收.md)
+
+### 发布后追读与完读
+
+在「故事与审阅」打开「追读数据」，下载带当前章节编号的事件或汇总模板。事件使用同一发布版本内稳定的脱敏读者键。追读和留存从源章首读、目标章开放及读者获权中的最晚时点计时。首读渠道、明确无权、资格未知及窗口未满在报告中各有统计。只提供平台汇总时，报告保留独立读人数及来源指标口径。[追读数据口径](七台创作工作流设计.md#追读数据口径)
+
+事件模板可用 `completion_coverage` 逐章声明完读采集。填入 `chapter_id` 和 `coverage`。来源确认完整采集用 `observed`，来源确认未采集用 `not_observed`。定义可使用该条的 `definition` 或通用的 `completion_definition`。确认采集且窗口内有开始阅读但没有匹配完读时显示 0%。仅有定义但缺少采集证明或匹配事件时显示数据缺失。声明未采集却带该章的 `finish` 事件会拒绝导入，已有报告保留。[完读验收](tests/e2e/reading-metrics.offline.spec.ts)
 
 ### 备份、恢复与付费验收
 

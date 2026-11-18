@@ -200,10 +200,18 @@ test('U01：空白手写、卡点方向、作者选择、补写、拒绝、采�
   await expect
     .poll(async () => (await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content)
     .toContain('旧尺')
+  const beforeRestore = await (await page.request.get(`/api/chapters/${chapter.id}`)).json()
   await page.getByRole('button', { name: '版本历史', exact: true }).click()
-  const previous = page.locator('.history details').filter({ hasText: continued })
+  const previous = page.locator('.history > details').filter({ hasText: continued })
   await previous.locator('summary').click()
-  await previous.getByRole('button', { name: '恢复为新修订', exact: true }).click()
+  await previous.getByRole('button', { name: '预览恢复', exact: true }).click()
+  const preview = previous.getByRole('region', { name: '章节恢复预览', exact: true })
+  await expect(preview.locator('[aria-label^="历史稿 · 修订"] .cm-line')).toHaveText(continued.split('\n'))
+  expect(await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).toMatchObject({
+    revision: beforeRestore.revision,
+    content: beforeRestore.content,
+  })
+  await previous.getByRole('button', { name: '确认恢复为新修订', exact: true }).click()
   await expect
     .poll(async () => (await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content)
     .toBe(continued)

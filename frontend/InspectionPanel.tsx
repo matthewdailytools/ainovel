@@ -6,6 +6,8 @@ import { InspectionSemanticPanel, type InspectionSuggestion } from './Inspection
 import { InspectionSources } from './InspectionSources'
 import {
   coversInspectionExcerpt,
+  maxAuthorEvidence,
+  maxSoftDeviations,
   softDeviations,
   type InspectionExcerpt,
   type SoftDeviation,
@@ -524,19 +526,15 @@ export function InspectionPanel({
     }))
   function markSoftDeviation(deviation: SoftDeviation, checked: boolean) {
     const previous = review.soft_deviation_report_ids ?? []
-    if (!checked) {
-      change({ soft_deviation_report_ids: previous.filter((id) => id !== deviation.id) })
-      return
-    }
-    const covered = review.evidence.some((excerpt) => coversInspectionExcerpt(excerpt, deviation.source))
-    if (!covered && review.evidence.length >= 30) {
-      setError('引文已达 30 处。请移除一处引文，再核对本条偏离。')
+    if (checked && previous.length >= maxSoftDeviations) {
+      setError('本次签认可包含至多 1000 条软偏离。请先在对应章卷处理部分偏离。')
       return
     }
     setError('')
     change({
-      soft_deviation_report_ids: [...previous, deviation.id],
-      evidence: covered ? review.evidence : [...review.evidence, deviation.source],
+      soft_deviation_report_ids: checked
+        ? [...previous, deviation.id]
+        : previous.filter((id) => id !== deviation.id),
     })
   }
   const visible = historyId ? historical : data?.latest
@@ -553,7 +551,7 @@ export function InspectionPanel({
               (old) => old.chapter_id === item.chapter_id && old.start === item.start && old.end === item.end,
             ),
         ),
-      ].slice(0, 30)
+      ].slice(0, maxAuthorEvidence)
       return {
         ...current,
         [id]: {
@@ -601,8 +599,28 @@ export function InspectionPanel({
     const validReviews = Object.values(reviews).filter(
       (review) => review.status || review.reason || review.basis_note || review.evidence.length,
     )
+    const settingReview = validReviews.find(({ check_id }) => check_id === '05')
+    const settingDeviations =
+      softDeviations(data.preview.items.find(({ check_id }) => check_id === '05')?.basis ?? {}) ?? []
+    const selectedSoftDeviations = new Set(settingReview?.soft_deviation_report_ids)
     if (
-      validReviews.some(
+      settingReview?.status === 'green' &&
+      (selectedSoftDeviations.size !== settingDeviations.length ||
+        settingDeviations.some(({ id }) => !selectedSoftDeviations.has(id)))
+    ) {
+      setError('请逐条核对当前软设定偏离并保留本次取舍依据。')
+      return
+    }
+    const authorReviews = validReviews.map(({ candidate_result: _, ...review }) => {
+      if (review.check_id !== '05' || review.status !== 'green' || !settingDeviations.length) return review
+      const evidence = [...review.evidence]
+      for (const { source } of settingDeviations) {
+        if (!evidence.some((excerpt) => coversInspectionExcerpt(excerpt, source))) evidence.push(source)
+      }
+      return { ...review, evidence }
+    })
+    if (
+      authorReviews.some(
         (review) =>
           !review.status ||
           !review.reason.trim() ||
@@ -613,20 +631,6 @@ export function InspectionPanel({
       setError('请完成已编辑项目的判定和说明。确认通过或阻断时请引用正文。')
       return
     }
-    const settingReview = validReviews.find(({ check_id }) => check_id === '05')
-    const settingDeviations =
-      softDeviations(data.preview.items.find(({ check_id }) => check_id === '05')?.basis ?? {}) ?? []
-    if (
-      settingReview?.status === 'green' &&
-      settingDeviations.some(
-        ({ id, source }) =>
-          !settingReview.soft_deviation_report_ids?.includes(id) ||
-          !settingReview.evidence.some((excerpt) => coversInspectionExcerpt(excerpt, source)),
-      )
-    ) {
-      setError('请逐条核对当前软设定偏离并保留本次取舍依据。')
-      return
-    }
     setSaving(true)
     setError('')
     setMessage('')
@@ -635,7 +639,7 @@ export function InspectionPanel({
         scope,
         scope_id: scopeId || null,
         basis_sha256: data.preview.basis_sha256,
-        author_reviews: validReviews.map(({ candidate_result: _, ...review }) => review),
+        author_reviews: authorReviews,
       })
       setData({
         ...data,
@@ -776,19 +780,30 @@ export function InspectionPanel({
                   {review.status === 'green' && deviations.length > 0 && (
                     <fieldset>
                       <legend>已发现的软设定偏离</legend>
-                      {deviations.map((deviation) => (
-                        <div key={deviation.id}>
-                          <label className="check">
-                            <input
-                              type="checkbox"
-                              checked={review.soft_deviation_report_ids?.includes(deviation.id) ?? false}
-                              onChange={(event) => markSoftDeviation(deviation, event.target.checked)}
-                            />
-                            核对并引用「{deviation.ruleTitle}」的偏离
-                          </label>
-                          <blockquote>{deviation.source.quote}</blockquote>
-                        </div>
-                      ))}
+                      {deviations.map((deviation) => {
+                        const { chapter_id, revision, quote } = deviation.source
+                        const chapter = data.preview.chapters.find(({ id }) => id === chapter_id)
+                        const description = `soft-deviation-${deviation.id}`
+                        return (
+                          <div key={deviation.id}>
+                            <label className="check">
+                              <input
+                                type="checkbox"
+                                aria-describedby={description}
+                                checked={review.soft_deviation_report_ids?.includes(deviation.id) ?? false}
+                                onChange={(event) => markSoftDeviation(deviation, event.target.checked)}
+                              />
+                              核对并引用「{deviation.ruleTitle}」的偏离
+                            </label>
+                            <div id={description}>
+                              <span className="small">
+                                {chapter?.title ?? chapter_id} · 正文修订 {revision}
+                              </span>
+                              <blockquote>{quote}</blockquote>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </fieldset>
                   )}
                   {requiresCandidateResolution && (
@@ -823,7 +838,7 @@ export function InspectionPanel({
                     chapters={data.preview.chapters}
                     onAdd={(source) => {
                       if (
-                        review.evidence.length < 30 &&
+                        review.evidence.length < maxAuthorEvidence &&
                         !review.evidence.some(
                           (old) =>
                             old.chapter_id === source.chapter_id &&
@@ -931,7 +946,29 @@ export function InspectionPanel({
                       onClick={() => {
                         if (dirty && !window.confirm('用历史核对内容替换本轮尚未保存的核对？')) return
                         const archived = visible.revalidation_request!.author_reviews
-                        setReviews(Object.fromEntries(archived.map((row) => [row.check_id, row])))
+                        const ruleCheck = visible.items.find(({ check_id }) => check_id === '05')
+                        const historicalDeviations = softDeviations(ruleCheck?.basis ?? {}) ?? []
+                        setReviews(
+                          Object.fromEntries(
+                            archived.map((row) => [
+                              row.check_id,
+                              row.check_id !== '05' || !row.soft_deviation_report_ids?.length
+                                ? row
+                                : {
+                                    ...row,
+                                    evidence: row.evidence.filter(
+                                      (excerpt) =>
+                                        !historicalDeviations.some(
+                                          ({ source }) =>
+                                            excerpt.start === source.start &&
+                                            excerpt.end === source.end &&
+                                            coversInspectionExcerpt(excerpt, source),
+                                        ),
+                                    ),
+                                  },
+                            ]),
+                          ),
+                        )
                         setSelected(archived[0]?.check_id ?? '')
                         setMessage('已载入历史作者核对。请按当前依据复核后生成新体检单。')
                       }}

@@ -1,4 +1,10 @@
-import { coversInspectionExcerpt, softDeviationPolicy, softDeviations } from './inspectionEvidence'
+import {
+  coversInspectionExcerpt,
+  maxAuthorEvidence,
+  maxSoftDeviations,
+  softDeviationPolicy,
+  softDeviations,
+} from './inspectionEvidence'
 
 type FrozenRevision = { id: string; chapter_id: string; revision: number; sha256: string; content: string }
 type Digest = (text: string) => Promise<string>
@@ -123,8 +129,12 @@ function verifyChapters(
   )
 }
 
-function verifySources(value: unknown, chapters: ReadonlyMap<string, FrozenRevision>): Source[] {
-  return list(value, 30).map((entry) => {
+function verifySources(
+  value: unknown,
+  chapters: ReadonlyMap<string, FrozenRevision>,
+  limit = maxAuthorEvidence,
+): Source[] {
+  return list(value, limit).map((entry) => {
     const row = record(entry, ['chapter_id', 'revision', 'start', 'end', 'quote'])
     const chapter_id = id(row.chapter_id)
     const revision = integer(row.revision)
@@ -157,10 +167,14 @@ function parseAuthorReview(value: unknown, check: string, chapters: ReadonlyMap<
     'soft_deviation_report_ids',
   ])
   const status = choice(review.status, ['green', 'yellow', 'red', 'not_applicable'])
-  const evidence = verifySources(review.evidence ?? [], chapters)
   const author_overrides_candidate = flag(review.author_overrides_candidate ?? false)
   const source_candidate_id = optionalId(review.source_candidate_id)
-  const soft_deviation_report_ids = list(review.soft_deviation_report_ids ?? [], 1000).map(id)
+  const soft_deviation_report_ids = list(review.soft_deviation_report_ids ?? [], maxSoftDeviations).map(id)
+  const evidence = verifySources(
+    review.evidence ?? [],
+    chapters,
+    maxAuthorEvidence + soft_deviation_report_ids.length,
+  )
   if (
     review.check_id !== check ||
     ((status === 'green' || status === 'red') && !evidence.length) ||
@@ -310,13 +324,38 @@ function parseDeliveryManifest(value: unknown) {
     'inspection_id',
     'length_target',
     'promises',
+    'settings_catalogue',
     'ai_preparation_id',
     'files',
     'spoiler_scope',
     'sample_chapter_ids',
   ])
+  const format = choice(row.format, ['book-completion/1', 'book-completion/2'])
+  const setting_id = optionalId(row.setting_id)
+  const settings_catalogue =
+    format === 'book-completion/2'
+      ? list(row.settings_catalogue, 240, 1).map((value) => {
+          const setting = record(value, ['id', 'category_id', 'category_title', 'title', 'detail'])
+          return {
+            id: id(setting.id),
+            category_id: id(setting.category_id),
+            category_title: text(setting.category_title, 200, 1),
+            title: text(setting.title, 200, 1),
+            detail: text(setting.detail, 4000, 1),
+          }
+        })
+      : undefined
+  if (
+    (format === 'book-completion/1' && 'settings_catalogue' in row) ||
+    (settings_catalogue &&
+      (!setting_id ||
+        settings_catalogue.every(({ category_id }) => category_id === 'world') ||
+        settings_catalogue.some(({ detail }) => !trimArchiveText(detail)) ||
+        new Set(settings_catalogue.map(({ id }) => id)).size !== settings_catalogue.length))
+  )
+    invalid('历史交付的分类设定册或采用修订无效。')
   return {
-    format: choice(row.format, ['book-completion/1']),
+    format,
     branch_id: id(row.branch_id),
     title: text(row.title, 200, 1),
     story_revision: integer(row.story_revision),
@@ -324,7 +363,7 @@ function parseDeliveryManifest(value: unknown) {
       chapterManifest(record(value, ['id', 'title', 'position', 'revision', 'sha256'])),
     ),
     project_id: optionalId(row.project_id),
-    setting_id: optionalId(row.setting_id),
+    setting_id,
     outline_id: optionalId(row.outline_id),
     inspection_id: id(row.inspection_id),
     length_target: row.length_target == null ? null : record(row.length_target),
@@ -332,6 +371,7 @@ function parseDeliveryManifest(value: unknown) {
       const promise = record(value, ['id', 'revision'])
       return { id: id(promise.id), revision: integer(promise.revision) }
     }),
+    ...(settings_catalogue ? { settings_catalogue } : {}),
     ...(row.ai_preparation_id != null ? { ai_preparation_id: id(row.ai_preparation_id) } : {}),
     files: deliveryRecord(row.files, hash),
     spoiler_scope: choice(row.spoiler_scope, ['opening', 'whole']),
@@ -438,15 +478,40 @@ async function parseCompletion(
     invalid('历史完本的作者复核和试读范围不一致。')
   const body = (rows: ChapterManifest[]) =>
     rows.map(({ id, title }) => `## ${title}\n\n${chapters.get(id)?.content ?? ''}`).join('\n\n')
-  const rules = list(report.report.items[4].basis.rules, 240).map((value) => {
-    const rule = record(value)
-    return `## ${text(rule.title, 200, 1)}\n\n${text(rule.detail, 4000)}`
-  })
+  const ruleBasis = report.report.items[4].basis
+  const rules = list(ruleBasis.rules, 240).map((value) => record(value))
+  const { settings_catalogue, ai_preparation_id, files, spoiler_scope, sample_chapter_ids, ...core } =
+    manifest
+  if (settings_catalogue) {
+    const originalWorld = rules.map((rule) => [id(rule.id), rule.title, rule.detail])
+    const catalogueWorld = settings_catalogue
+      .filter(({ category_id }) => category_id === 'world')
+      .map(({ id, title, detail }) => [id, title, detail])
+    if (
+      manifest.setting_id !== ruleBasis.confirmation_id ||
+      JSON.stringify(originalWorld) !== JSON.stringify(catalogueWorld) ||
+      basis_sha256 !==
+        (await digest(
+          JSON.stringify([
+            { ...core, settings_catalogue },
+            report.report.chapters.map(({ stale }) => Number(stale)),
+            ruleBasis.outline_stale,
+            report.report.items.map(({ status }) => status),
+          ]),
+        ))
+    )
+      invalid('历史交付的分类设定册与原体检修订或冻结依据不符。')
+  }
+  const catalogue = settings_catalogue
+    ? settings_catalogue.map(
+        ({ category_title, title, detail }) => `## ${category_title} · ${title}\n\n${detail}`,
+      )
+    : rules.map((rule) => `## ${text(rule.title, 200, 1)}\n\n${text(rule.detail, 4000)}`)
   const workTitle = manifest.title
   const spoiler = review.spoiler_scope === 'opening' ? '仅开篇' : '含全书内容'
   const expected: Record<DeliveryFile, string> = {
     '正文.md': `# ${workTitle}\n\n${body(manifest.chapters)}\n`,
-    '设定册.md': `# ${workTitle} · 设定册\n\n${rules.join('\n\n') || '本作没有单独确认的世界设定条目。'}\n`,
+    '设定册.md': `# ${workTitle} · 设定册\n\n${catalogue.join('\n\n') || '本作没有单独确认的世界设定条目。'}\n`,
     '简介.md': `# ${workTitle} · 简介\n\n剧透范围：${spoiler}\n\n${trimArchiveText(review.intro)}\n`,
     '试读.md': `# ${workTitle} · 试读\n\n${body(sample)}\n`,
   }

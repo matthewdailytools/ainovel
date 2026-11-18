@@ -1,11 +1,15 @@
 from contextlib import closing
 from hashlib import sha256
+import os
+import socket
 import sqlite3
+import subprocess
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
 
-from ainovel import cloud_sync_server
+from ainovel import cloud_sync_server, cloud_sync_storage
 from ainovel.cloud_ledger import LEDGER_HEADER
 from ainovel.cloud_sync import SyncStore, create_sync_app
 from ainovel.cloud_sync_backup import create_backup, restore_backup, verify_backup
@@ -20,6 +24,7 @@ from test_cloud_sync import ADMIN, WORK, grant, parent, push
         (["--host", "sync.example.com"], "明确的 IPv4 或 IPv6"),
         (["--port", "65536"], "监听端口"),
         (["--tls-keyfile", "unused.pem"], "TLS 证书和私钥须同时提供"),
+        (["--require-encrypted-storage"], "须提供 --backup-dir"),
     ],
 )
 def test_invalid_transport_stops_before_opening_storage(argv, problem, monkeypatch, capsys):
@@ -70,6 +75,114 @@ def test_local_loopback_uses_isolated_sync_factory_without_proxy_headers(tmp_pat
     monkeypatch.setattr(cloud_sync_server.uvicorn.Server, "run", verify)
     cloud_sync_server.main(["--port", "41234"])
     assert ledger.is_file()
+
+
+def test_encrypted_startup_verifies_both_directories_before_creating_the_ledger(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    directory = tmp_path / "data"
+    directory.mkdir()
+    backup = tmp_path / "backups"
+    backup.mkdir()
+    ledger = directory / "sync.sqlite"
+    monkeypatch.setenv("AINOVEL_SYNC_DB", "data/sync.sqlite")
+    monkeypatch.setenv("AINOVEL_SYNC_PROVISION_TOKEN", "isolated-encrypted-test-provision")
+    monkeypatch.delenv("AINOVEL_SYNC_BROWSER_ORIGINS", raising=False)
+    checked = []
+
+    def proof(path):
+        assert not ledger.exists()
+        checked.append(path)
+        return "dm-crypt"
+
+    def verify(server):
+        assert checked == [directory, backup]
+        assert ledger.is_file()
+        with TestClient(server.config.loaded_app) as client:
+            assert client.get("/api/sync/health").json()["status"] == "ready"
+
+    monkeypatch.setattr(cloud_sync_storage, "_volume_proof", proof)
+    monkeypatch.setattr(cloud_sync_server.uvicorn.Server, "run", verify)
+    cloud_sync_server.main(["--port", "41234", "--require-encrypted-storage", "--backup-dir", "backups"])
+
+
+def test_encrypted_startup_refuses_unverified_backup_before_loading_an_existing_ledger(
+    tmp_path, monkeypatch, capsys
+):
+    directory = tmp_path / "data"
+    directory.mkdir()
+    backup = tmp_path / "backups"
+    backup.mkdir()
+    ledger = directory / "sync.sqlite"
+    provisioning = "isolated-preflight-rejection-token"
+    create_sync_app(ledger, provisioning)
+    before = ledger.read_bytes()
+    monkeypatch.setenv("AINOVEL_SYNC_DB", str(ledger))
+    monkeypatch.setenv("AINOVEL_SYNC_PROVISION_TOKEN", provisioning)
+    checked = []
+
+    def proof(path):
+        checked.append(path)
+        if path == backup:
+            raise cloud_sync_storage.StorageProofError("备份卷未通过核验。")
+        return "dm-crypt"
+
+    monkeypatch.setattr(cloud_sync_storage, "_volume_proof", proof)
+    monkeypatch.setattr(cloud_sync_server, "sync_app_from_env", lambda: pytest.fail("unexpected ledger load"))
+    monkeypatch.setattr(cloud_sync_server.uvicorn.Server, "run", lambda _: pytest.fail("unexpected listener"))
+    with pytest.raises(SystemExit) as stopped:
+        cloud_sync_server.main(["--require-encrypted-storage", "--backup-dir", str(backup)])
+    assert stopped.value.code == 2
+    error = capsys.readouterr().err
+    assert "静态加密核验未通过" in error and "backup_directory" in error
+    assert provisioning not in error and str(tmp_path) not in error
+    assert checked == [directory, backup]
+    assert ledger.read_bytes() == before
+
+
+def test_encrypted_cli_rejects_invalid_sidecar_without_creating_database_or_listening(tmp_path):
+    ledger = tmp_path / "sync.sqlite"
+    invalid_wal = ledger.with_name("sync.sqlite-wal")
+    invalid_wal.mkdir()
+    backup = tmp_path / "backups"
+    backup.mkdir()
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP"}
+    }
+    environment.update(
+        AINOVEL_SYNC_DB=str(ledger),
+        AINOVEL_SYNC_PROVISION_TOKEN="isolated-process-preflight-token",
+        PYTHONIOENCODING="utf-8",
+    )
+    with socket.socket() as connection:
+        connection.bind(("127.0.0.1", 0))
+        port = connection.getsockname()[1]
+    process = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ainovel.cloud_sync_server",
+            "--port",
+            str(port),
+            "--require-encrypted-storage",
+            "--backup-dir",
+            str(backup),
+        ],
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        timeout=15,
+        check=False,
+    )
+    assert process.returncode == 2, process.stderr
+    assert "静态加密核验未通过" in process.stderr and "wal 路径" in process.stderr
+    assert "Uvicorn running" not in process.stderr and "Application startup" not in process.stderr
+    assert not ledger.exists() and not ledger.with_name("sync.sqlite-shm").exists()
+    assert invalid_wal.is_dir() and not any(backup.iterdir())
+    with socket.socket() as connection:
+        connection.settimeout(1)
+        assert connection.connect_ex(("127.0.0.1", port)) != 0
 
 
 def test_health_checks_real_sqlite_without_creating_or_disclosing_storage(tmp_path):

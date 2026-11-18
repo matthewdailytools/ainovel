@@ -3,6 +3,8 @@ import type { components } from './api-schema'
 export type InspectionExcerpt = components['schemas']['Source']
 export type SoftDeviation = { id: string; ruleTitle: string; source: InspectionExcerpt }
 export const softDeviationPolicy = 'soft-deviation-review/1'
+export const maxAuthorEvidence = 30
+export const maxSoftDeviations = 1000
 
 export function softDeviations(basis: Record<string, unknown>): SoftDeviation[] | undefined {
   if (basis.soft_deviation_policy !== softDeviationPolicy) return []

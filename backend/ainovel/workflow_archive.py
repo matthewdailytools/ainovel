@@ -4,9 +4,16 @@ from hashlib import sha256
 import json
 from typing import Literal
 
-from pydantic import Field, JsonValue, TypeAdapter, ValidationError
+from pydantic import Field, JsonValue, TypeAdapter, ValidationError, model_validator
 
-from .book_completion import CompletionRequest, KIND as COMPLETION, basis_fingerprint, material_chunks
+from .book_completion import (
+    CLASSIFIED_VERSION,
+    KIND as COMPLETION,
+    WORLD_CATEGORY,
+    CompletionRequest,
+    basis_fingerprint,
+    material_chunks,
+)
 from .db import DomainError
 from .domain import utf16_slice
 from .models import Input
@@ -112,8 +119,16 @@ class PromiseManifest(Input):
     revision: int = Field(ge=0, strict=True)
 
 
+class DeliverySetting(Input):
+    id: Identifier
+    category_id: Identifier
+    category_title: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=200)
+    detail: str = Field(min_length=1, max_length=4000)
+
+
 class DeliveryManifest(Input):
-    format: Literal["book-completion/1"]
+    format: Literal["book-completion/1", "book-completion/2"]
     branch_id: Identifier
     title: str = Field(min_length=1, max_length=200)
     story_revision: int = Field(ge=0, strict=True)
@@ -124,10 +139,30 @@ class DeliveryManifest(Input):
     inspection_id: Identifier
     length_target: dict[str, JsonValue] | None
     promises: list[PromiseManifest] = Field(max_length=5000)
+    settings_catalogue: list[DeliverySetting] | None = Field(
+        default=None, min_length=1, max_length=240, exclude_if=lambda value: value is None
+    )
     ai_preparation_id: Identifier | None = Field(default=None, exclude_if=lambda value: value is None)
     files: dict[str, str] = Field(min_length=4, max_length=4)
     spoiler_scope: Literal["opening", "whole"]
     sample_chapter_ids: list[Identifier] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_settings_catalogue(self):
+        if self.format != CLASSIFIED_VERSION:
+            if "settings_catalogue" in self.model_fields_set:
+                raise ValueError("世界设定版交付清单不能附带分类设定册。")
+            return self
+        entries = self.settings_catalogue
+        if (
+            not self.setting_id
+            or not entries
+            or all(entry.category_id == WORLD_CATEGORY for entry in entries)
+            or len({entry.id for entry in entries}) != len(entries)
+            or any(not entry.detail.strip() for entry in entries)
+        ):
+            raise ValueError("分类设定册须绑定正式设定修订并包含有效的不同设定条目。")
+        return self
 
 
 class CompletionCheck(Input):
@@ -397,19 +432,28 @@ def _validate_completion(record, branch_id, report, revision_for, *, hydrate=Fal
     if isinstance(record, ArchivedCompletion):
         checked_materials(manifest.model_dump(), record.materials)
         hydrate = False
-    rules = report.report.items[4].basis.get("rules")
+    rule_basis = report.report.items[4].basis
+    rules = rule_basis.get("rules")
     if not isinstance(rules, list) or any(
         not isinstance(item, dict) or not all(isinstance(item.get(key), str) for key in ("title", "detail"))
         for item in rules
     ):
         _bad("稿件包交付的设定册缺少原体检设定依据。")
+    if manifest.format == CLASSIFIED_VERSION:
+        world_entries = [
+            (entry.id, entry.title, entry.detail)
+            for entry in manifest.settings_catalogue
+            if entry.category_id == WORLD_CATEGORY
+        ]
+        if manifest.setting_id != rule_basis.get("confirmation_id") or world_entries != [
+            (rule.get("id"), rule["title"], rule["detail"]) for rule in rules
+        ]:
+            _bad("稿件包分类设定册与原体检设定修订不一致。")
 
     def read_content(chapter):
         return chapter["content"] if "content" in chapter else revision_for(chapter["revision_id"]).content
 
-    rendered = material_chunks(
-        manifest.model_dump(), list(chapters.values()), {"items": rules}, review, read_content
-    )
+    rendered = material_chunks(manifest.model_dump(), list(chapters.values()), rules, review, read_content)
     if rendered is None or set(rendered) != set(manifest.files):
         _bad("稿件包的交付材料与冻结稿件、设定或作者输入不一致。")
     materials = {}

@@ -74,6 +74,7 @@ class ConceptionDecision(ConceptionBasis):
 
 class RestoreSettingItem(ConceptionDecision):
     source_workspace_id: Identifier
+    basis_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class ConfirmConception(ConceptionDecision):
@@ -805,50 +806,6 @@ def _receipt(tx, data, artifact_id, fingerprint):
     )
 
 
-def restore_setting_item(domain, branch_id, item_id, data):
-    with domain.db.connect(True) as tx:
-        branch = _branch(tx, branch_id)
-        fingerprint, replay = _decision(tx, branch, data, f"restore-item:{item_id}")
-        if replay:
-            return _snapshot_tx(tx, branch)
-        before = _workspace(tx, branch_id)
-        _check_basis(branch, before, data)
-        row = tx.execute(
-            "SELECT payload FROM artifacts WHERE id=? AND branch_id=? AND kind=? AND status='accepted'",
-            (data.source_workspace_id, branch_id, WORKSPACE),
-        ).fetchone()
-        source = _item_version(_read_payload(row), item_id) if row else None
-        if source is None:
-            raise DomainError("conception_item_version", "此历史修订中没有该设定条目。", 404)
-        current = _item_version(before, item_id)
-        if _item_change(current) == _item_change(source):
-            raise DomainError("conception_item_unchanged", "选中的历史版本与当前条目一致。", 409)
-        item, origin, category_id, _, number = source
-        target = next((category for category in before["categories"] if category["id"] == category_id), None)
-        if target is None:
-            raise DomainError("conception_item_category", "该历史条目的原类别已被移除，无法原位恢复。", 409)
-        position = current[4] - 1 if current is not None and current[2] == category_id else number - 1
-        # Keep the revision we read intact so baseline comparison and origins are preserved.
-        categories = []
-        for category in before["categories"]:
-            entries = [entry for entry in category["items"] if entry["id"] != item_id]
-            if category["id"] == category_id:
-                if len(entries) >= 40:
-                    raise DomainError("conception_items", "原类别已满，无法恢复该条目。", 409)
-                entries.insert(position, item)
-            categories.append({**category, "items": entries})
-        artifact_id = _persist(
-            tx,
-            branch,
-            before,
-            categories,
-            {item_id: origin},
-            restored_item={"item_id": item_id, "workspace_id": data.source_workspace_id},
-        )
-        _receipt(tx, data, artifact_id, fingerprint)
-        return _snapshot_tx(tx, branch)
-
-
 def adopt(domain, branch_id, data, *, before_write=None):
     with domain.db.connect(True) as tx:
         if before_write is not None:
@@ -1067,6 +1024,7 @@ def queued_handoff_tx(tx, branch_id, kind, identifier):
 
 def register_routes(app, domain):
     from .project_brief import register_routes as register_project_routes
+    from .setting_restore import SettingRestorePreview, preview_setting_restore, restore_setting_item
 
     register_project_routes(app, domain)
     path = "/api/branches/{branch_id}/conception"
@@ -1091,6 +1049,12 @@ def register_routes(app, domain):
         limit: Annotated[int, Query(ge=1, le=50)] = 20,
     ) -> SettingItemHistory:
         return setting_item_history(domain, branch_id, item_id, before_revision, limit)
+
+    @app.get(path + "/items/{item_id}/history/{source_workspace_id}/restore-preview")
+    def preview_workspace_setting_item(
+        branch_id: str, item_id: Identifier, source_workspace_id: Identifier
+    ) -> SettingRestorePreview:
+        return preview_setting_restore(domain, branch_id, item_id, source_workspace_id)
 
     @app.post(path + "/items/{item_id}/restore")
     def restore_workspace_setting_item(

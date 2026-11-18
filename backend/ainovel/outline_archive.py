@@ -24,7 +24,7 @@ from .outline_workspace import (
     save_outline_tx,
 )
 from .project_sync import read_project_head
-from .setting_review import confirmed_world_basis
+from .setting_review import confirmed_outline_settings
 from .settings_sync import _parents_first, read_settings_head
 from .story_graph import RECORD
 
@@ -138,7 +138,7 @@ def _prerequisite(tx, branch_id, version, required):
         return "稿件包采用的大纲仍基于另一立项版本，请核对立项后恢复。"
     if version.settings_version_id and (
         read_settings_head(tx, branch_id) != version.settings_version_id
-        or not confirmed_world_basis(tx, branch_id)["confirmation_id"]
+        or not confirmed_outline_settings(tx, branch_id)["confirmation_id"]
     ):
         return "稿件包采用的大纲仍基于另一设定版本，请核对设定后恢复。"
     for identifier in required:
@@ -175,7 +175,7 @@ def restore_outline_archive(tx, branch_id):
         try:
             _ensure_promises(tx, branch_id, version)
             confirmation_id = (
-                confirmed_world_basis(tx, branch_id)["confirmation_id"]
+                confirmed_outline_settings(tx, branch_id)["confirmation_id"]
                 if version.settings_version_id
                 else None
             )

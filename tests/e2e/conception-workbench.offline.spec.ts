@@ -222,7 +222,11 @@ test('设定体检可定位双方、预检草稿并冻结作者复核', async ({
 })
 
 test('设定条目历史对照后只恢复所选条目，并在保存版变化时要求重读', async ({ page }) => {
-  const { base, headers } = await openWorkbench(page, '潮锁 · 单项设定历史')
+  const { base, novel, chapterId, headers } = await openWorkbench(
+    page,
+    '潮锁 · 单项设定历史',
+    '守港人等潮响以后开锁。',
+  )
   const state = await readWorkbench(page, base)
   const world = state.categories.find((category) => category.id === 'world')!
   const save = async (revision: number) => {
@@ -257,9 +261,13 @@ test('设定条目历史对照后只恢复所选条目，并在保存版变化�
   await page.evaluate(() => (document.documentElement.style.fontSize = '200%'))
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
 
+  const preview = history.getByRole('button', { name: '预览设定恢复影响' })
+  const restore = history.getByRole('button', { name: '恢复所选版本为设定草稿' })
+  await expect(restore).toBeDisabled()
+  await preview.press('Enter')
+  await expect(restore).toBeEnabled()
   world.items.push({ id: 'dock-guard', title: '守港人', detail: '轮岗之前核对铜牌。', links: [] })
   await save(state.revision + 2)
-  const restore = history.getByRole('button', { name: '恢复所选版本为设定草稿' })
   await restore.click()
   await expect(history.getByRole('alert')).toContainText('构思或故事记录已更新')
   const basis = await readWorkbench(page, base)
@@ -274,10 +282,73 @@ test('设定条目历史对照后只恢复所选条目，并在保存版变化�
   expect(signed.ok(), await signed.text()).toBe(true)
   const confirmation = ((await signed.json()) as ConceptionState).confirmation
   expect(confirmation?.id).toBeTruthy()
+  const branch = `/api/branches/${novel.branch_id}`
+  const second = await page.request.post(branch + '/chapters', { headers, data: { title: '到港复核' } })
+  expect(second.ok(), await second.text()).toBe(true)
+  const later = (await second.json()).id
+  const outline = await page.request.put(branch + '/outline-workspace', {
+    headers,
+    data: {
+      base_revision: 0,
+      confirmation_id: confirmation?.id,
+      plan: {
+        summary: '渡口开锁并交接。',
+        volumes: [
+          { id: 'v1', title: '开锁卷', chapter: chapterId, rule: 'tide-lock' },
+          { id: 'v2', title: '交接卷', chapter: later, rule: 'dock-guard' },
+        ].map(({ id, title, chapter, rule }) => ({
+          id,
+          title,
+          summary: '核对铜牌和潮汐。',
+          units: [
+            {
+              id: `unit-${id}`,
+              title: '核对',
+              summary: '看守渡口。',
+              chapters: [
+                {
+                  chapter_id: chapter,
+                  goal: '让船靠岸',
+                  obstacle: '缺少开锁证明',
+                  turn: '交出铜牌',
+                  result: '确认通过',
+                  setting_ids: [rule],
+                },
+              ],
+            },
+          ],
+        })),
+      },
+    },
+  })
+  expect(outline.ok(), await outline.text()).toBe(true)
+  const savedOutline = await page.request.post(branch + '/outline-workspace/confirm', {
+    headers,
+    data: { base_revision: (await outline.json()).draft.revision },
+  })
+  expect(savedOutline.ok(), await savedOutline.text()).toBe(true)
+  const inspection = branch + '/workflow-inspections'
+  const getReport = await page.request.get(`${inspection}?scope=volume&scope_id=v2`)
+  expect(getReport.ok(), await getReport.text()).toBe(true)
+  const found = (await getReport.json()).preview
+  const report = await page.request.post(inspection, {
+    headers,
+    data: { scope: 'volume', scope_id: 'v2', basis_sha256: found.basis_sha256 },
+  })
+  expect(report.ok(), await report.text()).toBe(true)
+  const reportId = (await report.json()).id
+
   await history.getByRole('button', { name: '重新读取设定和历史' }).click()
   await expect(history.getByRole('region', { name: '当前保存版 · 修订 3' })).toContainText('潮响五次开锁。')
-  await expect(history.getByText(/原条目和作者确认版保留在历史中/)).toBeVisible()
-  await expect(history.getByText(/依赖它的大纲、写作依据与体检结果须复核/)).toBeVisible()
+  await expect(restore).toBeDisabled()
+  await preview.press('Enter')
+  const impact = history.getByRole('region', { name: '设定恢复影响' })
+  await expect(impact.getByRole('listitem').filter({ hasText: '渡口暗号' })).toContainText('直接引用本条设定')
+  await expect(impact.getByRole('listitem').filter({ hasText: '到港复核' })).toContainText('共用整版设定')
+  const affected = impact.getByRole('region', { name: '受影响报告' }).getByRole('listitem')
+  await expect(affected).toContainText(reportId)
+  await expect(affected).toContainText('交接卷')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
   await restore.click()
   await expect(history.getByText('条目已恢复为设定草稿修订 4。可核对后重新确认。')).toBeVisible()
   const updated = await readWorkbench(page, base)

@@ -308,7 +308,7 @@ describe('离线大纲正式版本', () => {
     )
     await expect(
       validateOutlineVersionSources(version, { ...lookup, settings: () => observed }),
-    ).rejects.toThrow('有效世界设定')
+    ).rejects.toThrow('在所选正式版本中已采用')
     await expect(
       validateOutlineVersionSources(version, {
         ...lookup,
@@ -324,5 +324,56 @@ describe('离线大纲正式版本', () => {
     expect(() =>
       validateOutlineActiveBasis(version, { projectVersionId: 'project', settingsVersionId: 'other' }),
     ).toThrow('对应设定')
+  })
+
+  it('章纲可挂载正式的自定义资源条目，同时拒绝待定、暂缓类别和原文观察', async () => {
+    const baseline = await setting()
+    const resource = { id: 'lamps', title: '油灯库存', detail: '库房只余两盏旧灯。', links: [] }
+    const observed = { ...resource, id: 'observation' }
+    const candidate = await prepareSettingsVersion({
+      ...baseline,
+      categories: [
+        ...baseline.categories,
+        {
+          id: 'resources',
+          title: '资源台账',
+          skipped: false,
+          items: [
+            resource,
+            { ...resource, id: 'pending', adoption_state: 'pending' },
+            { ...resource, id: 'proposed', adoption_state: 'proposed' },
+            observed,
+          ],
+        },
+        { id: 'unused', title: '待查库存', skipped: true, items: [{ ...resource, id: 'skipped' }] },
+      ],
+      origins: {
+        ...baseline.origins,
+        lamps: { origin: 'author' },
+        pending: { origin: 'author' },
+        proposed: { origin: 'author' },
+        skipped: { origin: 'author' },
+        observation: {
+          origin: 'author',
+          evidence: {
+            chapter_id: 'first',
+            revision_id: 'original',
+            start: 0,
+            end: 1,
+            quote_sha256: '1'.repeat(64),
+          },
+        },
+      },
+    })
+    const version = prepareOutlineVersion(fixture())
+    const first = version.plan.volumes[0].units[0].chapters[0]
+    const lookup = { project: () => true, outline: () => true, settings: () => candidate }
+    first.setting_ids = [resource.id]
+    await expect(validateOutlineVersionSources(version, lookup)).resolves.toBeUndefined()
+
+    for (const id of ['pending', 'proposed', 'skipped', 'observation']) {
+      first.setting_ids = [id]
+      await expect(validateOutlineVersionSources(version, lookup)).rejects.toThrow('在所选正式版本中已采用')
+    }
   })
 })

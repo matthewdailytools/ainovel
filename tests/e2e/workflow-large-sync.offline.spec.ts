@@ -5,7 +5,7 @@ import { writeFile } from 'node:fs/promises'
 const cloud = 'http://127.0.0.1:8888'
 test.skip(process.env.AINOVEL_SYNC_E2E !== '1', '使用隔离云端进程验收大体积交付')
 
-test('长篇交付以清单和来源同步，从独立 Web 备份恢复后四件交付逐件一致', async ({
+test('长篇交付与分类设定册以冻结清单同步，从独立 Web 备份恢复后四件材料逐件一致', async ({
   page,
   context,
   browser,
@@ -33,6 +33,39 @@ test('长篇交付以清单和来源同步，从独立 Web 备份恢复后四件
     expect(saved.ok(), await saved.text()).toBe(true)
     first ??= await saved.json()
   }
+  const conception = `${branch}/conception`
+  const state = await (await page.request.get(conception)).json()
+  const categories: { id: string; title: string; skipped: boolean; items: unknown[] }[] = state.categories
+  categories.find(({ id }) => id === 'characters')!.items = [
+    { id: 'apprentice', title: '守铃人学徒', detail: '守铃人按旧约还铃。' },
+    { id: 'unused-person', title: '未采用的人物', detail: '不得写入设定册。', adoption_state: 'pending' },
+  ]
+  categories.find(({ id }) => id === 'world')!.items = [
+    { id: 'sound', title: '门内铃声', detail: '铜铃只在旧宅门内响。' },
+  ]
+  categories.push({
+    id: 'props',
+    title: '信物',
+    skipped: false,
+    items: [{ id: 'red-key', title: '赤钥', detail: '从祖屋带出的信物。' }],
+  })
+  const settingDraft = await page.request.put(conception, {
+    headers,
+    data: { base_revision: state.revision, base_story_revision: state.story_revision, categories },
+  })
+  expect(settingDraft.ok(), await settingDraft.text()).toBe(true)
+  const savedSettings = await settingDraft.json()
+  const confirmedSettings = await page.request.post(conception + '/confirm', {
+    headers,
+    data: {
+      base_revision: savedSettings.revision,
+      base_story_revision: savedSettings.story_revision,
+      idempotency_key: 'classified-settings-for-delivery',
+      note: '确认人物、规则和信物。',
+    },
+  })
+  expect(confirmedSettings.ok(), await confirmedSettings.text()).toBe(true)
+  const { confirmation } = await confirmedSettings.json()
   const response = await page.request.get(`${branch}/workflow-inspections`)
   const { preview } = await response.json()
   const inspection = await page.request.post(`${branch}/workflow-inspections`, {
@@ -71,7 +104,14 @@ test('长篇交付以清单和来源同步，从独立 Web 备份恢复后四件
     },
   })
   expect(completion.ok(), await completion.text()).toBe(true)
-  const { id: delivery } = await completion.json()
+  const { id: delivery, manifest } = await completion.json()
+  expect(manifest.format).toBe('book-completion/2')
+  expect(manifest.setting_id).toBe(confirmation.id)
+  expect(manifest.settings_catalogue.map(({ id }: { id: string }) => id)).toEqual([
+    'apprentice',
+    'sound',
+    'red-key',
+  ])
   const original = await page.request.get(`${branch}/book-completion/${delivery}/export`)
   expect(original.ok()).toBe(true)
   const originalFile = testInfo.outputPath('large-desktop.zip')
@@ -166,6 +206,9 @@ test('长篇交付以清单和来源同步，从独立 Web 备份恢复后四件
       'import json, sys, zipfile',
       'with zipfile.ZipFile(sys.argv[1]) as source:',
       '    assert source.getinfo("正文.md").file_size > 1024 * 1024',
+      '    catalogue = source.read("设定册.md").decode()',
+      '    assert all(title in catalogue for title in ("守铃人学徒", "门内铃声", "信物 · 赤钥"))',
+      '    assert "未采用的人物" not in catalogue',
       '    for path in sys.argv[2:]:',
       '        with zipfile.ZipFile(path) as received:',
       '            assert received.testzip() is None and set(source.namelist()) == set(received.namelist())',

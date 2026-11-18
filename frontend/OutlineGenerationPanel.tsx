@@ -155,7 +155,9 @@ export function OutlineGenerationPanel({
         />
       </label>
       <p className="small">
-        {hasChapters ? '按已有章节目录规划，使用当前确认立项及所选世界设定。' : '请先在写作页建立章节目录。'}
+        {hasChapters
+          ? '按已有章节目录规划，发送当前确认立项及所选设定中已采用的条目。'
+          : '请先在写作页建立章节目录。'}
         {dirty ? '保存当前编辑后可生成或载入。' : ''}
         {!modelReady ? '配置模型账户后可生成。' : ''}
       </p>

@@ -36,6 +36,18 @@ def confirm(client, endpoint, current, key="confirm-conception"):
     return response.json()
 
 
+def restore_preview(client, item_url, source_id):
+    return client.get(f"{item_url}/history/{source_id}/restore-preview")
+
+
+def restore_basis(response):
+    assert response.status_code == 200, response.text
+    return {
+        name: response.json()[name]
+        for name in ("base_revision", "base_story_revision", "source_workspace_id", "basis_sha256")
+    }
+
+
 def add_core(client, endpoint, title="盐船换票"):
     state = client.get(endpoint).json()
     state["categories"][0]["items"] = [item("core-1", title)]
@@ -211,12 +223,13 @@ def test_setting_item_history_pages_and_restores_single_item_with_original_sourc
     assert prior["state"]["provenance"]["artifact_id"] == proposal["id"]
     assert not prior["state"]["provenance"]["author_edited"]
 
-    restore = f"{endpoint}/items/lock/restore"
+    item_url = f"{endpoint}/items/lock"
+    restore = f"{item_url}/restore"
     draft = {
-        **basis(approved),
-        "source_workspace_id": prior["workspace_id"],
+        **restore_basis(restore_preview(client, item_url, prior["workspace_id"])),
         "idempotency_key": "restore-lock",
     }
+    assert client.get(endpoint).json() == approved
     assert (
         client.post(restore, json={**draft, "base_revision": second["revision"]}).json()["code"]
         == "conception_changed"
@@ -256,21 +269,24 @@ def test_deleted_setting_restore_requires_its_links_and_preserves_current_draft(
     history = client.get(f"{endpoint}/items/route/history").json()
     assert history["current"] is None and history["entries"][0]["state"] is None
     source = history["entries"][1]["workspace_id"]
-    blocked = client.post(
-        f"{endpoint}/items/route/restore",
-        json={**basis(removed), "source_workspace_id": source, "idempotency_key": "restore-route"},
-    )
+    blocked = restore_preview(client, f"{endpoint}/items/route", source)
     assert blocked.status_code == 400 and blocked.json()["code"] == "conception_links"
     assert "route" in blocked.text and "pass" in blocked.text
     assert client.get(endpoint).json() == removed
     dependency = client.post(
         f"{endpoint}/items/pass/restore",
-        json={**basis(removed), "source_workspace_id": source, "idempotency_key": "restore-pass"},
+        json={
+            **restore_basis(restore_preview(client, f"{endpoint}/items/pass", source)),
+            "idempotency_key": "restore-pass",
+        },
     )
     assert dependency.status_code == 200, dependency.text
     restored = client.post(
         f"{endpoint}/items/route/restore",
-        json={**basis(dependency.json()), "source_workspace_id": source, "idempotency_key": "restore-route"},
+        json={
+            **restore_basis(restore_preview(client, f"{endpoint}/items/route", source)),
+            "idempotency_key": "restore-route",
+        },
     )
     assert restored.status_code == 200, restored.text
     assert (
@@ -288,10 +304,12 @@ def test_restoring_setting_invalidates_current_outline_candidate_and_review(clie
 
     branch = story["branch_id"]
     chapter = domain.save(story["chapter_id"], 0, "在门内轻轻摇铃。")
+    later = domain.create_chapter(branch, "下一卷试锁")
+    later = domain.save(later["id"], 0, "船靠岸后，巡夜人打开封条。")
     endpoint = path(branch)
     state = client.get(endpoint).json()
     index = next(index for index, category in enumerate(state["categories"]) if category["id"] == "world")
-    state["categories"][index]["items"] = [item("bell", "铜铃规则")]
+    state["categories"][index]["items"] = [item("bell", "铜铃规则"), item("dock", "船靠岸规则")]
     original = save(client, endpoint, state)
     original["categories"][index]["items"][0]["detail"] = "铜铃只在门内响。"
     changed = save(client, endpoint, original)
@@ -308,25 +326,38 @@ def test_restoring_setting_invalidates_current_outline_candidate_and_review(clie
                 "summary": "铜铃线索",
                 "volumes": [
                     {
-                        "id": "volume",
-                        "title": "铜铃",
-                        "summary": "铃声引路",
+                        "id": f"volume-{number}",
+                        "title": title,
+                        "summary": "核对线索",
                         "units": [
                             {
-                                "id": "unit",
-                                "title": "门前",
-                                "summary": "试铃",
-                                "chapters": [chapter_plan(chapter["id"], "摇响铃声")],
+                                "id": f"unit-{number}",
+                                "title": title,
+                                "summary": "核对证据",
+                                "chapters": [chapter_plan(row["id"], title) | {"setting_ids": [setting]}],
                             }
                         ],
                     }
+                    for number, (title, row, setting) in enumerate(
+                        [("开门试铃", chapter, "bell"), ("到岸试锁", later, "dock")], 1
+                    )
                 ],
             },
         },
     )
     rule_reports = f"/api/branches/{branch}/workflow-inspections"
-    before = report(client, rule_reports, read(client, rule_reports)["preview"])
-    assert before["current"]
+
+    def signed(scope, scope_id=None):
+        return report(
+            client,
+            rule_reports,
+            read(client, rule_reports, **({"scope": scope, "scope_id": scope_id} if scope_id else {}))[
+                "preview"
+            ],
+        )
+
+    checks = [signed("book"), signed("volume", "volume-1"), signed("volume", "volume-2")]
+    assert all(check["current"] for check in checks)
     with domain.db.connect() as tx:
         frozen = freeze_tx(
             tx,
@@ -337,22 +368,46 @@ def test_restoring_setting_invalidates_current_outline_candidate_and_review(clie
 
     route = f"{endpoint}/items/bell"
     source = client.get(f"{route}/history").json()["entries"][-1]
+    preview = restore_preview(client, route, source["workspace_id"])
+    payload = restore_basis(preview) | {"idempotency_key": "restore-bell"}
+    assert client.get(endpoint).json() == confirmed
+    details = preview.json()
+    confirmed_outline = details["outlines"][0]
+    assert confirmed_outline["id"] == planned["confirmed"]["id"]
+    assert confirmed_outline["setting_basis_current"]
+    assert [
+        (row["volume_id"], row["chapter_id"], row["references_item"]) for row in confirmed_outline["chapters"]
+    ] == [("volume-1", chapter["id"], True), ("volume-2", later["id"], False)]
+    affected = {row["id"]: row for row in details["affected_reports"]}
+    assert set(affected) == {check["id"] for check in checks}
+    for check in checks:
+        impact = affected[check["id"]]
+        assert (impact["scope"], impact["scope_id"]) == (check["scope"], check["scope_id"])
+        assert {"02", "05"} <= set(impact["check_ids"]) and "09" not in impact["check_ids"]
+
+    new_report = signed("chapter", later["id"])
+    stale = client.post(f"{route}/restore", json=payload)
+    assert stale.status_code == 409 and stale.json()["code"] == "conception_restore_changed"
+    assert client.get(endpoint).json() == confirmed
+    fresh = restore_preview(client, route, source["workspace_id"])
+    assert new_report["id"] in {report["id"] for report in fresh.json()["affected_reports"]}
     restored = client.post(
         f"{route}/restore",
-        json={
-            **basis(confirmed),
-            "source_workspace_id": source["workspace_id"],
-            "idempotency_key": "restore-bell",
-        },
+        json=restore_basis(fresh) | {"idempotency_key": "restore-bell"},
     )
     assert restored.status_code == 200, restored.text
+    assert restored.json()["confirmation"] == (confirmed["confirmation"] | {"current": False})
     with domain.db.connect() as tx:
         assert not candidate_current(tx, branch, frozen)
     current = client.get(outline).json()
     assert current["confirmed"] == planned["confirmed"] and "采用设定已有变化" in current["stale"]
-    after = read(client, rule_reports)["latest"]
-    assert after["id"] == before["id"] and not after["current"]
-    assert report_item(after, "05")["current_status"] == "outdated"
+    for check in [*checks, new_report]:
+        response = client.get(f"{rule_reports}/{check['id']}")
+        assert response.status_code == 200, response.text
+        after = response.json()
+        assert not after["current"]
+        assert report_item(after, "05")["current_status"] == "outdated"
+        assert report_item(after, "09")["current_status"] != "outdated"
 
 
 def test_author_can_confirm_with_issues_and_restore_snapshot(client, domain, story, settings):

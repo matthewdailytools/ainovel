@@ -11,7 +11,7 @@ from .db import DomainError, dumps, uid
 from .models import Input
 from .project_brief import confirmed_project_tx
 from .reference_portability import HashId
-from .setting_review import confirmed_world_basis
+from .setting_review import confirmed_outline_settings, confirmed_world_basis
 from .story_graph import SaveRecord, graph_snapshot, save_record_tx
 
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")]
@@ -132,7 +132,7 @@ def _chapter_plans(plan):
 def _settings(tx, branch_id, confirmation_id):
     if not confirmation_id:
         return {"confirmation_id": None, "items": []}
-    return confirmed_world_basis(tx, branch_id, confirmation_id)
+    return confirmed_outline_settings(tx, branch_id, confirmation_id)
 
 
 def _card_key(ref):
@@ -596,11 +596,12 @@ def register_routes(app, domain):
         )
 
     @app.get(endpoint + "/setting-options")
-    def setting_options(branch_id: str):
+    def setting_options(branch_id: str, scope: Literal["outline", "world"] = "outline"):
         domain.branch(branch_id)
         with domain.db.connect() as tx:
             tx.execute("BEGIN")
-            return confirmed_world_basis(tx, branch_id)
+            read = confirmed_world_basis if scope == "world" else confirmed_outline_settings
+            return read(tx, branch_id)
 
     @app.get(endpoint + "/reference-options")
     def reference_options(branch_id: str) -> list[OutlineCard]:

@@ -75,12 +75,16 @@ def test_only_adopted_settings_feed_frozen_handoff_chapter_plan_and_inspection(c
     outline = _outline_data(branch, chapter["id"], setting)
     endpoint, data = outline["endpoint"], outline["data"]
     options = client.get(endpoint + "/setting-options").json()
-    assert [row["id"] for row in options["items"]] == ["bell"]
+    assert [row["id"] for row in options["items"]] == ["kept-ending", "actor", "bell"]
+    world_options = client.get(endpoint + "/setting-options", params={"scope": "world"})
+    assert world_options.status_code == 200, world_options.text
+    assert [row["id"] for row in world_options.json()["items"]] == ["bell"]
     for identifier in ("pending-rule", "proposed-rule"):
         rejected = deepcopy(data)
         rejected["plan"]["volumes"][0]["units"][0]["chapters"][0]["setting_ids"] = [identifier]
         response = client.put(endpoint, json=rejected)
         assert response.status_code == 400 and response.json()["code"] == "outline_setting"
+    data["plan"]["volumes"][0]["units"][0]["chapters"][0]["setting_ids"] = ["actor", "bell"]
     adopted = put_and_confirm(client, endpoint, data)
     request = {
         "action": "writing.advise",
@@ -100,8 +104,9 @@ def test_only_adopted_settings_feed_frozen_handoff_chapter_plan_and_inspection(c
     ]
     assert [rule["id"] for rule in handoff_items] == ["kept-ending", "actor", "bell"]
     assert handoff_items[-1]["links"] == []
-    assert [rule["id"] for rule in frozen["outline"]["settings"]] == ["bell"]
-    for identifier in ("pending-rule", "proposed-rule"):
+    assert [rule["id"] for rule in frozen["outline"]["settings"]] == ["actor", "bell"]
+    assert frozen["outline"]["settings"][0]["category_id"] == "characters"
+    for identifier in ("pending-rule", "proposed-rule", "actor"):
         response = client.post(
             "/api/modules", json={**request, "action": "review.chapter", "setting_item_id": identifier}
         )

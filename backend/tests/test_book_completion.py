@@ -4,7 +4,13 @@ from io import BytesIO
 import json
 from zipfile import ZipFile
 
+from ainovel.db import Database
+from ainovel.domain import Domain
+from ainovel.manuscript_exchange import export_manuscript, import_manuscript
 from ainovel.worker import Worker
+from test_conception_workbench import confirm, item, path, save
+from test_workflow_archive import _members, _send_reports
+from test_workflow_cloud import _complete
 from test_workflow_inspection import author
 
 
@@ -88,6 +94,64 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
     assert not client.get(endpoint).json()["latest"]["current"]
     with ZipFile(BytesIO(client.get(export).content)) as archive:
         assert chapter["content"] in archive.read("正文.md").decode()
+
+
+def test_exported_catalogue_keeps_each_adopted_setting_on_its_frozen_revision(
+    client, domain, story, tmp_path
+):
+    branch = story["branch_id"]
+    chapter = domain.save(story["chapter_id"], 0, "学徒找到师姐，归还了铜铃。")
+    completion = f"/api/branches/{branch}/book-completion"
+    inspection = f"/api/branches/{branch}/workflow-inspections"
+    conception = path(branch)
+    _send_reports(client, inspection, chapter)
+    initial = _complete(client, completion, chapter)
+    initial_path = completion + f"/{initial['id']}/export"
+    original = _members(client.get(initial_path))
+    assert initial["manifest"]["format"] == "book-completion/1"
+
+    state = client.get(conception).json()
+    categories = {category["id"]: category for category in state["categories"]}
+    categories["characters"]["items"] = [
+        item("keeper", "守铃人阿陶"),
+        {**item("draft-person", "待定人物"), "adoption_state": "pending"},
+    ]
+    categories["relationships"]["items"] = [item("sisters", "师承关系")]
+    state["categories"].extend(
+        [
+            {"id": "props", "title": "信物", "items": [item("red-key", "赤钥")], "skipped": False},
+            {"id": "unused", "title": "未用设定", "items": [item("blue-key", "蓝钥")], "skipped": True},
+        ]
+    )
+    adopted = confirm(client, conception, save(client, conception, state))["confirmation"]["id"]
+    _send_reports(client, inspection, chapter)
+    classified = _complete(client, completion, chapter)
+    classified_path = completion + f"/{classified['id']}/export"
+    frozen = _members(client.get(classified_path))
+    manifest = classified["manifest"]
+    assert manifest["format"] == "book-completion/2" and manifest["setting_id"] == adopted
+    assert [entry["id"] for entry in manifest["settings_catalogue"]] == ["keeper", "sisters", "red-key"]
+    catalogue = frozen["设定册.md"].decode()
+    assert all(title in catalogue for title in ("守铃人阿陶", "人物关系 · 师承关系", "信物 · 赤钥"))
+    assert "待定人物" not in catalogue and "蓝钥" not in catalogue
+    assert sha256(frozen["设定册.md"]).hexdigest() == manifest["files"]["设定册.md"]
+
+    state = client.get(conception).json()
+    first = next(row for row in state["categories"] if row["id"] == "characters")
+    first["items"][0]["detail"] = "阿陶已经把铜铃交回师门。"
+    confirm(client, conception, save(client, conception, state), "confirmed-after-delivery")
+    assert not client.get(completion).json()["latest"]["current"]
+    assert _members(client.get(classified_path)) == frozen
+    assert _members(client.get(initial_path)) == original
+
+    history = export_manuscript(domain, branch)
+    isolated = Domain(Database(tmp_path / "completion-with-settings.sqlite"))
+    import_manuscript(isolated, history)
+    restored = export_manuscript(isolated, branch).workflow_history.completions
+    assert {row.id: row.materials["设定册.md"].encode() for row in restored} == {
+        initial["id"]: original["设定册.md"],
+        classified["id"]: frozen["设定册.md"],
+    }
 
 
 def test_completion_preparation_uses_exact_sources_and_keeps_author_gate(client, domain, settings, story):

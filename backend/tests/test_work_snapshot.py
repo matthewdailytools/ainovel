@@ -430,7 +430,10 @@ def test_volume_checkpoint_restores_manuscript_setting_outline_and_promise_in_bo
     chapter_id = story["chapter_id"]
     project = save_project(client, branch, 0, "铃归师姐。")
     settled = domain.save(chapter_id, 0, "师姐在门内接过铜铃，铜铃响了。")
-    setting_id = setting_confirmation(client, branch)
+    inventory = {"id": "lamps", "title": "油灯库存", "detail": "库房只余两盏旧灯。"}
+    setting_id = setting_confirmation(
+        client, branch, [{"id": "resources", "title": "资源台账", "items": [inventory]}]
+    )
     record_route = f"/api/branches/{branch}/story-records"
     planned = verify(
         client.post(
@@ -474,7 +477,10 @@ def test_volume_checkpoint_restores_manuscript_setting_outline_and_promise_in_bo
                         "title": "师姐",
                         "summary": "归还",
                         "chapters": [
-                            chapter_plan(chapter_id, "门内归铃"),
+                            {
+                                **chapter_plan(chapter_id, "门内归铃"),
+                                "setting_ids": ["bell", "lamps"],
+                            },
                         ],
                     }
                 ],
@@ -511,6 +517,8 @@ def test_volume_checkpoint_restores_manuscript_setting_outline_and_promise_in_bo
     )
     assert checkpoint["outline_id"] == old_outline["id"]
     assert checkpoint["project_id"] == project["id"]
+    old_resource = next(item for item in old_outline["setting_basis"]["items"] if item["id"] == "lamps")
+    assert old_resource == {**inventory, "category_id": "resources", "category_title": "资源台账"}
     before = verify(client.get(f"{route(branch)}/{checkpoint['id']}/preview"))
     changed = domain.save(chapter_id, settled["revision"], "师姐在门外接过铜铃，没有听见声音。")
     changed_project = save_project(client, branch, project["revision"], "铃由学徒保管。")
@@ -518,6 +526,9 @@ def test_volume_checkpoint_restores_manuscript_setting_outline_and_promise_in_bo
     next(category for category in second["categories"] if category["id"] == "world")["items"][0]["detail"] = (
         "铜铃只在门外响。"
     )
+    next(category for category in second["categories"] if category["id"] == "resources")["items"][0][
+        "detail"
+    ] = "库房补到五盏油灯。"
     second = confirm(client, path(branch), save(client, path(branch), second), key=uid())
     put_and_confirm(
         client,
@@ -552,7 +563,10 @@ def test_volume_checkpoint_restores_manuscript_setting_outline_and_promise_in_bo
     returned_project = verify(client.get(f"{path(branch)}/project-brief"))
     assert returned_project["revision"] > changed_project["revision"]
     assert returned_project["brief"]["ending"] == project["brief"]["ending"]
-    assert verify(client.get(outline(branch)))["confirmed"]["plan"] == authored_plan
+    restored_outline = verify(client.get(outline(branch)))["confirmed"]
+    assert restored_outline["plan"] == authored_plan
+    assert restored_outline["setting_basis"]["confirmation_id"] == restored["setting_id"]
+    assert old_resource in restored_outline["setting_basis"]["items"]
     row = graph(domain, branch)["records"][0]
     assert not row["invalid_reasons"]
     assert row["payload"]["stages"][-1]["sources"][0]["revision"] == current["revision"]
@@ -563,7 +577,11 @@ def test_volume_checkpoint_restores_manuscript_setting_outline_and_promise_in_bo
     fork_chapter = fork["chapters"][chapter_id]["id"]
     assert fork_chapter != chapter_id
     assert domain.chapter(fork_chapter, fork_branch)["content"] == settled["content"]
-    fork_plan = verify(client.get(outline(fork_branch)))["confirmed"]["plan"]
+    fork_outline = verify(client.get(outline(fork_branch)))["confirmed"]
+    assert fork_outline["setting_basis"]["confirmation_id"] == fork["setting_id"]
+    assert old_resource in fork_outline["setting_basis"]["items"]
+    fork_plan = fork_outline["plan"]
+    assert fork_plan["volumes"][0]["units"][0]["chapters"][0]["setting_ids"] == ["bell", "lamps"]
     assert fork_plan["promises"][0]["promise_id"] == fork["record_ids"][record_id] != record_id
     assert fork_plan["promises"][0]["closes_chapter_id"] == fork_chapter
     fork_record = graph(domain, fork_branch)["records"][0]
@@ -580,6 +598,8 @@ def test_volume_checkpoint_restores_manuscript_setting_outline_and_promise_in_bo
         recovered.artifact(restored["id"])["payload"]["recovery_snapshot_id"]
         == restored["recovery_snapshot_id"]
     )
+    assert old_resource in read_outline(recovered, branch)["confirmed"]["setting_basis"]["items"]
+    assert old_resource in read_outline(recovered, fork_branch)["confirmed"]["setting_basis"]["items"]
 
 
 def test_failed_restore_is_atomic_and_retry_is_idempotent(snapshot_client, domain, story, monkeypatch):

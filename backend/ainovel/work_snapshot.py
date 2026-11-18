@@ -32,7 +32,7 @@ from .outline_workspace import (
 from .project_brief import KIND as PROJECT, confirmed_project_tx
 from .reference_fork import fork_reference_cards
 from .restore_impact import AffectedReport, forecast, invalidated_reports, report_basis
-from .setting_review import confirmed_world_basis
+from .setting_review import confirmed_outline_settings, confirmed_world_basis
 from .story_extraction import rewrite_references
 from .story_graph import graph_snapshot, sources
 from .workflow_inspection import LENGTH_TARGET_KIND, _save_length_target, current_length_target
@@ -727,7 +727,7 @@ def _restore_outline(
     if not saved and not source["outline"]:
         return None
     basis = (
-        confirmed_world_basis(tx, target["id"], setting_id)
+        confirmed_outline_settings(tx, target["id"], setting_id)
         if setting_id
         else {"confirmation_id": None, "items": []}
     )

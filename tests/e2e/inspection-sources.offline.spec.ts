@@ -111,9 +111,12 @@ test('跨章体检同时打开冲突双方的固定选区，改稿后历史与�
   await openPair(first.content.slice(2), second.content.slice(2))
 })
 
-test('第 05 项软偏离先显示待处理，逐条签认后保留原引文且独立 Web 能打开报告', async ({ page, context }) => {
+test('全书逐条签认 31 章的软偏离，独立 Web 可验证并读回签认', async ({ page, context }) => {
   const work = await createWork(page, '遗铃 · 软设定签认')
-  const current = await work.chapter('拾铃', '😀学徒拾起铜铃。\n铜铃在门外响了。')
+  const chapters: { id: string; revision: number }[] = []
+  for (let index = 1; index <= 31; index++) {
+    chapters.push(await work.chapter(`拾铃 ${index}`, `😀学徒第${index}次拾起铜铃。\n铜铃在门外响了。`))
+  }
   const route = `${work.branch}/conception`
   const state = await checked(await page.request.get(route))
   const world = state.categories.find(({ id }: { id: string }) => id === 'world')
@@ -146,25 +149,34 @@ test('第 05 项软偏离先显示待处理，逐条签认后保留原引文且�
       },
     }),
   )
-  const run = await checked(
-    await page.request.post('/api/modules', {
-      headers: work.headers,
-      data: {
-        novel_id: work.id,
-        branch_id: work.branch_id,
-        chapter_id: current.id,
-        base_revision: current.revision,
-        account: 'offline',
-        action: 'review.chapter',
-        instruction: '单条设定对账',
-        conception_snapshot_id: adopted.confirmation.id,
-        setting_item_id: 'bell',
-      },
-    }),
-  )
+  const tasks: string[] = []
+  for (const current of chapters) {
+    const run = await checked(
+      await page.request.post('/api/modules', {
+        headers: work.headers,
+        data: {
+          novel_id: work.id,
+          branch_id: work.branch_id,
+          chapter_id: current.id,
+          base_revision: current.revision,
+          account: 'offline',
+          action: 'review.chapter',
+          instruction: '单条设定对账',
+          conception_snapshot_id: adopted.confirmation.id,
+          setting_item_id: 'bell',
+        },
+      }),
+    )
+    tasks.push(run.id)
+  }
   await expect
-    .poll(async () => (await checked(await page.request.get(`/api/tasks/${run.id}`))).status)
+    .poll(async () => {
+      const run = await checked(await page.request.get(`/api/tasks/${tasks.at(-1)}`))
+      return run.status
+    })
     .toBe('succeeded')
+  for (const task of tasks)
+    expect((await checked(await page.request.get(`/api/tasks/${task}`))).status).toBe('succeeded')
   const panel = await work.openInspection()
   await panel.getByText('本次依据与未核查项', { exact: true }).click()
   const initial = panel.getByRole('listitem').filter({ hasText: '05 设定规则、数值与资源' }).first()
@@ -172,8 +184,11 @@ test('第 05 项软偏离先显示待处理，逐条签认后保留原引文且�
   await panel.getByRole('button', { name: '核对 05', exact: true }).press('Enter')
   await panel.getByRole('combobox', { name: '作者判定', exact: true }).selectOption('green')
   const witness = panel.getByRole('checkbox', { name: '核对并引用「铃声规则」的偏离', exact: true })
-  await expect(witness).not.toBeChecked()
-  await witness.press('Space')
+  await expect(witness).toHaveCount(31)
+  for (const entry of await witness.all()) {
+    await expect(entry).not.toBeChecked()
+    await entry.press('Space')
+  }
   await panel.getByLabel('对照的章纲、约定或规则', { exact: true }).fill('铃声规则为软设定。')
   await panel
     .getByLabel('判定理由', { exact: true })
@@ -184,9 +199,12 @@ test('第 05 项软偏离先显示待处理，逐条签认后保留原引文且�
   await panel.getByRole('button', { name: '生成体检单', exact: true }).press('Enter')
   const report = await checked(await received)
   expect(report.items[4].status).toBe('green')
-  expect(report.items[4].author_review.soft_deviation_report_ids).toHaveLength(1)
+  expect(report.items[4].author_review.soft_deviation_report_ids).toHaveLength(31)
+  expect(
+    report.items[4].author_review.evidence.map(({ chapter_id }: { chapter_id: string }) => chapter_id),
+  ).toEqual(chapters.map(({ id }) => id))
   const result = panel.getByRole('region', { name: '体检单结果', exact: true })
-  await expect(result.getByText('已签认 1 条软设定偏离。')).toBeVisible()
+  await expect(result.getByText('已签认 31 条软设定偏离。')).toBeVisible()
 
   const pack = await page.request.get(`${work.branch}/manuscript-package`)
   expect(pack.ok(), await pack.text()).toBe(true)

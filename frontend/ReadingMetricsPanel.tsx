@@ -8,6 +8,11 @@ type AccessExclusions = { excluded_ineligible?: number | null; excluded_access_u
 type ChannelFollow = components['schemas']['ChannelFollow'] & AccessExclusions
 type MetricKind = 'adjacent_follow' | 'first_chapter_retention' | 'chapter_completion' | 'aggregate_ratio'
 type AccessMode = 'shared_opening' | 'shared_opening_assumed' | 'reader_eligibility' | 'unknown'
+type CompletionCoverage = {
+  chapter_id: string
+  coverage: 'observed' | 'not_observed' | 'event_evidence' | 'unknown'
+  definition: string | null
+}
 type Metric = AccessExclusions & {
   kind: MetricKind
   chapter_id: string
@@ -29,6 +34,7 @@ type ReadingReport = {
   observed_until: string
   read_definition: string
   completion_definition: string | null
+  completion_coverage?: CompletionCoverage[] | null
   cohort: { started_from: string; started_before: string; channel: string | null } | null
   window_hours: number | null
   access_mode?: AccessMode | null
@@ -68,6 +74,12 @@ const accessLabel: Record<AccessMode, string> = {
   shared_opening_assumed: '按共同开放假设统计，读者资格未观测',
   reader_eligibility: '按读者资格统计，资格未知和明确无权分别排除',
   unknown: '读者资格覆盖未知，章间追读与留存无可计算数据',
+}
+const completionLabel: Record<CompletionCoverage['coverage'], string> = {
+  observed: '来源确认已采集',
+  not_observed: '来源确认未采集',
+  event_evidence: '有完读事件，采集覆盖未声明',
+  unknown: '完读采集覆盖未知',
 }
 
 function eligibilityCells(row: AccessExclusions) {
@@ -137,6 +149,7 @@ function downloadTemplate(mode: ReadingReport['mode'], chapters: ChapterOption[]
       ? {
           window_hours: 168,
           completion_definition: null,
+          completion_coverage: [],
           access_mode: 'unknown',
           reader_access: null,
           events: [],
@@ -161,6 +174,8 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
   const rows = report.metrics.filter((metric) => metric.kind === kind)
   const showCoverage = report.mode === 'events'
   const showEligibility = rows.some((row) => row.excluded_access_unknown != null)
+  const completion = new Map(report.completion_coverage?.map((row) => [row.chapter_id, row]))
+  const showCompletion = kind === 'chapter_completion' && report.completion_coverage != null
   const channelRows = rows.flatMap(({ chapter_id, target_chapter_id, channel_breakdown }) =>
     target_chapter_id && channel_breakdown?.length
       ? [{ from: chapter_id, to: target_chapter_id, channels: channel_breakdown }]
@@ -202,7 +217,8 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
         <p>有效阅读为「{report.read_definition}」。</p>
         {showCoverage && (
           <p>
-            完读定义为{report.completion_definition ? `「${report.completion_definition}」` : '来源未提供'}。
+            默认完读定义为
+            {report.completion_definition ? `「${report.completion_definition}」` : '来源未提供'}。
           </p>
         )}
         <ul>
@@ -233,6 +249,7 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
           </select>
         </label>
       )}
+      {kind === 'chapter_completion' && !showCompletion && <p>此历史报告未记录逐章完读采集覆盖。</p>}
       {rows.length > 0 ? (
         <div className="table-scroll" tabIndex={0} role="region" aria-label={metricLabels[kind]}>
           <table>
@@ -247,6 +264,7 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
                 {showCoverage && kind !== 'chapter_completion' && <th scope="col">已先读或同时读到目标章</th>}
                 {showEligibility && <th scope="col">明确无权</th>}
                 {showEligibility && <th scope="col">资格未知</th>}
+                {showCompletion && <th scope="col">完读采集覆盖与口径</th>}
               </tr>
             </thead>
             <tbody>
@@ -270,6 +288,14 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
                     <td>{number.format(row.excluded_prior_or_tied)}</td>
                   )}
                   {showEligibility && eligibilityCells(row)}
+                  {showCompletion && (
+                    <td>
+                      {completionLabel[completion.get(row.chapter_id)?.coverage ?? 'unknown']}
+                      {completion.get(row.chapter_id)?.definition
+                        ? ` · ${completion.get(row.chapter_id)?.definition}`
+                        : ' · 来源未提供完读定义'}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -444,7 +470,12 @@ export function ReadingMetricsPanel({ branchId, chapters }: { branchId: string; 
           </li>
           <li>
             事件窗口默认 168 小时，可改 window_hours。限定首读批次时，填写 cohort 的 started_from 和
-            started_before，也可填写 channel。若导出包含完读事件，请填写 completion_definition。
+            started_before，也可填写 channel。若导出包含完读事件，请填写通用或逐章完读定义。
+          </li>
+          <li>
+            在 completion_coverage 按章记录完读事件的采集情况。每条填 chapter_id 和 coverage。
+            来源确认完整采集后使用 observed，确认未采集时用 not_observed。该章定义与通用定义不同时，在该条加
+            definition。 只有确认采集的章节，才把同批没有匹配完读事件计为 0%。
           </li>
           <li>
             章节开放晚于发布时，填写 opens_at。按读者限制访问时，使用 reader_eligibility 作为 access_mode， 在

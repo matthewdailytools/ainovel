@@ -355,9 +355,87 @@ def test_completion_uses_beginning_cohort_and_never_matches_prior_finish():
     report = calculate_report(parse(data))
     completed = select(report, "chapter_completion", "one")
     assert (completed.numerator, completed.denominator, completed.rate) == (1, 2, 0.5)
-    assert select(report, "chapter_completion", "two").rate == 0
+    second = select(report, "chapter_completion", "two")
+    assert (second.numerator, second.denominator, second.rate) == (None, 1, None)
+    declared = calculate_report(
+        parse({**data, "completion_coverage": [{"chapter_id": "two", "coverage": "observed"}]})
+    )
+    assert select(declared, "chapter_completion", "two").rate == 0
     undocumented = calculate_report(parse({**data, "completion_definition": None}))
     assert select(undocumented, "chapter_completion", "two").rate is None
+
+
+def test_confirmed_completion_coverage_distinguishes_zero_from_missing_and_has_per_chapter_definition():
+    data = {
+        **source("events"),
+        "window_hours": 24,
+        "completion_definition": "默认读至最后一屏",
+        "completion_coverage": [
+            {"chapter_id": "one", "coverage": "observed", "definition": "第一章读满九成"},
+            {"chapter_id": "three", "coverage": "not_observed"},
+        ],
+        "events": [
+            event("one", "reader", 1, "start"),
+            event("two", "reader", 5, "start"),
+            event("two", "out-of-cohort", 5, "finish"),
+            event("three", "reader", 13, "start"),
+        ],
+    }
+    report = calculate_report(parse(data))
+    assert [(row.chapter_id, row.coverage, row.definition) for row in report.completion_coverage] == [
+        ("one", "observed", "第一章读满九成"),
+        ("two", "event_evidence", "默认读至最后一屏"),
+        ("three", "not_observed", "默认读至最后一屏"),
+    ]
+    assert [
+        (row.numerator, row.denominator, row.rate)
+        for row in report.metrics
+        if row.kind == "chapter_completion"
+    ] == [(0, 1, 0), (None, 1, None), (None, 1, None)]
+
+    bad_inputs = [
+        {**data, "events": [*data["events"], event("three", "reader", 13, "finish")]},
+        {
+            **data,
+            "completion_coverage": [
+                *data["completion_coverage"],
+                {"chapter_id": "one", "coverage": "not_observed"},
+            ],
+        },
+        {**data, "completion_coverage": [{"chapter_id": "missing", "coverage": "not_observed"}]},
+        {
+            **data,
+            "completion_definition": None,
+            "completion_coverage": [{"chapter_id": "one", "coverage": "observed"}],
+        },
+    ]
+    for invalid in bad_inputs:
+        with pytest.raises(DomainError, match="完读"):
+            parse(invalid)
+
+
+def test_historical_completion_zero_is_read_without_recalculating(client, domain, story):
+    chapter_id = story["chapter_id"]
+    base = f"/api/branches/{story['branch_id']}/reading-metrics"
+    data = {
+        **source("events", (chapter_id,)),
+        "window_hours": 24,
+        "completion_definition": "读至最后一屏",
+        "completion_coverage": [{"chapter_id": chapter_id, "coverage": "observed"}],
+        "events": [event(chapter_id, "reader", 1, "start")],
+    }
+    response = client.post(base + "/import", files={"file": ("reading.json", json.dumps(data))})
+    assert response.status_code == 201, response.text
+    archived = response.json()
+    del archived["report"]["completion_coverage"]
+    with domain.db.connect(True) as tx:
+        tx.execute(
+            "UPDATE artifacts SET payload=? WHERE id=?", (json.dumps(archived["report"]), archived["id"])
+        )
+    historical = client.get(f"{base}/history/{archived['id']}")
+    assert historical.status_code == 200
+    assert historical.json() == archived
+    assert historical.json()["report"]["metrics"][0]["rate"] == 0
 
 
 def test_aggregate_downgrades_to_independent_readers_and_preserves_native_definition():

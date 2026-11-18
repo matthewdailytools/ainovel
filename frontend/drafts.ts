@@ -26,7 +26,7 @@ function open() {
     request.onerror = () => reject(request.error)
   }))
 }
-export async function readDraft(id: string): Promise<Draft | undefined> {
+export async function readDraft(id: string, owner = windowId): Promise<Draft | undefined> {
   const db = await open()
   return new Promise((resolve, reject) => {
     const request = db.transaction('drafts').objectStore('drafts').getAll()
@@ -34,29 +34,29 @@ export async function readDraft(id: string): Promise<Draft | undefined> {
       const rows = (request.result as Stored[])
         .filter((row) => row.chapter_id === id || row.id === id)
         .sort((a, b) => b.updated - a.updated)
-      const row = rows.find((row) => row.window_id === windowId) || rows[0]
-      resolve(row ? { ...row, id, fromOtherWindow: row.window_id !== windowId } : undefined)
+      const row = rows.find((row) => row.window_id === owner) || rows[0]
+      resolve(row ? { ...row, id, fromOtherWindow: row.window_id !== owner } : undefined)
     }
     request.onerror = () => reject(request.error)
   })
 }
-export async function writeDraft(draft: Draft): Promise<void> {
+export async function writeDraft(draft: Draft, owner = windowId): Promise<void> {
   const db = await open()
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('drafts', 'readwrite')
     transaction
       .objectStore('drafts')
-      .put({ ...draft, id: draft.id + '@' + windowId, chapter_id: draft.id, window_id: windowId })
+      .put({ ...draft, id: draft.id + '@' + owner, chapter_id: draft.id, window_id: owner })
     transaction.oncomplete = () => resolve()
     transaction.onabort = () => reject(transaction.error)
   })
 }
 
-export async function discardOwnDraft(id: string): Promise<void> {
+export async function discardOwnDraft(id: string, owner = windowId): Promise<void> {
   const db = await open()
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('drafts', 'readwrite')
-    transaction.objectStore('drafts').delete(id + '@' + windowId)
+    transaction.objectStore('drafts').delete(id + '@' + owner)
     transaction.oncomplete = () => resolve()
     transaction.onabort = () => reject(transaction.error)
   })

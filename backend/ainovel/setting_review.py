@@ -24,13 +24,34 @@ class SettingDecision(Input):
     reason: str = Field(min_length=1, max_length=2000)
 
 
-def confirmed_world_basis(tx, branch_id, confirmation_id=None):
-    """Read authored rules without treating new story observations as edits to those rules."""
+def outline_setting_items(categories, observed_ids, *, world_only=False):
+    return [
+        {
+            "id": item["id"],
+            "title": item["title"],
+            "detail": item["detail"],
+            **(
+                {"category_id": category["id"], "category_title": category["title"]}
+                if category["id"] != "world"
+                else {}
+            ),
+            **({"setting_policy": item["setting_policy"]} if item.get("setting_policy") else {}),
+        }
+        for category in categories
+        if not category["skipped"] and (not world_only or category["id"] == "world")
+        for item in category["items"]
+        if setting_is_adopted(item.get("adoption_state"))
+        and item["id"] not in observed_ids
+        and item["detail"].strip()
+    ]
+
+
+def _confirmed_basis(tx, branch_id, confirmation_id, *, world_only):
     row = _latest(tx, branch_id, CONFIRMATION)
     absent = {"confirmation_id": None, "items": []}
     if not row or (confirmation_id and confirmation_id != row["id"]):
         if confirmation_id:
-            raise DomainError("conception_snapshot", "所选世界设定确认版本已改变。", 409)
+            raise DomainError("conception_snapshot", "所选设定确认版本已改变。", 409)
         return absent
     snapshot = _read_payload(row)
     project = confirmed_project_tx(tx, branch_id)
@@ -48,21 +69,18 @@ def confirmed_world_basis(tx, branch_id, confirmation_id=None):
     return {
         "confirmation_id": row["id"],
         "revision": snapshot["revision"],
-        "items": [
-            {
-                "id": item["id"],
-                "title": item["title"],
-                "detail": item["detail"],
-                **({"setting_policy": item["setting_policy"]} if item.get("setting_policy") else {}),
-            }
-            for category in snapshot["categories"]
-            if category["id"] == "world" and not category["skipped"]
-            for item in category["items"]
-            if setting_is_adopted(item.get("adoption_state"))
-            and item["id"] not in observed_ids
-            and item["detail"].strip()
-        ],
+        "items": outline_setting_items(snapshot["categories"], observed_ids, world_only=world_only),
     }
+
+
+def confirmed_world_basis(tx, branch_id, confirmation_id=None):
+    """Read adopted world rules for dedicated manuscript checking."""
+    return _confirmed_basis(tx, branch_id, confirmation_id, world_only=True)
+
+
+def confirmed_outline_settings(tx, branch_id, confirmation_id=None):
+    """Read the adopted authored settings that may be cited in a chapter plan."""
+    return _confirmed_basis(tx, branch_id, confirmation_id, world_only=False)
 
 
 def freeze_rule(snapshot, item_id):

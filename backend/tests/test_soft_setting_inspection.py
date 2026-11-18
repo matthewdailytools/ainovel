@@ -12,6 +12,91 @@ from test_outline_workspace import chapter_plan, put_and_confirm
 from test_workflow_inspection import author, item, read, report
 
 
+def test_book_can_sign_soft_setting_excerpts_across_more_than_thirty_chapters(
+    client, domain, story, tmp_path
+):
+    branch = story["branch_id"]
+    conception = f"/api/branches/{branch}/conception"
+    inspection = f"/api/branches/{branch}/workflow-inspections"
+    state = read(client, conception)
+    rule = {
+        "id": "sound",
+        "title": "铃声倾向",
+        "detail": "铜铃通常在门内响。",
+        "setting_policy": {"strength": "soft"},
+        "adoption_state": "adopted",
+    }
+    next(row for row in state["categories"] if row["id"] == "world")["items"] = [rule]
+    authority = confirm(client, conception, save(client, conception, state))["confirmation"]["id"]
+
+    ids, excerpts = [], []
+    for index in range(31):
+        chapter_id = (
+            story["chapter_id"] if index == 0 else domain.create_chapter(branch, f"第{index + 1}章")["id"]
+        )
+        original = f"第{index + 1}章，铜铃仍在门外响了。"
+        chapter = domain.save(chapter_id, 0, "😀" + original)
+        ids.append(
+            domain.stage(
+                {
+                    "novel_id": story["id"],
+                    "branch_id": branch,
+                    "chapter_id": chapter_id,
+                    "base_revision": chapter["revision"],
+                },
+                "setting_review",
+                {"result": "fail", "evidence": {"text": original, "start": 2, "end": 2 + len(original)}},
+                {"rule": {**rule, "confirmation_id": authority}},
+                on_stage=lambda tx, identifier: tx.execute(
+                    "UPDATE artifacts SET status='accepted' WHERE id=?", (identifier,)
+                ),
+            )["id"]
+        )
+        excerpts.append(
+            {
+                "chapter_id": chapter_id,
+                "revision": chapter["revision"],
+                "start": 2,
+                "end": 2 + len(original),
+                "quote": original,
+            }
+        )
+
+    preview = read(client, inspection)["preview"]
+    assert item(preview, "05")["status"] == "yellow"
+    decision = {**author("05", chapter), "evidence": excerpts, "soft_deviation_report_ids": ids}
+    rejected = client.post(
+        inspection,
+        json={
+            "basis_sha256": preview["basis_sha256"],
+            "author_reviews": [
+                {**author("03", chapter), "evidence": excerpts},
+            ],
+        },
+    )
+    assert rejected.status_code == 422
+    incomplete = client.post(
+        inspection,
+        json={
+            "basis_sha256": preview["basis_sha256"],
+            "author_reviews": [{**decision, "evidence": excerpts[:-1]}],
+        },
+    )
+    assert incomplete.status_code == 409, incomplete.text
+    signed = report(client, inspection, preview, author_reviews=[decision])
+    entry = item(signed, "05")
+    assert entry["status"] == "green"
+    assert entry["author_review"]["evidence"] == excerpts
+    assert entry["author_review"]["soft_deviation_report_ids"] == ids
+
+    pack = export_manuscript(domain, branch)
+    isolated = Domain(Database(tmp_path / "large-soft-review.sqlite"))
+    import_manuscript(isolated, pack)
+    history = export_manuscript(isolated, branch).workflow_history.inspections
+    assert len(history) == 1 and history[0].id == signed["id"]
+    assert history[0].report.items[4].author_review.soft_deviation_report_ids == ids
+
+
 def test_soft_setting_deviations_require_a_source_backed_author_decision_or_a_new_review(
     client, domain, settings, story, tmp_path
 ):

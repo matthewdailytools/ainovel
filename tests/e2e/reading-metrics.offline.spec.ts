@@ -288,3 +288,104 @@ test('按目标章实际资格算出一人中一人，资格未知时显示缺�
   await panel.getByRole('combobox', { name: '发布报告', exact: true }).selectOption(latest.id)
   await expect(pair.getByRole('cell')).toHaveText(['1', '1', '100%', '0', '0', '2', '0'])
 })
+
+test('单章完读区分已覆盖的零、覆盖未知和明确未采集', async ({ page }) => {
+  await page.goto('/')
+  const { csrf } = await (await page.request.get('/api/session')).json()
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const created = await page.request.post('/api/novels', {
+    headers,
+    data: { title: '后台验证 · 完读覆盖' },
+  })
+  expect(created.ok()).toBe(true)
+  const novel = await created.json()
+  const branch = `/api/branches/${novel.branch_id}`
+  const chapters: { chapter_id: string; published_at: string }[] = []
+  for (const [title, day] of [
+    ['已采集', '01'],
+    ['覆盖未知', '02'],
+    ['未采集', '03'],
+  ]) {
+    const response = await page.request.post(branch + '/chapters', { headers, data: { title } })
+    expect(response.ok()).toBe(true)
+    chapters.push({ chapter_id: (await response.json()).id, published_at: `2026-11-${day}T00:00:00+08:00` })
+  }
+  const payload = {
+    format: 'ainovel-reading/1',
+    mode: 'events',
+    source: '合成埋点样本',
+    release_version: '逐章完读采集覆盖',
+    timezone: 'Asia/Shanghai',
+    observed_from: '2026-11-01T00:00:00+08:00',
+    observed_until: '2026-11-05T00:00:00+08:00',
+    extracted_at: '2026-11-05T10:00:00+08:00',
+    read_definition: '文章加载完毕',
+    completion_definition: '最后一屏已达',
+    completion_coverage: [
+      { chapter_id: chapters[0].chapter_id, coverage: 'observed', definition: '该章读至九成' },
+      { chapter_id: chapters[2].chapter_id, coverage: 'not_observed' },
+    ],
+    chapters,
+    window_hours: 24,
+    events: chapters.map((chapter) => ({
+      chapter_id: chapter.chapter_id,
+      reader_key: 'anonymous-start',
+      channel: '站内',
+      kind: 'start',
+      at: chapter.published_at,
+    })),
+  }
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+  await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  const panel = page.getByRole('region', { name: '追读数据', exact: true })
+  async function upload(value: object) {
+    const file = panel.getByLabel('追读数据文件')
+    await file.setInputFiles({
+      name: '完读采集范围.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(value)),
+    })
+    const submit = panel.getByRole('button', { name: '导入并计算' })
+    await expect(submit).toBeEnabled()
+    const posted = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' && response.url().endsWith(branch + '/reading-metrics/import'),
+    )
+    await submit.press('Enter')
+    return posted
+  }
+  expect((await upload(payload)).status()).toBe(201)
+  await panel.getByRole('combobox', { name: '查看指标' }).selectOption('chapter_completion')
+  const table = panel.getByRole('table', { name: '单章完读率' })
+  const row = (title: string) =>
+    table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: title, exact: true }) })
+  await expect(row('已采集').getByRole('cell')).toHaveText([
+    '0',
+    '1',
+    '0%',
+    '0',
+    '来源确认已采集 · 该章读至九成',
+  ])
+  await expect(row('覆盖未知').getByRole('cell')).toHaveText([
+    '未提供',
+    '1',
+    '无可计算数据',
+    '0',
+    '完读采集覆盖未知 · 最后一屏已达',
+  ])
+  await expect(row('未采集').getByRole('cell')).toHaveText([
+    '未提供',
+    '1',
+    '无可计算数据',
+    '0',
+    '来源确认未采集 · 最后一屏已达',
+  ])
+  const contradicted = await upload({
+    ...payload,
+    events: [...payload.events, { ...payload.events[2], kind: 'finish' }],
+  })
+  expect(contradicted.status()).toBe(400)
+  await expect(panel.getByRole('alert')).toContainText('声明未采集完读的章节不能同时提供完读事件')
+  await expect(row('已采集').getByText('0%', { exact: true })).toBeVisible()
+})

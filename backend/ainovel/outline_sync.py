@@ -5,7 +5,6 @@ from typing import Literal
 
 from pydantic import ValidationError
 
-from .conception import setting_is_adopted
 from .db import DomainError
 from .manuscript_exchange import Identifier
 from .models import Input
@@ -23,6 +22,7 @@ from .outline_workspace import (
     validate_frozen_reference_cards,
 )
 from .project_sync import FORMAT, read_project_head, read_project_version
+from .setting_review import confirmed_outline_settings, outline_setting_items
 from .settings_sync import project_source_id, read_settings_head, read_settings_version, settings_source_id
 from .story_graph import RECORD, Promise, SaveRecord, save_record_tx
 
@@ -131,19 +131,15 @@ def validate_version_sources(
         settings = settings_lookup(version.settings_version_id)
         if not settings or settings.project_version_id != version.project_version_id:
             raise DomainError("sync_outline_settings", "大纲引用的设定版本或对应立项尚未到齐。", 409)
+        observed = {identifier for identifier, origin in settings.origins.items() if origin.evidence}
         eligible = {
-            item.id
-            for category in settings.categories
-            if category.id == "world" and not category.skipped
-            for item in category.items
-            if setting_is_adopted(item.adoption_state)
-            and item.detail.strip()
-            and not settings.origins[item.id].evidence
+            item["id"]
+            for item in outline_setting_items(
+                [category.model_dump() for category in settings.categories], observed
+            )
         }
         if any(not set(chapter["setting_ids"]) <= eligible for chapter in chapters):
-            raise DomainError(
-                "sync_outline_settings", "章纲只能引用该正式世界设定版本中已采用的作者设定。", 409
-            )
+            raise DomainError("sync_outline_settings", "章纲只能引用该正式设定版本中已采用的设定条目。", 409)
     if chapter_lookup and any(not chapter_lookup(chapter["chapter_id"]) for chapter in chapters):
         raise DomainError("sync_outline_chapters", "大纲引用的章节目录尚未到齐。", 409)
     if reference_lookup is not None:
@@ -332,9 +328,7 @@ def apply_outline_head(tx, branch_id, value, receipt):
     if version.settings_version_id:
         if read_settings_head(tx, branch_id) != version.settings_version_id:
             raise DomainError("sync_outline_settings", "本机采用的设定与大纲依据不同，待采用对应设定。", 409)
-        from .setting_review import confirmed_world_basis
-
-        confirmation_id = confirmed_world_basis(tx, branch_id)["confirmation_id"]
+        confirmation_id = confirmed_outline_settings(tx, branch_id)["confirmation_id"]
         if not confirmation_id:
             raise DomainError("sync_outline_settings", "本机设定依据尚未生效，待确认后采用大纲。", 409)
     chapter_ids = {

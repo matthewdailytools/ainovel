@@ -16,12 +16,14 @@ from .domain import utf16_slice
 from .models import Input
 from .outline_workspace import _chapter_plans, _view
 from .project_brief import confirmed_project_tx
-from .setting_review import confirmed_world_basis
+from .setting_review import confirmed_outline_settings
 from .story_graph import Source, graph_snapshot
 from .workflow_inspection import body_chars, current_length_target, latest_book_inspection, length_result
 
 KIND = "book_completion"
 VERSION = "book-completion/1"
+CLASSIFIED_VERSION = "book-completion/2"
+WORLD_CATEGORY = "world"
 
 
 class ClosureReview(Input):
@@ -65,7 +67,7 @@ def _basis(tx, branch_id):
     graph = graph_snapshot(tx, branch_id)
     report = latest_book_inspection(tx, branch_id)
     project = confirmed_project_tx(tx, branch_id)
-    rules = confirmed_world_basis(tx, branch_id)
+    settings = confirmed_outline_settings(tx, branch_id)
     promises = [row for row in graph["records"] if row["kind"] == "promise" and not row["archived"]]
     manifest = {
         "format": VERSION,
@@ -80,19 +82,31 @@ def _basis(tx, branch_id):
             for row in chapters
         ],
         "project_id": project["id"] if project else None,
-        "setting_id": rules["confirmation_id"],
+        "setting_id": settings["confirmation_id"],
         "outline_id": outline["confirmed"]["id"] if outline["confirmed"] else None,
         "inspection_id": report["id"] if report else None,
         "length_target": current_length_target(tx, branch_id, "book", None, include_cleared=True),
         "promises": [{"id": row["id"], "revision": row["revision"]} for row in promises],
     }
+    if any(item.get("category_id") for item in settings["items"]):
+        manifest["format"] = CLASSIFIED_VERSION
+        manifest["settings_catalogue"] = [
+            {
+                "id": item["id"],
+                "category_id": item.get("category_id", WORLD_CATEGORY),
+                "category_title": item.get("category_title", "世界设定"),
+                "title": item["title"],
+                "detail": item["detail"],
+            }
+            for item in settings["items"]
+        ]
     fingerprint = basis_fingerprint(
         manifest,
         [row["stale"] for row in chapters],
         outline["stale"],
         [item["current_status"] for item in report["items"]] if report else [],
     )
-    return fingerprint, manifest, chapters, rules, outline, report, promises
+    return fingerprint, manifest, chapters, settings["items"], outline, report, promises
 
 
 def basis_fingerprint(manifest, stale_chapters, stale_outline, inspection_statuses):
@@ -131,7 +145,7 @@ def _chapter_text(chapters, read_content):
         yield read_content(row)
 
 
-def material_chunks(manifest, chapters, rules, data, read_content):
+def material_chunks(manifest, chapters, world_items, data, read_content):
     if not data:
         return None
     requested = data.sample_chapter_ids
@@ -141,7 +155,13 @@ def material_chunks(manifest, chapters, rules, data, read_content):
     if not data.intro.strip() or any(not read_content(row).strip() for row in sample):
         return None
     title = manifest["title"]
-    catalogue = "\n\n".join(f"## {item['title']}\n\n{item['detail']}" for item in rules["items"])
+    if manifest["format"] == CLASSIFIED_VERSION:
+        catalogue = "\n\n".join(
+            f"## {item['category_title']} · {item['title']}\n\n{item['detail']}"
+            for item in manifest["settings_catalogue"]
+        )
+    else:
+        catalogue = "\n\n".join(f"## {item['title']}\n\n{item['detail']}" for item in world_items)
     if not catalogue:
         catalogue = "本作没有单独确认的世界设定条目。"
     limit = "仅开篇" if data.spoiler_scope == "opening" else "含全书内容"
@@ -153,13 +173,13 @@ def material_chunks(manifest, chapters, rules, data, read_content):
     }
 
 
-def _materials(manifest, chapters, rules, data):
-    parts = material_chunks(manifest, chapters, rules, data, lambda row: row["content"])
+def _materials(manifest, chapters, settings, data):
+    parts = material_chunks(manifest, chapters, settings, data, lambda row: row["content"])
     return {name: "".join(chunks) for name, chunks in parts.items()} if parts else None
 
 
 def _evaluate(tx, branch_id, data=None):
-    basis, manifest, chapters, rules, outline, report, promises = _basis(tx, branch_id)
+    basis, manifest, chapters, settings, outline, report, promises = _basis(tx, branch_id)
     if data and basis != data.basis_sha256:
         raise DomainError("completion_changed", "完本依据已变化，请刷新并重新预览。", 409)
     if data and data.preparation_id:
@@ -217,7 +237,7 @@ def _evaluate(tx, branch_id, data=None):
     blocked = (report and any(item["current_status"] == "red" for item in report["items"])) or any(
         row["stale"] for row in chapters
     )
-    materials = _materials(manifest, chapters, rules, data)
+    materials = _materials(manifest, chapters, settings, data)
     checks = [
         _check(
             "manuscript",

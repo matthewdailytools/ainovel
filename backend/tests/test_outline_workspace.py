@@ -9,11 +9,12 @@ from test_reference_flow import SOURCE, reference as reference_fixture, update
 reference = reference_fixture
 
 
-def setting_confirmation(client, branch):
+def setting_confirmation(client, branch, extra_categories=()):
     endpoint = path(branch)
     state = client.get(endpoint).json()
     world = next(category for category in state["categories"] if category["id"] == "world")
     world["items"] = [{"id": "bell", "title": "铃声规则", "detail": "铜铃只在门内响。"}]
+    state["categories"].extend(extra_categories)
     return confirm(client, endpoint, save(client, endpoint, state))["confirmation"]["id"]
 
 

@@ -1424,6 +1424,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/conception/items/{item_id}/history/{source_workspace_id}/restore-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Preview Workspace Setting Item */
+    get: operations['preview_workspace_setting_item_api_branches__branch_id__conception_items__item_id__history__source_workspace_id__restore_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/conception/items/{item_id}/restore': {
     parameters: {
       query?: never
@@ -3685,9 +3702,9 @@ export interface components {
     DeliveryManifest: {
       /**
        * Format
-       * @constant
+       * @enum {string}
        */
-      format: 'book-completion/1'
+      format: 'book-completion/1' | 'book-completion/2'
       /** Branch Id */
       branch_id: string
       /** Title */
@@ -3710,6 +3727,8 @@ export interface components {
       } | null
       /** Promises */
       promises: components['schemas']['PromiseManifest'][]
+      /** Settings Catalogue */
+      settings_catalogue?: components['schemas']['DeliverySetting'][] | null
       /** Ai Preparation Id */
       ai_preparation_id?: string | null
       /** Files */
@@ -3723,6 +3742,19 @@ export interface components {
       spoiler_scope: 'opening' | 'whole'
       /** Sample Chapter Ids */
       sample_chapter_ids: string[]
+    }
+    /** DeliverySetting */
+    DeliverySetting: {
+      /** Id */
+      id: string
+      /** Category Id */
+      category_id: string
+      /** Category Title */
+      category_title: string
+      /** Title */
+      title: string
+      /** Detail */
+      detail: string
     }
     /** DownloadInput */
     DownloadInput: {
@@ -5003,6 +5035,8 @@ export interface components {
       read_definition: string
       /** Completion Definition */
       completion_definition?: string | null
+      /** Completion Coverage */
+      completion_coverage?: components['schemas']['ReportedCompletionCoverage'][] | null
       cohort?: components['schemas']['Cohort'] | null
       /** Access Mode */
       access_mode?: ('shared_opening' | 'shared_opening_assumed' | 'reader_eligibility' | 'unknown') | null
@@ -5268,6 +5302,18 @@ export interface components {
       /** Title */
       title: string
     }
+    /** ReportedCompletionCoverage */
+    ReportedCompletionCoverage: {
+      /** Chapter Id */
+      chapter_id: string
+      /**
+       * Coverage
+       * @enum {string}
+       */
+      coverage: 'observed' | 'not_observed' | 'event_evidence' | 'unknown'
+      /** Definition */
+      definition: string | null
+    }
     /** RestorePromise */
     RestorePromise: {
       /** Id */
@@ -5323,6 +5369,8 @@ export interface components {
       idempotency_key: string
       /** Source Workspace Id */
       source_workspace_id: string
+      /** Basis Sha256 */
+      basis_sha256: string
     }
     /** RestoreSource */
     RestoreSource: {
@@ -5661,6 +5709,61 @@ export interface components {
        * @default
        */
       exceptions: string
+    }
+    /** SettingRestoreChapter */
+    SettingRestoreChapter: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Title */
+      title: string
+      /** Chapter Revision */
+      chapter_revision: number
+      /** Volume Id */
+      volume_id: string
+      /** Volume Title */
+      volume_title: string
+      /** Unit Id */
+      unit_id: string
+      /** Unit Title */
+      unit_title: string
+      /** References Item */
+      references_item: boolean
+    }
+    /** SettingRestoreOutline */
+    SettingRestoreOutline: {
+      /** Id */
+      id: string
+      /** Revision */
+      revision: number
+      /** Confirmed */
+      confirmed: boolean
+      /** Setting Confirmation Id */
+      setting_confirmation_id: string | null
+      /** Setting Basis Current */
+      setting_basis_current: boolean
+      /** Chapters */
+      chapters: components['schemas']['SettingRestoreChapter'][]
+    }
+    /** SettingRestorePreview */
+    SettingRestorePreview: {
+      /** Base Revision */
+      base_revision: number
+      /** Base Story Revision */
+      base_story_revision: number
+      /** Item Id */
+      item_id: string
+      /** Source Workspace Id */
+      source_workspace_id: string
+      /** Current Confirmation Id */
+      current_confirmation_id: string | null
+      /** Confirmation Current */
+      confirmation_current: boolean
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Outlines */
+      outlines: components['schemas']['SettingRestoreOutline'][]
+      /** Affected Reports */
+      affected_reports: components['schemas']['AffectedReport'][]
     }
     /** SettingsEvidence */
     SettingsEvidence: {
@@ -8298,7 +8401,9 @@ export interface operations {
   }
   setting_options_api_branches__branch_id__outline_workspace_setting_options_get: {
     parameters: {
-      query?: never
+      query?: {
+        scope?: 'outline' | 'world'
+      }
       header?: never
       path: {
         branch_id: string
@@ -9274,6 +9379,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['SettingItemHistory']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_workspace_setting_item_api_branches__branch_id__conception_items__item_id__history__source_workspace_id__restore_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        item_id: string
+        source_workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SettingRestorePreview']
         }
       }
       /** @description Validation Error */

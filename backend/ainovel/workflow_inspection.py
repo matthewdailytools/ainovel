@@ -32,6 +32,8 @@ KIND = "workflow_inspection"
 LENGTH_TARGET_KIND = "inspection_length_target"
 VERSION = "m6-inspection/1"
 SOFT_DEVIATION_POLICY = "soft-deviation-review/1"
+MAX_AUTHOR_EVIDENCE = 30
+MAX_SOFT_DEVIATIONS = 1000
 COUNT_VERSION = "正文有效字符/1，排除 Markdown 标题行、常见排版标记、空白和不可见字符，计入标点"
 Scope = Literal["chapter", "volume", "book"]
 CheckId = Literal["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"]
@@ -56,11 +58,11 @@ class AuthorReview(Input):
     status: Literal["green", "yellow", "red", "not_applicable"]
     basis_note: Text
     reason: Text
-    evidence: list[Source] = Field(default_factory=list, max_length=30)
+    evidence: list[Source] = Field(default_factory=list, max_length=MAX_AUTHOR_EVIDENCE + MAX_SOFT_DEVIATIONS)
     source_candidate_id: str | None = Field(default=None, min_length=1, max_length=128)
     author_overrides_candidate: bool = Field(default=False, strict=True)
     soft_deviation_report_ids: list[ReportId] = Field(
-        default_factory=list, max_length=1000, exclude_if=lambda value: not value
+        default_factory=list, max_length=MAX_SOFT_DEVIATIONS, exclude_if=lambda value: not value
     )
 
     @model_validator(mode="after")
@@ -75,6 +77,8 @@ class AuthorReview(Input):
             or len(set(self.soft_deviation_report_ids)) != len(self.soft_deviation_report_ids)
         ):
             raise ValueError("软设定偏离回执须各引用一次，并用于第 05 项的作者通过裁定。")
+        if len(self.evidence) > MAX_AUTHOR_EVIDENCE + len(self.soft_deviation_report_ids):
+            raise ValueError("常规引文最多 30 处，每条软设定偏离可追加一处反证。")
         return self
 
 
@@ -448,7 +452,8 @@ def _evaluate(tx, branch_id, scope, scope_id):
     world_needs_confirmation = not world["confirmation_id"] and _world_needs_confirmation(tx, branch_id)
     reviews = _rule_reports(tx, branch_id, chapters, world["confirmation_id"])
     covered = {(row["chapter_id"], row["rule"]["id"]) for row in reviews if row["result"] == "pass"}
-    rules = {(row["chapter_id"], key) for row in plans for key in row["setting_ids"]}
+    world_ids = {rule["id"] for rule in world["items"]}
+    rules = {(row["chapter_id"], key) for row in plans for key in row["setting_ids"] if key in world_ids}
     failures = [row for row in reviews if row["result"] == "fail"]
     if any(row["rule"].get("setting_policy", {}).get("strength") != "soft" for row in failures):
         rule_status = "red"
@@ -735,6 +740,12 @@ def _same_length_inputs(report, preview):
     )
 
 
+def _same_exemption_scope(report, preview):
+    return (report["scope"], report["scope_id"]) == (preview["scope"], preview["scope_id"]) and [
+        row["id"] for row in report["chapters"]
+    ] == [row["id"] for row in preview["chapters"]]
+
+
 def _effective(row, preview):
     report = json.loads(row["payload"])
     current = {item["check_id"]: item for item in preview["items"]} if preview else {}
@@ -746,6 +757,15 @@ def _effective(row, preview):
             # Continuity changes can require a new report without changing the frozen length calculation.
             matched = _same_length_inputs(report, preview)
         allowed = item["status"] != "not_applicable" or latest.get("can_mark_not_applicable", False)
+        if (
+            not matched
+            and preview
+            and item["status"] == "not_applicable"
+            and allowed
+            and not (item.get("author_review") or {}).get("evidence")
+        ):
+            # These exemptions depend on absence of applicable material in the same chapter range.
+            matched = _same_exemption_scope(report, preview)
         if not allowed:
             invalid_exemption = True
         item["current_status"] = item["status"] if matched and allowed else "outdated"

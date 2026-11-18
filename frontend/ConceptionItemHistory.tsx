@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import type { components } from './api-schema'
+import { RestoreReportList } from './ChapterRestorePreview'
 import { settingAdoptionLabels } from './conception'
 import { ConceptionQuote } from './ConceptionItems'
 
 type History = components['schemas']['SettingItemHistory']
 type ItemState = components['schemas']['SettingItemState']
-type RestoreBasis = Omit<components['schemas']['RestoreSettingItem'], 'idempotency_key'>
+export type SettingRestoreBasis = Omit<components['schemas']['RestoreSettingItem'], 'idempotency_key'>
+type SettingRestorePreview = components['schemas']['SettingRestorePreview']
 
 function provenanceLabel(provenance: ItemState['provenance']) {
   if (provenance.origin === 'author') return '作者设定'
@@ -88,6 +90,58 @@ function sameItem(left: ItemState | null, right: ItemState | null) {
   )
 }
 
+function SettingRestoreImpact({ preview }: { preview: SettingRestorePreview }) {
+  const scopeNames = new Map(
+    preview.outlines.flatMap(({ chapters }) =>
+      chapters.flatMap(({ chapter_id, title, volume_id, volume_title }) => [
+        [chapter_id, title] as const,
+        [volume_id, volume_title] as const,
+      ]),
+    ),
+  )
+  return (
+    <section aria-label="设定恢复影响" style={{ overflowWrap: 'anywhere' }}>
+      <h4>设定恢复影响</h4>
+      <p>恢复会创建新的设定草稿。请在设定台核对并重新确认后采用。</p>
+      {preview.current_confirmation_id && (
+        <p>
+          设定确认依据 <code>{preview.current_confirmation_id}</code> ·{' '}
+          {preview.confirmation_current ? '恢复后需重新确认' : '当前已待重新确认'}
+        </p>
+      )}
+      {preview.outlines.map((outline) => (
+        <details key={outline.id} open>
+          <summary>
+            {outline.confirmed ? '已确认大纲' : '保存的大纲草稿'} · 修订 {outline.revision} ·{' '}
+            {outline.chapters.filter((chapter) => chapter.references_item).length} 章直接引用
+          </summary>
+          <p>
+            大纲 <code>{outline.id}</code>
+            {outline.setting_confirmation_id && (
+              <>
+                {' · 绑定整版设定 '}
+                <code>{outline.setting_confirmation_id}</code>
+                {outline.setting_basis_current ? ' · 恢复后需重新核对' : ' · 该设定依据已待复核'}
+              </>
+            )}
+          </p>
+          <ul>
+            {outline.chapters.map((chapter) => (
+              <li key={chapter.chapter_id}>
+                {chapter.volume_title}（<code>{chapter.volume_id}</code>） · {chapter.unit_title}（
+                <code>{chapter.unit_id}</code>） · {chapter.title}（<code>{chapter.chapter_id}</code>
+                ，稿件修订 {chapter.chapter_revision}） ·{' '}
+                {chapter.references_item ? '直接引用本条设定' : '共用整版设定'}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ))}
+      <RestoreReportList reports={preview.affected_reports} scopeNames={scopeNames} />
+    </section>
+  )
+}
+
 export function ConceptionItemHistory({
   path,
   itemId,
@@ -105,7 +159,7 @@ export function ConceptionItemHistory({
   dirty: boolean
   busy: boolean
   onRefresh: () => Promise<void>
-  onRestore: (basis: RestoreBasis) => void
+  onRestore: (basis: SettingRestoreBasis) => void
 }) {
   const historyPath = `${path}/items/${encodeURIComponent(itemId)}/history`
   const [history, setHistory] = useState<History>()
@@ -113,9 +167,19 @@ export function ConceptionItemHistory({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reload, setReload] = useState(0)
+  const [impact, setImpact] = useState<SettingRestorePreview>()
+  const [checking, setChecking] = useState(false)
   const request = useRef(0)
+  const impactRequest = useRef(0)
+
+  function resetImpact() {
+    impactRequest.current++
+    setImpact(undefined)
+    setChecking(false)
+  }
 
   useEffect(() => {
+    resetImpact()
     const attempt = ++request.current
     setLoading(true)
     setError('')
@@ -137,6 +201,7 @@ export function ConceptionItemHistory({
       })
     return () => {
       request.current++
+      impactRequest.current++
     }
   }, [historyPath, reload, revision, storyRevision])
 
@@ -177,6 +242,36 @@ export function ConceptionItemHistory({
   const stale =
     !!history && (history.base_revision !== revision || history.base_story_revision !== storyRevision)
   const unchanged = !!history && !!selected && sameItem(history.current, selected.state)
+  const blocked = busy || loading || dirty || stale || !selected?.state || unchanged
+  const currentImpact =
+    !blocked && impact?.source_workspace_id === selected?.workspace_id ? impact : undefined
+
+  async function checkImpact() {
+    if (!selected || !history || blocked) return
+    const attempt = ++impactRequest.current
+    setImpact(undefined)
+    setChecking(true)
+    setError('')
+    try {
+      const next = await api<SettingRestorePreview>(
+        `${historyPath}/${encodeURIComponent(selected.workspace_id)}/restore-preview`,
+      )
+      if (attempt !== impactRequest.current) return
+      if (
+        next.item_id !== itemId ||
+        next.source_workspace_id !== selected.workspace_id ||
+        next.base_revision !== history.base_revision ||
+        next.base_story_revision !== history.base_story_revision
+      )
+        throw new Error('设定基准已有变化，请重新读取设定和历史。')
+      setImpact(next)
+    } catch (failure) {
+      if (attempt === impactRequest.current)
+        setError(failure instanceof Error ? failure.message : '暂无法读取设定恢复影响。')
+    } finally {
+      if (attempt === impactRequest.current) setChecking(false)
+    }
+  }
   return (
     <section aria-label="条目版本对照">
       {error && <p role="alert">{error}</p>}
@@ -189,7 +284,13 @@ export function ConceptionItemHistory({
         <>
           <label>
             比较修订
-            <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
+            <select
+              value={selectedId}
+              onChange={(event) => {
+                resetImpact()
+                setSelectedId(event.target.value)
+              }}
+            >
               {history.entries.map((entry) => (
                 <option key={entry.workspace_id} value={entry.workspace_id}>
                   修订 {entry.revision} · {entry.state?.item.title || '已删除'}
@@ -221,21 +322,21 @@ export function ConceptionItemHistory({
                 <p className="small">请先保存或放弃本窗口的未保存编辑。</p>
               ) : unchanged ? (
                 <p className="small">此历史版本与当前条目一致。</p>
-              ) : (
-                <p className="small">
-                  恢复会保存为新的设定草稿。原条目和作者确认版保留在历史中，当前设定须重新确认，依赖它的大纲、写作依据与体检结果须复核。
-                </p>
-              )}
+              ) : null}
+              <button type="button" disabled={blocked || checking} onClick={() => void checkImpact()}>
+                {checking ? '正在预览设定恢复影响…' : '预览设定恢复影响'}
+              </button>
+              {currentImpact && <SettingRestoreImpact preview={currentImpact} />}
               <button
                 type="button"
-                disabled={busy || loading || dirty || stale || !selected.state || unchanged}
-                onClick={() =>
-                  onRestore({
-                    base_revision: history.base_revision,
-                    base_story_revision: history.base_story_revision,
-                    source_workspace_id: selected.workspace_id,
-                  })
-                }
+                disabled={!currentImpact}
+                onClick={() => {
+                  if (!currentImpact) return
+                  const { base_revision, base_story_revision, source_workspace_id, basis_sha256 } =
+                    currentImpact
+                  resetImpact()
+                  onRestore({ base_revision, base_story_revision, source_workspace_id, basis_sha256 })
+                }}
               >
                 恢复所选版本为设定草稿
               </button>

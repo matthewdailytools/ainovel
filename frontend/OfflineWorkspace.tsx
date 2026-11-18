@@ -398,6 +398,7 @@ export function OfflineWorkspace() {
               />
               <OfflineSettings
                 key={`settings-${selected.branch.id}`}
+                branchId={selected.branch.id}
                 ref={settingsEditor}
                 read={loadSettings}
                 refreshToken={workbenchRefresh}

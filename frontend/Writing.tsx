@@ -59,7 +59,7 @@ import {
   findChapterPlan,
   OutlineCardSource,
   outlineFields,
-  type ConfirmedWorldRules,
+  type ConfirmedSettingBasis,
   type FrozenCard,
   type OutlineView,
 } from './OutlineWorkspace'
@@ -165,7 +165,7 @@ export function Writing({
   const [fixed, setFixed] = useState('')
   const [profile, setProfile] = useState(presets[0])
   const [useConception, setUseConception] = useState(true)
-  const [confirmedSetting, setConfirmedSetting] = useState<ConfirmedWorldRules>()
+  const [confirmedSetting, setConfirmedSetting] = useState<ConfirmedSettingBasis>()
   const [settingItemId, setSettingItemId] = useState('')
   const settingRules = confirmedSetting?.items ?? []
   const settingRule =
@@ -435,7 +435,7 @@ export function Writing({
           api<Artifact[]>(`/artifacts?branch_id=${branch.id}`),
           api<Task[]>(`/tasks?branch_id=${branch.id}`),
           api<Excerpt[]>(`/library/excerpts?novel_id=${novel.id}`),
-          api<ConfirmedWorldRules>(`/branches/${branch.id}/outline-workspace/setting-options`),
+          api<ConfirmedSettingBasis>(`/branches/${branch.id}/outline-workspace/setting-options?scope=world`),
         ])
         if (active) {
           setArtifacts((rows) => refreshArtifactList(rows, a))
@@ -1299,7 +1299,9 @@ export function Writing({
               .map((item) => (
                 <details key={item.id}>
                   <summary>
-                    {item.title} · 修订 {outline?.confirmed?.setting_basis.revision}
+                    {item.title}
+                    {item.category_title && ` · ${item.category_title}`} · 修订{' '}
+                    {outline?.confirmed?.setting_basis.revision}
                   </summary>
                   <p>{item.detail}</p>
                 </details>
