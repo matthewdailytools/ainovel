@@ -1,8 +1,13 @@
 import asyncio
+from dataclasses import replace
 import json
+from pathlib import Path
 
+from fastapi.testclient import TestClient
 import pytest
 
+from ainovel.api import create_app
+from ainovel.backups import create_backup, unpack_verified
 from ainovel.budget import Budget
 from ainovel.db import DomainError, dumps, uid
 from ainovel.domain import Domain
@@ -11,7 +16,7 @@ from ainovel.worker import Worker
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 from test_project_brief import BRIEF, IDEA
 from test_reference_flow import SOURCE, reference as reference_fixture, update as update_reference
-from test_work_snapshot import request_restore, route
+from test_work_snapshot import request_restore, route, save_project, verify
 from test_workflow_inspection import author
 
 
@@ -350,6 +355,135 @@ def test_seven_stage_run_reaches_verified_checkpoints(client, domain, settings, 
     final = done["result"]["seven_stage_run"]
     assert final["completion_id"] == confirmed.json()["id"]
     assert len(final["children"]) == child_count + 1
+
+
+def test_backup_recovers_automatic_milestones_and_their_chapter_and_outline_history(
+    client, domain, settings, story, tmp_path
+):
+    branch = story["branch_id"]
+    first = domain.save(story["chapter_id"], 0, "学徒在门外认出师姐的铃。")
+    second = domain.create_chapter(branch, "第二卷·铃归原主")
+    project = save_project(client, branch, 0, "铜铃归还师姐。")
+    setting_id = setting_confirmation(client, branch)
+    prefix = f"/api/branches/{branch}"
+    outline_url = prefix + "/outline-workspace"
+    original_plan = plan([first], ["bell"])
+    next_volume = plan([second], ["bell"])["volumes"][0]
+    next_volume.update(id="return", title="归还")
+    next_volume["units"][0]["id"] = "return-bell"
+    original_plan["volumes"].append(next_volume)
+    authored = put_and_confirm(
+        client,
+        outline_url,
+        {"base_revision": 0, "confirmation_id": setting_id, "plan": original_plan},
+    )["confirmed"]
+
+    runs = prefix + "/seven-stage-runs"
+    request = {
+        "start_from": "outline",
+        "source_id": authored["id"],
+        "account": "deepseek",
+        "budget_limit": 1,
+        "client_request_id": uid(),
+        "auto_adopt_body": True,
+    }
+    started = verify(client.post(runs, json=request), 202)
+    assert verify(client.post(runs, json=request), 202)["id"] == started["id"]
+    model = Model(settings=settings)
+    drain(settings, model)
+    progress = domain.task(started["id"])["result"]["seven_stage_run"]
+    assert progress["stage"] == "inspection"
+    published_second = domain.chapter(second["id"])
+    assert published_second["content"] == BODY
+
+    inspection_url = prefix + "/workflow-inspections"
+    preview = verify(client.get(inspection_url))["preview"]
+    inspected = verify(
+        client.post(
+            inspection_url,
+            json={
+                "basis_sha256": preview["basis_sha256"],
+                "author_reviews": [
+                    author(row["check_id"], published_second)
+                    for row in preview["items"]
+                    if row["status"] == "pending"
+                ],
+            },
+        ),
+        201,
+    )
+    completion_url = prefix + "/book-completion"
+    decision = {
+        "basis_sha256": verify(client.get(completion_url))["basis_sha256"],
+        "read_note": "作者通读两卷保存稿。",
+        "ending": {"note": "铜铃归还师姐。"},
+        "characters": {"note": "确认二人重逢。"},
+        "promises": {"note": "两卷均围绕还铃收束。"},
+        "intro": "循着铜铃去找它的主人。",
+        "spoiler_scope": "opening",
+        "sample_chapter_ids": [first["id"]],
+        "materials_reviewed": True,
+    }
+    completed = verify(client.post(completion_url + "/confirm", json=decision), 201)
+    assert verify(client.post(completion_url + "/confirm", json=decision), 201)["id"] == completed["id"]
+    verify(client.post(f"{runs}/{started['id']}/resume"))
+    drain(settings, model)
+    assert domain.task(started["id"])["status"] == "succeeded"
+
+    saved = verify(client.get(route(branch)))
+    labels = [row["label"] for row in saved if row["purpose"] == "milestone"]
+    assert labels.count("启动七台接力") == labels.count("确认作品完结") == 1
+    milestones = {row["label"]: row for row in saved if row["purpose"] == "milestone"}
+    m1 = milestones["确认立项"]
+    kickoff = milestones["启动七台接力"]
+    first_end = milestones["接力到卷末 · 遗铃"]
+    second_end = milestones["接力到卷末 · 归还"]
+    m7 = milestones["确认作品完结"]
+    assert m1["project_id"] == project["id"] and m1["outline_id"] is None
+    assert kickoff["id"] == progress["start_snapshot_id"]
+    assert kickoff["setting_id"] == setting_id and kickoff["outline_id"] == authored["id"]
+    assert progress["volume_snapshot_ids"] == {"v": first_end["id"], "return": second_end["id"]}
+    assert first_end["scoped_chapter_ids"] == [first["id"]]
+    assert second_end["scoped_chapter_ids"] == [second["id"]]
+    assert m7["outline_id"] == authored["id"]
+    assert m7["reports"] == {"workflow_inspection": inspected["id"], "book_completion": completed["id"]}
+
+    domain.save(second["id"], published_second["revision"], "后来改写的结尾。")
+    later_plan = {**original_plan, "summary": "新的四级大纲"}
+    updated = put_and_confirm(
+        client,
+        outline_url,
+        {"base_revision": authored["revision"], "confirmation_id": setting_id, "plan": later_plan},
+    )["confirmed"]
+    backup = create_backup(settings, domain.db)
+    isolated = tmp_path / "isolated-milestones"
+    unpack_verified(Path(backup["path"]), isolated)
+    assert (isolated / "usage-evidence.sqlite").is_file()
+
+    with TestClient(create_app(replace(settings, data_dir=isolated))) as recovered:
+        recovered.headers["X-Ainovel-CSRF"] = recovered.get("/api/session").json()["csrf"]
+        points = {row["id"]: row for row in verify(recovered.get(route(branch)))}
+        for mark in (m1, kickoff, first_end, second_end, m7):
+            assert points[mark["id"]] == mark
+        for mark, historical in (
+            (m1, {**second, "content": ""}),
+            (kickoff, {**second, "content": ""}),
+            (first_end, first),
+            (second_end, published_second),
+            (m7, published_second),
+        ):
+            chapters = f"{route(branch)}/{mark['id']}/chapters"
+            old = verify(recovered.get(f"{chapters}/{historical['id']}"))["snapshot"]
+            assert old == {key: historical[key] for key in ("content", "revision")}
+        assert verify(recovered.get(inspection_url + "/" + inspected["id"]))["current"] is False
+        assert verify(recovered.get(completion_url + "/history/" + completed["id"]))["current"] is False
+        fork = request_restore(recovered, branch, second_end["id"], "new_branch", branch_name="卷末恢复演练")
+        restored = verify(recovered.get(f"/api/branches/{fork['branch_id']}/outline-workspace"))["confirmed"]
+        assert restored["plan"]["summary"] == authored["plan"]["summary"]
+        assert restored["setting_basis"]["restored_outline_id"] == authored["id"]
+        forked_chapter = fork["chapters"][second["id"]]["id"]
+        assert verify(recovered.get(f"/api/chapters/{forked_chapter}"))["content"] == BODY
+        assert verify(recovered.get(outline_url))["confirmed"]["id"] == updated["id"]
 
 
 def test_resume_from_adopted_project_keeps_author_ending_and_skips_ideation(client, domain, settings):

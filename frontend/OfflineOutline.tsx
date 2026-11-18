@@ -21,6 +21,7 @@ import {
   type OutlineWindow,
 } from './outlineSyncModel'
 import type { SettingsVersion } from './settingsSyncModel'
+import type { ArchivedReferenceCard } from './referenceArchive'
 
 export type OfflineOutlineData = {
   current?: OutlineVersionRecord
@@ -30,6 +31,7 @@ export type OfflineOutlineData = {
   chapters: OutlineDirectoryChapter[]
   promises?: OutlineExistingPromise[]
   cards?: OutlineCard[]
+  referenceVersions?: ArchivedReferenceCard[]
   restorePending?: OutlineArchivePending
 }
 
@@ -256,6 +258,7 @@ export function OfflineOutline({
         outline: (id) => id === current?.id,
         settings: (id) => (id === activeSettings?.id ? activeSettings : null),
         chapter: (id) => chapters.find((chapter) => chapter.id === id),
+        reference: (id) => data.referenceVersions?.find((card) => card.id === id),
         ...(data.promises
           ? { promise: (id: string) => data.promises?.find((entry) => entry.id === id) }
           : {}),
@@ -403,18 +406,26 @@ export function OfflineOutline({
                               onChange={(keys) =>
                                 replace({
                                   ...chapter,
-                                  reference_cards: keys.flatMap((key) => {
-                                    const card = cardIndex.get(key)
-                                    return card
-                                      ? [
-                                          {
-                                            session_id: card.session_id,
-                                            card_id: card.card_id,
-                                            revision: card.revision,
-                                          },
-                                        ]
-                                      : []
-                                  }),
+                                  reference_cards: [
+                                    ...new Map(
+                                      keys.flatMap((key) => {
+                                        const card = cardIndex.get(key)
+                                        if (!card) return []
+                                        const { session_id, card_id, revision, version_id } = card
+                                        return [
+                                          [
+                                            `${session_id}/${card_id}`,
+                                            {
+                                              session_id,
+                                              card_id,
+                                              revision,
+                                              ...(version_id ? { version_id } : {}),
+                                            },
+                                          ],
+                                        ] as const
+                                      }),
+                                    ).values(),
+                                  ],
                                 })
                               }
                             />

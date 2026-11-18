@@ -5494,14 +5494,14 @@
             "title": "Checks"
           },
           "manifest": { "$ref": "#/components/schemas/DeliveryManifest" },
+          "review": { "$ref": "#/components/schemas/CompletionRequest" },
           "materials": {
             "additionalProperties": { "type": "string" },
             "type": "object",
             "maxProperties": 4,
             "minProperties": 4,
             "title": "Materials"
-          },
-          "review": { "$ref": "#/components/schemas/CompletionRequest" }
+          }
         },
         "additionalProperties": false,
         "type": "object",
@@ -5512,8 +5512,8 @@
           "basis_sha256",
           "checks",
           "manifest",
-          "materials",
-          "review"
+          "review",
+          "materials"
         ],
         "title": "ArchivedCompletion"
       },
@@ -7714,6 +7714,10 @@
             "title": "Card Id"
           },
           "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "version_id": {
+            "anyOf": [{ "type": "string", "pattern": "^[a-f0-9]{64}$" }, { "type": "null" }],
+            "title": "Version Id"
+          },
           "technique": { "type": "string", "title": "Technique" },
           "conditions": { "type": "string", "title": "Conditions" },
           "exceptions": { "type": "string", "title": "Exceptions" },
@@ -7748,7 +7752,11 @@
             "pattern": "^[a-zA-Z0-9_-]+$",
             "title": "Card Id"
           },
-          "revision": { "type": "integer", "minimum": 0, "title": "Revision" }
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "version_id": {
+            "anyOf": [{ "type": "string", "pattern": "^[a-f0-9]{64}$" }, { "type": "null" }],
+            "title": "Version Id"
+          }
         },
         "additionalProperties": false,
         "type": "object",

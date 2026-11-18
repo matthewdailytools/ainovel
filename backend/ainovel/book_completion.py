@@ -2,6 +2,7 @@
 
 from hashlib import sha256
 from io import BytesIO
+from itertools import chain
 import json
 from time import time
 from typing import Literal
@@ -122,18 +123,22 @@ def _check(identifier, title, detail, passed=False, blocked=False):
     }
 
 
-def _text(chapters):
-    return "\n\n".join(f"## {row['title']}\n\n{row['content']}" for row in chapters)
+def _chapter_text(chapters, read_content):
+    for index, row in enumerate(chapters):
+        if index:
+            yield "\n\n"
+        yield f"## {row['title']}\n\n"
+        yield read_content(row)
 
 
-def _materials(manifest, chapters, rules, data):
+def material_chunks(manifest, chapters, rules, data, read_content):
     if not data:
         return None
     requested = data.sample_chapter_ids
     if not requested or requested != [row["id"] for row in chapters[: len(requested)]]:
         return None
     sample = chapters[: len(requested)]
-    if not data.intro.strip() or any(not row["content"].strip() for row in sample):
+    if not data.intro.strip() or any(not read_content(row).strip() for row in sample):
         return None
     title = manifest["title"]
     catalogue = "\n\n".join(f"## {item['title']}\n\n{item['detail']}" for item in rules["items"])
@@ -141,11 +146,16 @@ def _materials(manifest, chapters, rules, data):
         catalogue = "本作没有单独确认的世界设定条目。"
     limit = "仅开篇" if data.spoiler_scope == "opening" else "含全书内容"
     return {
-        "正文.md": f"# {title}\n\n{_text(chapters)}\n",
-        "设定册.md": f"# {title} · 设定册\n\n{catalogue}\n",
-        "简介.md": f"# {title} · 简介\n\n剧透范围：{limit}\n\n{data.intro.strip()}\n",
-        "试读.md": f"# {title} · 试读\n\n{_text(sample)}\n",
+        "正文.md": chain([f"# {title}\n\n"], _chapter_text(chapters, read_content), ["\n"]),
+        "设定册.md": [f"# {title} · 设定册\n\n{catalogue}\n"],
+        "简介.md": [f"# {title} · 简介\n\n剧透范围：{limit}\n\n{data.intro.strip()}\n"],
+        "试读.md": chain([f"# {title} · 试读\n\n"], _chapter_text(sample, read_content), ["\n"]),
     }
+
+
+def _materials(manifest, chapters, rules, data):
+    parts = material_chunks(manifest, chapters, rules, data, lambda row: row["content"])
+    return {name: "".join(chunks) for name, chunks in parts.items()} if parts else None
 
 
 def _evaluate(tx, branch_id, data=None):

@@ -9,7 +9,7 @@ import pytest
 from uvicorn import Config, Server
 
 from ainovel.api import create_app
-from ainovel.cloud_sync import create_sync_app
+from ainovel.cloud_sync import MAX_OBJECT_BYTES, create_sync_app
 from ainovel.db import Database, DomainError
 from ainovel.desktop_sync import DesktopSync, _network
 from ainovel.domain import Domain
@@ -176,6 +176,15 @@ def test_formal_archive_is_immutable_and_pulls_into_independent_desktop_history(
         raw_push(
             frozen.model_copy(update={"id": "changed-basis", "manifest": wrong_basis}), "unverified-basis"
         )
+    corrupt_manifest = frozen.manifest.model_copy(
+        update={"files": {**frozen.manifest.files, "正文.md": "0" * 64}}
+    )
+    with pytest.raises(DomainError, match="交付材料与冻结稿件"):
+        raw_push(
+            frozen.model_copy(update={"id": "bad-digest", "manifest": corrupt_manifest}), "bad-file-digest"
+        )
+    full_envelope = {**workflow_object(branch, frozen), "entry_json": frozen.model_dump_json()}
+    assert raw_push(frozen, "full-wire-same-proof", payload=full_envelope)["status"] == "applied"
 
     with TestClient(create_app(other_settings)) as other:
         other.headers["X-Ainovel-CSRF"] = other.get("/api/session").json()["csrf"]
@@ -204,10 +213,14 @@ def test_formal_archive_is_immutable_and_pulls_into_independent_desktop_history(
         assert _members(other.get(pointer)) == original_zip
 
 
-def test_oversized_workflow_archive_defers_without_blocking_unrelated_chapters(
-    client, domain, story, loopback
+def test_large_delivery_restores_original_files_from_small_cloud_proof(
+    client, domain, settings, story, tmp_path, loopback
 ):
     branch = story["branch_id"]
+    baseline = export_manuscript(domain, branch).model_copy(update={"chapters": [], "revisions": []})
+    receiver_settings = replace(settings, data_dir=tmp_path / "large-proof-receiver")
+    receiver = Domain(Database(receiver_settings.data_dir / "manuscripts.sqlite"))
+    import_manuscript(receiver, baseline)
     opener = domain.save(story["chapter_id"], 0, "学徒沿铃声找到师姐。")
     chapter_ids = [opener["id"]]
     for position in (2, 3):
@@ -228,17 +241,34 @@ def test_oversized_workflow_archive_defers_without_blocking_unrelated_chapters(
     )
     assert response.status_code == 201, response.text
     completed = _complete(client, completion, opener)
+    pointer = completion + f"/{completed['id']}/export"
+    original_zip = _members(client.get(pointer))
+    assert len(original_zip["正文.md"]) > MAX_OBJECT_BYTES
     token = _grant(loopback, branch, "large-work")
+    receiver_token = _grant(loopback, branch, "large-receiver")
     origin, _ = loopback
     desktop = DesktopSync(domain)
     desktop.enable(branch, origin, token)
     state = desktop.run(branch, origin, token)
-    deferred = {row["object_id"]: row["reason"] for row in state["deferred"]}
-    assert "超过" in deferred[f"workflow-completion:{completed['id']}"]
-    assert not state["pending"]
+    assert not state["pending"] and not state["deferred"]
     events = _network(origin, token, "GET", f"/api/sync/works/{branch}/pull?after=0&limit=50")
-    object_ids = {row["object_id"] for row in events["changes"]}
-    assert {f"chapter:{identifier}" for identifier in chapter_ids} <= object_ids
-    assert f"workflow-inspection:{response.json()['id']}" in object_ids
-    assert f"workflow-completion:{completed['id']}" not in object_ids
+    objects = {row["object_id"]: row for row in events["changes"]}
+    assert {f"chapter:{identifier}" for identifier in chapter_ids} <= objects.keys()
+    original_m6 = objects[f"workflow-inspection:{response.json()['id']}"]
+    cloud_proof = objects[f"workflow-completion:{completed['id']}"]
+    assert original_m6["sequence"] < cloud_proof["sequence"]
+    assert len(dumps(cloud_proof["payload"], ensure_ascii=False).encode()) < MAX_OBJECT_BYTES
+    proof = loads(cloud_proof["payload"]["entry_json"])
+    assert "materials" not in proof
+    assert proof["manifest"]["files"] == completed["manifest"]["files"]
+
+    other_sync = DesktopSync(receiver)
+    other_sync.enable(branch, origin, receiver_token)
+    other_state = other_sync.run(branch, origin, receiver_token)
+    assert not other_state["pending"] and not other_state["deferred"]
+    with TestClient(create_app(receiver_settings)) as other:
+        assert other.get(completion).json()["latest"] is None
+        assert _members(other.get(pointer)) == original_zip
+    exported_history = export_manuscript(receiver, branch).workflow_history
+    assert exported_history.completions[0].materials["正文.md"].encode() == original_zip["正文.md"]
     assert client.get(completion).json()["latest"]["id"] == completed["id"]

@@ -256,7 +256,10 @@ async def run(worker, request, frozen):
             for card in frozen["setting_basis"]["reference_cards"]
             if _card_key(card) in eligible
         ]
-        instruction["要求"] += "可按章纲需要选用获准手法卡，只照填其三个编号字段，替换原作人物、场景和道具。"
+        instruction["要求"] += (
+            "可按章纲需要选用获准手法卡。照填会话、卡片、修订编号，来源中提供 version_id 时也照填，"
+            "替换原作人物、场景和道具。"
+        )
     preserved = {
         row["chapter_id"]: row["reference_cards"]
         for _, _, row in _chapter_plans(frozen["outline"] or {"volumes": []})

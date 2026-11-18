@@ -13,7 +13,7 @@ from fastapi import Body
 import httpx
 from pydantic import Field, SecretStr, TypeAdapter, ValidationError
 
-from . import outline_sync, settings_sync, story_sync, workflow_archive
+from . import outline_sync, reference_sync, settings_sync, story_sync, workflow_archive
 from .cloud_sync import ComparedConflict, MAX_CURSOR, MAX_OBJECT_BYTES, Pulled, Receipt
 from .db import DomainError, dumps, uid
 from .manuscript_exchange import (
@@ -89,6 +89,15 @@ INSERT OR IGNORE INTO desktop_sync_dirty
  SELECT branch_id,'story-bootstrap' FROM desktop_sync WHERE enabled=1
  AND NOT EXISTS(SELECT 1 FROM extension_migrations WHERE name='desktop-sync-story/1');
 INSERT OR IGNORE INTO extension_migrations VALUES('desktop-sync-story/1',unixepoch());
+INSERT OR IGNORE INTO desktop_sync_dirty
+ SELECT branch_id,'reference-bootstrap' FROM desktop_sync WHERE enabled=1
+ AND NOT EXISTS(SELECT 1 FROM extension_migrations WHERE name='desktop-sync-reference/1');
+INSERT OR IGNORE INTO extension_migrations VALUES('desktop-sync-reference/1',unixepoch());
+CREATE TRIGGER IF NOT EXISTS desktop_sync_reference_edit AFTER UPDATE OF revision ON reference_sessions BEGIN
+ INSERT OR IGNORE INTO desktop_sync_dirty
+ SELECT s.branch_id,'reference-session:'||NEW.id FROM desktop_sync s WHERE s.enabled=1
+ AND s.branch_id IN (json_extract(OLD.payload,'$.branch_id'),json_extract(NEW.payload,'$.branch_id'));
+ END;
 INSERT OR IGNORE INTO desktop_sync_dirty
  SELECT branch_id,'workflow-bootstrap' FROM desktop_sync WHERE enabled=1
  AND NOT EXISTS(SELECT 1 FROM extension_migrations WHERE name='desktop-sync-workflow/1');
@@ -259,6 +268,13 @@ def _parse(cls, value):
 
 
 def _local(tx, branch_id, object_id):
+    if object_id.startswith("reference-card-version:"):
+        identifier = object_id.removeprefix("reference-card-version:")
+        version = reference_sync.read_reference_version(tx, branch_id, identifier)
+        return reference_sync.version_object(branch_id, version).model_dump() if version else None
+    if object_id.startswith("reference-card:"):
+        head = reference_sync.read_reference_head_object(tx, branch_id, object_id)
+        return head.model_dump() if head else None
     if object_id.startswith("story-version:"):
         version = story_sync.read_story_version(tx, branch_id, object_id.removeprefix("story-version:"))
         return story_sync.version_object(branch_id, version).model_dump() if version else None
@@ -448,6 +464,12 @@ def _apply_chapter(tx, domain, branch_id, event):
 
 
 def _apply(tx, domain, branch_id, event):
+    if event.object_id.startswith("reference-card:"):
+        value = reference_sync.parse_reference_object(
+            branch_id, event.object_id, event.payload, event.tombstone
+        )
+        reference_sync.apply_reference_head(tx, branch_id, value, event)
+        return
     if event.object_id.startswith("story:"):
         value = story_sync.parse_story_object(branch_id, event.object_id, event.payload, event.tombstone)
         story_sync.apply_story_head(tx, branch_id, value, event)
@@ -514,6 +536,12 @@ def _apply(tx, domain, branch_id, event):
 
 
 def _verified_digest(branch_id, event):
+    if event.object_id.startswith(("reference-card:", "reference-card-version:")):
+        return _digest(
+            reference_sync.parse_reference_object(
+                branch_id, event.object_id, event.payload, event.tombstone
+            ).model_dump()
+        )
     if event.object_id.startswith(("story:", "story-version:")):
         return _digest(
             story_sync.parse_story_object(
@@ -685,14 +713,15 @@ class DesktopSync:
             (branch_id, object_id, reason),
         )
 
-    def _verify_workflow(self, tx, branch_id, entry):
-        workflow_archive.validate_workflow_object(
+    def _verify_workflow(self, tx, branch_id, entry, *, hydrate=False):
+        return workflow_archive.validate_workflow_object(
             entry,
             branch_id,
             lambda identifier: source_revision(tx, branch_id, identifier),
             lambda identifier: workflow_archive.read_workflow_entry(
                 tx, branch_id, workflow_archive.INSPECTION, identifier
             ),
+            hydrate=hydrate,
         )
 
     def _consume_workflow(self, tx, branch_id, event):
@@ -700,7 +729,11 @@ class DesktopSync:
             entry = workflow_archive.parse_workflow_object(
                 branch_id, event.object_id, event.payload, event.tombstone
             )
-            self._verify_workflow(tx, branch_id, entry)
+            if isinstance(entry, workflow_archive.CompletionProof) and not _shadow(
+                tx, branch_id, f"workflow-inspection:{entry.manifest.inspection_id}"
+            ):
+                raise DomainError("sync_workflow_dependency", "云端原体检单尚未通过本机核对。", 409)
+            entry = self._verify_workflow(tx, branch_id, entry, hydrate=True)
             workflow_archive.observe_workflow_object(tx, branch_id, event, entry)
         except (DomainError, ValidationError) as error:
             reason = error.message if isinstance(error, DomainError) else "本机历史记录格式无法核对。"
@@ -739,13 +772,24 @@ class DesktopSync:
             self._consume_workflow(tx, branch_id, incoming)
             return
         immutable = object_id.startswith(
-            ("project-version:", "settings-version:", "outline-version:", "story-version:")
+            (
+                "project-version:",
+                "settings-version:",
+                "outline-version:",
+                "story-version:",
+                "reference-card-version:",
+            )
         )
         if known and known["sequence"] >= incoming.sequence and not immutable:
             return
         if immutable:
             try:
-                if object_id.startswith("story-version:"):
+                if object_id.startswith("reference-card-version:"):
+                    wrapped = reference_sync.parse_reference_object(
+                        branch_id, object_id, incoming.payload, incoming.tombstone
+                    )
+                    reference_sync.observe_reference_version(tx, branch_id, wrapped.version, incoming)
+                elif object_id.startswith("story-version:"):
                     wrapped = story_sync.parse_story_object(
                         branch_id, object_id, incoming.payload, incoming.tombstone
                     )
@@ -837,7 +881,11 @@ class DesktopSync:
 
     def _prepare(self, branch_id):
         with self.domain.db.connect(True) as tx:
-            if not tx.execute("SELECT 1 FROM desktop_sync_dirty WHERE branch_id=?", (branch_id,)).fetchone():
+            if not tx.execute(
+                "SELECT 1 FROM desktop_sync_dirty WHERE branch_id=? UNION ALL "
+                "SELECT 1 FROM desktop_sync_workflow_pending WHERE branch_id=? LIMIT 1",
+                (branch_id, branch_id),
+            ).fetchone():
                 return
             object_ids = [
                 f"chapter:{row['id']}"
@@ -908,8 +956,15 @@ class DesktopSync:
                 else f"outline:{branch_id}": value.model_dump()
                 for value in outline_sync.draft_outline_objects(tx, branch_id)
             }
+            handcraft = {}
+            for value in reference_sync.draft_reference_objects(tx, branch_id):
+                if isinstance(value, reference_sync.ReferenceCardVersionObject):
+                    key = f"reference-card-version:{value.version.id}"
+                else:
+                    key = reference_sync.reference_head_object_id(branch_id, value.session_id, value.card_id)
+                handcraft[key] = value.model_dump()
             workflows = self._prepare_workflow(tx, branch_id)
-            formal = {**projects, **settings, **stories, **outlines, **workflows}
+            formal = {**projects, **handcraft, **settings, **stories, **outlines, **workflows}
             blocked = False
             for object_id in [f"branch:{branch_id}", *histories, *object_ids, *formal, *documents]:
                 if tx.execute(
@@ -1041,9 +1096,12 @@ class DesktopSync:
                 "settings": settings_sync.read_settings_version,
                 "outline": outline_sync.read_outline_version,
                 "story": story_sync.read_story_version,
+                "reference-card": reference_sync.read_reference_version,
             }
             family = remote.object_id.partition(":")[0]
-            if family in readers and (family == "story" or remote.object_id == f"{family}:{branch_id}"):
+            if family in readers and (
+                family in {"story", "reference-card"} or remote.object_id == f"{family}:{branch_id}"
+            ):
                 read_version = readers[family]
                 versions = {}
                 for payload in (
@@ -1055,7 +1113,7 @@ class DesktopSync:
                     if payload and (identifier := payload.get("revision_id")):
                         if version := read_version(tx, branch_id, identifier):
                             versions[identifier] = version.model_dump()
-                result[f"{family}_versions"] = versions
+                result[f"{'reference' if family == 'reference-card' else family}_versions"] = versions
             return result
 
     def resolve(self, branch_id, origin, token, identifier, data):
@@ -1113,6 +1171,17 @@ class DesktopSync:
                     ):
                         raise DomainError(
                             "sync_pending", "本机故事记录刚有新确认，请先同步源修订，再比较冲突。", 409
+                        )
+                    if (
+                        data.choice == "local"
+                        and remote.object_id.startswith("reference-card:")
+                        and (
+                            not local
+                            or not reference_sync.has_reference_source(tx, branch_id, local["revision_id"])
+                        )
+                    ):
+                        raise DomainError(
+                            "sync_pending", "本机没有已同步的手法卡修订，请先同步源修订，再比较冲突。", 409
                         )
                     request = {
                         "change_id": data.idempotency_key,

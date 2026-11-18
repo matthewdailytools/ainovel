@@ -27,6 +27,7 @@ import {
   type StoryVersion,
 } from './storySyncModel'
 import { workflowSyncEntry } from './workflowArchive'
+import { referenceCardKey, referenceHeadObjectId } from './referenceArchive'
 import {
   approveSyncResolution,
   listSyncHeads,
@@ -126,6 +127,7 @@ async function localObjects(project: LocalProject) {
     outline,
     story,
     workflow,
+    reference,
     publications,
   } = await readLocalSyncSnapshot(project.novel.id)
   const objects = syncManuscriptObjects(manuscript)
@@ -140,6 +142,22 @@ async function localObjects(project: LocalProject) {
       branch_id,
       revision_id: current.version.id,
     })
+  if (reference) {
+    for (const version of [...reference.versions].sort((left, right) => left.revision - right.revision))
+      objects.set(`reference-card-version:${version.id}`, {
+        format,
+        kind: 'reference-card-version',
+        branch_id,
+        version,
+      })
+    for (const head of reference.adopted_heads)
+      objects.set(await referenceHeadObjectId(branch_id, head, manuscriptHash), {
+        format,
+        kind: 'reference-card-head',
+        branch_id,
+        ...head,
+      })
+  }
   for (const { version } of orderVersions(settings.versions))
     objects.set(`settings-version:${version.id}`, { format, kind: 'settings-version', branch_id, version })
   if (settings.current)
@@ -179,6 +197,7 @@ async function localObjects(project: LocalProject) {
     settings,
     outline,
     story,
+    reference,
     publications: new Map(publications.map((record) => [record.objectId, record])),
   }
 }
@@ -210,7 +229,9 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
     if (id.startsWith('settings-version:')) return 2
     if (id.startsWith('settings:')) return 3
     if (id.startsWith('story-version:')) return 4
+    if (id.startsWith('reference-card-version:')) return 4
     if (id.startsWith('story:')) return 5
+    if (id.startsWith('reference-card:')) return 5
     if (id.startsWith('outline-version:')) return 6
     if (id.startsWith('outline:')) return 7
     if (id.startsWith('evidence:')) return 8
@@ -249,6 +270,7 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         object?.kind === 'settings-version' ||
         object?.kind === 'outline-version' ||
         object?.kind === 'story-version' ||
+        object?.kind === 'reference-card-version' ||
         object?.kind === 'workflow-inspection' ||
         object?.kind === 'workflow-completion'
       ) {
@@ -276,7 +298,8 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         head.id.startsWith('project:') ||
         head.id.startsWith('settings:') ||
         head.id.startsWith('outline:') ||
-        head.id.startsWith('story:')
+        head.id.startsWith('story:') ||
+        head.id.startsWith('reference-card:')
       if (
         resolution &&
         ((resolution.publicationId ?? null) !== publicationId || resolution.signature !== signature)
@@ -347,11 +370,14 @@ function outlinePublicationSources(
     ]
   }
   if (object?.kind !== 'outline-version') return []
-  const { parent_id, project_version_id, settings_version_id } = object.version
+  const { parent_id, project_version_id, settings_version_id, reference_cards } = object.version
   return [
     ...(parent_id ? [`outline-version:${parent_id}`] : []),
     ...(project_version_id ? [`project-version:${project_version_id}`] : []),
     ...(settings_version_id ? [`settings-version:${settings_version_id}`] : []),
+    ...reference_cards.flatMap(({ version_id }) =>
+      version_id ? [`reference-card-version:${version_id}`] : [],
+    ),
   ]
 }
 
@@ -380,11 +406,21 @@ function workflowPublicationSources(id: string, object: SyncedObject | null): st
   ]
 }
 
+function referencePublicationSource(object: SyncedObject | null) {
+  const revision =
+    object?.kind === 'reference-card-head'
+      ? object.revision_id
+      : object?.kind === 'reference-card-version'
+        ? object.version.parent_id
+        : null
+  return revision ? `reference-card-version:${revision}` : null
+}
+
 function assertOutlineSources(
-  snapshot: Pick<Awaited<ReturnType<typeof localObjects>>, 'outline' | 'settings' | 'versions'>,
+  snapshot: Pick<Awaited<ReturnType<typeof localObjects>>, 'outline' | 'settings' | 'versions' | 'reference'>,
   version: OutlineVersion,
 ) {
-  const { outline, settings, versions } = snapshot
+  const { outline, settings, versions, reference } = snapshot
   const advanced = new Set(
     outline.promises.filter(({ advanced, archived }) => advanced && !archived).map(({ id }) => id),
   )
@@ -400,6 +436,7 @@ function assertOutlineSources(
     outline: (id) => outline.versions.some(({ version }) => version.id === id),
     chapter: (id) => outline.chapters.find((chapter) => chapter.id === id),
     promise: (id) => outline.promises.find((promise) => promise.id === id),
+    reference: (id) => reference?.versions.find((card) => card.id === id),
   })
 }
 
@@ -475,6 +512,11 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
       unsent.set(id, '历史报告引用的准确章稿或全书体检尚未排到云端。')
       continue
     }
+    const cardSource = referencePublicationSource(object)
+    if (cardSource && !heads.has(cardSource) && !pending.has(cardSource)) {
+      unsent.set(id, '手法卡的确切源修订尚未排到云端。')
+      continue
+    }
     const acknowledged = head?.lastPublication
     const parent =
       marker && acknowledged && acknowledged.sequence > (base?.sequence ?? 0)
@@ -524,7 +566,7 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
 export async function prepareWebResolution(project: LocalProject, scope: SyncScope, id: string) {
   const compared = await readSyncConflict(scope, id)
   if (!compared?.current || compared.resolvedBy) throw new Error('冲突已变化，请再次同步。')
-  const { objects, publications, versions, settings, outline, story } = await localObjects(project)
+  const { objects, publications, versions, settings, outline, story, reference } = await localObjects(project)
   const object = objects.get(compared.incoming.object_id) ?? null
   const publicationId = publications.get(compared.incoming.object_id)?.id ?? null
   return {
@@ -535,6 +577,7 @@ export async function prepareWebResolution(project: LocalProject, scope: SyncSco
     settings,
     outline,
     story,
+    reference,
     signature: syncObjectSignature(object),
     publicationId,
   }
@@ -599,6 +642,23 @@ export async function resolveWebManuscript(
     )
       throw new Error('无法采用未经核验的故事版本。')
     await checkLocalStorySelection(project.novel.id, chosen.record_id, chosen.revision_id)
+  }
+  if (fresh.incoming.object_id.startsWith('reference-card:')) {
+    const chosen =
+      choice === 'local'
+        ? fresh.object
+        : choice === 'current'
+          ? fresh.current.payload
+          : fresh.incoming.payload
+    const selected = await validateSyncedObject(project, fresh.incoming.object_id, chosen)
+    if (selected?.kind !== 'reference-card-head') throw new Error('无法采用未核验的手法卡版本。')
+    const source = fresh.reference?.versions.find((entry) => entry.id === selected.revision_id)
+    if (
+      !source ||
+      referenceCardKey(source) !== referenceCardKey(selected) ||
+      !(await listSyncHeads(scope)).some(({ id }) => id === `reference-card-version:${source.id}`)
+    )
+      throw new Error('尚未取得该手法卡与云端对应的源修订，请先同步再比较。')
   }
   const resolutionId = crypto.randomUUID()
   const objectId = compared.incoming.object_id

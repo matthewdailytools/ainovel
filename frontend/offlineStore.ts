@@ -40,7 +40,20 @@ import {
   type WorkflowSyncObject,
 } from './workflowArchive'
 import { createStoryOfflineStore, storyReadStores, storyWriteStores } from './storyOfflineStore'
-import { validateReferenceHistory, type ReferenceHistory } from './referenceArchive'
+import {
+  createEditedReferenceVersion,
+  referenceCardKey,
+  referenceHeadObjectId,
+  referenceSyncSignature,
+  validateReferenceHistory,
+  validateReferenceSyncObject,
+  validateReferenceVersionParent,
+  type ArchivedReferenceCard,
+  type ReferenceCardFields,
+  type ReferenceCardHead,
+  type ReferenceHistory,
+  type ReferenceSyncObject,
+} from './referenceArchive'
 import {
   storyObjectSignature,
   validateStoryHistory,
@@ -120,6 +133,7 @@ export type SyncedObject =
   | StoryHeadObject
   | StoryVersionObject
   | WorkflowSyncObject
+  | ReferenceSyncObject
 
 function revisionSignature(row: LocalRevision) {
   return [row.id, row.chapter_id, row.revision, row.parent_id, row.sha256, row.cause, row.created]
@@ -164,6 +178,8 @@ export function syncObjectSignature(object: SyncedObject | null) {
   if (object?.kind === 'story-head' || object?.kind === 'story-version') return storyObjectSignature(object)
   if (object?.kind === 'workflow-inspection' || object?.kind === 'workflow-completion')
     return workflowObjectSignature(object)
+  if (object?.kind === 'reference-card-head' || object?.kind === 'reference-card-version')
+    return referenceSyncSignature(object)
   return 'null'
 }
 
@@ -700,6 +716,105 @@ export function readLocalReferenceHistory(projectId: string) {
   )
 }
 
+const referenceStores = ['projects', 'referenceArchives', 'publications'] satisfies Store[]
+const emptyReferenceHistory = (): ReferenceHistory => ({
+  adopted_heads: [],
+  versions: [],
+  source_devices: {},
+})
+
+function adoptedReference(archive: ReferenceHistory, card: ReferenceCardHead) {
+  return archive.adopted_heads.find((head) => referenceCardKey(head) === referenceCardKey(card))
+}
+
+function adoptReference(archive: ReferenceHistory, head: ReferenceCardHead) {
+  archive.adopted_heads = [
+    ...archive.adopted_heads.filter((old) => referenceCardKey(old) !== referenceCardKey(head)),
+    head,
+  ]
+}
+
+function addReferenceVersion(archive: ReferenceHistory, version: ArchivedReferenceCard) {
+  if (archive.versions.length >= 5000) invalid('手法卡历史已达数量上限。')
+  validateReferenceVersionParent(version, (id) => archive.versions.find((entry) => entry.id === id))
+  archive.versions.push(version)
+}
+
+export async function confirmLocalReferenceCard(
+  projectId: string,
+  baseId: string,
+  card: ReferenceCardFields,
+) {
+  const source = await transact(referenceStores, 'readonly', async (tx) => {
+    const branchId = (await readProject(tx, projectId)).branch.id
+    const archive = await readReferenceHistory(tx, branchId)
+    const base = archive?.versions.find(({ id }) => id === baseId)
+    if (!base) throw new OfflineStoreError('missing', '缺少编辑手法卡所用的原修订。')
+    return { branchId, base }
+  })
+  const version = await createEditedReferenceVersion(source.branchId, source.base, card, manuscriptHash)
+  const head = { session_id: version.session_id, card_id: version.card_id, revision_id: version.id }
+  const objectId = await referenceHeadObjectId(source.branchId, head, manuscriptHash)
+  return transact(referenceStores, 'readwrite', async (tx) => {
+    const branchId = (await readProject(tx, projectId)).branch.id
+    const archive = await readReferenceHistory(tx, branchId)
+    if (branchId !== source.branchId || !archive || adoptedReference(archive, head)?.revision_id !== baseId)
+      throw new OfflineStoreError('conflict', '当前手法卡已有新修订。当前输入保留，请比较后重试。')
+    if (!archive.versions.some((old) => old.id === version.id)) addReferenceVersion(archive, version)
+    if (archive.excerpts && Object.hasOwn(archive.excerpts, baseId))
+      archive.excerpts[version.id] = archive.excerpts[baseId]
+    adoptReference(archive, head)
+    await result(tx.objectStore('referenceArchives').put({ branchId, archive }))
+    await markPublication(tx, branchId, `reference-card-version:${version.id}`, objectId)
+    return version
+  })
+}
+
+function applyReferenceObject(
+  projectId: string,
+  objectId: string,
+  object: ReferenceSyncObject,
+  expected: string,
+  options: ApplyOptions,
+) {
+  return transact(referenceStores, 'readwrite', async (tx) => {
+    const branchId = (await readProject(tx, projectId)).branch.id
+    if (branchId !== object.branch_id) invalid('手法卡属于另一工作版本。')
+    const archive = (await readReferenceHistory(tx, branchId)) ?? emptyReferenceHistory()
+    if (object.kind === 'reference-card-version') {
+      const current = archive.versions.find(({ id }) => id === object.version.id)
+      if (
+        current &&
+        referenceSyncSignature({ ...object, version: current }) !== referenceSyncSignature(object)
+      )
+        invalid('相同手法卡修订编号不能指向不同内容。')
+      if (!current) {
+        if (expected !== 'null') return false
+        addReferenceVersion(archive, object.version)
+      }
+      if (options.source && !Object.hasOwn(archive.source_devices, object.version.id))
+        archive.source_devices[object.version.id] = options.source.device_id
+    } else {
+      const current = adoptedReference(archive, object)
+      const publication = await readPublication(tx, branchId, objectId)
+      if (
+        (current ? referenceSyncSignature({ ...object, ...current }) : 'null') !== expected ||
+        (options.publicationId !== undefined && options.publicationId !== (publication?.id ?? null))
+      )
+        return false
+      const version = archive.versions.find(({ id }) => id === object.revision_id)
+      if (!version || referenceCardKey(version) !== referenceCardKey(object))
+        throw new OfflineStoreError('missing', '手法卡采用的同一卡片修订尚未到齐。')
+      const { session_id, card_id, revision_id } = object
+      adoptReference(archive, { session_id, card_id, revision_id })
+      if (options.consumePublication && publication)
+        await result(tx.objectStore('publications').delete([branchId, objectId]))
+    }
+    await result(tx.objectStore('referenceArchives').put({ branchId, archive }))
+    return true
+  })
+}
+
 async function workflowRows(tx: IDBTransaction, branchId: string) {
   const [inspections, completions] = await Promise.all([
     result<LocalWorkflowEntry<ArchivedInspection>[]>(
@@ -742,13 +857,13 @@ async function readWorkflowSyncObjects(tx: IDBTransaction, branch_id: string) {
           { format, kind: 'workflow-inspection', branch_id, entry_json: entryJson ?? JSON.stringify(entry) },
         ] as const,
     ),
-    ...completions.map(
-      ({ entry, entryJson }) =>
-        [
-          `workflow-completion:${entry.id}`,
-          { format, kind: 'workflow-completion', branch_id, entry_json: entryJson ?? JSON.stringify(entry) },
-        ] as const,
-    ),
+    ...completions.map(({ entry, entryJson }) => {
+      const { materials: _materials, ...proof } = entry
+      return [
+        `workflow-completion:${entry.id}`,
+        { format, kind: 'workflow-completion', branch_id, entry_json: entryJson ?? JSON.stringify(proof) },
+      ] as const
+    }),
   ]
 }
 
@@ -836,22 +951,25 @@ export function readLocalSyncSnapshot(projectId: string) {
       ...outlineReadStores,
       ...storyReadStores,
       ...workflowStores,
+      'referenceArchives' as const,
       'publications' as const,
     ]),
   ]
   return transact(stores, 'readonly', async (tx) => {
     const project = await readProject(tx, projectId)
     const branchId = project.branch.id
-    const [manuscript, brief, settings, outline, story, workflow, publications] = await Promise.all([
-      readManuscript(tx, project),
-      readProjectBrief(tx, branchId),
-      readSettings(tx, branchId),
-      outlineStore.readOutlineTx(tx, project),
-      storyStore.readStoryTx(tx, project),
-      readWorkflowSyncObjects(tx, branchId),
-      publicationRows(tx, branchId),
-    ])
-    return { manuscript, brief, settings, outline, story, workflow, publications }
+    const [manuscript, brief, settings, outline, story, workflow, reference, publications] =
+      await Promise.all([
+        readManuscript(tx, project),
+        readProjectBrief(tx, branchId),
+        readSettings(tx, branchId),
+        outlineStore.readOutlineTx(tx, project),
+        storyStore.readStoryTx(tx, project),
+        readWorkflowSyncObjects(tx, branchId),
+        readReferenceHistory(tx, branchId),
+        publicationRows(tx, branchId),
+      ])
+    return { manuscript, brief, settings, outline, story, workflow, reference, publications }
   })
 }
 
@@ -1107,6 +1225,7 @@ const outlineStore = createOutlineOfflineStore({
   getProjectVersion,
   getSettingsHead,
   getSettingsVersion,
+  readReferenceHistory,
   readStoryOutlinePromisesTx: storyStore.readStoryOutlinePromisesTx,
   readPublication,
   markPublication,
@@ -1135,6 +1254,8 @@ export async function validateSyncedObject(
     return validateOutlineSyncObject(project.branch.id, objectId, value)
   if (objectId.startsWith('story:') || objectId.startsWith('story-version:'))
     return validateStorySyncObject(project.branch.id, objectId, value)
+  if (objectId.startsWith('reference-card:') || objectId.startsWith('reference-card-version:'))
+    return validateReferenceSyncObject(project.branch.id, objectId, value, manuscriptHash)
   if (objectId.startsWith('workflow-inspection:') || objectId.startsWith('workflow-completion:'))
     return workflowSyncEntry(project.branch.id, objectId, value).object
   if (value === null && objectId.startsWith('chapter:')) {
@@ -1220,6 +1341,8 @@ export function applySyncedObject(
     return outlineStore.applyOutlineObject(projectId, object, expected, options)
   if (object?.kind === 'story-head' || object?.kind === 'story-version')
     return storyStore.applyStoryObject(projectId, object, expected, options)
+  if (object?.kind === 'reference-card-head' || object?.kind === 'reference-card-version')
+    return applyReferenceObject(projectId, objectId, object, expected, options)
   if (object?.kind === 'workflow-inspection' || object?.kind === 'workflow-completion')
     return applyWorkflowObject(projectId, objectId, object, expected, options)
   const stores = [...manuscriptStores, 'publications', 'storyChapterAliases'] satisfies Store[]
@@ -1617,6 +1740,14 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
       invalid(error instanceof Error ? error.message : '设定历史格式无效。')
     }
   }
+  let reference_history: ReferenceHistory | undefined
+  if (pack.reference_history != null) {
+    try {
+      reference_history = await validateReferenceHistory(pack.reference_history, branch.id, manuscriptHash)
+    } catch (error) {
+      invalid(error instanceof Error ? error.message : '手法卡历史无法读取。')
+    }
+  }
   let outline_history: OutlineHistory | undefined
   if (pack.outline_history != null) {
     try {
@@ -1624,6 +1755,7 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
         projects,
         settings: new Map(settings_history?.versions.map((row) => [row.id, row])),
         chapters: new Set(chaptersById.keys()),
+        references: new Map(reference_history?.versions.map((row) => [row.id, row])),
       })
     } catch (error) {
       invalid(error instanceof Error ? error.message : '大纲历史格式无效。')
@@ -1646,14 +1778,6 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
       })
     } catch (error) {
       invalid(error instanceof Error ? error.message : '故事档案无法读取。')
-    }
-  }
-  let reference_history: ReferenceHistory | undefined
-  if (pack.reference_history != null) {
-    try {
-      reference_history = await validateReferenceHistory(pack.reference_history, branch.id, manuscriptHash)
-    } catch (error) {
-      invalid(error instanceof Error ? error.message : '手法卡历史无法读取。')
     }
   }
   return {

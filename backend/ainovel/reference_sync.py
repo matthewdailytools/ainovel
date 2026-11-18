@@ -176,6 +176,7 @@ def _native_catalog(tx, branch_id):
     for row in rows:
         content = json.loads(row["payload"])
         lineage = {}
+        active = {}
         snapshots = [*content.get("history", []), {**content, "revision": row["revision"]}]
         for snapshot in sorted(snapshots, key=lambda value: value["revision"]):
             # Old scope-less history cannot establish which work authorized the transfer.
@@ -200,9 +201,13 @@ def _native_catalog(tx, branch_id):
                     content["source"],
                 )
                 lineage[card_id] = versions[version.id] = version
+                if previous is None or version.model_dump(
+                    exclude={"id", "parent_id", "revision"}
+                ) != previous.model_dump(exclude={"id", "parent_id", "revision"}):
+                    active[card_id] = version.id
                 if version.assessment == "ready":
                     excerpts[version.id] = card["evidence"]
-        heads.update({(row["id"], identifier): value.id for identifier, value in lineage.items()})
+        heads.update({(row["id"], identifier): value for identifier, value in active.items()})
     return versions, heads, excerpts
 
 
@@ -303,7 +308,8 @@ def observe_reference_version(tx, branch_id, version, receipt):
         raise DomainError("sync_reference", "同一正式手法卡修订已存在不同内容。", 409)
     tx.execute(
         "INSERT INTO portable_reference_cards VALUES(?,?,?,?,?,?) ON CONFLICT(branch_id,id) DO UPDATE SET "
-        "source_device=COALESCE(portable_reference_cards.source_device,excluded.source_device),"
+        "source_device=CASE WHEN portable_reference_cards.sequence IS NULL "
+        "THEN COALESCE(portable_reference_cards.source_device,excluded.source_device) ELSE excluded.source_device END,"
         "change_id=excluded.change_id,sequence=excluded.sequence "
         "WHERE portable_reference_cards.sequence IS NULL OR excluded.sequence<portable_reference_cards.sequence",
         (

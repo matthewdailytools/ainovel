@@ -150,8 +150,24 @@ function parseVersion(value: unknown) {
 }
 
 export type ArchivedReferenceCard = ReturnType<typeof parseVersion>
-type ReferenceScope = { session_id: string; card_id: string }
-const cardId = (scope: ReferenceScope) => JSON.stringify([scope.session_id, scope.card_id])
+export type ReferenceCardFields = NonNullable<ArchivedReferenceCard['card']>
+type Digest = (data: string) => Promise<string>
+export type ReferenceScope = { session_id: string; card_id: string }
+export type ReferenceCardHead = ReferenceScope & { revision_id: string }
+const format = 'ainovel-manuscript-sync/1' as const
+export type ReferenceCardVersionObject = {
+  format: typeof format
+  kind: 'reference-card-version'
+  branch_id: string
+  version: ArchivedReferenceCard
+}
+export type ReferenceCardHeadObject = ReferenceCardHead & {
+  format: typeof format
+  kind: 'reference-card-head'
+  branch_id: string
+}
+export type ReferenceSyncObject = ReferenceCardVersionObject | ReferenceCardHeadObject
+export const referenceCardKey = (scope: ReferenceScope) => JSON.stringify([scope.session_id, scope.card_id])
 const citationKeys = [
   'book_id',
   'unit_id',
@@ -161,37 +177,139 @@ const citationKeys = [
   'selection_sha256',
 ] as const
 
-export async function validateReferenceHistory(
-  input: unknown,
-  branchId: string,
-  digest: (data: string) => Promise<string>,
+export async function referenceHeadObjectId(branchId: string, scope: ReferenceScope, digest: Digest) {
+  return `reference-card:${await digest(compactJSON([branchId, scope.session_id, scope.card_id]))}`
+}
+
+function referenceHead(row: Record<string, unknown>): ReferenceCardHead {
+  return {
+    session_id: identifier(row.session_id),
+    card_id: identifier(row.card_id),
+    revision_id: hash(row.revision_id),
+  }
+}
+
+export async function validateReferenceSyncObject(
+  work: string,
+  objectId: string,
+  payload: unknown,
+  digest: Digest,
+): Promise<ReferenceSyncObject> {
+  const isVersion = objectId.startsWith('reference-card-version:')
+  const row = fields(payload, [
+    'format',
+    'kind',
+    'branch_id',
+    ...(isVersion ? ['version'] : ['session_id', 'card_id', 'revision_id']),
+  ])
+  if (row.format !== format || row.branch_id !== work) invalid('云端手法卡与当前工作版本不符。')
+  if (isVersion && row.kind === 'reference-card-version') {
+    const version = parseVersion(row.version)
+    const { id, ...values } = version
+    if (
+      objectId !== `reference-card-version:${id}` ||
+      (await digest(compactJSON([work, values]))) !== id ||
+      version.parent_id === id
+    )
+      invalid('手法卡正式修订编号与内容不匹配。')
+    return { format, kind: 'reference-card-version', branch_id: work, version }
+  }
+  if (!isVersion && row.kind === 'reference-card-head') {
+    const head = referenceHead(row)
+    if (objectId !== (await referenceHeadObjectId(work, head, digest)))
+      invalid('云端手法卡采用头指向另一条记录。')
+    return { format, kind: 'reference-card-head', branch_id: work, ...head }
+  }
+  return invalid('云端手法卡格式无效。')
+}
+
+export function referenceSyncSignature(object: ReferenceSyncObject) {
+  return compactJSON(object)
+}
+
+function requireEarlierCard(version: ArchivedReferenceCard, parent: ArchivedReferenceCard | undefined) {
+  if (
+    !parent ||
+    referenceCardKey(parent) !== referenceCardKey(version) ||
+    parent.revision >= version.revision
+  )
+    return invalid('手法卡父修订不是同一卡片的较早版本。')
+  return parent
+}
+
+function confirmCitation(version: ArchivedReferenceCard, prior: ArchivedReferenceCard['citation']) {
+  if (prior && version.citation && citationKeys.some((key) => prior[key] !== version.citation?.[key]))
+    invalid('手法卡的原始选段在同一会话中发生变化。')
+}
+
+export function validateReferenceVersionParent(
+  version: ArchivedReferenceCard,
+  lookup: (id: string) => ArchivedReferenceCard | undefined,
 ) {
+  if (!version.parent_id) return
+  let parent = requireEarlierCard(version, lookup(version.parent_id))
+  if (version.citation) {
+    while (parent.parent_id && !parent.citation) parent = requireEarlierCard(parent, lookup(parent.parent_id))
+    confirmCitation(version, parent.citation)
+  }
+}
+
+export async function createEditedReferenceVersion(
+  branchId: string,
+  base: ArchivedReferenceCard,
+  card: ReferenceCardFields,
+  digest: Digest,
+) {
+  if (base.assessment !== 'ready' || !base.citation || !base.card)
+    return invalid('请从带准确引用地址的已保存手法卡开始。')
+  if (cardFields.some((key) => !card[key].trim()))
+    return invalid('请填齐观察、解释、手法、适用条件和须替换处再确认。')
+  const { id: parent_id, ...before } = base
+  const version = { ...before, parent_id, revision: base.revision + 1, card }
+  return parseVersion({ ...version, id: await digest(compactJSON([branchId, version])) })
+}
+
+export function describeReferenceVersion(version: ArchivedReferenceCard) {
+  const { card, citation } = version
+  if (!card || !citation)
+    return [
+      `卡片 ${version.card_id} · 修订 ${version.revision}`,
+      version.assessment === 'archived' ? '已归档' : `未完成 · 缺 ${version.missing_fields.join('、')}`,
+    ].join('\n')
+  return [
+    `修订 ${version.revision} · 来源 ${citation.title}`,
+    `观察　${card.observation}`,
+    `解释　${card.interpretation}`,
+    `可迁移手法　${card.technique}`,
+    `适用条件　${card.conditions}`,
+    `须替换处　${card.exceptions}`,
+  ].join('\n')
+}
+
+export async function validateReferenceHistory(input: unknown, branchId: string, digest: Digest) {
   const history = fields(input, ['adopted_heads', 'versions', 'source_devices', 'excerpts'])
   const versions = rows(history.versions, 5000, 1).map(parseVersion)
   const indexed = validateVersionGraph(versions, null, '手法卡')
   const adopted_heads = rows(history.adopted_heads, 5000).map((value) => {
     const head = fields(value, ['session_id', 'card_id', 'revision_id'])
-    const row = {
-      session_id: identifier(head.session_id),
-      card_id: identifier(head.card_id),
-      revision_id: hash(head.revision_id),
-    }
+    const row = referenceHead(head)
     const version = indexed.get(row.revision_id)
-    if (!version || cardId(version) !== cardId(row)) invalid('手法卡采用头指向另一条记录。')
+    if (!version || referenceCardKey(version) !== referenceCardKey(row))
+      invalid('手法卡采用头指向另一条记录。')
     return row
   })
-  if (new Set(adopted_heads.map(cardId)).size !== adopted_heads.length) invalid('手法卡档案中有重复采用头。')
+  if (new Set(adopted_heads.map(referenceCardKey)).size !== adopted_heads.length)
+    invalid('手法卡档案中有重复采用头。')
 
   const citations = new Map<string, ArchivedReferenceCard['citation']>()
   for (const { id, ...version } of [...versions].sort((left, right) => left.revision - right.revision)) {
     if ((await digest(compactJSON([branchId, version]))) !== id)
       invalid('手法卡正式修订编号与内容或工作版本不一致。')
-    const parent = version.parent_id ? indexed.get(version.parent_id) : undefined
-    if (parent && (cardId(parent) !== cardId(version) || parent.revision >= version.revision))
-      invalid('手法卡父修订不是同一卡片的较早版本。')
+    const parent = version.parent_id
+      ? requireEarlierCard({ id, ...version }, indexed.get(version.parent_id))
+      : undefined
     const prior = parent && citations.get(parent.id)
-    if (prior && version.citation && citationKeys.some((key) => prior[key] !== version.citation?.[key]))
-      invalid('手法卡的原始选段在同一会话中发生变化。')
+    if (prior) confirmCitation({ id, ...version }, prior)
     citations.set(id, version.citation ?? prior ?? null)
   }
   const source_devices = Object.fromEntries(

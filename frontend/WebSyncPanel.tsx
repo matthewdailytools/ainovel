@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { CloudAttachments } from './CloudAttachments'
+import { SyncScopePreview } from './SyncScopePreview'
 import type { LocalProject } from './offlineStore'
 import { describeOutlineVersion } from './outlineSyncModel'
 import { describeProjectVersion } from './projectSyncModel'
 import { describeSettingsVersion } from './settingsSyncModel'
 import { describeStoryVersion } from './storySyncModel'
+import { describeReferenceVersion } from './referenceArchive'
 import { readSyncState, setSyncEnabled, type SyncPayload } from './syncClient'
 import {
   cloudScope,
@@ -39,6 +41,13 @@ function excerpt(value: SyncPayload | null, comparison: Comparison) {
       ({ version }) => version.id === value.revision_id && version.record_id === value.record_id,
     )
     return source ? describeStoryVersion(source.version) : '尚未取得该版本的故事记录来源。'
+  }
+  if (value.kind === 'reference-card-head') {
+    const source = comparison.reference?.versions.find(
+      ({ id, session_id, card_id }) =>
+        id === value.revision_id && session_id === value.session_id && card_id === value.card_id,
+    )
+    return source ? describeReferenceVersion(source) : '尚未取得该手法卡的源修订。'
   }
   const part = value.head ?? value.novel
   if (part && typeof part === 'object' && !Array.isArray(part)) {
@@ -139,7 +148,7 @@ export function WebSyncPanel({
   return (
     <details>
       <summary>作品云同步</summary>
-      <p>同步目录、章稿、已确认立项、已确认设定和随稿依据。设备凭据仅用于本次页面。</p>
+      <SyncScopePreview title={project.novel.title} />
       <p>
         工作版本编号 <code>{project.branch.id}</code>
       </p>

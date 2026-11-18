@@ -4,9 +4,9 @@ from hashlib import sha256
 import json
 from typing import Literal
 
-from pydantic import Field, JsonValue, ValidationError
+from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
-from .book_completion import CompletionRequest, KIND as COMPLETION, _materials, basis_fingerprint
+from .book_completion import CompletionRequest, KIND as COMPLETION, basis_fingerprint, material_chunks
 from .db import DomainError
 from .domain import utf16_slice
 from .models import Input
@@ -120,15 +120,21 @@ class CompletionCheck(Input):
     detail: str
 
 
-class ArchivedCompletion(Input):
+class CompletionProof(Input):
     id: Identifier
     created: float = Field(ge=0, allow_inf_nan=False)
     chapter_bindings: list[ChapterBinding] = Field(min_length=1, max_length=5000)
     basis_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     checks: list[CompletionCheck] = Field(min_length=6, max_length=6)
     manifest: DeliveryManifest
-    materials: dict[str, str] = Field(min_length=4, max_length=4)
     review: CompletionRequest
+
+
+class ArchivedCompletion(CompletionProof):
+    materials: dict[str, str] = Field(min_length=4, max_length=4)
+
+
+COMPLETION_WIRE = TypeAdapter(ArchivedCompletion | CompletionProof)
 
 
 class WorkflowHistory(Input):
@@ -149,7 +155,7 @@ def workflow_object(branch_id, entry):
         "format": FORMAT,
         "kind": "workflow-inspection" if isinstance(entry, ArchivedInspection) else "workflow-completion",
         "branch_id": branch_id,
-        "entry_json": entry.model_dump_json(),
+        "entry_json": entry.model_dump_json(exclude={"materials"}),
     }
 
 
@@ -158,8 +164,11 @@ def parse_workflow_object(branch_id, object_id, payload, tombstone):
         raise DomainError("sync_workflow", "已归档的体检或交付历史不能删除。", 409)
     try:
         value = WorkflowObject.model_validate(payload)
-        model = ArchivedInspection if value.kind == "workflow-inspection" else ArchivedCompletion
-        entry = model.model_validate_json(value.entry_json)
+        entry = (
+            ArchivedInspection.model_validate_json(value.entry_json)
+            if value.kind == "workflow-inspection"
+            else COMPLETION_WIRE.validate_json(value.entry_json)
+        )
     except ValidationError as error:
         raise DomainError("sync_workflow", "云端体检或交付历史格式无效。", 409) from error
     if value.branch_id != branch_id or object_id != f"{value.kind}:{entry.id}":
@@ -167,25 +176,28 @@ def parse_workflow_object(branch_id, object_id, payload, tombstone):
     return entry
 
 
-def validate_workflow_object(entry, branch_id, revision, inspection):
+def same_workflow_entry(left, right):
+    if isinstance(left, CompletionProof) and isinstance(right, CompletionProof):
+        return left.model_dump(exclude={"materials"}) == right.model_dump(exclude={"materials"})
+    return left == right
+
+
+def validate_workflow_object(entry, branch_id, revision, inspection, *, hydrate=False):
+    def require_revision(identifier):
+        source = revision(identifier)
+        if not source:
+            raise DomainError("sync_workflow_dependency", f"历史记录尚缺原章稿修订 {identifier}。", 409)
+        return source
+
     if isinstance(entry, ArchivedInspection):
-        history = WorkflowHistory(inspections=[entry])
-    else:
-        report = inspection(entry.manifest.inspection_id)
-        if not isinstance(report, ArchivedInspection):
-            raise DomainError("sync_workflow_dependency", "完本交付尚缺原全书体检单。", 409)
-        history = WorkflowHistory(inspections=[report], completions=[entry])
-    revisions = {}
-    for item in [*history.inspections, *history.completions]:
-        for binding in item.chapter_bindings:
-            if binding.revision_id not in revisions:
-                source = revision(binding.revision_id)
-                if not source:
-                    raise DomainError(
-                        "sync_workflow_dependency", f"历史记录尚缺原章稿修订 {binding.revision_id}。", 409
-                    )
-                revisions[binding.revision_id] = source
-    validate_workflow_history(history, branch_id, revisions)
+        _validate_inspection(entry, require_revision)
+        return entry
+    report = inspection(entry.manifest.inspection_id)
+    if not isinstance(report, ArchivedInspection):
+        raise DomainError("sync_workflow_dependency", "完本交付尚缺原全书体检单。", 409)
+    if report.id == entry.id:
+        _bad("稿件包报告的来源编号重复。")
+    return _validate_completion(entry, branch_id, report, require_revision, hydrate=hydrate)
 
 
 def _digest(text):
@@ -203,15 +215,16 @@ def _bad(message):
     raise DomainError("manuscript_workflow", message, 409)
 
 
-def _chapters(manifest, bindings, revisions):
+def _chapters(manifest, bindings, revision_for, retain_content):
     if len(manifest) != len(bindings) or len({item.id for item in bindings}) != len(bindings):
         _bad("稿件包报告的正文清单和来源修订不一致。")
     result = {}
     for chapter, binding in zip(manifest, bindings, strict=True):
-        revision = revisions.get(binding.revision_id)
+        revision = revision_for(binding.revision_id)
         if (
             (chapter.id, chapter.revision, chapter.sha256) != (binding.id, binding.revision, binding.sha256)
             or not revision
+            or revision.id != binding.revision_id
             or (revision.chapter_id, revision.revision, revision.sha256)
             != (binding.id, binding.revision, binding.sha256)
             or _digest(revision.content) != binding.sha256
@@ -220,9 +233,11 @@ def _chapters(manifest, bindings, revisions):
         result[chapter.id] = {
             "title": chapter.title,
             "id": chapter.id,
-            "content": revision.content,
             "revision": revision.revision,
+            "revision_id": revision.id,
         }
+        if chapter.id in retain_content:
+            result[chapter.id]["content"] = revision.content
     return result
 
 
@@ -246,107 +261,139 @@ def validate_workflow_history(history, branch_id, revisions):
     all_ids = [*reports, *(entry.id for entry in history.completions)]
     if len(all_ids) != len(set(all_ids)) or len(reports) != len(history.inspections):
         _bad("稿件包报告的来源编号重复。")
-    for archived in history.inspections:
-        report = archived.report
+    for report in history.inspections:
+        _validate_inspection(report, revisions.get)
+    for completion in history.completions:
+        _validate_completion(
+            completion, branch_id, reports.get(completion.manifest.inspection_id), revisions.get
+        )
+
+
+def _validate_inspection(archived, revision_for):
+    report = archived.report
+    if (
+        (report.scope == "book") != (report.scope_id is None)
+        or (report.scope == "chapter" and [row.id for row in report.chapters] != [report.scope_id])
+        or (report.scope == "volume" and not report.chapters)
+    ):
+        _bad("稿件包的体检范围和章稿清单不一致。")
+    retain = {
+        source.chapter_id
+        for item in report.items
+        if item.author_review
+        for source in item.author_review.evidence
+    }
+    chapters = _chapters(report.chapters, archived.chapter_bindings, revision_for, retain)
+    manifest = [chapter.model_dump() for chapter in report.chapters]
+    if [item.check_id for item in report.items] != [f"{number:02d}" for number in range(1, 11)]:
+        _bad("稿件包体检单缺少十项检查或编号顺序错误。")
+    for item in report.items:
+        if report.scope != "book" and "outline" in item.basis and not isinstance(item.basis["outline"], dict):
+            _bad("稿件包分范围体检的章纲依据格式无效。")
+        expected = _item(item.check_id, item.summary, item.basis, manifest=manifest, scope=report.scope)
+        review = item.author_review
         if (
-            (report.scope == "book") != (report.scope_id is None)
-            or (report.scope == "chapter" and [row.id for row in report.chapters] != [report.scope_id])
-            or (report.scope == "volume" and not report.chapters)
-        ):
-            _bad("稿件包的体检范围和章稿清单不一致。")
-        chapters = _chapters(report.chapters, archived.chapter_bindings, revisions)
-        manifest = [chapter.model_dump() for chapter in report.chapters]
-        if [item.check_id for item in report.items] != [f"{number:02d}" for number in range(1, 11)]:
-            _bad("稿件包体检单缺少十项检查或编号顺序错误。")
-        for item in report.items:
-            if (
-                report.scope != "book"
-                and "outline" in item.basis
-                and not isinstance(item.basis["outline"], dict)
-            ):
-                _bad("稿件包分范围体检的章纲依据格式无效。")
-            expected = _item(item.check_id, item.summary, item.basis, manifest=manifest, scope=report.scope)
-            review = item.author_review
-            if (
-                expected["basis_sha256"] != item.basis_sha256
-                or (item.can_mark_not_applicable and item.check_id not in {"05", "07"})
-                or (item.status == "not_applicable" and not item.can_mark_not_applicable)
-                or (review and review.check_id != item.check_id)
-                or (review and review.status == "red" and item.status != "red")
-                or (
-                    item.status in {"green", "not_applicable"}
-                    and (item.check_id in {"01", "02", "08", "10"} or item.status == "not_applicable")
-                    and (not review or review.status != item.status)
-                )
-            ):
-                _bad("稿件包体检单的检查依据或作者裁定不一致。")
-            if review:
-                _sources(review.evidence, chapters)
-        if report.basis_sha256 != _sha(
-            [report.scope, report.scope_id, [item.basis_sha256 for item in report.items]]
-        ):
-            _bad("稿件包体检单的复核依据校验失败。")
-    for record in history.completions:
-        manifest = record.manifest
-        if manifest.branch_id != branch_id or record.basis_sha256 != record.review.basis_sha256:
-            _bad("稿件包完本记录归属或原作者复核依据不一致。")
-        if tuple(check.id for check in record.checks) != CHECKS or any(
-            check.status != "green" for check in record.checks
-        ):
-            _bad("稿件包的正式完本缺少原六项通过记录。")
-        chapters = _chapters(manifest.chapters, record.chapter_bindings, revisions)
-        report = reports.get(manifest.inspection_id)
-        if (
-            not report
-            or report.report.scope != "book"
-            or report.chapter_bindings != record.chapter_bindings
-            or any(item.status not in {"green", "not_applicable"} for item in report.report.items)
-        ):
-            _bad("稿件包的完本记录缺少与原章稿对应的通过体检单。")
-        declared = [chapter.model_dump(exclude={"chars", "stale"}) for chapter in report.report.chapters]
-        stale_outline = report.report.items[4].basis.get("outline_stale")
-        # The native delivery fingerprint encodes SQLite's integer stale flags.
-        stale_chapters = [int(chapter.stale) for chapter in report.report.chapters]
-        if (
-            declared != [chapter.model_dump() for chapter in manifest.chapters]
-            or not isinstance(stale_outline, list)
-            or any(not isinstance(reason, str) for reason in stale_outline)
-            or any(stale_chapters)
-            or basis_fingerprint(
-                manifest.model_dump(
-                    exclude={"ai_preparation_id", "files", "spoiler_scope", "sample_chapter_ids"}
-                ),
-                stale_chapters,
-                stale_outline,
-                [item.status for item in report.report.items],
+            expected["basis_sha256"] != item.basis_sha256
+            or (item.can_mark_not_applicable and item.check_id not in {"05", "07"})
+            or (item.status == "not_applicable" and not item.can_mark_not_applicable)
+            or (review and review.check_id != item.check_id)
+            or (review and review.status == "red" and item.status != "red")
+            or (
+                item.status in {"green", "not_applicable"}
+                and (item.check_id in {"01", "02", "08", "10"} or item.status == "not_applicable")
+                and (not review or review.status != item.status)
             )
-            != record.basis_sha256
         ):
-            _bad("稿件包的完本清单与原体检单或冻结完本依据不一致。")
-        review = record.review
-        for closure in (review.ending, review.characters, review.promises):
-            _sources(closure.sources, chapters)
-        if (
-            not review.read_note.strip()
-            or not all(row.note.strip() for row in (review.ending, review.characters, review.promises))
-            or not review.materials_reviewed
-            or manifest.spoiler_scope != review.spoiler_scope
-            or manifest.sample_chapter_ids != review.sample_chapter_ids
-            or manifest.ai_preparation_id != review.preparation_id
-        ):
-            _bad("稿件包完本记录缺少一致的作者通读、收束及材料核对。")
+            _bad("稿件包体检单的检查依据或作者裁定不一致。")
+        if review:
+            _sources(review.evidence, chapters)
+    if report.basis_sha256 != _sha(
+        [report.scope, report.scope_id, [item.basis_sha256 for item in report.items]]
+    ):
+        _bad("稿件包体检单的复核依据校验失败。")
+
+
+def _validate_completion(record, branch_id, report, revision_for, *, hydrate=False):
+    manifest = record.manifest
+    if manifest.branch_id != branch_id or record.basis_sha256 != record.review.basis_sha256:
+        _bad("稿件包完本记录归属或原作者复核依据不一致。")
+    if tuple(check.id for check in record.checks) != CHECKS or any(
+        check.status != "green" for check in record.checks
+    ):
+        _bad("稿件包的正式完本缺少原六项通过记录。")
+    if (
+        not report
+        or report.report.scope != "book"
+        or report.chapter_bindings != record.chapter_bindings
+        or any(item.status not in {"green", "not_applicable"} for item in report.report.items)
+    ):
+        _bad("稿件包的完本记录缺少与原章稿对应的通过体检单。")
+    declared = [chapter.model_dump(exclude={"chars", "stale"}) for chapter in report.report.chapters]
+    stale_outline = report.report.items[4].basis.get("outline_stale")
+    # The native delivery fingerprint encodes SQLite's integer stale flags.
+    stale_chapters = [int(chapter.stale) for chapter in report.report.chapters]
+    if (
+        declared != [chapter.model_dump() for chapter in manifest.chapters]
+        or not isinstance(stale_outline, list)
+        or any(not isinstance(reason, str) for reason in stale_outline)
+        or any(stale_chapters)
+        or basis_fingerprint(
+            manifest.model_dump(
+                exclude={"ai_preparation_id", "files", "spoiler_scope", "sample_chapter_ids"}
+            ),
+            stale_chapters,
+            stale_outline,
+            [item.status for item in report.report.items],
+        )
+        != record.basis_sha256
+    ):
+        _bad("稿件包的完本清单与原体检单或冻结完本依据不一致。")
+    review = record.review
+    closures = (review.ending, review.characters, review.promises)
+    evidence = [source for closure in closures for source in closure.sources]
+    chapters = _chapters(
+        manifest.chapters, record.chapter_bindings, revision_for, {source.chapter_id for source in evidence}
+    )
+    _sources(evidence, chapters)
+    if (
+        not review.read_note.strip()
+        or not all(row.note.strip() for row in closures)
+        or not review.materials_reviewed
+        or manifest.spoiler_scope != review.spoiler_scope
+        or manifest.sample_chapter_ids != review.sample_chapter_ids
+        or manifest.ai_preparation_id != review.preparation_id
+    ):
+        _bad("稿件包完本记录缺少一致的作者通读、收束及材料核对。")
+    if isinstance(record, ArchivedCompletion):
         checked_materials(manifest.model_dump(), record.materials)
-        rules = report.report.items[4].basis.get("rules")
-        if not isinstance(rules, list) or any(
-            not isinstance(item, dict)
-            or not all(isinstance(item.get(key), str) for key in ("title", "detail"))
-            for item in rules
-        ):
-            _bad("稿件包交付的设定册缺少原体检设定依据。")
-        if record.materials != _materials(
-            manifest.model_dump(), list(chapters.values()), {"items": rules}, review
-        ):
+        hydrate = False
+    rules = report.report.items[4].basis.get("rules")
+    if not isinstance(rules, list) or any(
+        not isinstance(item, dict) or not all(isinstance(item.get(key), str) for key in ("title", "detail"))
+        for item in rules
+    ):
+        _bad("稿件包交付的设定册缺少原体检设定依据。")
+
+    def read_content(chapter):
+        return chapter["content"] if "content" in chapter else revision_for(chapter["revision_id"]).content
+
+    rendered = material_chunks(
+        manifest.model_dump(), list(chapters.values()), {"items": rules}, review, read_content
+    )
+    if rendered is None or set(rendered) != set(manifest.files):
+        _bad("稿件包的交付材料与冻结稿件、设定或作者输入不一致。")
+    materials = {}
+    for name, chunks in rendered.items():
+        digest = sha256()
+        if hydrate:
+            parts = list(chunks)
+            materials[name] = "".join(parts)
+            chunks = parts
+        for chunk in chunks:
+            digest.update(chunk.encode("utf-8"))
+        if digest.hexdigest() != manifest.files[name]:
             _bad("稿件包的交付材料与冻结稿件、设定或作者输入不一致。")
+    return ArchivedCompletion(**record.model_dump(), materials=materials) if hydrate else record
 
 
 def _bindings(tx, branch_id, chapters):

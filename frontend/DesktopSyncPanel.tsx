@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react'
 import { api } from './api'
 import type { Notify } from './App'
 import { CloudAttachments } from './CloudAttachments'
+import { SyncScopePreview } from './SyncScopePreview'
 import { describeProjectVersion, type ProjectVersion } from './projectSyncModel'
+import type { ArchivedReferenceCard } from './referenceArchive'
+import { referenceAssessmentLabel, referenceFieldLabels } from './ReferenceCardHistory'
 
 type Conflict = { id: string; object_id: string }
 type FormalSource = { id: string; device_id: string; change_id: string; sequence: number }
@@ -65,6 +68,7 @@ type Comparison = {
     }
   >
   story_versions?: Record<string, StoryVersion>
+  reference_versions?: Record<string, ArchivedReferenceCard>
   remote: {
     head_revision: string
     parent_revision: string | null
@@ -109,6 +113,32 @@ function readable(side: Side, comparison: Comparison) {
         `${category.title}${category.skipped ? ' · 暂缓' : ''}`,
         ...category.items.map((item) => `${item.title} · ${item.detail}`),
       ]),
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
+  if (side.kind === 'reference-card-head' && side.revision_id) {
+    const version = comparison.reference_versions?.[side.revision_id]
+    if (!version) return '尚未取得该版本的手法卡来源。'
+    const { card, citation } = version
+    return [
+      `修订 ${version.revision} · ${referenceAssessmentLabel(version.assessment)}`,
+      `版本 SHA-256 ${version.id}`,
+      version.goal && `学习目标 ${version.goal}`,
+      ...(card
+        ? (['observation', 'interpretation', 'technique', 'conditions', 'exceptions'] as const).map(
+            (field) => `${referenceFieldLabels[field]} · ${card[field]}`,
+          )
+        : []),
+      version.missing_fields.length &&
+        `待补 ${version.missing_fields.map((field) => referenceFieldLabels[field]).join('、')}`,
+      citation && `资料《${citation.title}》· 单元 ${citation.unit_id}`,
+      citation && `选段 UTF-16 ${citation.selection_start}–${citation.selection_end}`,
+      citation &&
+        (citation.evidence_start === null
+          ? '原句在选段中有多个匹配位置'
+          : `证据 UTF-16 ${citation.evidence_start}–${citation.evidence_end}`),
+      citation && `证据 SHA-256 ${citation.evidence_sha256}`,
     ]
       .filter(Boolean)
       .join('\n')
@@ -209,9 +239,7 @@ export function DesktopSyncPanel({
   return (
     <section className="card" aria-label="作品云同步">
       <h2>作品云同步</h2>
-      <p>
-        同步当前工作版本的目录、章稿、已确认立项、设定、大纲和故事记录，以及随稿依据。启用前请确认云服务及作品范围。
-      </p>
+      <SyncScopePreview />
       <p>
         工作版本编号 <code>{branchId}</code>
       </p>

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 
-test('拆解台核对保存卡片，稿件包仅选带已预览的原句', async ({ page }) => {
+test('拆解台核对保存卡片，稿件包仅选带已预览的原句', async ({ page, browser }) => {
   await page.goto('/')
   const { csrf } = await (await page.request.get('/api/session')).json()
   const headers = { 'X-Ainovel-CSRF': csrf }
@@ -76,4 +76,98 @@ test('拆解台核对保存卡片，稿件包仅选带已预览的原句', async
   const opted = JSON.parse(await readFile((await (await optedDownload).path())!, 'utf8'))
   expect(Object.values(opted.reference_history.excerpts)).toEqual(['😀渡口'])
   expect(JSON.stringify(opted)).not.toContain('半幅旧图')
+
+  if (process.env.AINOVEL_SYNC_E2E !== '1') return
+  const branch = `/api/branches/${branch_id}`
+  const cloud = 'http://127.0.0.1:8888'
+  async function grant(device_id: string) {
+    const response = await page.request.post(`${cloud}/api/sync/works/${branch_id}/devices`, {
+      headers: { Authorization: 'Bearer e2e-test-only-provisioning-token' },
+      data: { device_id },
+    })
+    expect(response.ok(), await response.text()).toBe(true)
+    return (await response.json()).token as string
+  }
+  const desktopToken = await grant('desktop-reference')
+  const webToken = await grant('web-reference')
+  async function desktopSync(action: 'enable' | 'run') {
+    const response = await page.request.post(`${branch}/desktop-sync/${action}`, {
+      headers,
+      data: { origin: cloud, token: desktopToken },
+    })
+    expect(response.ok(), await response.text()).toBe(true)
+    return response.json()
+  }
+  await desktopSync('enable')
+  await desktopSync('run')
+
+  const reader = await browser.newContext()
+  try {
+    const web = await reader.newPage()
+    await web.goto('http://127.0.0.1:8877/offline/')
+    await expect(web.getByText('离线页面就绪')).toBeVisible()
+    const baseline = structuredClone(defaultPackage)
+    delete baseline.reference_history
+    await web.getByLabel('导入新离线作品').setInputFiles({
+      name: '共同作品.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(baseline)),
+    })
+    await web.getByText('作品云同步', { exact: true }).click()
+    await web.getByLabel('同步服务地址').fill(cloud)
+    await web.getByLabel('设备编号').fill('web-reference')
+    await web.getByLabel('设备凭据').fill(webToken)
+    await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
+    const sync = web.getByRole('button', { name: '同步当前工作版本', exact: true })
+    await sync.click()
+    const webArchive = web.getByLabel('离线手法卡历史')
+    await webArchive.getByText('手法卡历史', { exact: true }).click()
+    const choose = webArchive.getByRole('combobox', { name: '手法卡修订' })
+    await choose.selectOption({ label: '解析一层可信证据 · 修订 1 · 可引用' })
+    await expect(webArchive.getByText('档案保留了引用地址。这里没有附带原文。')).toBeVisible()
+    await reader.setOffline(true)
+    await webArchive.getByRole('button', { name: '编辑手法卡摘要' }).click()
+    await webArchive.getByLabel('可迁移手法').fill('依据缺口推动下一次会面')
+    await webArchive.getByRole('button', { name: '确认手法卡修订' }).click()
+    await expect(webArchive.getByRole('status')).toHaveText('已保存手法卡修订，原出处和历史仍可查。')
+
+    const edited = await page.request.patch(`/api/reference-sessions/${session.id}`, {
+      headers,
+      data: {
+        base_revision: 1,
+        branch_id,
+        goal,
+        cards: [{ ...cards[0], technique: '用矛盾线索制造回旋' }, cards[1]],
+      },
+    })
+    expect(edited.ok(), await edited.text()).toBe(true)
+    expect((await desktopSync('run')).conflicts).toHaveLength(0)
+    await reader.setOffline(false)
+    await sync.click()
+    await web.getByRole('button', { name: /^比较冲突/ }).click()
+    const comparison = web.getByRole('region', { name: '云同步冲突比较' })
+    await expect(comparison).toContainText('依据缺口推动下一次会面')
+    await expect(comparison).toContainText('用矛盾线索制造回旋')
+    await expect(comparison).toContainText('解析一层可信证据')
+    web.once('dialog', (dialog) => void dialog.accept())
+    await comparison.getByRole('button', { name: '采用另一提交版' }).click()
+    await expect(comparison).toHaveCount(0)
+    await expect(choose.getByRole('option', { name: '用矛盾线索制造回旋 · 修订 2 · 可引用' })).toHaveCount(1)
+    await desktopSync('run')
+    const nativeCards = await (await page.request.get(`${branch}/reference-cards`)).json()
+    const adopted = nativeCards.find(
+      (row: { adopted: boolean; version: { card_id: string } }) =>
+        row.adopted && row.version.card_id === 'limited-proof',
+    )
+    expect(adopted.version.card.technique).toBe('依据缺口推动下一次会面')
+    const cloudData = await page.request.get(`${cloud}/api/sync/works/${branch_id}/pull?after=0&limit=100`, {
+      headers: { Authorization: `Bearer ${webToken}` },
+    })
+    expect(cloudData.ok(), await cloudData.text()).toBe(true)
+    const raw = await cloudData.text()
+    expect(raw).not.toContain('😀渡口')
+    expect(raw).not.toContain('半幅旧图')
+  } finally {
+    await reader.close()
+  }
 })

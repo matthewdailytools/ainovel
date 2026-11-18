@@ -2754,11 +2754,11 @@ export interface components {
       /** Checks */
       checks: components['schemas']['CompletionCheck'][]
       manifest: components['schemas']['DeliveryManifest']
+      review: components['schemas']['CompletionRequest']
       /** Materials */
       materials: {
         [key: string]: string
       }
-      review: components['schemas']['CompletionRequest']
     }
     /** ArchivedInspection */
     ArchivedInspection: {
@@ -4218,6 +4218,8 @@ export interface components {
       card_id: string
       /** Revision */
       revision: number
+      /** Version Id */
+      version_id?: string | null
       /** Technique */
       technique: string
       /** Conditions */
@@ -4235,6 +4237,8 @@ export interface components {
       card_id: string
       /** Revision */
       revision: number
+      /** Version Id */
+      version_id?: string | null
     }
     /** OutlineGenerationTask */
     OutlineGenerationTask: {

@@ -115,16 +115,19 @@ def export_outline_history(tx, branch_id):
         raise DomainError("manuscript_outline", "本机大纲历史的父链或依赖档案不完整。", 409) from error
 
 
-def validate_outline_history(history, projects, settings, chapters):
+def validate_outline_history(history, projects, settings, chapters, references=None):
     if not history:
         return
     projects = {version.id: version for version in projects.versions} if projects else {}
     settings = {version.id: version for version in settings.versions} if settings else {}
     chapters = {chapter.id: chapter for chapter in chapters}
+    references = {version.id: version for version in references.versions} if references else {}
     for version in history.versions:
         try:
             validate_version(version)
-            validate_version_sources(version, projects.get, settings.get, chapters.get)
+            validate_version_sources(
+                version, projects.get, settings.get, chapters.get, reference_lookup=references.get
+            )
             basis = settings.get(version.settings_version_id)
             actual = {
                 item.id

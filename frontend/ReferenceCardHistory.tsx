@@ -19,13 +19,17 @@ const sources = {
   metadata_only: '仅有引用地址，原文尚未取得',
   no_evidence: '该修订未携带原文依据',
 }
-const fieldLabels = {
+export const referenceFieldLabels = {
   observation: '观察',
   interpretation: '解读',
   technique: '可迁移手法',
   conditions: '适用条件',
   exceptions: '须替换',
   evidence: '原文依据',
+}
+
+export function referenceAssessmentLabel(assessment: ArchivedReferenceCard['assessment']) {
+  return assessments[assessment as keyof typeof assessments]
 }
 
 export function canReadEvidence(row: ReferenceHistoryRow) {
@@ -81,7 +85,7 @@ function CardRevision({
   const { version } = row
   const citation = version.citation
   const state = proof?.source_state ?? row.source_state
-  const assessment = assessments[version.assessment as keyof typeof assessments]
+  const assessment = referenceAssessmentLabel(version.assessment)
   async function readProof() {
     setBusy(true)
     try {
@@ -103,7 +107,7 @@ function CardRevision({
           {(['observation', 'interpretation', 'technique', 'conditions', 'exceptions'] as const).map(
             (key) => (
               <div key={key}>
-                <dt>{fieldLabels[key]}</dt>
+                <dt>{referenceFieldLabels[key]}</dt>
                 <dd>{version.card?.[key]}</dd>
               </div>
             ),
@@ -111,7 +115,7 @@ function CardRevision({
         </dl>
       )}
       {!!version.missing_fields.length && (
-        <p>待补 {version.missing_fields.map((key) => fieldLabels[key]).join('、')}</p>
+        <p>待补 {version.missing_fields.map((key) => referenceFieldLabels[key]).join('、')}</p>
       )}
       {citation && (
         <>

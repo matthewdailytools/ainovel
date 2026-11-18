@@ -30,6 +30,7 @@ from .outline_workspace import (
     _validate,
 )
 from .project_brief import KIND as PROJECT, confirmed_project_tx
+from .reference_fork import fork_reference_cards
 from .setting_review import confirmed_world_basis
 from .story_extraction import rewrite_references
 from .story_graph import graph_snapshot, sources
@@ -701,7 +702,9 @@ def _append_outline(tx, target, plan, basis, confirmed):
     return identifier
 
 
-def _restore_outline(tx, snapshot, current, target, chapters, records, setting_id, project_id, whole):
+def _restore_outline(
+    tx, snapshot, current, target, chapters, records, setting_id, project_id, whole, reference_ids
+):
     source = snapshot["manifest"]
     saved = source["confirmed_outline"]
     if not saved and not source["outline"]:
@@ -734,7 +737,7 @@ def _restore_outline(tx, snapshot, current, target, chapters, records, setting_i
             if saved["setting_basis"]["confirmation_id"]
             else {**basis, "confirmation_id": None, "items": []}
         )
-        cards = _restored_cards(plan, sources)
+        cards = _restored_cards(plan, sources, reference_ids)
         if cards:
             adopted = {**adopted, "reference_cards": cards}
         live = source["outline_live"]
@@ -746,24 +749,52 @@ def _restore_outline(tx, snapshot, current, target, chapters, records, setting_i
         plan = deepcopy(draft["plan"])
         _rebase_outline(plan, chapters, records)
         draft_basis = {**basis, "restored_outline_id": draft["id"]}
-        if cards := _restored_cards(plan, [draft["setting_basis"]]):
+        if cards := _restored_cards(plan, [draft["setting_basis"]], reference_ids):
             draft_basis["reference_cards"] = cards
         draft_id = _append_outline(tx, target, plan, draft_basis, False)
         identifier = identifier or draft_id
     return identifier
 
 
-def _restored_cards(plan, sources):
-    selected = {
-        _card_key(ref) for _, _, chapter in _chapter_plans(plan) for ref in chapter.get("reference_cards", [])
-    }
+def _outline_card_references(plan):
+    for _, _, chapter in _chapter_plans(plan):
+        yield from chapter.get("reference_cards", [])
+
+
+def _restored_cards(plan, sources, reference_ids=None):
+    references = list(_outline_card_references(plan))
+    selected = {_card_key(ref) for ref in references}
     cards = {
         _card_key(card): card
         for basis in sources
         for card in basis.get("reference_cards", [])
         if _card_key(card) in selected
     }
+    if reference_ids:
+        for ref in references:
+            if identifier := ref.get("version_id"):
+                ref["version_id"] = reference_ids[identifier]
+        return [
+            {**card, "version_id": reference_ids[card["version_id"]]} if card.get("version_id") else card
+            for card in cards.values()
+        ]
     return list(cards.values())
+
+
+def _fork_outline_cards(tx, origin, target, source):
+    selected = []
+    for outline in (source["confirmed_outline"], source["outline"]):
+        if not outline:
+            continue
+        cards = _restored_cards(outline["plan"], [outline["setting_basis"]])
+        frozen = {_card_key(card) for card in cards}
+        if any(
+            ref.get("version_id") and _card_key(ref) not in frozen
+            for ref in _outline_card_references(outline["plan"])
+        ):
+            raise DomainError("snapshot_reference", "快照中的大纲缺少手法卡正式修订的冻结摘要。", 409)
+        selected.extend(cards)
+    return fork_reference_cards(tx, origin, target, selected)
 
 
 def _restore_length_targets(tx, snapshot, current, target, chapters, chapter_ids, is_new):
@@ -833,9 +864,19 @@ def _execute_restore(tx, domain, origin, snapshot, current, data):
         setting_id = current["confirmed_setting_id"]
         project_id = project["id"] if project else None
     outline_id = None
+    reference_ids = _fork_outline_cards(tx, origin["id"], target["id"], source) if is_new else {}
     if is_new or snapshot["scope"] != "chapter":
         outline_id = _restore_outline(
-            tx, snapshot, current, target, chapters, records, setting_id, project_id, is_new or shared
+            tx,
+            snapshot,
+            current,
+            target,
+            chapters,
+            records,
+            setting_id,
+            project_id,
+            is_new or shared,
+            reference_ids,
         )
     _restore_length_targets(tx, snapshot, current, target, chapters, set(wanted) | set(scoped), is_new)
     return {
@@ -846,6 +887,11 @@ def _execute_restore(tx, domain, origin, snapshot, current, data):
         "setting_id": setting_id,
         "project_id": project_id,
         "outline_id": outline_id,
+        **(
+            {"reference_sources": {"source_branch_id": origin["id"], "version_ids": reference_ids}}
+            if reference_ids
+            else {}
+        ),
     }
 
 

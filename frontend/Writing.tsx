@@ -1170,8 +1170,9 @@ export function Writing({
             <summary>本章章纲引用的手法卡</summary>
             {cards.map((card) => (
               <OutlineCardSource
-                key={`${card.session_id}/${card.card_id}/${card.revision}`}
+                key={`${card.session_id}/${card.card_id}/${card.revision}/${card.version_id ?? ''}`}
                 card={card}
+                branchId={branch.id}
                 notify={notify}
               />
             ))}
@@ -1836,8 +1837,9 @@ function Candidate({
           ))}
           {outlineBasis.reference_cards?.map((card) => (
             <OutlineCardSource
-              key={`${card.session_id}/${card.card_id}/${card.revision}`}
+              key={`${card.session_id}/${card.card_id}/${card.revision}/${card.version_id ?? ''}`}
               card={card}
+              branchId={branchId}
               notify={notify}
             />
           ))}

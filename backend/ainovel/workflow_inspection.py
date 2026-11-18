@@ -205,6 +205,8 @@ def _rule_reports(tx, branch_id, chapters, confirmation_id):
 
 
 def _card_references(tx, branch_id, chapters):
+    from .reference_sync import read_reference_version
+
     indexed = {chapter["id"]: chapter for chapter in chapters}
     result = []
     for row in tx.execute(
@@ -222,30 +224,42 @@ def _card_references(tx, branch_id, chapters):
         selected = (basis.get("reference_session") or {}).get("card_references", [])
         planned = (basis.get("outline") or {}).get("reference_cards", [])
         addresses = dict.fromkeys(
-            (ref["session_id"], ref["card_id"], ref["revision"]) for ref in [*selected, *planned]
+            (ref["session_id"], ref["card_id"], ref["revision"], ref.get("version_id"))
+            for ref in [*selected, *planned]
         )
-        for session_id, card_id, card_revision in addresses:
-            session = tx.execute("SELECT * FROM reference_sessions WHERE id=?", (session_id,)).fetchone()
-            resolved = None
-            if session:
-                try:
-                    resolved = card_version(
-                        {**dict(session), "payload": json.loads(session["payload"])},
-                        card_id,
-                        card_revision,
-                    )
-                except DomainError as error:
-                    if error.code not in {"reference_card", "reference_card_incomplete"}:
-                        raise
+        for session_id, card_id, card_revision, version_id in addresses:
+            source = None
+            if version_id:
+                version = read_reference_version(tx, branch_id, version_id)
+                if (
+                    version
+                    and version.assessment == "ready"
+                    and (version.session_id, version.card_id, version.revision)
+                    == (session_id, card_id, card_revision)
+                ):
+                    source = version.citation.model_dump()
+            else:
+                session = tx.execute("SELECT * FROM reference_sessions WHERE id=?", (session_id,)).fetchone()
+                if session:
+                    try:
+                        source = card_version(
+                            {**dict(session), "payload": json.loads(session["payload"])},
+                            card_id,
+                            card_revision,
+                        )["source"]
+                    except DomainError as error:
+                        if error.code not in {"reference_card", "reference_card_incomplete"}:
+                            raise
             result.append(
                 {
                     "session_id": session_id,
                     "card_id": card_id,
                     "revision": card_revision,
+                    **({"version_id": version_id} if version_id else {}),
                     "artifact_id": row["id"],
                     "chapter_id": chapter["id"],
                     "chapter_revision": revision,
-                    "source": resolved["source"] if resolved else None,
+                    "source": source,
                 }
             )
     return result

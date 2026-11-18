@@ -1,4 +1,5 @@
 import { validateVersionGraph, type ProjectSource } from './projectSyncModel'
+import type { ArchivedReferenceCard } from './referenceArchive'
 import type { SettingsItem, SettingsVersion } from './settingsSyncModel'
 
 const format = 'ainovel-manuscript-sync/1' as const
@@ -16,7 +17,12 @@ export const outlineWindowFields = [
 
 type ChapterText = (typeof outlineChapterFields)[number][0]
 type WindowPart = (typeof outlineWindowFields)[number][0]
-export type OutlineCardReference = { session_id: string; card_id: string; revision: number }
+export type OutlineCardReference = {
+  session_id: string
+  card_id: string
+  revision: number
+  version_id?: string
+}
 export type OutlineCard = OutlineCardReference & {
   technique: string
   conditions: string
@@ -122,17 +128,44 @@ function identifier(value: unknown) {
 }
 
 const nullableId = (value: unknown) => (value === null ? null : identifier(value))
-const cardReferenceFields = ['session_id', 'card_id', 'revision']
+const cardReferenceFields = ['session_id', 'card_id', 'revision', 'version_id']
 
 function cardAddress(row: Record<string, unknown>): OutlineCardReference {
   const revision = row.revision
   if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0)
     return invalid('手法卡修订号无效。')
-  return { session_id: identifier(row.session_id), card_id: identifier(row.card_id), revision }
+  const version = row.version_id
+  if (
+    version !== undefined &&
+    version !== null &&
+    (typeof version !== 'string' || version.length !== 64 || /[^a-f0-9]/u.test(version))
+  )
+    invalid('手法卡正式版本编号无效。')
+  return {
+    session_id: identifier(row.session_id),
+    card_id: identifier(row.card_id),
+    revision,
+    ...(typeof version === 'string' ? { version_id: version } : {}),
+  }
 }
 
 export const outlineCardKey = (ref: OutlineCardReference) =>
-  `${ref.session_id}/${ref.card_id}/${ref.revision}`
+  `${ref.session_id}/${ref.card_id}/${ref.revision}/${ref.version_id ?? ''}`
+
+export function outlineCardFromReference(version?: ArchivedReferenceCard | null): OutlineCard | undefined {
+  if (version?.assessment !== 'ready' || !version.card || !version.citation) return
+  const { id, session_id, card_id, revision, card, citation } = version
+  return {
+    session_id,
+    card_id,
+    revision,
+    version_id: id,
+    technique: card.technique,
+    conditions: card.conditions,
+    exceptions: card.exceptions,
+    source_title: citation.title,
+  }
+}
 
 function parseCard(value: unknown): OutlineCard {
   const row = object(value, [...cardReferenceFields, 'technique', 'conditions', 'exceptions', 'source_title'])
@@ -382,6 +415,7 @@ export type OutlineSourceLookup = {
   settings: (id: string) => Awaitable<SettingsVersion | null | undefined>
   chapter?: (id: string) => Awaitable<OutlineDirectoryChapter | null | undefined>
   promise?: (id: string) => Awaitable<OutlineExistingPromise | null | undefined>
+  reference?: (id: string) => Awaitable<ArchivedReferenceCard | null | undefined>
 }
 
 export async function validateOutlineVersionSources(version: OutlineVersion, lookup: OutlineSourceLookup) {
@@ -397,6 +431,21 @@ export async function validateOutlineVersionSources(version: OutlineVersion, loo
   )
     invalid('大纲引用的设定版本或对应立项尚未到齐。')
   const eligible = new Set(eligibleOutlineSettings(settings).map(({ id }) => id))
+  if (lookup.reference) {
+    for (const card of version.reference_cards) {
+      if (!card.version_id) continue
+      const source = outlineCardFromReference(await lookup.reference(card.version_id))
+      if (!source) return invalid('缺少大纲引用的完整正式手法卡修订。')
+      if (
+        outlineCardKey(source) !== outlineCardKey(card) ||
+        source.technique !== card.technique ||
+        source.conditions !== card.conditions ||
+        source.exceptions !== card.exceptions ||
+        source.source_title !== card.source_title
+      )
+        invalid('大纲中的手法卡地址或冻结摘要与正式修订不符。')
+    }
+  }
   let position = 0
   for (const chapter of outlineChapterPlans(version.plan)) {
     if (chapter.setting_ids.some((id) => !eligible.has(id)))
@@ -440,6 +489,7 @@ export async function validateOutlineHistory(
     projects: ReadonlySet<string>
     settings: ReadonlyMap<string, SettingsVersion>
     chapters: ReadonlySet<string>
+    references?: ReadonlyMap<string, ArchivedReferenceCard>
   },
 ): Promise<OutlineHistory> {
   const history = object(input, [
@@ -473,6 +523,7 @@ export async function validateOutlineHistory(
       project: (id) => dependencies.projects.has(id),
       settings: (id) => dependencies.settings.get(id),
       outline: (id) => byId.has(id),
+      reference: (id) => dependencies.references?.get(id),
     })
     if (outlineChapterPlans(version.plan).some(({ chapter_id }) => !dependencies.chapters.has(chapter_id)))
       invalid('稿件包缺少大纲引用的原章节目录。')

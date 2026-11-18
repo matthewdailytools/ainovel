@@ -1,7 +1,10 @@
+from dataclasses import replace
+
 import pytest
 from fastapi.testclient import TestClient
 
-from ainovel import outline_archive, outline_sync, project_sync, settings_sync
+from ainovel import outline_archive, outline_sync, project_sync, reference_sync, settings_sync
+from ainovel.api import create_app
 from ainovel.cloud_sync import create_sync_app
 from ainovel.db import Database, DomainError
 from ainovel.desktop_sync import DesktopSync, Resolve
@@ -9,10 +12,12 @@ from ainovel.domain import Domain
 from ainovel.manuscript_exchange import ManuscriptPackage, export_manuscript, import_manuscript
 from ainovel.outline_workspace import ConfirmOutline, SaveOutline, confirm_outline, read_outline, save_outline
 from ainovel.project_brief import ConfirmProject, confirm
+from ainovel.reference_portability import ReferenceCardVersion
 from ainovel.story_graph import SaveRecord, graph, save_record_tx
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 from test_project_brief import BRIEF
 from test_reference_flow import SOURCE, reference as reference_fixture, update
+from test_reference_sync import card
 from test_settings_sync import receipt
 
 reference = reference_fixture
@@ -58,6 +63,128 @@ def record(tx, branch, payload, *, existing=None, identifier=None):
         existing["id"] if existing else None,
         new_identifier=identifier,
     )
+
+
+def test_restored_formal_card_keeps_exact_address_through_outline_package_and_cloud(
+    client, domain, settings, story, tmp_path, reference
+):
+    branch, chapter_id = story["branch_id"], story["chapter_id"]
+    domain.save(chapter_id, 0, "古宅门内只有铜铃在响。")
+    confirm(
+        domain,
+        branch,
+        ConfirmProject(base_revision=0, idempotency_key="pinned-outline-card", idea="追查铜铃", brief=BRIEF),
+    )
+    setting_confirmation(client, branch)
+    seed = export_manuscript(domain, branch)
+    first = update(client, domain, reference, cards=[card("😀渡口")])
+    update(client, domain, first, cards=[card("😀渡口", technique="只留下本机的疑问。")])
+    package = export_manuscript(domain, branch).model_dump()
+    history = package["reference_history"]
+    native = next(item for item in history["versions"] if item["revision"] == 2)
+    remote = {
+        **native,
+        "card": {**native["card"], "technique": "用局部证据改变人物的下一步。"},
+    }
+    remote["id"] = reference_sync._version_id(branch, ReferenceCardVersion.model_validate(remote))
+    history["versions"].append(remote)
+    history["adopted_heads"][0]["revision_id"] = remote["id"]
+
+    path = tmp_path / "restored-formal-card"
+    target = Domain(Database(path / "manuscripts.sqlite"))
+    import_manuscript(target, ManuscriptPackage.model_validate(package))
+    endpoint = f"/api/branches/{branch}/outline-workspace"
+    address = {field: remote[field] for field in ("session_id", "card_id", "revision")}
+    pinned = {**address, "version_id": remote["id"]}
+    with TestClient(create_app(replace(settings, data_dir=path))) as restored:
+        restored.headers["X-Ainovel-CSRF"] = restored.get("/api/session").json()["csrf"]
+        available = restored.get(endpoint + "/reference-options")
+        assert available.status_code == 200, available.text
+        assert available.json() == [
+            {
+                **pinned,
+                **{key: remote["card"][key] for key in ("technique", "conditions", "exceptions")},
+                "source_title": remote["citation"]["title"],
+            }
+        ]
+        source = restored.get(f"/api/branches/{branch}/reference-cards/{pinned['version_id']}/evidence")
+        assert source.status_code == 200 and source.json()["source_state"] == "metadata_only"
+        assert not source.json()["excerpt"]
+        confirmation_id = restored.get(endpoint + "/setting-options").json()["confirmation_id"]
+
+        def draft(ref):
+            return {
+                "base_revision": 0,
+                "confirmation_id": confirmation_id,
+                "plan": plan({**chapter_plan(chapter_id, "查证铜铃来历"), "reference_cards": [ref]}),
+            }
+
+        ambiguous = restored.put(endpoint, json=draft(address))
+        assert ambiguous.status_code == 409 and ambiguous.json()["code"] == "reference_citation"
+        incoherent = restored.put(endpoint, json=draft({**pinned, "revision": 1}))
+        assert incoherent.status_code == 404 and incoherent.json()["code"] == "reference_citation"
+        assert not restored.get(endpoint).json()["draft"]
+        adopted = put_and_confirm(restored, endpoint, draft(pinned))["confirmed"]
+    assert adopted["setting_basis"]["reference_cards"] == available.json()
+    assert adopted["plan"]["volumes"][0]["units"][0]["chapters"][0]["reference_cards"] == [pinned]
+    finalized = export_manuscript(target, branch)
+    content = finalized.model_dump_json()
+    assert SOURCE not in content and "😀渡口" not in content and '"excerpts"' not in content
+    selected = finalized.outline_history.versions[0]
+    assert selected.reference_cards[0].version_id == remote["id"]
+    forged = finalized.model_dump()
+    forged["outline_history"]["versions"][0]["reference_cards"][0]["technique"] = "改写冻结的手法"
+    restored_again = Domain(Database(tmp_path / "restored-again.sqlite"))
+    with pytest.raises(DomainError, match="冻结摘要"):
+        import_manuscript(restored_again, ManuscriptPackage.model_validate(forged))
+    missing = finalized.model_copy(update={"reference_history": None})
+    with pytest.raises(DomainError, match="准确手法卡来源"):
+        import_manuscript(restored_again, missing)
+    import_manuscript(restored_again, finalized)
+    assert (
+        read_outline(restored_again, branch)["confirmed"]["setting_basis"]["reference_cards"]
+        == available.json()
+    )
+
+    provision = "test-pinned-card-cloud-provision-token"
+    origin = "http://127.0.0.1:8888"
+    cloud_endpoint = f"/api/sync/works/{branch}"
+    receiver = Domain(Database(tmp_path / "cloud-receiver.sqlite"))
+    import_manuscript(receiver, seed)
+    with TestClient(create_sync_app(tmp_path / "pinned-card-cloud.sqlite", provision)) as cloud:
+        pushes = []
+
+        def provision_device(device_id):
+            result = cloud.post(
+                cloud_endpoint + "/devices",
+                headers={"Authorization": f"Bearer {provision}"},
+                json={"device_id": device_id},
+            )
+            assert result.status_code == 201, result.text
+            return result.json()["token"]
+
+        def transport(sync_origin, token, method, route, payload):
+            result = cloud.request(method, route, headers={"Authorization": f"Bearer {token}"}, json=payload)
+            if not result.is_success:
+                error = result.json()
+                raise DomainError(error["code"], error["message"], result.status_code)
+            if method == "POST" and route.endswith("/push"):
+                pushes.append(payload["object_id"])
+            return result.json()
+
+        left, right = DesktopSync(target, transport), DesktopSync(receiver, transport)
+        source_token, receiver_token = provision_device("restored-author"), provision_device("clean-reader")
+        left.enable(branch, origin, source_token)
+        right.enable(branch, origin, receiver_token)
+        uploaded = left.run(branch, origin, source_token)
+        assert not uploaded["deferred"] and not uploaded["conflicts"], uploaded
+        assert pushes.index(f"reference-card-version:{remote['id']}") < pushes.index(
+            f"outline-version:{selected.id}"
+        )
+        downloaded = right.run(branch, origin, receiver_token)
+        assert not downloaded["deferred"] and not downloaded["conflicts"], downloaded
+        adopted_in_cloud = read_outline(receiver, branch)["confirmed"]
+        assert adopted_in_cloud["setting_basis"]["reference_cards"] == available.json()
 
 
 def test_outline_package_restores_frozen_cards_and_defers_advanced_promise_records(

@@ -309,6 +309,7 @@ async function record(tx: IDBTransaction, key: string, receipt: SyncReceipt, pen
         receipt.object_id.startsWith('settings-version:') ||
         receipt.object_id.startsWith('outline-version:') ||
         receipt.object_id.startsWith('story-version:') ||
+        receipt.object_id.startsWith('reference-card-version:') ||
         receipt.object_id.startsWith('workflow-inspection:') ||
         receipt.object_id.startsWith('workflow-completion:')) &&
       (!head?.firstRevision || head.firstRevision.sequence > receipt.sequence)

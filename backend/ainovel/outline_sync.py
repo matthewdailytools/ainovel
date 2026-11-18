@@ -19,6 +19,7 @@ from .outline_workspace import (
     _validate,
     confirm_outline_tx,
     save_outline_tx,
+    validate_frozen_reference_cards,
 )
 from .project_sync import FORMAT, read_project_head, read_project_version
 from .settings_sync import project_source_id, read_settings_head, read_settings_version, settings_source_id
@@ -119,7 +120,9 @@ def validate_version(version):
     _validate(graph, plan, {"items": [{"id": key} for key in settings], "reference_cards": cards}, True)
 
 
-def validate_version_sources(version, project_lookup, settings_lookup, chapter_lookup=None):
+def validate_version_sources(
+    version, project_lookup, settings_lookup, chapter_lookup=None, *, reference_lookup=None
+):
     if version.project_version_id and not project_lookup(version.project_version_id):
         raise DomainError("sync_outline_project", "大纲引用的立项版本尚未到齐。", 409)
     if version.settings_version_id:
@@ -131,6 +134,10 @@ def validate_version_sources(version, project_lookup, settings_lookup, chapter_l
         for _, _, chapter in _chapter_plans(version.plan.model_dump())
     ):
         raise DomainError("sync_outline_chapters", "大纲引用的章节目录尚未到齐。", 409)
+    if reference_lookup is not None:
+        validate_frozen_reference_cards(
+            [card.model_dump() for card in version.reference_cards], reference_lookup
+        )
 
 
 def _source_id(row):
@@ -240,6 +247,8 @@ def draft_outline_objects(tx, branch_id):
 
 
 def observe_outline_version(tx, branch_id, version, receipt):
+    from .reference_sync import read_reference_version
+
     validate_version(version)
     existing = read_outline_version(tx, branch_id, version.id)
     if existing is not None and existing != version:
@@ -250,6 +259,7 @@ def observe_outline_version(tx, branch_id, version, receipt):
         version,
         lambda identifier: read_project_version(tx, branch_id, identifier),
         lambda identifier: read_settings_version(tx, branch_id, identifier),
+        reference_lookup=lambda identifier: read_reference_version(tx, branch_id, identifier),
     )
     tx.execute(
         "INSERT INTO synced_outline_versions VALUES(?,?,?,?,?,?) ON CONFLICT(branch_id,id) DO UPDATE SET "

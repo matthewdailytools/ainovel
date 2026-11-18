@@ -3,16 +3,20 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from ainovel import reference_fork, reference_sync
 from ainovel.api import create_app
 from ainovel.backups import create_backup, unpack_verified
 from ainovel.db import Database, uid
 from ainovel.domain import Domain
+from ainovel.manuscript_exchange import export_manuscript, import_manuscript
+from ainovel.outline_workspace import read_outline
 from ainovel.story_graph import graph
 from ainovel.work_snapshot import RestoreInput, register_routes, restore
 from test_conception_workbench import confirm, path, save
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 from test_project_brief import BRIEF, IDEA
 from test_reference_flow import SOURCE, reference as reference_fixture, update as update_reference
+from test_reference_sync import card
 
 reference = reference_fixture
 
@@ -258,6 +262,167 @@ def test_snapshot_rebinds_project_and_keeps_card_addresses_and_length_targets(
     )
     forked = verify(client.get(outline(fork["branch_id"])))["confirmed"]
     assert forked["setting_basis"]["reference_cards"] == confirmed["setting_basis"]["reference_cards"]
+
+
+def test_snapshot_fork_reissues_exact_reference_lineage_without_raw_quotes(
+    snapshot_client, domain, story, reference, tmp_path, monkeypatch
+):
+    client = snapshot_client
+    branch, chapter_id = story["branch_id"], story["chapter_id"]
+    domain.save(chapter_id, 0, "师姐在门内接过铜铃。")
+    save_project(client, branch, 0, "铃归师姐。")
+    settings_id = setting_confirmation(client, branch)
+    support = card("半幅图", id="support", technique="以余下疑问推进后一步。")
+    unrelated = card("渡口掌柜", id="unrelated", technique="让边角线索留在背景。")
+    first = update_reference(client, domain, reference, cards=[card("😀渡口"), support, unrelated])
+    chosen = card("😀渡口", technique="先得到可核对的一半证据。")
+    second = update_reference(client, domain, first, cards=[chosen, support, unrelated])
+    catalogue = verify(client.get(outline(branch) + "/reference-options"))
+    pinned = next(row for row in catalogue if row["card_id"] == chosen["id"])
+    supporting = next(row for row in catalogue if row["card_id"] == support["id"])
+    unrelated_address = next(row for row in catalogue if row["card_id"] == unrelated["id"])
+
+    def address(source):
+        return {key: source[key] for key in ("session_id", "card_id", "revision", "version_id")}
+
+    def plan(*cards):
+        return {
+            "summary": "门内查证",
+            "volumes": [
+                {
+                    "id": "v",
+                    "title": "遗铃",
+                    "summary": "查证铜铃",
+                    "units": [
+                        {
+                            "id": "u",
+                            "title": "师姐",
+                            "summary": "找到线索",
+                            "chapters": [
+                                {
+                                    **chapter_plan(chapter_id, "验证铜铃"),
+                                    "reference_cards": [address(value) for value in cards],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+    confirmed = put_and_confirm(
+        client,
+        outline(branch),
+        {
+            "base_revision": 0,
+            "confirmation_id": settings_id,
+            "plan": plan(pinned, supporting),
+        },
+    )["confirmed"]
+    later = card("😀渡口", technique="由前一层证据直接指向另一位证人。")
+    third = update_reference(client, domain, second, cards=[later, support, unrelated])
+    draft_card = next(
+        row
+        for row in verify(client.get(outline(branch) + "/reference-options"))
+        if row["card_id"] == later["id"]
+    )
+    verify(
+        client.put(
+            outline(branch),
+            json={
+                "base_revision": confirmed["revision"],
+                "confirmation_id": settings_id,
+                "plan": plan(draft_card),
+            },
+        )
+    )
+    snapshot = verify(client.post(route(branch), json={"label": "保留手法卡来源"}), 201)
+    current = card("😀渡口", technique="快照后改变手法。")
+    update_reference(client, domain, third, cards=[current, support, unrelated])
+    location = f"{route(branch)}/{snapshot['id']}"
+    args = {
+        "basis_sha256": verify(client.get(location + "/preview"))["basis_sha256"],
+        "mode": "new_branch",
+        "branch_name": "手法卡快照复本",
+        "idempotency_key": uid(),
+    }
+    source_before = export_manuscript(domain, branch).reference_history
+    first_revision = next(
+        version
+        for version in source_before.versions
+        if version.card_id == chosen["id"] and version.revision == 1
+    )
+    native_catalog = reference_fork._native_catalog
+
+    def missing_parent(tx, branch_id):
+        versions, heads, excerpts = native_catalog(tx, branch_id)
+        if branch_id == branch:
+            versions.pop(first_revision.id)
+        return versions, heads, excerpts
+
+    with monkeypatch.context() as patch:
+        patch.setattr(reference_fork, "_native_catalog", missing_parent)
+        missing = client.post(location + "/restore", json=args)
+        assert missing.status_code == 409, missing.text
+        assert first_revision.id in missing.json()["message"]
+        with domain.db.connect() as tx:
+            assert not tx.execute("SELECT 1 FROM branches WHERE name=?", (args["branch_name"],)).fetchone()
+            assert not tx.execute("SELECT 1 FROM receipts WHERE key=?", (args["idempotency_key"],)).fetchone()
+
+    forked = verify(client.post(location + "/restore", json=args), 201)
+    assert verify(client.post(location + "/restore", json=args), 201) == forked
+    target = forked["branch_id"]
+    assert forked["reference_sources"]["source_branch_id"] == branch
+    mapping = forked["reference_sources"]["version_ids"]
+    assert set(mapping) == {
+        first_revision.id,
+        pinned["version_id"],
+        draft_card["version_id"],
+        supporting["version_id"],
+    }
+    assert not set(mapping) & set(mapping.values())
+    assert unrelated_address["version_id"] not in mapping
+    assert export_manuscript(domain, branch).reference_history == source_before
+    with domain.db.connect() as tx:
+        assert not tx.execute(
+            "SELECT 1 FROM portable_reference_excerpts WHERE branch_id=?", (target,)
+        ).fetchone()
+        for new in mapping.values():
+            reference_sync.validate_reference_version(
+                target, reference_sync.read_reference_version(tx, target, new)
+            )
+        version = reference_sync.read_reference_version(tx, target, mapping[draft_card["version_id"]])
+        assert version.parent_id == mapping[pinned["version_id"]]
+        assert version.card.technique == later["technique"]
+        assert version.citation == next(
+            row.citation for row in source_before.versions if row.id == draft_card["version_id"]
+        )
+
+    current = verify(client.get(outline(target)))
+    assert not current["stale"]
+    for row, old in ((current["confirmed"], pinned), (current["draft"], draft_card)):
+        selected = row["setting_basis"]["reference_cards"][0]
+        assert selected == {**old, "version_id": mapping[old["version_id"]]}
+        assert row["plan"]["volumes"][0]["units"][0]["chapters"][0]["reference_cards"][0] == address(selected)
+    options = verify(client.get(outline(target) + "/reference-options"))
+    assert options == [{**supporting, "version_id": mapping[supporting["version_id"]]}]
+    edited = put_and_confirm(
+        client,
+        outline(target),
+        {
+            "base_revision": current["draft"]["revision"],
+            "confirmation_id": forked["setting_id"],
+            "plan": {**current["draft"]["plan"], "summary": "改用另一位证人。"},
+        },
+    )["confirmed"]
+    frozen = edited["setting_basis"]["reference_cards"][0]
+
+    exported = export_manuscript(domain, target)
+    assert not exported.reference_history.excerpts
+    assert "😀渡口" not in exported.model_dump_json() and "半幅图" not in exported.model_dump_json()
+    receiver = Domain(Database(tmp_path / "forked-reference-archive.sqlite"))
+    import_manuscript(receiver, exported)
+    assert read_outline(receiver, target)["confirmed"]["setting_basis"]["reference_cards"] == [frozen]
 
 
 def test_volume_checkpoint_restores_manuscript_setting_outline_and_promise_in_both_modes(

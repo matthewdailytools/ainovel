@@ -86,6 +86,7 @@ export function OfflineWorkspace() {
   const [settingsDirty, setSettingsDirty] = useState(false)
   const [outlineDirty, setOutlineDirty] = useState(false)
   const [storyDirty, setStoryDirty] = useState(false)
+  const [referenceDirty, setReferenceDirty] = useState(false)
   const [includedExcerpts, setIncludedExcerpts] = useState<string[]>([])
   const [workbenchRefresh, setWorkbenchRefresh] = useState(0)
   const busy = localBusy || syncBusy
@@ -177,7 +178,7 @@ export function OfflineWorkspace() {
   function mayLeave(workChange = false) {
     if (
       workChange &&
-      (projectDirty || settingsDirty || outlineDirty || storyDirty) &&
+      (projectDirty || settingsDirty || outlineDirty || storyDirty || referenceDirty) &&
       !window.confirm('工作台有未确认的修改。是否离开当前作品？')
     )
       return false
@@ -365,6 +366,10 @@ export function OfflineWorkspace() {
               <OfflineReferenceHistory
                 key={`reference-${selected.branch.id}`}
                 projectId={selected.novel.id}
+                refreshToken={workbenchRefresh}
+                disabled={busy}
+                onDirty={setReferenceDirty}
+                onConfirmed={refreshWorkbench}
                 includedExcerpts={includedExcerpts}
                 setIncludedExcerpts={setIncludedExcerpts}
               />
@@ -383,7 +388,15 @@ export function OfflineWorkspace() {
               <WebSyncPanel
                 key={selected.branch.id}
                 project={selected}
-                unsaved={dirty || projectDirty || settingsDirty || outlineDirty || storyDirty || localBusy}
+                unsaved={
+                  dirty ||
+                  projectDirty ||
+                  settingsDirty ||
+                  outlineDirty ||
+                  storyDirty ||
+                  referenceDirty ||
+                  localBusy
+                }
                 onBusy={setSyncBusy}
                 onApplied={async () => {
                   const saved = (await listLocalProjects()).find(

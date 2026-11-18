@@ -12,6 +12,7 @@ type OutlineCard = components['schemas']['OutlineCard']
 type OutlineCardReference = components['schemas']['OutlineCardReference']
 export type FrozenCard = Omit<OutlineCard, 'source_title'> & { source_title?: string }
 type SavedReferenceCard = components['schemas']['SavedReferenceCard']
+type ReferenceCardEvidence = components['schemas']['ReferenceCardEvidence']
 type Setting = { id: string; title: string; detail: string }
 export type ConfirmedWorldRules = { confirmation_id: string | null; revision?: number; items: Setting[] }
 type OutlineRevision = {
@@ -78,16 +79,33 @@ export function findChapterPlan(outline: OutlineRevision | null | undefined, cha
 }
 
 function cardKey(card: OutlineCardReference) {
-  return `${card.session_id}/${card.card_id}/${card.revision}`
+  return `${card.session_id}/${card.card_id}/${card.revision}/${card.version_id ?? ''}`
 }
 
-export function OutlineCardSource({ card, notify }: { card: FrozenCard; notify: Notify }) {
+export function OutlineCardSource({
+  card,
+  branchId,
+  notify,
+}: {
+  card: FrozenCard
+  branchId?: string
+  notify: Notify
+}) {
   const [source, setSource] = useState<SavedReferenceCard>()
+  const [evidence, setEvidence] = useState<ReferenceCardEvidence>()
   const [loading, setLoading] = useState(false)
   async function readSource() {
     if (loading) return
     setLoading(true)
     try {
+      if (card.version_id && branchId) {
+        setEvidence(
+          await api<ReferenceCardEvidence>(
+            `/branches/${encodeURIComponent(branchId)}/reference-cards/${encodeURIComponent(card.version_id)}/evidence`,
+          ),
+        )
+        return
+      }
       const session = encodeURIComponent(card.session_id)
       const identifier = encodeURIComponent(card.card_id)
       setSource(
@@ -109,13 +127,28 @@ export function OutlineCardSource({ card, notify }: { card: FrozenCard; notify: 
       <p>适用条件 · {card.conditions}</p>
       <p>须替换 · {card.exceptions}</p>
       {card.source_title && <p>来源 · {card.source_title}</p>}
-      {source ? (
+      {card.version_id && (
+        <p className="small" style={{ overflowWrap: 'anywhere' }}>
+          来源修订编号 {card.version_id}
+        </p>
+      )}
+      {evidence ? (
+        evidence.excerpt ? (
+          <blockquote>{evidence.excerpt}</blockquote>
+        ) : (
+          <p>该手法卡保留来源地址。此工作版本未包含原文。</p>
+        )
+      ) : source ? (
         <>
           <p>卡片所引 · {source.card.evidence}</p>
           {typeof source.source.quote === 'string' && <blockquote>{source.source.quote}</blockquote>}
         </>
       ) : (
-        <button type="button" disabled={loading} onClick={() => void readSource()}>
+        <button
+          type="button"
+          disabled={loading || (!!card.version_id && !branchId)}
+          onClick={() => void readSource()}
+        >
           {loading ? '正在读取手法卡原文…' : '查看手法卡原文依据'}
         </button>
       )}
@@ -443,7 +476,7 @@ export function OutlineWorkspace({
                                   return (
                                     <div key={key}>
                                       {card ? (
-                                        <OutlineCardSource card={card} notify={notify} />
+                                        <OutlineCardSource card={card} branchId={branchId} notify={notify} />
                                       ) : (
                                         <p>手法卡 {ref.card_id}</p>
                                       )}
@@ -469,13 +502,18 @@ export function OutlineWorkspace({
                                     onChange={(event) => {
                                       const card = availableCards.get(event.target.value)
                                       if (!card) return
-                                      const { session_id, card_id, revision } = card
+                                      const { session_id, card_id, revision, version_id } = card
                                       changeChapter((row) => {
                                         row.reference_cards = [
                                           ...(row.reference_cards ?? []).filter(
                                             (ref) => ref.session_id !== session_id || ref.card_id !== card_id,
                                           ),
-                                          { session_id, card_id, revision },
+                                          {
+                                            session_id,
+                                            card_id,
+                                            revision,
+                                            ...(version_id ? { version_id } : {}),
+                                          },
                                         ]
                                       })
                                     }}
@@ -785,7 +823,12 @@ export function OutlineWorkspace({
                               {chapter.turn} · {chapter.result}
                             </p>
                             {chapterCards(previous, chapter).map((card) => (
-                              <OutlineCardSource key={cardKey(card)} card={card} notify={notify} />
+                              <OutlineCardSource
+                                key={cardKey(card)}
+                                card={card}
+                                branchId={branchId}
+                                notify={notify}
+                              />
                             ))}
                           </div>
                         ))}

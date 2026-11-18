@@ -1,8 +1,10 @@
 import type { LocalChapter, LocalProject, LocalPublication } from './offlineStore'
 import type { ProjectSource } from './projectSyncModel'
+import type { ReferenceHistory } from './referenceArchive'
 import type { SettingsVersion } from './settingsSyncModel'
 import {
   outlineObjectSignature,
+  outlineCardFromReference,
   prepareOutlineVersion,
   requiredOutlineStoryRecord,
   validateOutlineActiveBasis,
@@ -36,6 +38,7 @@ export const outlineReadStores = [
   'storyHeads',
   'storyVersions',
   'storyHistory',
+  'referenceArchives',
 ] as const
 export const outlineWriteStores = [...outlineReadStores, 'projectVersions', 'publications'] as const
 type StoreName = (typeof outlineWriteStores)[number]
@@ -50,6 +53,7 @@ type Access = {
   getSettingsHead(tx: Tx, branchId: string): Promise<{ versionId: string } | undefined>
   getSettingsVersion(tx: Tx, branchId: string, id: string): Promise<{ version: SettingsVersion } | undefined>
   readStoryOutlinePromisesTx(tx: Tx, branch: string): Promise<OutlineExistingPromise[]>
+  readReferenceHistory(tx: Tx, branchId: string): Promise<ReferenceHistory | undefined>
   readPublication(tx: Tx, branchId: string, objectId: string): Promise<LocalPublication | undefined>
   markPublication(tx: Tx, branchId: string, ...objects: string[]): Promise<void>
   fail(code: FailCode, message: string): never
@@ -65,6 +69,7 @@ export function createOutlineOfflineStore({
   getSettingsHead,
   getSettingsVersion,
   readStoryOutlinePromisesTx,
+  readReferenceHistory,
   readPublication,
   markPublication,
   fail,
@@ -92,14 +97,21 @@ export function createOutlineOfflineStore({
 
   async function readOutlineTx(tx: Tx, project: LocalProject) {
     const branch = project.branch.id
-    const [head, versions, source, settingsHead, chapters, promises] = await Promise.all([
+    const [head, versions, source, settingsHead, chapters, promises, referenceHistory] = await Promise.all([
       getHead(tx, branch),
       listVersions(tx, branch),
       getProjectHead(tx, branch),
       getSettingsHead(tx, branch),
       listChaptersTx(tx, branch),
       promisesTx(tx, branch),
+      readReferenceHistory(tx, branch),
     ])
+    const selected = new Set(referenceHistory?.adopted_heads.map(({ revision_id }) => revision_id))
+    const cards =
+      referenceHistory?.versions.flatMap((version) => {
+        const summary = selected.has(version.id) ? outlineCardFromReference(version) : undefined
+        return summary ? [summary] : []
+      }) ?? []
     return {
       current: versions.find(({ version }) => version.id === head?.versionId),
       versions,
@@ -109,6 +121,8 @@ export function createOutlineOfflineStore({
         : null,
       chapters,
       promises: [...promises.values()],
+      cards,
+      referenceVersions: referenceHistory?.versions ?? [],
       restorePending: head?.deferred,
     }
   }
@@ -172,6 +186,12 @@ export function createOutlineOfflineStore({
       project: (id) => getProjectVersion(tx, branch, id),
       settings: async (id) => (await getSettingsVersion(tx, branch, id))?.version,
       outline: (id) => getVersion(tx, branch, id),
+    }
+    if (version.reference_cards.some(({ version_id }) => version_id)) {
+      const references = new Map(
+        (await readReferenceHistory(tx, branch))?.versions.map((card) => [card.id, card]),
+      )
+      lookup.reference = (id) => references.get(id)
     }
     if (adopting) {
       const chapters = new Map((await listChaptersTx(tx, branch)).map((chapter) => [chapter.id, chapter]))

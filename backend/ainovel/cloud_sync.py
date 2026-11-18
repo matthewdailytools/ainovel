@@ -23,6 +23,8 @@ from .outline_sync import OutlineVersionObject, parse_outline_object
 from .outline_sync import validate_version_sources as validate_outline_sources
 from .models import Input
 from .project_sync import ProjectVersionObject, parse_project_object
+from .reference_portability import ReferenceCardVersionObject
+from .reference_sync import parse_reference_object, validate_version_parent as validate_reference_parent
 from .settings_sync import SettingsVersionObject, parse_settings_object, validate_version_sources
 from .story_sync import StoryVersionObject, parse_story_object
 from .story_sync import validate_version_sources as validate_story_sources
@@ -30,6 +32,7 @@ from .workflow_archive import (
     ArchivedInspection,
     WORKFLOW_PREFIXES,
     parse_workflow_object,
+    same_workflow_entry,
     validate_workflow_object,
 )
 
@@ -366,7 +369,13 @@ class SyncStore:
             formal = self._validate_formal(tx, work, data.object_id, data.payload, data.tombstone)
             if isinstance(
                 formal,
-                (ProjectVersionObject, SettingsVersionObject, OutlineVersionObject, StoryVersionObject),
+                (
+                    ProjectVersionObject,
+                    SettingsVersionObject,
+                    OutlineVersionObject,
+                    StoryVersionObject,
+                    ReferenceCardVersionObject,
+                ),
             ):
                 if data.parent_revision is not None:
                     base = self._change(tx, work, data.parent_revision)
@@ -422,12 +431,13 @@ class SyncStore:
             "settings": ("设定", SettingsVersionObject, parse_settings_object),
             "outline": ("大纲", OutlineVersionObject, parse_outline_object),
             "story": ("故事记录", StoryVersionObject, parse_story_object),
+            "reference-card": ("手法卡", ReferenceCardVersionObject, parse_reference_object),
         }
         if family not in contracts:
             return None
         title, immutable, parse = contracts[family]
         value = parse(work, object_id, payload, tombstone)
-        error_code = f"sync_{family}"
+        error_code = "sync_reference" if family == "reference-card" else f"sync_{family}"
 
         def source(object_id, model):
             head = self._head(tx, work, object_id)
@@ -437,6 +447,11 @@ class SyncStore:
             stored = source(f"{family}-version:{value.revision_id}", immutable)
             if not stored or (family == "story" and stored.version.record_id != value.record_id):
                 raise DomainError(error_code, f"尚未收到要采用的{title}修订。", 409)
+            if family == "reference-card" and (stored.version.session_id, stored.version.card_id) != (
+                value.session_id,
+                value.card_id,
+            ):
+                raise DomainError(error_code, "手法卡采用头须指向同一张卡的修订。", 409)
             return value
         version = value.version
         if version.parent_id and not self._head(tx, work, f"{family}-version:{version.parent_id}"):
@@ -455,6 +470,13 @@ class SyncStore:
 
         if family == "settings":
             validate_version_sources(version, project_exists, revision)
+        if family == "reference-card":
+
+            def card(identifier):
+                stored = source(f"reference-card-version:{identifier}", ReferenceCardVersionObject)
+                return stored.version if stored else None
+
+            validate_reference_parent(version, card)
         if family == "story":
 
             def story(identifier):
@@ -468,11 +490,16 @@ class SyncStore:
                 stored = source(f"settings-version:{identifier}", SettingsVersionObject)
                 return stored.version if stored else None
 
+            def reference(identifier):
+                stored = source(f"reference-card-version:{identifier}", ReferenceCardVersionObject)
+                return stored.version if stored else None
+
             validate_outline_sources(
                 version,
                 project_exists,
                 settings,
                 lambda identifier: self._head(tx, work, f"chapter:{identifier}"),
+                reference_lookup=reference,
             )
         return value
 
@@ -501,7 +528,7 @@ class SyncStore:
             stored = parse_workflow_object(
                 work, data.object_id, json.loads(previous["payload"]), previous["tombstone"]
             )
-            if stored != entry:
+            if not same_workflow_entry(stored, entry):
                 raise DomainError("sync_workflow", "同一体检或交付记录编号不能改写。", 409)
         if data.parent_revision is not None:
             base = self._change(tx, work, data.parent_revision)
@@ -636,7 +663,6 @@ class SyncStore:
                 (receipt.change_id, work, identifier),
             )
             return receipt
-
 
 def create_sync_app(database_path: Path, provisioning_token: str, browser_origins=()):
     if len(provisioning_token) < 32 or any(char.isspace() for char in provisioning_token):

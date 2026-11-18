@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { readLocalReferenceHistory } from './offlineStore'
-import type { ReferenceHistory } from './referenceArchive'
+import { confirmLocalReferenceCard, readLocalReferenceHistory } from './offlineStore'
+import { useLeaveGuard } from './leaveGuard'
+import type { ReferenceCardFields, ReferenceHistory } from './referenceArchive'
 
 const cardLabels = { ready: '可引用', incomplete: '未完成', archived: '已归档' }
 const cardFields = [
@@ -14,16 +15,34 @@ const cardFields = [
 
 export function OfflineReferenceHistory({
   projectId,
+  refreshToken,
+  disabled,
+  onDirty,
+  onConfirmed,
   includedExcerpts,
   setIncludedExcerpts,
 }: {
   projectId: string
+  refreshToken: number
+  disabled: boolean
+  onDirty: (dirty: boolean) => void
+  onConfirmed: () => void
   includedExcerpts: readonly string[]
   setIncludedExcerpts: (ids: string[]) => void
 }) {
   const [archive, setArchive] = useState<ReferenceHistory>()
   const [selected, setSelected] = useState('')
   const [error, setError] = useState('')
+  const [draft, setDraft] = useState<{ base: string; card: ReferenceCardFields }>()
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState('')
+  const dirty = draft !== undefined
+  useLeaveGuard(dirty, '离线手法卡')
+  useEffect(() => {
+    onDirty(dirty)
+    return () => onDirty(false)
+  }, [dirty, onDirty])
+
   useEffect(() => {
     let active = true
     void readLocalReferenceHistory(projectId).then(
@@ -37,20 +56,40 @@ export function OfflineReferenceHistory({
     return () => {
       active = false
     }
-  }, [projectId])
-  if (error) return <p role="alert">{error}</p>
-  if (!archive) return null
+  }, [projectId, refreshToken])
+  if (!archive) return error ? <p role="alert">{error}</p> : null
   const adopted = new Set(archive.adopted_heads.map(({ revision_id }) => revision_id))
   const versions = [...archive.versions].reverse()
   const version =
     versions.find(({ id }) => id === selected) ?? versions.find(({ id }) => adopted.has(id)) ?? versions[0]
   const quote = archive.excerpts?.[version.id]
+  const stale = draft && !adopted.has(draft.base)
+
+  async function save() {
+    if (!draft || stale || saving || disabled) return
+    setSaving(true)
+    setError('')
+    try {
+      const next = await confirmLocalReferenceCard(projectId, draft.base, draft.card)
+      setSelected(next.id)
+      setDraft(undefined)
+      setNotice('已保存手法卡修订，原出处和历史仍可查。')
+      onConfirmed()
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '手法卡修订未保存。')
+      setArchive(await readLocalReferenceHistory(projectId).catch(() => archive))
+    } finally {
+      setSaving(false)
+    }
+  }
   return (
     <details aria-label="离线手法卡历史">
       <summary>手法卡历史</summary>
+      {error && <p role="alert">{error}</p>}
+      {notice && <p role="status">{notice}</p>}
       <label>
         手法卡修订
-        <select value={version.id} onChange={(event) => setSelected(event.target.value)}>
+        <select disabled={dirty} value={version.id} onChange={(event) => setSelected(event.target.value)}>
           {versions.map((entry) => (
             <option key={entry.id} value={entry.id}>
               {entry.card?.technique.slice(0, 60) ?? entry.card_id} · 修订 {entry.revision} ·{' '}
@@ -71,6 +110,56 @@ export function OfflineReferenceHistory({
             .map(([, label]) => label)
             .join('、')}
         </p>
+      )}
+      {version.assessment === 'ready' && adopted.has(version.id) && version.card && !draft && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            if (!version.card) return
+            setError('')
+            setNotice('')
+            setDraft({ base: version.id, card: { ...version.card } })
+          }}
+        >
+          编辑手法卡摘要
+        </button>
+      )}
+      {draft && (
+        <fieldset disabled={disabled || saving}>
+          <legend>编辑手法卡摘要</legend>
+          {stale && <p role="alert">采用版已在别处更新。当前输入保留，请先比较修订。</p>}
+          {cardFields.map(([key, label]) =>
+            key === 'evidence' ? null : (
+              <label key={key}>
+                {label}
+                <textarea
+                  rows={2}
+                  maxLength={2000}
+                  value={draft.card[key]}
+                  onChange={(event) =>
+                    setDraft({ ...draft, card: { ...draft.card, [key]: event.target.value } })
+                  }
+                />
+              </label>
+            ),
+          )}
+          <button
+            type="button"
+            disabled={!!stale || Object.values(draft.card).some((value) => !value.trim())}
+            onClick={() => void save()}
+          >
+            确认手法卡修订
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm('放弃这次手法卡摘要修改？')) setDraft(undefined)
+            }}
+          >
+            放弃本次修改
+          </button>
+        </fieldset>
       )}
       {version.card && version.citation && (
         <>

@@ -228,7 +228,8 @@ def _index(package):
         from .outline_archive import validate_outline_history
 
         validate_outline_history(
-            package.outline_history, package.project_history, package.settings_history, package.chapters
+            package.outline_history, package.project_history, package.settings_history, package.chapters,
+            package.reference_history,
         )
     if package.story_history:
         from .story_archive import validate_story_archive
@@ -405,7 +406,8 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=()):
             )
         if package.outline_history:
             validate_outline_history(
-                package.outline_history, package.project_history, package.settings_history, package.chapters
+                package.outline_history, package.project_history, package.settings_history, package.chapters,
+                package.reference_history,
             )
         if package.story_history or package.workflow_history:
             native = {row.id: row for row in package.revisions}

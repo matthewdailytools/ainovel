@@ -82,6 +82,44 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
   const desktopText = '先查镇中的铸锁牌，再问旧匠。'
   const webText = '先找渡船上的旧锁，再查作坊名录。'
   const outlinePath = branch + '/outline-workspace'
+  const original = '😀临河的守夜人掀开灯罩，只指了记号上的第一笔。'
+  const imported = await page.request.post('/api/library/import', {
+    headers,
+    multipart: { file: { name: '结构参考.txt', mimeType: 'text/plain', buffer: Buffer.from(original) } },
+  })
+  expect(imported.ok(), await imported.text()).toBe(true)
+  const library = await imported.json()
+  const [sourceUnit] = await (await page.request.get('/api/library/books/' + library.id + '/units')).json()
+  const goal = '分析分两步提供证据的手法'
+  const newReference = await page.request.post('/api/reference-sessions', {
+    headers,
+    data: { unit_id: sourceUnit.id, start: 0, end: original.length, quote: original, goal, branch_id },
+  })
+  expect(newReference.ok(), await newReference.text()).toBe(true)
+  const session = await newReference.json()
+  const technique = '先给可核对的一半证据'
+  const edited = await page.request.patch('/api/reference-sessions/' + session.id, {
+    headers,
+    data: {
+      base_revision: 0,
+      branch_id,
+      goal,
+      cards: [
+        {
+          id: 'half-evidence',
+          observation: '先递出一半',
+          interpretation: '留下下一次核对动作',
+          technique,
+          conditions: '人物能继续查证',
+          exceptions: '替换原人物、动作和道具',
+          evidence: '只指了记号上的第一笔',
+        },
+      ],
+    },
+  })
+  expect(edited.ok(), await edited.text()).toBe(true)
+  const [ready] = await (await page.request.get(outlinePath + '/reference-options')).json()
+  expect(ready.version_id).toMatch(/^[0-9a-f]{64}$/)
   async function confirmOutline(base: number, plan: object) {
     const save = await page.request.put(outlinePath, {
       headers,
@@ -191,6 +229,8 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
     await context.setOffline(true)
     await panel.getByRole('button', { name: '编辑当前大纲' }).click()
     await panel.getByRole('textbox', { name: '总纲', exact: true }).fill(webText)
+    await panel.getByText('手法卡摘要 · 0 项', { exact: true }).click()
+    await panel.getByRole('checkbox', { name: technique + ' · 修订 1', exact: true }).check()
     await expect(panel.getByRole('combobox', { name: '最迟回收', exact: true })).toHaveValue(chapterId)
     await panel.getByRole('button', { name: '确认大纲并保存到浏览器' }).click()
     await expect(panel.getByText('已确认并保存大纲修订。')).toBeVisible()
@@ -221,6 +261,20 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
     expect(result.deferred).toHaveLength(0)
     const adopted = await (await page.request.get(outlinePath)).json()
     expect(adopted.confirmed.plan.summary).toBe(webText)
+    expect(adopted.confirmed.setting_basis.reference_cards).toEqual([ready])
+    expect(adopted.confirmed.plan.volumes[0].units[0].chapters[0].reference_cards).toEqual([
+      {
+        session_id: ready.session_id,
+        card_id: ready.card_id,
+        revision: ready.revision,
+        version_id: ready.version_id,
+      },
+    ])
+    const exported = await page.request.get(branch + '/manuscript-package')
+    const exportedText = await exported.text()
+    expect(exportedText).not.toContain(original)
+    expect(exportedText).not.toContain('只指了记号上的第一笔')
+    expect(JSON.parse(exportedText).reference_history.excerpts).toBeUndefined()
     expect(adopted.confirmed.plan.promises).toEqual([{ promise_id: promiseId, ...window }])
     expect(adopted.promises[0].state).toBe('planted')
     expect(adopted.promises[0].stages[1].sources).toEqual([source])
@@ -335,6 +389,7 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
       const transported = JSON.parse(await readFile((await (await download).path())!, 'utf-8'))
       expect(transported.outline_history).toEqual(pack.outline_history)
       expect(transported.story_history).toEqual(file.story_history)
+      expect(transported.reference_history).toEqual(pack.reference_history)
     } finally {
       await archiveContext.close()
     }

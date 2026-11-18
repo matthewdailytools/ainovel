@@ -10,6 +10,7 @@ from pydantic import Field, StringConstraints
 from .db import DomainError, dumps, uid
 from .models import Input
 from .project_brief import confirmed_project_tx
+from .reference_portability import HashId
 from .setting_review import confirmed_world_basis
 from .story_graph import SaveRecord, graph_snapshot, save_record_tx
 
@@ -22,6 +23,7 @@ class OutlineCardReference(Input):
     session_id: Identifier
     card_id: Identifier
     revision: int = Field(ge=0, strict=True)
+    version_id: HashId | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class OutlineCard(OutlineCardReference):
@@ -130,35 +132,44 @@ def _settings(tx, branch_id, confirmation_id):
 
 
 def _card_key(ref):
-    return ref["session_id"], ref["card_id"], ref["revision"]
+    return ref["session_id"], ref["card_id"], ref["revision"], ref.get("version_id")
 
 
-def _outline_card(ref, session):
-    from .reference import card_version
-
-    version = card_version(session, ref["card_id"], ref["revision"])
-    if not version["card"]["exceptions"].strip():
-        raise DomainError("reference_card_incomplete", "挂载手法卡前请填写须替换内容，没有时可明确填写无。")
+def _outline_card(version, *, pin=True):
+    if version.assessment != "ready":
+        raise DomainError("reference_card_incomplete", "请选择已完成的手法卡修订。", 409)
     return {
-        **ref,
-        **{key: version["card"][key] for key in ("technique", "conditions", "exceptions")},
-        "source_title": version["source"]["title"],
+        "session_id": version.session_id,
+        "card_id": version.card_id,
+        "revision": version.revision,
+        **({"version_id": version.id} if pin else {}),
+        **version.card.model_dump(include={"technique", "conditions", "exceptions"}),
+        "source_title": version.citation.title,
     }
 
 
+def validate_frozen_reference_cards(cards, lookup):
+    for card in cards:
+        if not (identifier := card.get("version_id")):
+            continue
+        source = lookup(identifier)
+        if not source:
+            raise DomainError("outline_reference", "缺少大纲引用的准确手法卡来源，待正式修订到齐。", 409)
+        if _outline_card(source) != card:
+            raise DomainError("outline_reference", "大纲手法卡地址或冻结摘要与原正式修订不符。", 409)
+
+
 def _freeze_cards(tx, branch_id, references, previous):
+    from .reference_sync import reference_card_at
+
     cached = {_card_key(card): card for card in (previous or {}).get("reference_cards", [])}
     frozen = {}
     for ref in references:
         key = _card_key(ref)
         if key not in cached:
-            session = tx.execute(
-                "SELECT * FROM reference_sessions WHERE id=? AND json_extract(payload,'$.branch_id')=?",
-                (ref["session_id"], branch_id),
-            ).fetchone()
-            if not session:
-                raise DomainError("outline_reference", "仅可选用本工作版本的已保存手法卡。", 409)
-            cached[key] = _outline_card(ref, {**dict(session), "payload": json.loads(session["payload"])})
+            session_id, card_id, revision, version_id = key
+            version = reference_card_at(tx, branch_id, session_id, card_id, revision, version_id=version_id)
+            cached[key] = _outline_card(version, pin=version_id is not None)
         frozen[key] = cached[key]
     return list(frozen.values())
 
@@ -193,7 +204,7 @@ def _validate(graph, plan, basis, confirmed):
     references = {_card_key(card) for card in basis.get("reference_cards", [])}
     for chapter in planned:
         selected = [_card_key(ref) for ref in chapter.get("reference_cards", [])]
-        identities = {(session_id, card_id) for session_id, card_id, _ in selected}
+        identities = {key[:2] for key in selected}
         if len(identities) != len(selected) or not set(selected) <= references:
             raise DomainError("outline_reference", "每章须选用手法卡的一个已保存修订。")
     if confirmed and (
@@ -279,6 +290,11 @@ def save_outline_tx(
     )
     if cards:
         basis["reference_cards"] = cards
+        from .reference_sync import read_reference_version
+
+        validate_frozen_reference_cards(
+            cards, lambda identifier: read_reference_version(tx, branch_id, identifier)
+        )
     if sync_source:
         basis["sync_outline_source"] = sync_source
     if archive_source:
@@ -536,21 +552,17 @@ def register_routes(app, domain):
 
     @app.get(endpoint + "/reference-options")
     def reference_options(branch_id: str) -> list[OutlineCard]:
+        from .reference_sync import export_reference_archive
+
         domain.branch(branch_id)
         with domain.db.connect() as tx:
-            result = []
-            rows = tx.execute(
-                "SELECT * FROM reference_sessions WHERE json_extract(payload,'$.branch_id')=? "
-                "ORDER BY updated DESC LIMIT 200",
-                (branch_id,),
-            )
-            for row in rows:
-                payload = json.loads(row["payload"])
-                for card in payload["cards"]:
-                    ref = {"session_id": row["id"], "card_id": card["id"], "revision": row["revision"]}
-                    try:
-                        result.append(_outline_card(ref, {**dict(row), "payload": payload}))
-                    except DomainError as error:
-                        if error.code != "reference_card_incomplete":
-                            raise
-            return result
+            tx.execute("BEGIN")
+            history = export_reference_archive(tx, branch_id)
+            if not history:
+                return []
+            adopted = {value.revision_id for value in history.adopted_heads}
+            return [
+                _outline_card(version)
+                for version in history.versions
+                if version.id in adopted and version.assessment == "ready"
+            ]

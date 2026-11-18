@@ -2,6 +2,7 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import {
   createLocalProject,
+  confirmLocalReferenceCard,
   exportLocalManuscript,
   importLocalManuscript,
   manuscriptHash,
@@ -60,4 +61,14 @@ test('交换包恢复手法卡地址，只有选定精确修订才再次附带�
   expect((await exportLocalManuscript(novel.id)).reference_history).not.toHaveProperty('excerpts')
   expect((await exportLocalManuscript(novel.id, [id])).reference_history).toEqual(history)
   await expect(exportLocalManuscript(novel.id, ['not-in-work'])).rejects.toThrow('不属于当前作品')
+  const authored = await confirmLocalReferenceCard(novel.id, id, {
+    ...draft.card,
+    technique: '改为三次查看刻痕。',
+  })
+  expect(authored.parent_id).toBe(id)
+  expect(authored.citation).toEqual(draft.citation)
+  await expect(confirmLocalReferenceCard(novel.id, id, draft.card)).rejects.toMatchObject({
+    code: 'conflict',
+  })
+  expect((await readLocalReferenceHistory(novel.id))?.adopted_heads[0].revision_id).toBe(authored.id)
 })

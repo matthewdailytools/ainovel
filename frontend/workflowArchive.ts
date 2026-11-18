@@ -8,6 +8,8 @@ const statuses = ['green', 'yellow', 'red', 'pending', 'not_applicable', 'outdat
 const completionChecks = ['manuscript', 'ending', 'characters', 'promises', 'inspection', 'delivery'] as const
 export const deliveryFiles = ['正文.md', '设定册.md', '简介.md', '试读.md'] as const
 type DeliveryFile = (typeof deliveryFiles)[number]
+const trimArchiveText = (value: string) =>
+  value.replace(/^[\p{White_Space}\x1c-\x1f]+|[\p{White_Space}\x1c-\x1f]+$/gu, '')
 
 function invalid(message: string): never {
   throw new Error(message)
@@ -360,6 +362,7 @@ async function parseCompletion(
   reports: ReadonlyMap<string, ArchivedInspection>,
   revisions: ReadonlyMap<string, FrozenRevision>,
   digest: Digest,
+  reconstructMaterials = false,
 ) {
   const entry = record(value, [
     'id',
@@ -408,7 +411,6 @@ async function parseCompletion(
     JSON.stringify(sample.map(({ id }) => id)) !== JSON.stringify(review.sample_chapter_ids)
   )
     invalid('历史完本的作者复核和试读范围不一致。')
-  const materials = deliveryRecord(entry.materials, (content) => text(content, 24 * 1024 * 1024))
   const body = (rows: ChapterManifest[]) =>
     rows.map(({ id, title }) => `## ${title}\n\n${chapters.get(id)?.content ?? ''}`).join('\n\n')
   const rules = list(report.report.items[4].basis.rules, 240).map((value) => {
@@ -420,9 +422,13 @@ async function parseCompletion(
   const expected: Record<DeliveryFile, string> = {
     '正文.md': `# ${workTitle}\n\n${body(manifest.chapters)}\n`,
     '设定册.md': `# ${workTitle} · 设定册\n\n${rules.join('\n\n') || '本作没有单独确认的世界设定条目。'}\n`,
-    '简介.md': `# ${workTitle} · 简介\n\n剧透范围：${spoiler}\n\n${review.intro.trim()}\n`,
+    '简介.md': `# ${workTitle} · 简介\n\n剧透范围：${spoiler}\n\n${trimArchiveText(review.intro)}\n`,
     '试读.md': `# ${workTitle} · 试读\n\n${body(sample)}\n`,
   }
+  const materials =
+    reconstructMaterials && entry.materials === undefined
+      ? expected
+      : deliveryRecord(entry.materials, (content) => text(content, 24 * 1024 * 1024))
   for (const filename of deliveryFiles) {
     if (
       materials[filename] !== expected[filename] ||
@@ -456,9 +462,13 @@ export type WorkflowSyncObject = {
 }[WorkflowKind]
 
 export function workflowObjectSignature(object: WorkflowSyncObject) {
-  // The signed source keeps Python's original field order. Compare its enclosing
+  // The archived source keeps Python's original field order. Compare its enclosing
   // values independently from the order JSON objects arrived in each transport.
-  return JSON.stringify([object.kind, object.branch_id, JSON.parse(object.entry_json)], (_, value) => {
+  const entry = record(JSON.parse(object.entry_json))
+  // The files in a compact completion are reconstructed from the same manifest.
+  // Each incoming shape is validated before being stored.
+  if (object.kind === 'workflow-completion') delete entry.materials
+  return JSON.stringify([object.kind, object.branch_id, entry], (_, value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return value
     return Object.fromEntries(
       Object.keys(value)
@@ -513,6 +523,7 @@ export async function validateWorkflowSyncEntry(
       new Map([[report.id, report]]),
       revisions,
       digest,
+      true,
     ),
   }
 }
