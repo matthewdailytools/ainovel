@@ -9866,7 +9866,15 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["outline", "setting", "reference_card", "story_record", "fact", "scene_time"],
+            "enum": [
+              "outline",
+              "setting",
+              "setting_use",
+              "reference_card",
+              "story_record",
+              "fact",
+              "scene_time"
+            ],
             "title": "Kind"
           },
           "id": { "type": "string", "title": "Id" },
@@ -9924,6 +9932,7 @@
         "properties": {
           "chapter_id": { "type": "string", "title": "Chapter Id" },
           "revision": { "type": "integer", "title": "Revision" },
+          "revision_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Revision Id" },
           "start": { "type": "integer", "title": "Start" },
           "end": { "type": "integer", "title": "End" },
           "quote": { "type": "string", "title": "Quote" }

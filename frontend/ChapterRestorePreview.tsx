@@ -1,9 +1,16 @@
 import { Difference } from './Editor'
 
 type RestoreVersion = { revision: number; content: string }
-type RestoreSource = { chapter_id: string; revision: number; start: number; end: number; quote: string }
+type RestoreSource = {
+  chapter_id: string
+  revision: number
+  revision_id?: string | null
+  start: number
+  end: number
+  quote: string
+}
 type RestoreReference = {
-  kind: 'outline' | 'setting' | 'story_record' | 'fact' | 'scene_time' | 'reference_card'
+  kind: 'outline' | 'setting' | 'setting_use' | 'story_record' | 'fact' | 'scene_time' | 'reference_card'
   id: string
   title: string
   source: RestoreSource | null
@@ -39,6 +46,7 @@ export type ChapterRestorePreviewProps = {
 const referenceNames = {
   outline: '大纲',
   setting: '设定',
+  setting_use: '设定正文使用',
   story_record: '台账记录',
   fact: '事实',
   scene_time: '场景时间',
@@ -101,6 +109,12 @@ function FrozenSource({ source }: { source: RestoreSource }) {
     <blockquote>
       <div className="small">
         章 <code>{source.chapter_id}</code> · 修订 {source.revision} · 位置 {source.start}–{source.end}
+        {source.revision_id && (
+          <>
+            {' · 原修订 '}
+            <code>{source.revision_id}</code>
+          </>
+        )}
       </div>
       <pre>{source.quote}</pre>
     </blockquote>

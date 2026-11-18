@@ -3,6 +3,8 @@ from hashlib import sha256
 from fastapi.testclient import TestClient
 
 from test_outline_workspace import chapter_plan, setting_confirmation
+from test_setting_use import QUOTE, TEXT, select, verified
+from test_setting_use import author_plan as author_plan
 
 
 def _report(client, endpoint, scope, scope_id):
@@ -245,3 +247,82 @@ def test_chapter_restore_rejects_preview_after_another_session_saves_and_keeps_l
         json={"base_revision": restored.json()["revision"], "revision_id": rows[0]["id"]},
     )
     assert legacy.status_code == 200 and legacy.json()["content"] == current["content"]
+
+
+def test_chapter_restore_reads_author_setting_use_and_requires_fresh_preview(client, domain, author_plan):
+    plan = author_plan
+    chapter = plan["first"]
+    chapter_url = f"/api/chapters/{chapter['id']}"
+    old = verified(client.get(chapter_url + "/history"))[0]
+    current = domain.save(chapter["id"], chapter["revision"], TEXT + "她核对名单后收起铜牌。")
+    second = plan["second"]
+    domain.save(second["id"], second["revision"], "在😀渡口，守门人留在木门外。")
+    history = f"{chapter_url}/history/{old['id']}"
+
+    def preview():
+        return verified(client.get(history + "/restore-preview"))
+
+    def restore(value):
+        return client.post(history + "/restore", json={"basis_sha256": value["basis_sha256"]})
+
+    baseline = preview()
+    assert not any(row["kind"] == "setting_use" for row in baseline["references"])
+    with TestClient(client.app) as another:
+        another.headers["X-Ainovel-CSRF"] = another.get("/api/session").json()["csrf"]
+        other_url = plan["other"]
+        other_proof = select(verified(another.get(other_url)), "other-chapter-proof") | {"item_id": "guard"}
+        other_proof["evidence"].update(start=6, end=9, quote_sha256=sha256("守门人".encode()).hexdigest())
+        verified(another.post(other_url, json=other_proof), 201)
+        assert preview()["basis_sha256"] == baseline["basis_sha256"]
+
+        url = plan["route"]
+        request = select(verified(another.get(url)), "current-chapter-proof")
+        proof = verified(another.post(url, json=request), 201)["version"]
+        expired = restore(baseline)
+        assert expired.status_code == 409 and expired.json()["code"] == "chapter_restore_changed"
+        assert verified(client.get(chapter_url)) == current
+        expected = {
+            "kind": "setting_use",
+            "id": proof["id"],
+            "title": "领航人阿禾",
+            "source": {
+                "chapter_id": chapter["id"],
+                "revision_id": proof["evidence"]["revision_id"],
+                "revision": current["revision"],
+                "start": proof["evidence"]["start"],
+                "end": proof["evidence"]["end"],
+                "quote": QUOTE,
+            },
+        }
+        reviewed = preview()
+        assert [row for row in reviewed["references"] if row["kind"] == "setting_use"] == [expected]
+
+        withdrawn = verified(
+            another.post(
+                url + f"/{proof['id']}/withdraw", json={"idempotency_key": "withdraw-chapter-proof"}
+            ),
+            201,
+        )["version"]
+        expired = restore(reviewed)
+        assert expired.status_code == 409 and expired.json()["code"] == "chapter_restore_changed"
+        assert not any(row["kind"] == "setting_use" for row in preview()["references"])
+        latest = verified(
+            another.post(
+                url,
+                json=select(verified(another.get(url)), "reauthor-chapter-proof", withdrawn["id"]),
+            ),
+            201,
+        )["version"]
+
+    reviewed_again = preview()
+    assert [row for row in reviewed_again["references"] if row["kind"] == "setting_use"] == [
+        expected | {"id": latest["id"]}
+    ]
+    restored = verified(restore(reviewed_again))
+    assert (restored["revision"], restored["content"]) == (current["revision"] + 1, old["content"])
+    history_record = verified(client.get(plan["route"] + "/" + latest["id"]))
+    assert (history_record["status"], history_record["quote"], history_record["version"]) == (
+        "outdated",
+        QUOTE,
+        latest,
+    )

@@ -486,13 +486,17 @@ export async function captureStoryEvidence(revision: StoryChapterRevision, start
   } satisfies SettingsEvidence
 }
 
+export function storyEvidenceQuote(evidence: SettingsEvidence, revision?: StoryChapterRevision | null) {
+  if (!revision || revision.id !== evidence.revision_id || revision.chapter_id !== evidence.chapter_id)
+    return invalid('缺少故事记录引用的原始章稿。')
+  return quoteAt(revision.content, evidence.start, evidence.end)
+}
+
 export async function verifyStoryEvidence(
   evidence: SettingsEvidence,
   revision?: StoryChapterRevision | null,
 ) {
-  if (!revision || revision.id !== evidence.revision_id || revision.chapter_id !== evidence.chapter_id)
-    return invalid('缺少故事记录引用的原始章稿。')
-  const quote = quoteAt(revision.content, evidence.start, evidence.end)
+  const quote = storyEvidenceQuote(evidence, revision)
   if ((await digest(quote)) !== evidence.quote_sha256) invalid('故事记录的原文选区散列不匹配。')
   return quote
 }

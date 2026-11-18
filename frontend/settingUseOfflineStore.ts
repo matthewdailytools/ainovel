@@ -2,7 +2,7 @@ import type { LocalChapter, LocalProject, LocalPublication, LocalRevision } from
 import { outlineChapterPlans, type OutlineVersion } from './outlineSyncModel'
 import type { ProjectSource } from './projectSyncModel'
 import type { SettingsVersion } from './settingsSyncModel'
-import { compactJSON, verifyStoryEvidence } from './storySyncModel'
+import { compactJSON, storyEvidenceQuote, verifyStoryEvidence } from './storySyncModel'
 import {
   buildSettingUseVersion,
   plannedSettingUseItems,
@@ -159,6 +159,41 @@ export function createSettingUseOfflineStore(access: Access) {
   type Context = Awaited<ReturnType<typeof activeContext>>
   type Presentation = Awaited<ReturnType<typeof readPresentation>>
 
+  function matchesCurrentBasis(row: Presentation, context: Context, live: LocalRevision | undefined) {
+    const { version } = row.entry
+    return (
+      !!row.original &&
+      row.original.sha256 === version.chapter_sha256 &&
+      nativeMatch(row.original, row.adopted) &&
+      row.adopted?.id === live?.id &&
+      context?.outline.id === version.outline_version_id &&
+      context.settings.id === version.settings_version_id
+    )
+  }
+
+  async function readCurrentChapterUsesTx(tx: Tx, branch: string, chapterId: string) {
+    const [context, live, heads] = await Promise.all([
+      activeContext(tx, branch),
+      currentRevision(tx, branch, chapterId),
+      byChapter<Head>(tx, 'settingUseHeads', branch, chapterId),
+    ])
+    if (!context || !live) return []
+    const current = []
+    for (const { versionId } of heads) {
+      const selected = await entry(tx, branch, versionId)
+      if (selected?.entry.version.action !== 'confirmed') continue
+      const proof = await readPresentation(tx, branch, selected)
+      const { original } = proof
+      if (!original || !matchesCurrentBasis(proof, context, live)) continue
+      const { version } = proof.entry
+      // Authoring, import and sync validate the hash before storing the immutable proof.
+      // Reading its saved selection here keeps the preview and restore in the same IndexedDB transaction.
+      const quote = storyEvidenceQuote(version.evidence, original)
+      if (hasProse(quote)) current.push({ version, title: proof.title, revision: original.revision, quote })
+    }
+    return current
+  }
+
   async function present(
     row: Presentation,
     selectedId: string | undefined,
@@ -176,11 +211,7 @@ export function createSettingUseOfflineStore(access: Access) {
       }
     }
     const isHead = selectedId === version.id
-    const correctBasis =
-      context?.outline.id === version.outline_version_id &&
-      context.settings.id === version.settings_version_id
-    const current =
-      !!row.original && nativeMatch(row.original, row.adopted) && row.adopted?.id === live?.id && correctBasis
+    const current = matchesCurrentBasis(row, context, live)
     return {
       entry: row.entry,
       title: row.title,
@@ -553,6 +584,7 @@ export function createSettingUseOfflineStore(access: Access) {
     readLocalOutlineSettingUse,
     confirmLocalSettingUse,
     withdrawLocalSettingUse,
+    readCurrentChapterUsesTx,
     readSettingUseVersionTx: entry,
     readSettingUseHistoryTx,
     restoreSettingUseHistoryTx,

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { authorSettingPlan } from './fixtures/authorSettingPlan'
 
 test('独立 Web 预览单章恢复的正文、伏笔和检查，另一窗口保存后须重读', async ({ page, context }) => {
   const session = await page.request.get('/api/session')
@@ -166,4 +167,61 @@ test('独立 Web 预览单章恢复的正文、伏笔和检查，另一窗口保
   await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toHaveValue(first)
   await page.getByLabel('历史修订').selectOption({ label: '修订 3 · 作者编辑' })
   await expect(preview.locator('[aria-label="历史稿 · 修订 3"]')).toHaveText(next)
+})
+
+test('独立 Web 另一窗口正式签注章稿后，旧恢复预览须重读原文依据', async ({ page, context }) => {
+  const { novel, branch, chapter, original } = await authorSettingPlan(page, '赤钥 · 回滚前的设定使用')
+  const pack = await page.request.get(`${branch}/manuscript-package`)
+  expect(pack.ok(), await pack.text()).toBe(true)
+  const sourceRows: { id: string; chapter_id: string; revision: number }[] = (await pack.json()).revisions
+  const originalId = sourceRows.find((row) => row.chapter_id === chapter.id && row.revision === 1)!.id
+  const targetId = sourceRows.find((row) => row.chapter_id === chapter.id && row.revision === 0)!.id
+  await page.setViewportSize({ width: 320, height: 900 })
+  await page.goto('/offline/')
+  await expect(page.getByText('离线页面就绪', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+  await context.setOffline(true)
+  await page.getByLabel('导入新离线作品').setInputFiles({
+    name: '赤钥.json',
+    mimeType: 'application/json',
+    buffer: await pack.body(),
+  })
+  await page.getByRole('button', { name: '1. 归还赤钥', exact: true }).press('Enter')
+  await page.getByText('本章版本历史', { exact: true }).press('Enter')
+  await page.getByLabel('历史修订').selectOption(targetId)
+  const preview = page.getByRole('region', { name: '章节恢复预览' })
+  const effects = preview.getByRole('region', { name: '引用与伏笔影响' })
+  await expect(preview).toBeVisible()
+  await expect(effects.getByText(/设定正文使用/)).toHaveCount(0)
+
+  const peer = await context.newPage()
+  await peer.goto('/offline/')
+  await peer.getByRole('combobox', { name: '离线作品', exact: true }).selectOption(novel.id)
+  await peer.getByRole('button', { name: '1. 归还赤钥', exact: true }).press('Enter')
+  const peerProof = peer.getByLabel('离线设定正文证据')
+  await peerProof.getByText('设定的正文使用证据', { exact: true }).press('Enter')
+  await peerProof.getByRole('combobox', { name: '本章引用的设定' }).selectOption('keeper')
+  await peer.getByRole('textbox', { name: '章节正文' }).press('Control+A')
+  await peerProof.getByRole('button', { name: '确认该选区为正文证据' }).press('Enter')
+  await expect(peerProof.getByRole('status')).toHaveText('已确认当前正文使用该设定。')
+
+  const restore = page.getByRole('button', { name: '恢复为最新修订' })
+  await restore.press('Enter')
+  await expect(page.getByRole('alert')).toContainText('请重新读取恢复预览')
+  const editor = page.getByRole('textbox', { name: '章节正文' })
+  await expect(editor).toHaveValue(original)
+  await page.getByRole('button', { name: '重新读取恢复预览' }).press('Enter')
+  const source = effects.getByRole('listitem').filter({ hasText: '设定正文使用 · 守铃人阿陶' })
+  await expect(source).toContainText(originalId)
+  await expect(source).toContainText(`位置 0–${original.length}`)
+  await expect(source.locator('pre')).toHaveText(original)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
+  await restore.press('Enter')
+  await expect(page.getByRole('status').filter({ hasText: '本地已保存' })).toContainText('修订 2')
+  await expect(editor).toHaveValue('')
+  const proofs = page.getByLabel('离线设定正文证据')
+  await proofs.getByText('设定的正文使用证据', { exact: true }).press('Enter')
+  const old = proofs.getByText('守铃人阿陶 · 待按当前正文或设定重新核对', { exact: true })
+  await old.press('Enter')
+  await expect(old.locator('..').locator('blockquote')).toHaveText(original)
 })

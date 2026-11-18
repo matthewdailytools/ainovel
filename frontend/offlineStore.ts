@@ -73,7 +73,11 @@ import {
   type StoryVersionObject,
 } from './storySyncModel'
 import { decodeWebManuscriptBackup, encodeWebManuscriptBackup } from './webManuscriptBackup'
-import { createSettingUseOfflineStore, settingUseStores } from './settingUseOfflineStore'
+import {
+  createSettingUseOfflineStore,
+  settingUseReadStores,
+  settingUseStores,
+} from './settingUseOfflineStore'
 import {
   settingUseObjectSignature,
   settingUseVersionSlot,
@@ -281,7 +285,9 @@ const settingsDependencyStores = [
   'settingsHeads',
   'settingsVersions',
 ] satisfies Store[]
-const chapterRestoreStores = [...new Set([...outlineReadStores, ...storyReadStores, ...workflowStores])]
+const chapterRestoreStores = [
+  ...new Set([...outlineReadStores, ...storyReadStores, ...workflowStores, ...settingUseReadStores]),
+]
 
 export class OfflineStoreError extends Error {
   constructor(
@@ -667,17 +673,32 @@ async function localRestorePreview(
   id: string,
 ) {
   const branchId = project.branch.id
-  const [current, target, outline, story, reports] = await Promise.all([
+  const [current, target, outline, story, reports, settingUses] = await Promise.all([
     chapterHead(tx, chapter),
     result<LocalRevision | undefined>(tx.objectStore('revisions').get(id)),
     outlineStore.readOutlineTx(tx, project),
     storyStore.readStoryTx(tx, project),
     readWorkflowHistory(tx, branchId),
+    settingUseStore.readCurrentChapterUsesTx(tx, branchId, chapter.id),
   ])
   if (!current || target?.chapter_id !== chapter.id)
     throw new OfflineStoreError('missing', '当前稿或历史修订已不存在。')
 
-  const references: ChapterRestorePreviewProps['references'][number][] = []
+  const references: ChapterRestorePreviewProps['references'][number][] = settingUses.map(
+    ({ version, title, revision, quote }) => ({
+      kind: 'setting_use',
+      id: version.id,
+      title,
+      source: {
+        chapter_id: version.evidence.chapter_id,
+        revision_id: version.evidence.revision_id,
+        revision,
+        start: version.evidence.start,
+        end: version.evidence.end,
+        quote,
+      },
+    }),
+  )
   const promises: ChapterRestorePreviewProps['promises'][number][] = []
   const storyRevisions: string[] = []
   const affected_reports: RestoreAffectedReport[] = []

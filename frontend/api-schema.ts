@@ -5462,7 +5462,7 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: 'outline' | 'setting' | 'reference_card' | 'story_record' | 'fact' | 'scene_time'
+      kind: 'outline' | 'setting' | 'setting_use' | 'reference_card' | 'story_record' | 'fact' | 'scene_time'
       /** Id */
       id: string
       /** Title */
@@ -5499,6 +5499,8 @@ export interface components {
       chapter_id: string
       /** Revision */
       revision: number
+      /** Revision Id */
+      revision_id?: string | null
       /** Start */
       start: number
       /** End */

@@ -11,10 +11,12 @@ import {
   exportLocalManuscript,
   importLocalBackup,
   manuscriptHash,
+  readLocalChapterRestore,
   readLocalHistory,
   readLocalOutlineSettingUse,
   readLocalPublications,
   readLocalSettingUse,
+  restoreLocalChapter,
   saveLocalChapter,
   syncObjectSignature,
   validateManuscript,
@@ -129,8 +131,62 @@ test('正式使用证据按章稿与采用头 CAS，撤回保留全文、父版�
   )
 })
 
+test('恢复单章前核对当前设定使用证据，其他作品确认不影响已预览依据', async () => {
+  const { project, chapter, saved, input, title } = await fixture()
+  const [target] = await readLocalHistory(project, chapter.id)
+  const preview = () => readLocalChapterRestore(project, chapter.id, target.id)
+  const restore = (basis: string) => restoreLocalChapter(project, chapter.id, target.id, basis)
+  const initial = await preview()
+  expect(initial.references.filter(({ kind }) => kind === 'setting_use')).toEqual([])
+
+  const first = await confirmLocalSettingUse(project, chapter.id, input)
+  await expect(restore(initial.basis)).rejects.toMatchObject({ code: 'conflict' })
+  const signed = await preview()
+  expect(signed.references.filter(({ kind }) => kind === 'setting_use')).toEqual([
+    {
+      kind: 'setting_use',
+      id: first.id,
+      title,
+      source: {
+        chapter_id: chapter.id,
+        revision_id: saved.id,
+        revision: saved.revision,
+        start: 0,
+        end: 4,
+        quote: '😀阿陶',
+      },
+    },
+  ])
+
+  const withdrawn = await withdrawLocalSettingUse(project, chapter.id, first.id)
+  await expect(restore(signed.basis)).rejects.toMatchObject({ code: 'conflict' })
+  expect((await preview()).references.filter(({ kind }) => kind === 'setting_use')).toEqual([])
+
+  const restoredProof = await confirmLocalSettingUse(project, chapter.id, {
+    ...input,
+    parent_id: withdrawn.id,
+  })
+  const ready = await preview()
+  const other = await fixture()
+  await confirmLocalSettingUse(other.project, other.chapter.id, other.input)
+  expect((await preview()).basis).toBe(ready.basis)
+  const restored = await restore(ready.basis)
+  expect(restored).toMatchObject({ revision: saved.revision + 1, content: target.content })
+  expect((await readLocalSettingUse(project, chapter.id)).records).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        entry: expect.objectContaining({ version: restoredProof }),
+        status: 'outdated',
+        quote: '😀阿陶',
+      }),
+    ]),
+  )
+})
+
 test('无确证的同文源只可回查，正式采用关系随独立备份保留并拒绝被篡改', async () => {
   const { project, branch_id, chapter, saved, input } = await fixture()
+  const [initial] = await readLocalHistory(project, chapter.id)
+  const preview = () => readLocalChapterRestore(project, chapter.id, initial.id)
   const source = { ...saved, id: 'foreign-saved' }
   const remote = { format, kind: 'revision' as const, branch_id, revision: source }
   await applySyncedObject(project, `revision:${source.id}`, remote, 'null')
@@ -164,6 +220,7 @@ test('无确证的同文源只可回查，正式采用关系随独立备份保�
     status: 'outdated',
     quote: '😀阿陶',
   })
+  expect((await preview()).references.some(({ kind }) => kind === 'setting_use')).toBe(false)
   expect((await exportLocalManuscript(project)).setting_use_history?.native_bindings).toBeUndefined()
 
   const previous = {
@@ -179,6 +236,11 @@ test('无确证的同文源只可回查，正式采用关系随独立备份保�
     syncObjectSignature(previous),
   )
   expect((await readLocalOutlineSettingUse(project))[0].proof?.status).toBe('current')
+  expect((await preview()).references.find(({ kind }) => kind === 'setting_use')?.source).toMatchObject({
+    revision_id: source.id,
+    revision: source.revision,
+    quote: '😀阿陶',
+  })
   const pack = await exportLocalManuscript(project)
   expect(pack.setting_use_history?.native_bindings).toEqual({ [source.id]: saved.id })
   await expect(

@@ -12,6 +12,7 @@ from .domain import utf16_slice
 from .models import Input
 from .outline_workspace import WINDOW_CHAPTERS, _chapter_plans, _decode, _latest as latest_outline
 from .restore_impact import AffectedReport, forecast, invalidated_reports, report_basis
+from .setting_use import current_chapter_uses
 from .story_graph import graph_snapshot, references as record_references, sources
 from .workflow_inspection import _card_references
 
@@ -30,13 +31,14 @@ class RestoreRevision(Input):
 class RestoreSource(Input):
     chapter_id: str
     revision: int
+    revision_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     start: int
     end: int
     quote: str
 
 
 class RestoreReference(Input):
-    kind: Literal["outline", "setting", "reference_card", "story_record", "fact", "scene_time"]
+    kind: Literal["outline", "setting", "setting_use", "reference_card", "story_record", "fact", "scene_time"]
     id: str
     title: str
     source: RestoreSource | None
@@ -144,6 +146,12 @@ def _outline_references(tx, chapter):
 
 def _other_references(tx, chapter):
     branch_id = chapter["branch_id"]
+    for title, version, revision, quote in current_chapter_uses(tx, chapter):
+        source = version.evidence.model_dump(exclude={"quote_sha256"}) | {
+            "revision": revision,
+            "quote": quote,
+        }
+        yield _reference(version.id, "setting_use", title, source)
     if row := latest_setting(tx, branch_id, CONFIRMATION):
         setting = _read_payload(row)
         items = {

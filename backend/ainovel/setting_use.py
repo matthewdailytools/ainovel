@@ -177,6 +177,23 @@ def _present(tx, chapter, row, heads, context):
     return {"version": version, "status": status, "created": row["created"], "quote": quote}
 
 
+def current_chapter_uses(tx, chapter):
+    heads = _head_ids(tx, chapter)
+    if not heads:
+        return
+    context = _context(tx, chapter)
+    basis, options, _ = context
+    if not basis or not options:
+        return
+    for item_id, item in sorted(options.items()):
+        identifier = heads.get((basis["settings_version_id"], item_id))
+        if identifier:
+            row = _lookup(tx, chapter, identifier)
+            record = _present(tx, chapter, row, heads, context)
+            if record["status"] == "current":
+                yield item["title"], record["version"], row["base_revision"], record["quote"]
+
+
 def current_outline_uses(tx, branch_id, outline_version_id, settings_version_id):
     """Return author-confirmed proofs for a caller's already validated current outline."""
     if not outline_version_id or not settings_version_id:

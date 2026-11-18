@@ -61,6 +61,72 @@ test('章纲中的人物条目经作者选取正式原文后才成为实际使�
   expect((await readPlan()).settings[0]).not.toHaveProperty('author_evidence')
 })
 
+test('单章恢复遇到另一窗口签认设定原文时要求重读，恢复后可查看历史证明', async ({ page }) => {
+  const { novel, chapter, original, headers } = await authorSettingPlan(page, '恢复前核对设定证据')
+  const chapterUrl = `/api/chapters/${chapter.id}`
+  const current = original + '他把钥齿的记号抄入册中。'
+  await accepted(
+    await page.request.put(chapterUrl, { headers, data: { base_revision: 1, content: current } }),
+  )
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+  await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toHaveText(current)
+  await page.setViewportSize({ width: 360, height: 820 })
+  const history = page.getByRole('button', { name: '版本历史', exact: true })
+  await expect(history).toBeEnabled()
+  await history.press('Enter')
+  const old = page.locator('.history details').filter({
+    has: page.locator('summary').filter({ hasText: '修订 1 · 作者编辑' }),
+  })
+  await old.locator('summary').press('Enter')
+  await old.getByRole('button', { name: '预览恢复', exact: true }).press('Enter')
+  const preview = old.getByRole('region', { name: '章节恢复预览' })
+  await expect(preview).toBeVisible()
+  await expect(preview.getByText(/设定正文使用 · 守铃人阿陶/)).toHaveCount(0)
+
+  const another = await page.context().newPage()
+  try {
+    await another.goto('/')
+    await another.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+    const editor = another.getByRole('textbox', { name: '章节正文', exact: true })
+    await expect(editor).toHaveText(current)
+    const trigger = another.getByText('设定的正文使用证据', { exact: true })
+    await trigger.press('Enter')
+    const evidence = trigger.locator('..')
+    await evidence.getByRole('combobox', { name: '本章引用的设定' }).selectOption('keeper')
+    await editor.press('Control+End')
+    await editor.press('Control+Shift+Home')
+    await expect(evidence.locator('blockquote')).toHaveText(current)
+    await evidence.getByRole('button', { name: '确认该选区为正文证据' }).press('Enter')
+    await expect(evidence.getByRole('status')).toContainText('已确认当前正文使用该设定。')
+  } finally {
+    await another.close()
+  }
+
+  const apply = old.getByRole('button', { name: '确认恢复为新修订', exact: true })
+  await apply.press('Enter')
+  await expect(page.locator('.history').getByRole('alert')).toContainText('请重新读取恢复预览')
+  await expect(apply).toBeDisabled()
+  expect((await accepted(await page.request.get(chapterUrl))).content).toBe(current)
+  const retry = old.getByRole('button', { name: '重新读取恢复预览' })
+  await expect(retry).toBeFocused()
+  await retry.press('Enter')
+  const affected = preview.getByRole('listitem').filter({ hasText: '设定正文使用 · 守铃人阿陶' })
+  await expect(affected.locator('blockquote pre')).toHaveText(current)
+  await expect(affected).toContainText(`修订 2 · 位置 0–${current.length}`)
+  const { records } = await accepted(await page.request.get(chapterUrl + '/setting-uses'))
+  const proof = records[0].version
+  await expect(affected).toContainText(proof.evidence.revision_id)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+  await apply.press('Enter')
+  await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toHaveText(original)
+  expect(await accepted(await page.request.get(`${chapterUrl}/setting-uses/${proof.id}`))).toMatchObject({
+    status: 'outdated',
+    quote: current,
+    version: proof,
+  })
+})
+
 async function accepted(response: APIResponse) {
   expect(response.ok(), await response.text()).toBe(true)
   return response.json()
