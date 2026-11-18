@@ -14,7 +14,7 @@ async function reviewSettingsConflict(page: Page, browser: Browser, mergeDirectl
     data: { title, brief: '追查遗铃的两种来历。' },
   })
   expect(created.ok(), await created.text()).toBe(true)
-  const { branch_id } = await created.json()
+  const { id: novelId, branch_id } = await created.json()
   const branch = `/api/branches/${branch_id}`
   const settings = `${branch}/conception`
   const project = await page.request.put(settings + '/project-brief', {
@@ -64,6 +64,8 @@ async function reviewSettingsConflict(page: Page, browser: Browser, mergeDirectl
       ]
     } else {
       world.items[0].detail = detail
+      if (!mergeDirectly)
+        world.items[0].setting_policy = { strength: 'hard', scope: '东城北门', exceptions: '满月夜除外' }
     }
     const response = await page.request.put(settings, {
       headers,
@@ -82,6 +84,7 @@ async function reviewSettingsConflict(page: Page, browser: Browser, mergeDirectl
         base_revision: saved.revision,
         base_story_revision: saved.story_revision,
         idempotency_key: `${branch_id}-${key}`,
+        note: '桌面作者已复核遗铃规则。',
         reviewed_setting_findings: saved.setting_findings.map((finding) => finding.id),
       },
     })
@@ -229,6 +232,32 @@ async function reviewSettingsConflict(page: Page, browser: Browser, mergeDirectl
       web.once('dialog', (dialog) => dialog.accept())
       await compare.getByRole('button', { name: '采用本机版', exact: true }).click()
     } else {
+      const desktopCompared = await desktopSync('run')
+      expect(desktopCompared.conflicts.map(({ object_id }: { object_id: string }) => object_id)).toContain(
+        `settings:${branch_id}`,
+      )
+      await page.reload()
+      await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novelId)
+      await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+      const desktopPanel = page.getByRole('region', { name: '作品云同步', exact: true })
+      await desktopPanel.getByLabel('同步服务地址').fill(cloud)
+      await desktopPanel.getByLabel('设备凭据').fill(desktopToken)
+      await desktopPanel.getByRole('button', { name: `比较 settings:${branch_id}` }).press('Enter')
+      const desktopCompare = desktopPanel.getByRole('region', { name: '云同步冲突比较' })
+      for (const [label, revision, policy, note] of [
+        ['本机当前版', remote.confirmation!.id, '硬规定 · 适用范围 东城北门 · 例外 满月夜除外', true],
+        ['另一提交版', undefined, '硬规定 · 适用范围 东城 · 例外 新月夜除外', false],
+        ['共同依据', common.confirmation!.id, '硬规定 · 适用范围 东城 · 例外 新月夜除外', true],
+      ] as const) {
+        const side = desktopCompare.locator('details').filter({ has: page.getByText(label, { exact: true }) })
+        await side.getByText(label, { exact: true }).press('Enter')
+        const summary = side.locator('pre')
+        await expect(summary).toContainText('遗铃 · east-bell')
+        await expect(summary).toContainText(policy)
+        await expect(summary).toContainText('关联 west-bell')
+        if (revision) await expect(summary).toContainText(`设定修订 ${revision}`)
+        if (note) await expect(summary).toContainText('作者确认说明 桌面作者已复核遗铃规则。')
+      }
       web.once('dialog', (dialog) => dialog.accept())
       await compare.getByRole('button', { name: '采用另一提交版' }).click()
     }

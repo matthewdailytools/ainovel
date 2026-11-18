@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from hashlib import sha256
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from ainovel import conception, project_sync, settings_sync
+from ainovel.api import create_app
 from ainovel.cloud_sync import create_sync_app
 from ainovel.db import Database, DomainError
 from ainovel.desktop_sync import DesktopSync, Resolve
@@ -14,6 +16,7 @@ from ainovel.domain import Domain
 from ainovel.manuscript_exchange import ManuscriptPackage, export_manuscript, import_manuscript
 from ainovel.project_brief import ConfirmProject, confirm
 from ainovel.setting_review import confirmed_world_basis
+from test_conception_workbench import basis
 from test_project_brief import BRIEF
 
 
@@ -324,10 +327,11 @@ def test_settings_head_preserves_unconfirmed_local_draft(domain, story, tmp_path
         assert conception._workspace(tx, branch)["categories"][0]["items"][0]["id"] == "local"
 
 
-def test_formal_settings_sync_conflict_and_pending_project_with_real_cloud(domain, story, tmp_path):
+def test_formal_settings_sync_conflict_and_pending_project_with_real_cloud(domain, story, settings, tmp_path):
     branch = story["branch_id"]
     chapter = domain.save(story["chapter_id"], 0, "响起📯，并非铜铃。")
-    other = Domain(Database(tmp_path / "other-settings.sqlite"))
+    other_settings = replace(settings, data_dir=tmp_path / "other-settings")
+    other = Domain(Database(other_settings.data_dir / "manuscripts.sqlite"))
     import_manuscript(other, export_manuscript(domain, branch))
     origin = "http://127.0.0.1:8888"
     provisioning = "isolated-settings-sync-provision-abcdefgh"
@@ -436,6 +440,53 @@ def test_formal_settings_sync_conflict_and_pending_project_with_real_cloud(domai
             )
         assert not left.run(branch, origin, left_token)["conflicts"]
 
+        combined = "把铃放到梁下，过午夜才响。"
+        route = f"/api/branches/{branch}/conception"
+        with TestClient(create_app(other_settings)) as author:
+            author.headers["X-Ainovel-CSRF"] = author.get("/api/session").json()["csrf"]
+            draft = author.get(route).json()
+            assert draft["confirmation"]["current"]
+            world = next(row for row in draft["categories"] if row["id"] == "world")
+            assert world["items"][0]["detail"] == "把铃放到梁下才响。"
+            world["items"][0]["detail"] = combined
+            request = {**basis(draft), "categories": draft["categories"]}
+            inspected = author.post(route + "/setting-inspection", json=request)
+            assert inspected.status_code == 200, inspected.text
+            findings = inspected.json()["findings"]
+            assert [finding["kind"] for finding in findings] == ["same_name"]
+            saved = author.put(route, json=request)
+            assert saved.status_code == 200, saved.text
+            assert not saved.json()["confirmation"]["current"]
+            sign = {
+                **basis(saved.json()),
+                "idempotency_key": "settings-author-combined-after-resolution",
+                "note": f"以 {left_edit} 为底稿，参考 {right_edit}。",
+            }
+            needs_review = author.post(route + "/confirm", json=sign)
+            assert needs_review.status_code == 409, needs_review.text
+            assert needs_review.json()["code"] == "conception_setting_review"
+            signed = author.post(
+                route + "/confirm",
+                json={**sign, "reviewed_setting_findings": [finding["id"] for finding in findings]},
+            )
+            assert signed.status_code == 200, signed.text
+            combined_id = signed.json()["confirmation"]["id"]
+
+        for adapter, token in ((right, right_token), (left, left_token)):
+            state = adapter.run(branch, origin, token)
+            assert not state["conflicts"] and not state["deferred"], state
+        for device in (domain, other):
+            assert conception.snapshot(device, branch)["confirmation"]["current"]
+            with device.db.connect() as tx:
+                assert settings_sync.read_settings_head(tx, branch) == combined_id
+                version = settings_sync.read_settings_version(tx, branch, combined_id)
+                assert version.parent_id == left_edit and version.project_version_id == project["id"]
+                world = next(row for row in version.categories if row.id == "world")
+                assert world.items[0].detail == combined
+                assert version.note == sign["note"]
+                for prior_id in (initial_id, left_edit, right_edit):
+                    assert settings_sync.read_settings_version(tx, branch, prior_id)
+
         save_project(domain, 1, "作者改变铜铃的用途", "m3-project-left")
         save_project(other, 1, "作者在另一台设备改变结局", "m3-project-right")
         later = edit_world(domain, "铜铃用于认路。")["confirmation"]["id"]
@@ -453,7 +504,7 @@ def test_formal_settings_sync_conflict_and_pending_project_with_real_cloud(domai
         assert "待采用对应立项" in pending["reason"]
         assert other.chapter(independent["id"])["content"] == "这段正文照常同步。"
         with other.db.connect() as tx:
-            assert settings_sync.read_settings_head(tx, branch) == left_edit
+            assert settings_sync.read_settings_head(tx, branch) == combined_id
             assert settings_sync.read_settings_version(tx, branch, later)
         parent = right.compare(branch, origin, right_token, project_conflict["id"])
         accepted = right.resolve(

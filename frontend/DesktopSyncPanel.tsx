@@ -6,6 +6,7 @@ import { SyncScopePreview } from './SyncScopePreview'
 import { describeProjectVersion, type ProjectVersion } from './projectSyncModel'
 import type { ArchivedReferenceCard } from './referenceArchive'
 import { referenceAssessmentLabel, referenceFieldLabels } from './ReferenceCardHistory'
+import { describeSettingsVersion, type SettingsVersion } from './settingsSyncModel'
 
 type Conflict = { id: string; object_id: string }
 type FormalSource = { id: string; device_id: string; change_id: string; sequence: number }
@@ -48,14 +49,7 @@ type Comparison = {
   local_sha256: string
   local: Side
   project_versions?: Record<string, ProjectVersion>
-  settings_versions?: Record<
-    string,
-    {
-      categories: { title: string; skipped: boolean; items: { title: string; detail: string }[] }[]
-      note: string
-      project_version_id: string | null
-    }
-  >
+  settings_versions?: Record<string, SettingsVersion>
   outline_versions?: Record<
     string,
     {
@@ -109,16 +103,8 @@ function readable(side: Side, comparison: Comparison) {
   if (side.kind === 'settings-head' && side.revision_id) {
     const version = comparison.settings_versions?.[side.revision_id]
     if (!version) return '尚未取得该版本的设定来源。'
-    return [
-      `立项来源 ${version.project_version_id ?? '无'}`,
-      version.note,
-      ...version.categories.flatMap((category) => [
-        `${category.title}${category.skipped ? ' · 暂缓' : ''}`,
-        ...category.items.map((item) => `${item.title} · ${item.detail}`),
-      ]),
-    ]
-      .filter(Boolean)
-      .join('\n')
+    const summary = describeSettingsVersion(version)
+    return version.note ? `${summary}\n作者确认说明 ${version.note}` : summary
   }
   if (side.kind === 'reference-card-head' && side.revision_id) {
     const version = comparison.reference_versions?.[side.revision_id]
