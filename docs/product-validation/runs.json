@@ -8591,5 +8591,27 @@
     "result": "passed",
     "record": "2026-11-18-source-checkpoint-offline-validation.md",
     "fix_of": "frozen-book-exit-source4-clarified-held-auto2-refreshed-20261118"
+  },
+  {
+    "id": "frozen-source-recheck-961be08-tested-deployed-20261118",
+    "date": "2026-11-18",
+    "commit": "961be08",
+    "module": "两处来源停点的合批验证与部署",
+    "scenario": "原检查点8项离线通过；2831后端、767前端、169全项目无头、48Node及10类静态和构建检查通过。精确CI 44234309985成功；备份4ace9261隔离恢复对比39张业务表和2张账本表，8766实际部署。部署阶段模型调用0。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-18-source-checkpoint-runtime.md",
+    "fix_of": "frozen-source-stops-offline-recheck-20261118"
+  },
+  {
+    "id": "frozen-source-recheck-assisted4-unknown-receipt-20261118",
+    "date": "2026-11-18",
+    "commit": "961be08",
+    "module": "原两条整书任务的实际来源核对",
+    "scenario": "半自动第4章只派发一次，超时后查得原请求编号、缺完整回执与结算，保留CNY0.300320未知预留。全自动第2章因同服务商未决记录未提交。两书保存维护3／12和1／12；原稿、回执及1691条历史用量保留。文学盲测暂停，继续以流程和情节因果为判断依据。",
+    "phase": "quality",
+    "result": "blocked",
+    "record": "2026-11-18-source-checkpoint-runtime.md",
+    "fix_of": ""
   }
 ]
