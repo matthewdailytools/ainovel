@@ -119,7 +119,7 @@ uv run python -m ainovel.cloud_sync_backup restore --file 'D:/sync-backups/ledge
 
 ### 备份、恢复与付费验收
 
-独立 Web 在页面底部提供「独立作品备份」。下载 `.ainovel-backup` 后，可在同一浏览器应用的干净配置中离线选择「从独立备份恢复作品」。该文件按记录校验，保留已保存稿件、修订、来源和冻结交付，手法卡原句按作者选带。恢复保留已有作品。桌面与独立 Web 的 `.json` 稿件交换包继续用于跨端导入，导入上限为 24 MiB。桌面全库备份使用下列命令。[本机和浏览器备份验收](docs/acceptance/七台工作流实施验收.md)
+在桌面「离线写作与交换」或独立 Web 页面底部可下载 `.ainovel-backup`。在桌面选择「导入独立作品备份」，或在独立 Web 选择「从独立备份恢复作品」，就能用同一文件离线交接。文件按记录校验，保留已保存稿件、修订、来源和冻结交付，手法卡原句按作者选带。导入为独立作品，同标识的现有作品保留。桌面单个 `.ainovel-backup` 上限 128 MiB，`.json` 稿件交换上限 24 MiB。桌面全库备份使用下列命令。[本机和浏览器备份验收](docs/acceptance/七台工作流实施验收.md)
 
 ```powershell
 uv run python -m ainovel backup

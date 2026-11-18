@@ -1,8 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
+import type { ConceptionState } from '../../frontend/conception'
 
 const idea = '学徒靠铜铃的断痕寻找师姐。'
 
-async function openEmptyRun(page: Page, title: string) {
+async function createEmptyWork(page: Page, title: string) {
   await page.goto('/')
   await page.getByText('＋ 新建作品', { exact: true }).click()
   await page.getByRole('textbox', { name: '作品名称', exact: true }).fill(title)
@@ -16,13 +17,18 @@ async function openEmptyRun(page: Page, title: string) {
   await expect(
     page.getByRole('combobox', { name: '作品', exact: true }).locator('option:checked'),
   ).toHaveText(title)
+  return '/api/branches/' + branch_id
+}
+
+async function openEmptyRun(page: Page, title: string) {
+  const branch = await createEmptyWork(page, title)
   await page.getByRole('button', { name: '整书创作', exact: true }).click()
   const panel = page.getByRole('region', { name: '七台自动接力', exact: true })
   await expect(panel.getByLabel('接力起点')).toHaveValue('idea')
   await expect(panel.getByRole('option', { name: '从创意开始', exact: true })).toBeEnabled()
   await panel.getByRole('textbox', { name: '自动立项的创作思路' }).fill(idea)
   await panel.getByLabel('本次接力总预算（所选账户币种）').fill('1')
-  return { panel, branch: '/api/branches/' + branch_id }
+  return { panel, branch }
 }
 
 async function submitEmptyRun(page: Page, panel: Awaited<ReturnType<typeof openEmptyRun>>['panel']) {
@@ -177,6 +183,124 @@ test('从创意启动但未授权确认规划时停在立项草案', async ({ pa
   const project = page.locator('#bench-project')
   await project.getByText('立项台', { exact: true }).click()
   await expect(project.getByRole('button', { name: '载入 AI 立项建议', exact: true })).toBeVisible()
+})
+
+test('从作者确认的设定开始接力，冻结立项与设定并在校验台待签', async ({ page }) => {
+  const branch = await createEmptyWork(page, '后台验证 · 作者设定接力')
+  const ending = '作者决定只留下复测读数，闸门由守闸人处理。'
+  const rule = '学徒只用守闸人借出的尺复测公开刻度。'
+  await page.getByRole('button', { name: '立项台', exact: true }).click()
+  const projectPanel = page.locator('#bench-project')
+  await projectPanel.getByText('立项台', { exact: true }).press('Enter')
+  await projectPanel.getByRole('combobox', { name: '主类型', exact: true }).selectOption('mystery')
+  for (const [label, value] of [
+    ['创作思路', '学徒向守闸人借尺，核对闸门上的公开刻度。'],
+    ['核心定位', '用公开记录复测门前的异响。'],
+    ['赛道', '短篇求证悬疑'],
+    ['读者定位', '偏好线索能回查的读者'],
+    ['差异化', '学徒只检查与记录，把维修交给守闸人。'],
+    ['篇幅目标', '一卷一章'],
+    ['终局', ending],
+  ]) {
+    await projectPanel.getByRole('textbox', { name: label, exact: true }).fill(value)
+  }
+  await projectPanel.getByRole('button', { name: '确认立项', exact: true }).click()
+  await expect(projectPanel.getByText('立项台 · 已确认修订 1')).toBeVisible()
+  await projectPanel.getByRole('button', { name: '去完善世界设定', exact: true }).click()
+  const settings = page.getByRole('region', { name: '按类别完善小说设定' })
+  await expect(settings.getByRole('heading', { name: '世界设定', exact: true })).toBeVisible()
+  await settings.getByRole('button', { name: '添加构思项目', exact: true }).click()
+  await settings.getByRole('textbox', { name: '项目名称', exact: true }).fill('公开刻度复测规则')
+  await settings.getByRole('textbox', { name: '设定内容', exact: true }).fill(rule)
+  await settings.getByRole('button', { name: '保存构思设定', exact: true }).click()
+  await page.getByRole('textbox', { name: '保留事项说明', exact: true }).fill('作者已确认复测范围。')
+  const accepted = page.waitForResponse(
+    (entry) => entry.request().method() === 'POST' && entry.url().endsWith(`${branch}/conception/confirm`),
+  )
+  await page.getByRole('button', { name: '确认当前构思', exact: true }).click()
+  const signed = await accepted
+  expect(signed.ok(), await signed.text()).toBe(true)
+  const source: ConceptionState = await signed.json()
+  expect(source.confirmation?.current).toBe(true)
+  expect(source.project?.brief.ending).toBe(ending)
+  const [item] = source.categories.find(({ id }) => id === 'world')!.items
+  expect(item.detail).toBe(rule)
+  expect(await (await page.request.get(branch + '/chapters')).json()).toEqual([])
+
+  await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  const panel = page.getByRole('region', { name: '七台自动接力', exact: true })
+  await expect(panel.getByLabel('接力起点')).toHaveValue('settings')
+  await expect(panel.getByRole('option', { name: /从已确认设定接力/ })).toBeEnabled()
+  await expect(panel.getByRole('option', { name: /从已确认大纲接力/ })).toBeDisabled()
+  await panel.getByLabel('新建章节数').fill('1')
+  await panel.getByLabel('本次接力总预算（所选账户币种）').fill('1')
+  await panel.getByRole('checkbox', { name: '授权确认本次生成的规划产物' }).check()
+  await panel.getByRole('checkbox', { name: '授权采纳通过检查的空章正文候选' }).check()
+  const queued = page.waitForResponse(
+    (entry) => entry.request().method() === 'POST' && entry.url().endsWith(`${branch}/seven-stage-runs`),
+  )
+  await panel.getByRole('button', { name: '启动七台接力' }).press('Enter')
+  const response = await queued
+  expect(response.ok(), await response.text()).toBe(true)
+  expect(response.request().postDataJSON()).toMatchObject({
+    start_from: 'settings',
+    source_id: source.confirmation!.id,
+    chapter_count: 1,
+    auto_confirm_planning: true,
+    auto_adopt_body: true,
+  })
+  const run = await response.json()
+  const basis = { project_id: source.project!.id, setting_id: source.confirmation!.id }
+  expect(run.result.seven_stage_run).toMatchObject(basis)
+
+  await expect(panel.getByRole('status')).toHaveText('校验 · 等待处理检查点', { timeout: 30_000 })
+  const task = await (await page.request.get(`/api/tasks/${run.id}`)).json()
+  const result = task.result.seven_stage_run
+  expect(result).toMatchObject({ ...basis, stage: 'inspection' })
+  expect(result.inspection_candidate_id).toBeTruthy()
+  expect(result.completion_id).toBeUndefined()
+  const children = await Promise.all(
+    (result.children as string[]).map(async (id) => {
+      const entry = await page.request.get(`/api/tasks/${id}`)
+      expect(entry.ok(), await entry.text()).toBe(true)
+      return entry.json()
+    }),
+  )
+  expect(children).toHaveLength(3)
+  expect(children.map(({ kind, payload }) => [kind, payload.action])).toEqual([
+    ['module', 'outline.plan'],
+    ['module', 'writing.expand_plot'],
+    ['module', 'review.chapter'],
+  ])
+  expect(children[0].payload.outline_generation.confirmation_id).toBe(basis.setting_id)
+  expect(children[2].payload.inspection_semantic.scope).toBe('book')
+
+  const outline = await (await page.request.get(branch + '/outline-workspace')).json()
+  expect(outline.confirmed).toMatchObject({
+    id: result.outline_id,
+    setting_basis: {
+      project_id: basis.project_id,
+      confirmation_id: basis.setting_id,
+      items: [expect.objectContaining({ id: item.id, detail: rule })],
+    },
+    plan: { summary: ending },
+  })
+  const after: ConceptionState = await (await page.request.get(branch + '/conception')).json()
+  expect(after.project).toEqual(source.project)
+  expect(after.confirmation).toMatchObject({ id: basis.setting_id, current: true })
+  expect(result.completed_chapters).toHaveLength(1)
+  const [chapter] = result.completed_chapters
+  expect(chapter.revision).toBe(1)
+  const saved = await (await page.request.get(`/api/chapters/${chapter.id}`)).json()
+  expect(saved.revision).toBe(1)
+  expect(saved.content).toContain('先把公开刻度抄进本子')
+  await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await expect(page.getByRole('region', { name: '十处对账体检' })).toBeVisible()
+  const report = await (await page.request.get(branch + '/workflow-inspections')).json()
+  expect(report.latest).toMatchObject({ id: result.inspection_id, scope: 'book', current: true })
+  expect(
+    report.latest.items.find(({ check_id }: { check_id: string }) => check_id === '01')?.basis.project.id,
+  ).toBe(basis.project_id)
 })
 
 test('从作者确认的大纲接力写作，在体检检查点等待处理', async ({ page }) => {
