@@ -369,6 +369,8 @@ async function setup(context: BrowserContext, page: Page) {
     if (method === 'GET' && branchMatch && branches.includes(branchMatch[1])) {
       const id = branchMatch[1],
         action = branchMatch[2]
+      if (action === 'outline-workspace/setting-options' && (!url.search || url.search === '?scope=world'))
+        return reply({ confirmation_id: null, items: [] })
       if (!url.search) {
         if (action === 'outline-workspace')
           return reply({
@@ -381,7 +383,6 @@ async function setup(context: BrowserContext, page: Page) {
             settings: [],
             promises: [],
           })
-        if (action === 'outline-workspace/setting-options') return reply({ confirmation_id: null, items: [] })
         if (action === 'conception') return reply(conception)
         if (action === 'seven-stage-runs/sources') return reply({ writing_id: null, inspection_id: null })
         if (action === 'seven-stage-runs') return reply([])
