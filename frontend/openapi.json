@@ -2161,7 +2161,7 @@
               "application/json": {
                 "schema": {
                   "type": "array",
-                  "items": { "$ref": "#/components/schemas/OutlineCard" },
+                  "items": { "$ref": "#/components/schemas/OutlineCardOption" },
                   "title": "Response Reference Options Api Branches  Branch Id  Outline Workspace Reference Options Get"
                 }
               }
@@ -7792,7 +7792,7 @@
             "title": "Budget Limit"
           },
           "reference_cards": {
-            "items": { "$ref": "#/components/schemas/OutlineCardReference" },
+            "items": { "$ref": "#/components/schemas/SelectedOutlineCardReference" },
             "type": "array",
             "maxItems": 8,
             "title": "Reference Cards"
@@ -8538,6 +8538,46 @@
           "source_title"
         ],
         "title": "OutlineCard"
+      },
+      "OutlineCardOption": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Session Id"
+          },
+          "card_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Card Id"
+          },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "version_id": {
+            "anyOf": [{ "type": "string", "pattern": "^[a-f0-9]{64}$" }, { "type": "null" }],
+            "title": "Version Id"
+          },
+          "technique": { "type": "string", "title": "Technique" },
+          "conditions": { "type": "string", "title": "Conditions" },
+          "exceptions": { "type": "string", "title": "Exceptions" },
+          "source_title": { "type": "string", "title": "Source Title" },
+          "pinned": { "anyOf": [{ "type": "boolean", "const": true }, { "type": "null" }], "title": "Pinned" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id",
+          "card_id",
+          "revision",
+          "technique",
+          "conditions",
+          "exceptions",
+          "source_title"
+        ],
+        "title": "OutlineCardOption"
       },
       "OutlineCardReference": {
         "properties": {
@@ -10183,6 +10223,30 @@
         "required": ["title", "start", "end"],
         "title": "Segment"
       },
+      "SelectedOutlineCardReference": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Session Id"
+          },
+          "card_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Card Id"
+          },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "version_id": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Version Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["session_id", "card_id", "revision", "version_id"],
+        "title": "SelectedOutlineCardReference"
+      },
       "SettingFinding": {
         "properties": {
           "id": {
@@ -11101,7 +11165,13 @@
             "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
             "title": "Reference Revision"
           },
-          "auto_adopt_reference": { "type": "boolean", "title": "Auto Adopt Reference", "default": false }
+          "auto_adopt_reference": { "type": "boolean", "title": "Auto Adopt Reference", "default": false },
+          "reference_cards": {
+            "items": { "$ref": "#/components/schemas/SelectedOutlineCardReference" },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Reference Cards"
+          }
         },
         "additionalProperties": false,
         "type": "object",

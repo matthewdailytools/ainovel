@@ -122,6 +122,16 @@ class Model(ReferenceModel):
                     for record in instruction["可用伏笔"]
                 ],
             }
+            if references := instruction.get("获准采用的手法卡"):
+                reference = references[0]
+                assert not {"evidence", "quote", "source_title"} & reference.keys()
+                plan["volumes"][0]["units"][0]["chapters"][0]["reference_cards"] = [
+                    {
+                        key: reference[key]
+                        for key in ("session_id", "card_id", "revision", "version_id")
+                        if key in reference
+                    }
+                ]
             return {
                 "text": json.dumps(plan),
                 "usage": {"input": 1, "output": 1},

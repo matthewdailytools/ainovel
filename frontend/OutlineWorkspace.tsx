@@ -4,6 +4,7 @@ import { api, ApiError } from './api'
 import type { components } from './api-schema'
 import { useLeaveGuard } from './leaveGuard'
 import { OutlineGenerationPanel } from './OutlineGenerationPanel'
+import type { SelectedOutlineCard } from './SelectedOutlineCards'
 import { OutlinePromiseProgress, type OutlinePromise } from './OutlinePromiseProgress'
 import { OutlineImpactDetails, type OutlineConfirmationImpact } from './OutlineConfirmationImpact'
 
@@ -44,7 +45,7 @@ function readWorkspace(root: string) {
   return Promise.all([
     api<OutlineView>(root),
     api<ConfirmedSettingBasis>(root + '/setting-options'),
-    api<OutlineCard[]>(root + '/reference-options'),
+    api<SelectedOutlineCard[]>(root + '/reference-options'),
   ])
 }
 
@@ -171,7 +172,7 @@ export function OutlineWorkspace({
   const root = `/branches/${branchId}/outline-workspace`
   const [view, setView] = useState<OutlineView>()
   const [settings, setSettings] = useState<ConfirmedSettingBasis>()
-  const [cards, setCards] = useState<OutlineCard[]>([])
+  const [cards, setCards] = useState<SelectedOutlineCard[]>([])
   const [editing, setEditing] = useState<OutlinePlan>()
   const [settingId, setSettingId] = useState<string | null>(null)
   const [generationId, setGenerationId] = useState<string>()
@@ -325,6 +326,11 @@ export function OutlineWorkspace({
           confirmationId={settingId ?? settings.confirmation_id}
           hasChapters={!!view.chapters.length}
           dirty={dirty || busy}
+          existingReferenceCount={view.draft?.setting_basis.reference_cards?.length}
+          referenceOptions={cards}
+          onRefreshReferences={async () =>
+            setCards(await api<SelectedOutlineCard[]>(root + '/reference-options'))
+          }
           notify={notify}
           onLoad={(plan, confirmationId, candidateId) => {
             setEditing(plan)

@@ -9,8 +9,8 @@ from .db import DomainError
 from .models import Input, ModuleInput
 from .outline_workspace import (
     Identifier,
-    OutlineCardReference,
     OutlinePlan,
+    SelectedOutlineCardReference,
     WINDOW_CHAPTERS,
     _card_key,
     _chapter_plans,
@@ -20,6 +20,7 @@ from .outline_workspace import (
     _latest,
     _settings,
     _validate,
+    freeze_selected_outline_cards,
     required_promise_windows,
 )
 from .story_graph import graph_snapshot
@@ -35,7 +36,7 @@ class GenerateOutline(Input):
     instruction: Annotated[str, StringConstraints(strip_whitespace=True, max_length=6000)] = ""
     client_request_id: str = Field(min_length=8, max_length=128)
     budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)
-    reference_cards: list[OutlineCardReference] = Field(
+    reference_cards: list[SelectedOutlineCardReference] = Field(
         default_factory=list, max_length=8, exclude_if=lambda value: not value
     )
 
@@ -87,7 +88,11 @@ def freeze_tx(tx, branch_id, request):
         basis["reference_cards"] = cards
     references = request.get("reference_cards", [])
     if references:
-        approved = _freeze_cards(tx, branch_id, references, basis)
+        approved = (
+            freeze_selected_outline_cards(tx, branch_id, references)
+            if any(ref.get("version_id") for ref in references)
+            else _freeze_cards(tx, branch_id, references, basis)
+        )
         basis["reference_cards"] = list(
             {_card_key(card): card for card in [*basis.get("reference_cards", []), *approved]}.values()
         )
@@ -123,6 +128,7 @@ def _current(tx, branch_id, frozen):
             "conception_snapshot",
             "conception_changed",
             "outline_reference",
+            "reference_changed",
             "reference_card",
             "reference_card_incomplete",
         }:

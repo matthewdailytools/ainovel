@@ -242,6 +242,30 @@ def read_reference_version(tx, branch_id, identifier):
     )
 
 
+def selectable_reference_cards(tx, branch_id):
+    native, native_heads, _ = _native_catalog(tx, branch_id)
+    stored = _stored_catalog(tx, branch_id)
+    heads = set(_adopted_heads(tx, branch_id, native_heads).values())
+    pins = {}
+    for row in tx.execute(
+        "SELECT id,payload FROM reference_sessions WHERE json_extract(payload,'$.branch_id')=?", (branch_id,)
+    ):
+        session = json.loads(row["payload"])
+        pins.update(
+            ((row["id"], card_id), revision)
+            for card_id, revision in session.get("pinned_revisions", {}).items()
+            if card_id in session["selected_ids"]
+        )
+    pinned = {version.id for version in native.values() if pins.get(_key(version)) == version.revision}
+    versions = {**native, **{key: value for key, (value, _) in stored.items()}}
+    eligible = heads | pinned
+    return [
+        (version, version.id in pinned)
+        for version in _ordered(versions)
+        if version.id in eligible and version.assessment == "ready"
+    ]
+
+
 def read_reference_head(tx, branch_id, session_id, card_id):
     native = _native_catalog(tx, branch_id)[1]
     return _adopted_heads(tx, branch_id, native).get((session_id, card_id))

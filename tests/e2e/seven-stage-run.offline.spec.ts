@@ -286,7 +286,8 @@ test('接力停在拆解台时可采用局部重拆的正式卡并继续到大�
   await expect(panel.getByLabel('接力起点')).toHaveValue('project')
   await panel.getByLabel('本次接力总预算（所选账户币种）').fill('1')
   await panel.getByLabel('新建章节数').fill('1')
-  await panel.getByLabel('自动拆解的保存选段（可选）').selectOption(`${session.id}/${session.revision}`)
+  await panel.getByLabel('拆解资料的用法').selectOption('analyze')
+  await panel.getByLabel('自动拆解的保存选段').selectOption(`${session.id}/${session.revision}`)
   await panel.getByRole('checkbox', { name: '授权确认本次生成的规划产物' }).check()
   const started = await startFromPanel(page, branch)
   expect(started.status(), await started.text()).toBe(202)
@@ -448,6 +449,36 @@ test('从作者确认的设定开始接力，冻结立项与设定并在校验�
   expect(item.detail).toBe(rule)
   expect(await (await page.request.get(branch + '/chapters')).json()).toEqual([])
 
+  const quote = '😀渡口掌柜先问用途，又把水路图收回袖中。他只肯给半幅图，却记下了来客的目的地。'
+  const filename = `设定接力手法卡-${branch.split('/').at(-1)}.txt`
+  const imported = await page.request.post('/api/library/import', {
+    headers: await authorHeaders(page),
+    multipart: { file: { name: filename, mimeType: 'text/plain', buffer: Buffer.from(quote) } },
+  })
+  expect(imported.ok(), await imported.text()).toBe(true)
+  await page.getByRole('button', { name: '资料书库', exact: true }).click()
+  await page.getByText(filename).first().click()
+  const original = page.getByRole('textbox', { name: '资料原文' })
+  await expect(original).toHaveValue(quote)
+  await original.press('ControlOrMeta+A')
+  await page.getByRole('button', { name: '拆解这段写法' }).click()
+  await page.getByRole('button', { name: '拆解选段写法' }).click()
+  await page.getByRole('button', { name: /载入分析卡供编辑和选择/ }).click()
+  await page.getByRole('button', { name: /明确使用顶部当前工作版本/ }).click()
+  const savedCard = page.waitForResponse(
+    (entry) => entry.request().method() === 'PATCH' && entry.url().includes('/api/reference-sessions/'),
+  )
+  await page.getByRole('button', { name: '保存本次规则与方案' }).click()
+  const storedCard = await savedCard
+  expect(storedCard.ok(), await storedCard.text()).toBe(true)
+  const session = await storedCard.json()
+  expect(session.payload.selected_ids).toEqual([])
+  const options = await page.request.get(branch + '/outline-workspace/reference-options')
+  expect(options.ok(), await options.text()).toBe(true)
+  const [{ session_id, card_id, revision, version_id }] = await options.json()
+  expect(session_id).toBe(session.id)
+  const reference = { session_id, card_id, revision, version_id }
+
   await page.getByRole('button', { name: '整书创作', exact: true }).click()
   const panel = page.getByRole('region', { name: '七台自动接力', exact: true })
   await expect(panel.getByLabel('接力起点')).toHaveValue('settings')
@@ -455,13 +486,15 @@ test('从作者确认的设定开始接力，冻结立项与设定并在校验�
   await expect(panel.getByRole('option', { name: /从已确认大纲接力/ })).toBeDisabled()
   await panel.getByLabel('新建章节数').fill('1')
   await panel.getByLabel('本次接力总预算（所选账户币种）').fill('1')
+  await panel.getByLabel('拆解资料的用法').selectOption('cards')
+  await expect(panel.getByRole('button', { name: '启动七台接力' })).toBeDisabled()
+  await panel.getByText('已保存的手法卡（可选）', { exact: true }).click()
+  await panel.getByRole('combobox', { name: '选用手法卡', exact: true }).selectOption(version_id)
+  await expect(panel.getByText(/适用条件 ·/)).toBeVisible()
+  await expect(panel.getByText(/须替换 ·/)).toBeVisible()
   await panel.getByRole('checkbox', { name: '授权确认本次生成的规划产物' }).check()
   await panel.getByRole('checkbox', { name: '授权采纳通过检查的空章正文候选' }).check()
-  const queued = page.waitForResponse(
-    (entry) => entry.request().method() === 'POST' && entry.url().endsWith(`${branch}/seven-stage-runs`),
-  )
-  await panel.getByRole('button', { name: '启动七台接力' }).press('Enter')
-  const response = await queued
+  const response = await startFromPanel(page, branch)
   expect(response.ok(), await response.text()).toBe(true)
   expect(response.request().postDataJSON()).toMatchObject({
     start_from: 'settings',
@@ -469,7 +502,9 @@ test('从作者确认的设定开始接力，冻结立项与设定并在校验�
     chapter_count: 1,
     auto_confirm_planning: true,
     auto_adopt_body: true,
+    reference_cards: [reference],
   })
+  expect(response.request().postDataJSON().reference_session_id).toBeUndefined()
   const run = await response.json()
   const basis = { project_id: source.project!.id, setting_id: source.confirmation!.id }
   expect(run.result.seven_stage_run).toMatchObject(basis)
@@ -478,6 +513,8 @@ test('从作者确认的设定开始接力，冻结立项与设定并在校验�
   const task = await (await page.request.get(`/api/tasks/${run.id}`)).json()
   const result = task.result.seven_stage_run
   expect(result).toMatchObject({ ...basis, stage: 'inspection' })
+  expect(result.reference_references).toEqual([reference])
+  expect(result.reference_analysis_id).toBeUndefined()
   expect(result.inspection_candidate_id).toBeTruthy()
   expect(result.completion_id).toBeUndefined()
   const children = await Promise.all(
@@ -494,6 +531,7 @@ test('从作者确认的设定开始接力，冻结立项与设定并在校验�
     ['module', 'review.chapter'],
   ])
   expect(children[0].payload.outline_generation.confirmation_id).toBe(basis.setting_id)
+  expect(children[0].payload.outline_generation.reference_cards).toEqual([reference])
   expect(children[2].payload.inspection_semantic.scope).toBe('book')
 
   const outline = await (await page.request.get(branch + '/outline-workspace')).json()
@@ -506,6 +544,10 @@ test('从作者确认的设定开始接力，冻结立项与设定并在校验�
     },
     plan: { summary: ending },
   })
+  expect(outline.confirmed.plan.volumes[0].units[0].chapters[0].reference_cards).toEqual([reference])
+  expect((await (await page.request.get(`/api/reference-sessions/${session_id}`)).json()).revision).toBe(
+    session.revision,
+  )
   const after: ConceptionState = await (await page.request.get(branch + '/conception')).json()
   expect(after.project).toEqual(source.project)
   expect(after.confirmation).toMatchObject({ id: basis.setting_id, current: true })

@@ -13,6 +13,7 @@ from ainovel.db import DomainError, dumps, uid
 from ainovel.domain import Domain
 from ainovel.evidence_export import export_evidence
 from ainovel.providers import RequestNotSent
+from ainovel.reference_sync import reference_card_at
 from ainovel.worker import Worker
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 from test_project_brief import BRIEF, IDEA
@@ -129,7 +130,11 @@ class Model:
                 assert card["conditions"] == "新动作须依靠已收到的部分线索"
                 assert card["exceptions"] == "替换人物、物件与具体场景"
                 value["volumes"][0]["units"][0]["chapters"][0]["reference_cards"] = [
-                    {key: card[key] for key in ("session_id", "card_id", "revision")}
+                    {
+                        key: card[key]
+                        for key in ("session_id", "card_id", "revision", "version_id")
+                        if key in card
+                    }
                 ]
         elif action == "拆解所选原文写法":
             assert instruction["选段"] == SOURCE
@@ -902,6 +907,155 @@ def test_explicit_reference_scope_analysis_and_card_handoff(
     assert state["reference_basis"]["source"]["quote_sha256"]
     assert state["reference_basis"]["revision"] == reference["revision"]
     assert domain.branch(branch)["story_revision"] > 0
+
+
+def formal_card(client, domain, reference, *, selected=True, complete=True):
+    card = {
+        "id": uid(),
+        "observation": "交涉只给局部信息",
+        "interpretation": "给主角一个具体的下一步",
+        "technique": "由有限线索推动下一步",
+        "conditions": "新动作须依靠已收到的部分线索",
+        "exceptions": "替换人物、物件与具体场景" if complete else "",
+        "evidence": SOURCE,
+    }
+    saved = update_reference(
+        client, domain, reference, cards=[card], selected_ids=[card["id"]] if selected else []
+    )
+    with domain.db.connect() as tx:
+        version = reference_card_at(
+            tx, saved["payload"]["branch_id"], saved["id"], card["id"], saved["revision"]
+        )
+    return {
+        "session_id": saved["id"],
+        "card_id": card["id"],
+        "revision": saved["revision"],
+        "version_id": version.id,
+    }, card
+
+
+@pytest.mark.parametrize("choose_card", [True, False])
+def test_confirmed_settings_relay_uses_only_explicitly_chosen_saved_cards(
+    client, domain, settings, story, reference, choose_card
+):
+    chosen, _ = formal_card(client, domain, reference, selected=False)
+    intended = [chosen] if choose_card else []
+    branch, _, identifier = start(client, domain, story, "settings", reference_cards=intended)
+    state = domain.task(identifier)["result"]["seven_stage_run"]
+    assert state["stage"] == "outline"
+    assert state.get("reference_references", []) == intended
+    assert "reference_basis" not in state
+
+    model = Model(settings=settings)
+    drain(settings, model)
+    finished = domain.task(identifier)
+    state = finished["result"]["seven_stage_run"]
+    assert state["stage"] == "inspection", finished["error"]
+    assert model.calls == ["生成四级大纲候选", "writing.expand_plot", "审查正文", "对账立项章纲与节奏"]
+    assert "reference_analysis_id" not in state
+    children = [domain.task(task_id) for task_id in state["children"]]
+    assert len(children) == 3
+    assert children[0]["payload"]["outline_generation"].get("reference_cards", []) == intended
+    assert all(child["payload"]["action"] != "reference.analyze" for child in children)
+    with Budget(settings).db() as ledger:
+        calls = ledger.execute("SELECT task_id FROM calls ORDER BY created").fetchall()
+    assert [row["task_id"] for row in calls] == [
+        children[0]["id"],
+        children[1]["id"],
+        children[1]["id"],
+        children[2]["id"],
+    ]
+    saved = client.get(f"/api/branches/{branch}/outline-workspace").json()["confirmed"]
+    assert saved["plan"]["volumes"][0]["units"][0]["chapters"][0].get("reference_cards", []) == intended
+    assert client.get(f"/api/reference-sessions/{reference['id']}").json()["revision"] == chosen["revision"]
+
+
+@pytest.mark.parametrize("mode", ["relay", "outline"])
+def test_explicit_selection_rejects_old_incomplete_and_other_work_cards(
+    client, domain, story, reference, mode
+):
+    branch = story["branch_id"]
+    confirmed = setting_confirmation(client, branch)
+    prefix = f"/api/branches/{branch}"
+    outline = prefix + "/outline-workspace"
+    endpoint, options = (
+        (prefix + "/seven-stage-runs", {"start_from": "settings", "source_id": confirmed, "budget_limit": 1})
+        if mode == "relay"
+        else (outline + "/generation", {"base_revision": 0, "confirmation_id": confirmed})
+    )
+    active, card = formal_card(client, domain, reference)
+    assert client.get(outline + "/reference-options").json()[0]["version_id"] == active["version_id"]
+
+    def rejects(denied):
+        response = client.post(
+            endpoint,
+            json={**options, "account": "deepseek", "client_request_id": uid(), "reference_cards": [denied]},
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["code"] == "reference_changed"
+
+    update_reference(client, domain, reference, cards=[{**card, "technique": "仅保留与下一步有关的线索"}])
+    assert client.get(outline + "/reference-options").json()[0]["version_id"] != active["version_id"]
+    rejects(active)
+    incomplete, _ = formal_card(client, domain, reference, selected=False, complete=False)
+    rejects(incomplete)
+    other = domain.create_novel("其他合成作品")
+    update_reference(
+        client,
+        domain,
+        reference,
+        branch_id=other["branch_id"],
+        chapter_id=None,
+        cards=[card],
+        selected_ids=[card["id"]],
+    )
+    other_option = client.get(
+        f"/api/branches/{other['branch_id']}/outline-workspace/reference-options"
+    ).json()[0]
+    rejects({key: other_option[key] for key in active})
+    invalid = {key: value for key, value in active.items() if key != "version_id"}
+    response = client.post(
+        endpoint,
+        json={**options, "account": "deepseek", "client_request_id": uid(), "reference_cards": [invalid]},
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_author_pinned_card_stays_selectable_until_pin_is_removed(client, domain, settings, story, reference):
+    pinned, card = formal_card(client, domain, reference)
+    update_reference(
+        client,
+        domain,
+        reference,
+        cards=[{**card, "technique": "按新草稿安排查证"}],
+        pinned_revisions={card["id"]: pinned["revision"]},
+    )
+    branch = story["branch_id"]
+    options = client.get(f"/api/branches/{branch}/outline-workspace/reference-options").json()
+    cards = {row["version_id"]: row for row in options}
+    assert len(cards) == 2 and cards[pinned["version_id"]]["pinned"] is True
+    other = next(row for row in options if row["version_id"] != pinned["version_id"])
+    assert "pinned" not in other
+    _, endpoint, identifier = start(client, domain, story, "settings", reference_cards=[pinned])
+    body = domain.task(identifier)["payload"]
+    update_reference(client, domain, reference, pinned_revisions={})
+    model = Model(settings=settings)
+    drain(settings, model)
+    stopped = domain.task(identifier)
+    assert stopped["status"] == "needs_review"
+    assert stopped["result"]["seven_stage_run"]["interruption"]["code"] == "reference_changed"
+    assert stopped["result"]["seven_stage_run"]["children"] == []
+    assert model.calls == []
+    assert client.post(f"{endpoint}/{identifier}/cancel").status_code == 200
+    new = client.post(
+        endpoint,
+        json={
+            **{key: value for key, value in body.items() if key != "branch_id"},
+            "client_request_id": uid(),
+            "reference_cards": [{key: other[key] for key in pinned}],
+        },
+    )
+    assert new.status_code == 202, new.text
 
 
 @pytest.mark.parametrize(("rounds", "pin_first"), [(1, False), (2, False), (2, True)])

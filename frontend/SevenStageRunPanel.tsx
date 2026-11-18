@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, label, type Task } from './api'
+import { api, ApiError, label, type Task } from './api'
 import type { Notify } from './App'
 import type { ConceptionState } from './conception'
+import {
+  SelectedOutlineCards,
+  selectedOutlineCardKey,
+  selectedOutlineCardReference,
+  type SelectedOutlineCard,
+} from './SelectedOutlineCards'
 
 type StartFrom = 'idea' | 'project' | 'settings' | 'outline' | 'writing' | 'inspection'
+type ReferenceMode = 'skip' | 'cards' | 'analyze'
 type ReviewSources = { writing_id: string | null; inspection_id: string | null }
 type OutlineState = {
   confirmed: { id: string; revision: number } | null
-  draft: unknown
+  draft: { setting_basis: { reference_cards?: SelectedOutlineCard[] } } | null
   stale: string[]
   chapters: { id: string }[]
 }
@@ -69,6 +76,7 @@ export function SevenStageRunPanel({
   const [settings, setSettings] = useState<ConceptionState>()
   const [reviewSources, setReviewSources] = useState<ReviewSources>()
   const [references, setReferences] = useState<ReferenceOption[]>([])
+  const [availableCards, setAvailableCards] = useState<SelectedOutlineCard[]>([])
   const [runs, setRuns] = useState<Run[]>([])
   const [runId, setRunId] = useState('')
   const [from, setFrom] = useState<StartFrom>()
@@ -77,6 +85,8 @@ export function SevenStageRunPanel({
   const [budget, setBudget] = useState('')
   const [autoConfirm, setAutoConfirm] = useState(false)
   const [autoAdopt, setAutoAdopt] = useState(false)
+  const [referenceMode, setReferenceMode] = useState<ReferenceMode>('skip')
+  const [selectedCards, setSelectedCards] = useState<string[]>([])
   const [referenceChoice, setReferenceChoice] = useState('')
   const [autoReference, setAutoReference] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -86,16 +96,18 @@ export function SevenStageRunPanel({
   const pending = useRef<{ signature: string; key: string } | undefined>(undefined)
 
   const refreshSources = useCallback(async () => {
-    const [concept, plan, savedReferences, sources] = await Promise.all([
+    const [concept, plan, savedReferences, sources, cards] = await Promise.all([
       api<ConceptionState>(`${prefix}/conception`),
       api<OutlineState>(`${prefix}/outline-workspace`),
       api<ReferenceOption[]>(`/reference-sessions?branch_id=${encodeURIComponent(branchId)}`),
       api<ReviewSources>(`${endpoint}/sources`),
+      api<SelectedOutlineCard[]>(`${prefix}/outline-workspace/reference-options`),
     ])
     if (!alive.current) return
     setSettings(concept)
     setOutline(plan)
     setReviewSources(sources)
+    setAvailableCards(cards)
     setReferences(
       savedReferences.filter((entry) => entry.payload.goal.trim() && entry.payload.source.quote.trim()),
     )
@@ -150,18 +162,27 @@ export function SevenStageRunPanel({
   const plansRemaining = origin === 'idea' || origin === 'project' || origin === 'settings'
   const writingRemaining = plansRemaining || origin === 'outline'
   const chapterCount = plansRemaining && !outline?.chapters.length
+  const existingReferenceCount = outline?.draft?.setting_basis.reference_cards?.length ?? 0
   const run = runs.find((entry) => entry.id === runId) ?? runs[0]
-  const reference = plansRemaining
+  const usingExcerpt = plansRemaining && referenceMode === 'analyze'
+  const usingCards = plansRemaining && referenceMode === 'cards'
+  const reference = usingExcerpt
     ? references.find((entry) => `${entry.id}/${entry.revision}` === referenceChoice)
     : undefined
-  const referenceChanged = plansRemaining && !!referenceChoice && !reference
+  const selectedReferences = usingCards
+    ? selectedCards.flatMap((id) => {
+        const card = availableCards.find((entry) => selectedOutlineCardKey(entry) === id)
+        return card ? [selectedOutlineCardReference(card)] : []
+      })
+    : []
   const activeRun = runs.some((entry) => unresolved.includes(entry.status))
   const status = run?.result.seven_stage_run
   const permitted = origin === 'idea' ? !!blank && !!idea.trim() : !!sources[origin]
   const ready =
     permitted &&
     modelReady &&
-    !referenceChanged &&
+    (!usingExcerpt || !!reference) &&
+    (!usingCards || (!!selectedReferences.length && selectedReferences.length === selectedCards.length)) &&
     Number.isFinite(Number(budget)) &&
     Number(budget) > 0 &&
     (!chapterCount ||
@@ -202,10 +223,19 @@ export function SevenStageRunPanel({
         reference_revision: reference.revision,
         auto_adopt_reference: autoReference,
       }),
+      ...(selectedReferences.length > 0 && { reference_cards: selectedReferences }),
     }
     const signature = JSON.stringify(body)
     if (pending.current?.signature !== signature) pending.current = { signature, key: crypto.randomUUID() }
-    const entry = await api<Run>(endpoint, 'POST', { ...body, client_request_id: pending.current.key })
+    let entry: Run
+    try {
+      entry = await api<Run>(endpoint, 'POST', { ...body, client_request_id: pending.current.key })
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.code === 'reference_changed') {
+        await refreshSources().catch(notify)
+      }
+      throw failure
+    }
     if (alive.current) {
       pending.current = undefined
       setEntry(entry)
@@ -287,9 +317,30 @@ export function SevenStageRunPanel({
           </label>
         )}
         {plansRemaining && (
+          <label>
+            拆解资料的用法
+            <select
+              value={referenceMode}
+              onChange={(event) => setReferenceMode(event.target.value as ReferenceMode)}
+            >
+              <option value="skip">跳过拆解</option>
+              <option value="cards">选用已保存的手法卡</option>
+              <option value="analyze">重新拆解保存的原文选段</option>
+            </select>
+          </label>
+        )}
+        {plansRemaining && existingReferenceCount > 0 && (
+          <p className="small">
+            大纲生成会发送最近保存的大纲及其 {existingReferenceCount} 张既有引用的手法摘要和固定修订。
+          </p>
+        )}
+        {usingCards && (
+          <SelectedOutlineCards cards={availableCards} selected={selectedCards} onChange={setSelectedCards} />
+        )}
+        {usingExcerpt && (
           <div>
             <label>
-              自动拆解的保存选段（可选）
+              自动拆解的保存选段
               <select
                 value={referenceChoice}
                 onChange={(event) => {
@@ -297,8 +348,10 @@ export function SevenStageRunPanel({
                   setAutoReference(false)
                 }}
               >
-                <option value="">跳过拆解</option>
-                {referenceChanged && <option value={referenceChoice}>所选拆解修订已更新，请重新选择</option>}
+                <option value="">选择原文选段</option>
+                {!!referenceChoice && !reference && (
+                  <option value={referenceChoice}>所选拆解修订已更新，请重新选择</option>
+                )}
                 {references.map(({ id, revision, payload }) => (
                   <option key={id} value={`${id}/${revision}`}>
                     {payload.source.title} · {payload.goal} · 修订 {revision}
@@ -384,6 +437,9 @@ export function SevenStageRunPanel({
               {status.reference_basis.goal}
               {status.reference_references && ` · 已采用 ${status.reference_references.length} 张手法卡`}
             </p>
+          )}
+          {!status.reference_basis && !!status.reference_references?.length && (
+            <p>本次获准使用 {status.reference_references.length} 张手法卡的所选修订。</p>
           )}
           {!!status.completed_chapters.length && (
             <p>本次范围已核对 {status.completed_chapters.length} 章，原有正文保留。</p>

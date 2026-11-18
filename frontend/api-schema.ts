@@ -4086,7 +4086,7 @@ export interface components {
       /** Budget Limit */
       budget_limit?: number | null
       /** Reference Cards */
-      reference_cards?: components['schemas']['OutlineCardReference'][]
+      reference_cards?: components['schemas']['SelectedOutlineCardReference'][]
     }
     /** GenreProfileBasis */
     GenreProfileBasis: {
@@ -4588,6 +4588,27 @@ export interface components {
       exceptions: string
       /** Source Title */
       source_title: string
+    }
+    /** OutlineCardOption */
+    OutlineCardOption: {
+      /** Session Id */
+      session_id: string
+      /** Card Id */
+      card_id: string
+      /** Revision */
+      revision: number
+      /** Version Id */
+      version_id?: string | null
+      /** Technique */
+      technique: string
+      /** Conditions */
+      conditions: string
+      /** Exceptions */
+      exceptions: string
+      /** Source Title */
+      source_title: string
+      /** Pinned */
+      pinned?: true | null
     }
     /** OutlineCardReference */
     OutlineCardReference: {
@@ -5705,6 +5726,17 @@ export interface components {
       /** End */
       end: number
     }
+    /** SelectedOutlineCardReference */
+    SelectedOutlineCardReference: {
+      /** Session Id */
+      session_id: string
+      /** Card Id */
+      card_id: string
+      /** Revision */
+      revision: number
+      /** Version Id */
+      version_id: string
+    }
     /** SettingFinding */
     SettingFinding: {
       /** Id */
@@ -6204,6 +6236,8 @@ export interface components {
        * @default false
        */
       auto_adopt_reference: boolean
+      /** Reference Cards */
+      reference_cards?: components['schemas']['SelectedOutlineCardReference'][]
     }
     /** State */
     State: {
@@ -8739,7 +8773,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['OutlineCard'][]
+          'application/json': components['schemas']['OutlineCardOption'][]
         }
       }
       /** @description Validation Error */

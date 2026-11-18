@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Notify } from './App'
-import { api, label } from './api'
+import { api, ApiError, label } from './api'
 import type { components } from './api-schema'
+import {
+  SelectedOutlineCards,
+  selectedOutlineCardKey,
+  selectedOutlineCardReference,
+  type SelectedOutlineCard,
+} from './SelectedOutlineCards'
 
 type Plan = components['schemas']['OutlinePlan']
 type GenerationTask = {
@@ -28,6 +34,9 @@ export function OutlineGenerationPanel({
   confirmationId,
   hasChapters,
   dirty,
+  existingReferenceCount = 0,
+  referenceOptions,
+  onRefreshReferences,
   onLoad,
   notify,
 }: {
@@ -38,6 +47,9 @@ export function OutlineGenerationPanel({
   confirmationId: string | null
   hasChapters: boolean
   dirty: boolean
+  existingReferenceCount?: number
+  referenceOptions: SelectedOutlineCard[]
+  onRefreshReferences: () => Promise<void>
   onLoad: (plan: Plan, confirmationId: string | null, candidateId: string) => void
   notify: Notify
 }) {
@@ -46,6 +58,7 @@ export function OutlineGenerationPanel({
   const [tasks, setTasks] = useState<GenerationTask[]>([])
   const [selected, setSelected] = useState('')
   const [proposal, setProposal] = useState<Proposal>()
+  const [selectedVersions, setSelectedVersions] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const pending = useRef<{ signature: string; key: string } | null>(null)
   const pollEpoch = useRef(0)
@@ -54,6 +67,11 @@ export function OutlineGenerationPanel({
   const candidateId = selectedTask?.artifact_id
   const current = proposal?.id === candidateId ? proposal : undefined
   const canLoad = current?.current && current.base_revision === baseRevision && !dirty
+  const chosenCards = selectedVersions.flatMap((id) => {
+    const card = referenceOptions.find((option) => selectedOutlineCardKey(option) === id)
+    return card ? [card] : []
+  })
+  const staleCards = chosenCards.length !== selectedVersions.length
   const latestInputs = useRef({ candidateId, dirty, baseRevision })
   latestInputs.current = { candidateId, dirty, baseRevision }
   useEffect(() => {
@@ -96,12 +114,14 @@ export function OutlineGenerationPanel({
   }, [candidateId, endpoint, baseRevision, notify])
 
   async function generate() {
+    if (staleCards) return
     setBusy(true)
     const values = {
       account,
       instruction,
       base_revision: baseRevision,
       confirmation_id: confirmationId,
+      ...(chosenCards.length > 0 && { reference_cards: chosenCards.map(selectedOutlineCardReference) }),
     }
     const signature = JSON.stringify(values)
     if (pending.current?.signature !== signature) pending.current = { signature, key: crypto.randomUUID() }
@@ -114,6 +134,24 @@ export function OutlineGenerationPanel({
       setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])
       setSelected(task.id)
       pending.current = null
+    } catch (error) {
+      notify(error)
+      if (error instanceof ApiError && error.code === 'reference_changed') {
+        try {
+          await onRefreshReferences()
+        } catch (refreshError) {
+          notify(refreshError)
+        }
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function refreshReferences() {
+    setBusy(true)
+    try {
+      await onRefreshReferences()
     } catch (error) {
       notify(error)
     } finally {
@@ -154,6 +192,18 @@ export function OutlineGenerationPanel({
           onChange={(event) => setInstruction(event.target.value)}
         />
       </label>
+      {existingReferenceCount > 0 && (
+        <p className="small">
+          最新保存的大纲中引用了 {existingReferenceCount} 张手法卡，本次会发送它们的摘要和修订标识。
+        </p>
+      )}
+      <SelectedOutlineCards
+        cards={referenceOptions}
+        selected={selectedVersions}
+        onChange={setSelectedVersions}
+        onRefresh={() => void refreshReferences()}
+        disabled={busy || running}
+      />
       <p className="small">
         {hasChapters
           ? '按已有章节目录规划，发送当前确认立项及所选设定中已采用的条目。'
@@ -163,7 +213,7 @@ export function OutlineGenerationPanel({
       </p>
       <button
         type="button"
-        disabled={busy || running || dirty || !hasChapters || !modelReady}
+        disabled={busy || running || dirty || staleCards || !hasChapters || !modelReady}
         onClick={() => void generate()}
       >
         生成四级大纲候选

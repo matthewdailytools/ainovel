@@ -11,6 +11,7 @@ from pydantic import Field, model_validator
 from .budget import micro
 from .db import DomainError, dumps, uid
 from .models import Input, ModuleInput
+from .outline_workspace import SelectedOutlineCardReference, freeze_selected_outline_cards
 from .project_brief import Identifier, IdeaText
 
 KIND = "seven_stage_run"
@@ -44,6 +45,9 @@ class StartRun(Input):
     reference_session_id: Identifier | None = None
     reference_revision: int | None = Field(default=None, ge=0, strict=True)
     auto_adopt_reference: bool = Field(default=False, strict=True)
+    reference_cards: list[SelectedOutlineCardReference] = Field(
+        default_factory=list, max_length=8, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def compatible_source(self):
@@ -57,6 +61,10 @@ class StartRun(Input):
                 raise ValueError("生成大纲前可选择绑定修订的拆解会话。")
         elif self.reference_revision is not None or self.auto_adopt_reference:
             raise ValueError("请先选择本工作版本的参考会话。")
+        if self.reference_cards and (
+            self.reference_session_id or self.start_from not in {"idea", "project", "settings"}
+        ):
+            raise ValueError("生成大纲前可选择正式手法卡或重新拆解原文，请选用一种方式。")
         return self
 
 
@@ -249,6 +257,9 @@ def start_run(domain, branch_id, data):
                 )
                 if data.start_from != "idea":
                     state["stage"] = "reference"
+            if references := payload.get("reference_cards"):
+                freeze_selected_outline_cards(tx, branch_id, references)
+                state["reference_references"] = references
             state["start_snapshot_id"] = checkpoint_tx(tx, branch_id, "启动七台接力")
             identifier = uid()
             timestamp = time()
@@ -688,6 +699,8 @@ def _ensure_chapters(worker, state):
     with worker.db.connect(True) as tx:
         worker.db.check_attempt(tx, worker.task["id"], worker.attempt)
         _unchanged(_story(tx, branch)["story_revision"], state["story_revision"])
+        if references := worker.task["payload"].get("reference_cards"):
+            freeze_selected_outline_cards(tx, branch, references)
         if tx.execute("SELECT 1 FROM chapters WHERE branch_id=? AND archived=0", (branch,)).fetchone():
             return
         count = worker.task["payload"]["chapter_count"]

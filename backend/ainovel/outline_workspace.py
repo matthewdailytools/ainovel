@@ -28,11 +28,19 @@ class OutlineCardReference(Input):
     version_id: HashId | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
+class SelectedOutlineCardReference(OutlineCardReference):
+    version_id: HashId
+
+
 class OutlineCard(OutlineCardReference):
     technique: str
     conditions: str
     exceptions: str
     source_title: str
+
+
+class OutlineCardOption(OutlineCard):
+    pinned: Literal[True] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ChapterPlan(Input):
@@ -153,6 +161,25 @@ def _outline_card(version, *, pin=True):
         **version.card.model_dump(include={"technique", "conditions", "exceptions"}),
         "source_title": version.citation.title,
     }
+
+
+def selected_outline_cards(tx, branch_id, *, include_pin_status=False):
+    from .reference_sync import selectable_reference_cards
+
+    return [
+        {**_outline_card(version), **({"pinned": True} if include_pin_status and pinned else {})}
+        for version, pinned in selectable_reference_cards(tx, branch_id)
+    ]
+
+
+def freeze_selected_outline_cards(tx, branch_id, references):
+    selected = {_card_key(card): card for card in selected_outline_cards(tx, branch_id)}
+    keys = [_card_key(ref) for ref in references]
+    if len({key[:2] for key in keys}) != len(keys):
+        raise DomainError("outline_reference", "每张手法卡只可选择一个正式修订。", 409)
+    if any(key not in selected for key in keys):
+        raise DomainError("reference_changed", "所选手法卡已变化或不可用，请重新核对正式修订。", 409)
+    return [selected[key] for key in keys]
 
 
 def validate_frozen_reference_cards(cards, lookup):
@@ -647,18 +674,8 @@ def register_routes(app, domain):
             return read(tx, branch_id)
 
     @app.get(endpoint + "/reference-options")
-    def reference_options(branch_id: str) -> list[OutlineCard]:
-        from .reference_sync import export_reference_archive
-
+    def reference_options(branch_id: str) -> list[OutlineCardOption]:
         domain.branch(branch_id)
         with domain.db.connect() as tx:
             tx.execute("BEGIN")
-            history = export_reference_archive(tx, branch_id)
-            if not history:
-                return []
-            adopted = {value.revision_id for value in history.adopted_heads}
-            return [
-                _outline_card(version)
-                for version in history.versions
-                if version.id in adopted and version.assessment == "ready"
-            ]
+            return selected_outline_cards(tx, branch_id, include_pin_status=True)
