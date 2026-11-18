@@ -28,6 +28,8 @@ jobs:
       - run: npm run build
       - run: npx playwright install chromium
       - run: npm run test:e2e
+        env:
+          AINOVEL_SYNC_E2E: '1'
       - run: node scripts/build-product-review.mjs --check
       - name: Preserve failed headless evidence
         if: failure()
