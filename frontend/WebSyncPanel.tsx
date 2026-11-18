@@ -83,7 +83,7 @@ export function WebSyncPanel({
   const [compared, setCompared] = useState<Comparison>()
   const [mergeText, setMergeText] = useState<string>()
   const [fork, setFork] = useState<{ choice: WebForkChoice; name: string }>()
-  const [forkNotice, setForkNotice] = useState('')
+  const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -117,14 +117,14 @@ export function WebSyncPanel({
   }, [project.branch.id, service, device, ready])
 
   async function run(
-    action: 'enable' | 'disable' | 'sync' | 'compare' | 'choose' | 'merge' | 'fork',
+    action: 'enable' | 'disable' | 'revoke' | 'sync' | 'compare' | 'choose' | 'merge' | 'fork',
     value?: string,
   ) {
     if (busy || !ready) return
     setBusy(true)
     onBusy(true)
     setMessage('')
-    setForkNotice('')
+    setNotice('')
     try {
       const scope = cloudScope(service, project.branch.id, device.trim())
       if (action === 'disable') {
@@ -142,10 +142,19 @@ export function WebSyncPanel({
         const saved = await forkWebConflict(project, scope, compared, fork.choice, fork.name)
         setFork(undefined)
         onForkSaved(saved)
-        setForkNotice(`已另存本机工作版本「${saved.novel.title}」，可从离线作品中打开。`)
+        setNotice(`已另存本机工作版本「${saved.novel.title}」，可从离线作品中打开。`)
         return
       }
       const transport = httpSyncTransport(scope, token.trim())
+      if (action === 'revoke') {
+        await transport.revokeDevice()
+        await setSyncEnabled(scope, false)
+        setToken('')
+        setCompared(undefined)
+        setStatus(await readSyncState(scope))
+        setNotice('已撤销此设备在云端的凭据。本机作品与待同步记录仍可使用。')
+        return
+      }
       if (action === 'enable') {
         await transport.pull(0)
         await setSyncEnabled(scope, true)
@@ -238,9 +247,19 @@ export function WebSyncPanel({
         <button type="button" disabled={!status?.enabled} onClick={() => void run('disable')}>
           停用作品同步
         </button>
+        <button
+          type="button"
+          disabled={!ready || !token}
+          onClick={() => {
+            if (window.confirm('撤销此设备的云端凭据？再次同步需要新凭据。本机作品与待同步记录会保留。'))
+              void run('revoke')
+          }}
+        >
+          撤销此设备的云端凭据
+        </button>
       </fieldset>
       {message && <p role="alert">{message}</p>}
-      {forkNotice && <p role="status">{forkNotice}</p>}
+      {notice && <p role="status">{notice}</p>}
       {status && (
         <p role="status">
           {status.enabled ? '已启用' : '本地模式'} · 游标 {status.cursor} · {status.pending.length}{' '}

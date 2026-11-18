@@ -258,6 +258,8 @@ def _network(origin, token, method, path, payload=None):
                     if len(body) + len(chunk) > RESPONSE_LIMIT:
                         raise DomainError("sync_response", "同步服务响应超过本机限制。", 502)
                     body.extend(chunk)
+                if response.status_code == 204 and not body:
+                    return None
                 result = json.loads(body)
                 if not response.is_success:
                     code = result.get("code") if isinstance(result, dict) else None
@@ -286,6 +288,8 @@ def _network(origin, token, method, path, payload=None):
                         f"同步服务拒绝此操作（HTTP {response.status_code}）。请核对设备凭据或刷新比较。",
                         409 if response.status_code == 409 else 502,
                     )
+                if result is None:
+                    raise DomainError("sync_response", "同步服务未返回可核验的回执。", 502)
                 return result
     except (httpx.HTTPError, ValueError, RecursionError) as error:
         raise DomainError("sync_transport", "同步未确认成功。本机操作仍可查询或重试。", 502) from error
@@ -690,6 +694,7 @@ class DesktopSync:
                 (branch_id, branch_id),
             ).fetchone()[0]
             return {
+                "bound": row is not None,
                 "enabled": bool(row and row["enabled"]),
                 "work_id": branch_id,
                 "cursor": row["cursor"] if row else 0,
@@ -718,12 +723,10 @@ class DesktopSync:
                 ],
             }
 
-    def _bound(self, branch_id, origin):
+    def _bound(self, branch_id, origin, *, allow_disabled=False):
         with self.domain.db.connect() as tx:
-            row = tx.execute(
-                "SELECT * FROM desktop_sync WHERE branch_id=? AND enabled=1", (branch_id,)
-            ).fetchone()
-            if not row or row["origin_sha256"] != _sha(origin):
+            row = tx.execute("SELECT * FROM desktop_sync WHERE branch_id=?", (branch_id,)).fetchone()
+            if not row or row["origin_sha256"] != _sha(origin) or (not row["enabled"] and not allow_disabled):
                 raise DomainError("sync_binding", "请先为此版本启用对应的同步地址。", 409)
             return row["cursor"]
 
@@ -757,6 +760,14 @@ class DesktopSync:
     def disable(self, branch_id):
         with self._operation():
             self.domain.branch(branch_id)
+            with self.domain.db.connect(True) as tx:
+                tx.execute("UPDATE desktop_sync SET enabled=0 WHERE branch_id=?", (branch_id,))
+            return self._state(branch_id)
+
+    def revoke_device(self, branch_id, origin, token):
+        with self._operation():
+            self._bound(branch_id, origin, allow_disabled=True)
+            self._call(branch_id, origin, token, "/device-session", type(None), method="DELETE")
             with self.domain.db.connect(True) as tx:
                 tx.execute("UPDATE desktop_sync SET enabled=0 WHERE branch_id=?", (branch_id,))
             return self._state(branch_id)
@@ -1367,6 +1378,11 @@ def register_routes(app, domain):
     @app.post(prefix + "/disable")
     def disable_sync(branch_id: str):
         return client.disable(branch_id)
+
+    @app.post(prefix + "/revoke-device")
+    def revoke_sync_device(branch_id: str, data: dict = Body()):
+        _, origin, token = _parse(Connection, data)
+        return client.revoke_device(branch_id, origin, token)
 
     @app.post(prefix + "/run")
     def run_sync(branch_id: str, data: dict = Body()):

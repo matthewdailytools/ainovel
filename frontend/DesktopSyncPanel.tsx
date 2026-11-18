@@ -10,6 +10,7 @@ import { referenceAssessmentLabel, referenceFieldLabels } from './ReferenceCardH
 type Conflict = { id: string; object_id: string }
 type FormalSource = { id: string; device_id: string; change_id: string; sequence: number }
 type SyncStatus = {
+  bound: boolean
   enabled: boolean
   work_id: string
   cursor: number
@@ -313,6 +314,7 @@ export function DesktopSyncPanel({
   const [status, setStatus] = useState<SyncStatus>()
   const [comparison, setComparison] = useState<{ id: string; value: Comparison; key: string }>()
   const [mergeNotice, setMergeNotice] = useState('')
+  const [deviceRevoked, setDeviceRevoked] = useState(false)
   const [busy, setBusy] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const credential = { origin: origin.trim(), token: token.trim() }
@@ -348,7 +350,15 @@ export function DesktopSyncPanel({
     setStatus(
       await api<SyncStatus>(path + '/' + action, 'POST', action === 'disable' ? undefined : credential),
     )
+    if (action === 'enable') setDeviceRevoked(false)
     if (action === 'run') await refresh()
+  }
+  async function revokeDevice() {
+    if (!window.confirm('撤销当前填写的设备凭据？重新同步需要签发新凭据。本机稿件和待同步记录会保留。'))
+      return
+    setStatus(await api<SyncStatus>(path + '/revoke-device', 'POST', credential))
+    setToken('')
+    setDeviceRevoked(true)
   }
   return (
     <section className="card" aria-label="作品云同步">
@@ -393,12 +403,17 @@ export function DesktopSyncPanel({
         >
           停用作品同步
         </button>
+        <button type="button" disabled={!status?.bound || !ready} onClick={() => void run(revokeDevice)}>
+          撤销当前设备凭据
+        </button>
+        <p>停用会暂停此工作版本的同步。撤销会使填写的设备凭据失效。</p>
       </fieldset>
       {status && (
         <p role="status">
           {status.enabled ? '已启用' : '本地模式'} · 游标 {status.cursor} · {status.pending} 条待发送或确认
         </p>
       )}
+      {deviceRevoked && <p role="status">设备凭据已撤销。本机稿件和待同步记录已保留。</p>}
       {mergeNotice && <p role="status">{mergeNotice}</p>}
       {[
         { label: '立项', source: status?.project_source },
@@ -491,7 +506,7 @@ export function DesktopSyncPanel({
             <button
               key={choice}
               type="button"
-              disabled={busy || !ready}
+              disabled={busy || !ready || !status?.enabled}
               onClick={() =>
                 void run(async () => {
                   if (!window.confirm(`${label}并保存为解决后的版本？历史修订会保留。`)) return
@@ -515,7 +530,7 @@ export function DesktopSyncPanel({
           <ChapterConflictActions
             key={comparison.key}
             comparison={comparison.value}
-            disabled={busy || !ready}
+            disabled={busy || !ready || !status?.enabled}
             run={run}
             onMerge={async (content, key) => {
               const merged = await api<MergeResult>(`${path}/conflicts/${comparison.id}/resolve`, 'POST', {

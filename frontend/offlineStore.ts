@@ -41,6 +41,7 @@ import {
 } from './workflowArchive'
 import { createStoryOfflineStore, storyReadStores, storyWriteStores } from './storyOfflineStore'
 import { buildOfflineFork, type OfflineForkSelection } from './offlineForkModel'
+import { calculateOfflineRules } from './offlineRules'
 import {
   createEditedReferenceVersion,
   referenceCardKey,
@@ -972,6 +973,29 @@ export function readLocalSyncSnapshot(projectId: string) {
       ])
     return { manuscript, brief, settings, outline, story, workflow, reference, publications }
   })
+}
+
+export async function readLocalRulePreview(projectId: string) {
+  const stores = [...new Set([...outlineReadStores, ...storyReadStores, 'revisions' as const])]
+  const snapshot = await transact(stores, 'readonly', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const [outline, story] = await Promise.all([
+      outlineStore.readOutlineTx(tx, project),
+      storyStore.readStoryTx(tx, project),
+    ])
+    const index = tx.objectStore('revisions').index('byRevision')
+    const chapters = await Promise.all(
+      outline.chapters
+        .filter(({ archived }) => !archived)
+        .map(async (chapter) => {
+          const saved = await result<LocalRevision | undefined>(index.get([chapter.id, chapter.revision]))
+          if (!saved) throw new OfflineStoreError('missing', '缺少章节的正式保存稿，请先恢复原稿。')
+          return { ...chapter, content: saved.content, revisionId: saved.id }
+        }),
+    )
+    return { outline, records: story.records, chapters }
+  })
+  return calculateOfflineRules(snapshot.chapters, snapshot.outline, snapshot.records)
 }
 
 export function confirmLocalProjectBrief(

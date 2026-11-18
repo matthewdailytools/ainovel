@@ -13,6 +13,7 @@ import {
   maxManuscriptBytes,
   readLocalHistory,
   readLocalOutline,
+  readLocalRulePreview,
   readLocalSourceRevision,
   readLocalSettings,
   readLocalStory,
@@ -30,6 +31,7 @@ import { OfflineOutline } from './OfflineOutline'
 import { OfflineWorkflowHistory } from './OfflineWorkflowHistory'
 import { OfflineReferenceHistory } from './OfflineReferenceHistory'
 import { OfflineStory } from './OfflineStory'
+import { OfflineRulePreview } from './OfflineRulePreview'
 import { discardOwnDraft, readDraft, writeDraft, type Draft } from './drafts'
 
 type EditorState = {
@@ -108,6 +110,10 @@ export function OfflineWorkspace() {
   const loadStory = useCallback(() => {
     if (!projectId) throw new Error('请先打开离线作品。')
     return readLocalStory(projectId)
+  }, [projectId])
+  const loadRules = useCallback(() => {
+    if (!projectId) throw new Error('请先打开离线作品。')
+    return readLocalRulePreview(projectId)
   }, [projectId])
   const refreshWorkbench = useCallback(() => setWorkbenchRefresh((revision) => revision + 1), [])
 
@@ -349,7 +355,10 @@ export function OfflineWorkspace() {
                 refreshToken={workbenchRefresh}
                 disabled={busy}
                 onDirty={setOutlineDirty}
-                onConfirm={(base, version) => confirmLocalOutline(selected.novel.id, base, version)}
+                onConfirm={async (base, version) => {
+                  await confirmLocalOutline(selected.novel.id, base, version)
+                  refreshWorkbench()
+                }}
               />
               <OfflineStory
                 key={`story-${selected.branch.id}`}
@@ -380,6 +389,7 @@ export function OfflineWorkspace() {
                 chapters={chapters}
                 readSource={(id) => readLocalSourceRevision(selected.novel.id, id)}
               />
+              <OfflineRulePreview key={selected.branch.id} read={loadRules} refreshToken={workbenchRefresh} />
               <OfflineWorkflowHistory
                 key={`workflow-${selected.branch.id}`}
                 projectId={selected.novel.id}

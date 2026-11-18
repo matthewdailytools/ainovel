@@ -72,6 +72,57 @@ def test_provision_opt_in_authentication_scope_rotation_and_revoke(service):
     assert rotated["Authorization"].split(" ", 1)[1] not in stored
 
 
+def test_device_can_revoke_only_its_own_work_session_and_repeat_lost_receipt(service):
+    client, _ = service
+    desktop = grant(client, "device")
+    peer = grant(client, "peer")
+    other_work = "/api/sync/works/same-device-name-different-work"
+    other = grant(client, "device", other_work)
+    event = push(client, desktop, parent("published"))
+    material = b"existing selected document"
+    digest = sha256(material).hexdigest()
+    attachments = WORK + "/attachments"
+    assert (
+        client.post(
+            attachments,
+            headers=desktop,
+            json={"name": "selected.txt", "sha256": digest, "size": len(material)},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"{attachments}/{digest}/parts/0",
+            headers={**desktop, "Content-Type": "application/octet-stream"},
+            content=material,
+        ).status_code
+        == 204
+    )
+    assert client.post(f"{attachments}/{digest}/seal", headers=desktop).status_code == 200
+
+    session = WORK + "/device-session"
+    denied = client.delete(session, headers=desktop, params={"device_id": "peer"})
+    assert denied.status_code == 403 and denied.json()["code"] == "sync_device_mismatch"
+    assert client.get(WORK + "/pull", headers=desktop).status_code == 200
+    assert client.delete(other_work + "/device-session", headers=desktop).status_code == 401
+    assert client.delete(session, headers=other).status_code == 401
+    assert client.delete(session, headers=ADMIN).status_code == 401
+    assert client.delete(WORK + "/devices/peer", headers=desktop).status_code == 401
+
+    for _ in range(2):
+        revoked = client.delete(session, headers=desktop, params={"device_id": "device"})
+        assert revoked.status_code == 204 and revoked.content == b""
+    assert client.get(WORK + "/pull", headers=desktop).status_code == 401
+    assert client.post(WORK + "/push", headers=desktop, json=parent("not-written")).status_code == 401
+    assert client.get(WORK + "/pull", headers=peer).json()["changes"] == [event]
+    assert client.get(f"{attachments}/{digest}/content", headers=peer).content == material
+    assert client.get(other_work + "/pull", headers=other).status_code == 200
+
+    replacement = grant(client, "device")
+    assert client.delete(session, headers=desktop).status_code == 401
+    assert client.get(WORK + "/pull", headers=replacement).json()["changes"] == [event]
+
+
 def test_scoped_attachment_resume_validates_full_content(service):
     client, _ = service
     desktop, web = grant(client, "desktop"), grant(client, "web")

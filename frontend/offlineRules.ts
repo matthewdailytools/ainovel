@@ -1,0 +1,142 @@
+import type { LocalChapter } from './offlineStore'
+import { bodyCountCharacters, bodyCountDecimals, bodyCountWhitespace } from './bodyCountUnicode16'
+import {
+  validateOutlineActiveBasis,
+  validateOutlineVersionSources,
+  type OutlineExistingPromise,
+  type OutlineVersion,
+} from './outlineSyncModel'
+import type { ArchivedReferenceCard } from './referenceArchive'
+import type { SettingsVersion } from './settingsSyncModel'
+import type { StoryVersion } from './storySyncModel'
+
+export { bodyCountMethod } from './bodyCountUnicode16'
+
+// Keep the line boundaries, decimal digits and whitespace aligned with workflow_inspection.body_chars.
+const formatLine = /^ {0,3}(?:#{1,6}[ \t]+[\s\S]*|(?:[-*_][ \t]*){3,}|(?:\x60{3,}|~{3,})[\s\S]*)$/u
+const formatPrefix = new RegExp(
+  '^ {0,3}(?:>[ \\t]*|[-+*][ \\t]+|[' + bodyCountDecimals + ']+[.)][ \\t]+)',
+  'u',
+)
+const inlineFormat = new RegExp(
+  '(\\*{1,3}|_{1,3}|~~|\x60{1,2})([^' +
+    bodyCountWhitespace +
+    '][^\\n]*?)(?<![' +
+    bodyCountWhitespace +
+    '])\\1',
+  'gu',
+)
+const countedChar = new RegExp('[' + bodyCountCharacters + ']', 'u')
+
+export function bodyChars(text: string) {
+  const body = text
+    .split('\n')
+    .map((line) => (formatLine.test(line) ? '' : line))
+    .join('\n')
+    .replace(/!\[[^\]\n]*\]\([^\n)]*\)/gu, '')
+    .replace(/\[([^\]\n]+)\]\([^\n)]*\)/gu, '$1')
+    .split('\n')
+    .map((line) => line.replace(formatPrefix, ''))
+    .join('\n')
+    .replace(inlineFormat, '$2')
+  let count = 0
+  for (const c of body) if (countedChar.test(c)) count += 1
+  return count
+}
+
+type RuleChapter = LocalChapter & { content: string; revisionId: string }
+type RuleOutline = {
+  current?: { version: OutlineVersion }
+  versions: { version: OutlineVersion }[]
+  projectVersionId: string | null
+  settings: SettingsVersion | null
+  promises: OutlineExistingPromise[]
+  referenceVersions: ArchivedReferenceCard[]
+  restorePending?: { reason: string }
+}
+type RuleStory = { version: StoryVersion; invalidReasons: string[] }
+
+export async function calculateOfflineRules(
+  chapters: RuleChapter[],
+  outline: RuleOutline,
+  records: RuleStory[],
+) {
+  let progress = 0
+  const saved = chapters
+    .filter(({ archived }) => !archived)
+    .map(({ id, position, title, content, revisionId, revision, stale }) => {
+      // Desktop uses SQLite trim(content) on the saved manuscript directory.
+      if (/[^ ]/u.test(content)) progress = Math.max(progress, position)
+      return { id, position, title, revisionId, revision, stale: !!stale, chars: bodyChars(content) }
+    })
+  const summarize = (entries: typeof saved) => ({
+    chapters: entries.length,
+    chars: entries.reduce((total, { chars }) => total + chars, 0),
+    empty: entries.filter(({ chars }) => !chars).length,
+    stale: entries.filter(({ stale }) => stale).length,
+  })
+  const result = {
+    chapters: saved,
+    book: summarize(saved),
+    volumes: [] as ({ id: string; title: string } & ReturnType<typeof summarize>)[],
+    promises: [] as {
+      id: string
+      title: string
+      state: 'open' | 'due' | 'review'
+      chapter?: { position: number; title: string }
+    }[],
+    outlineIssue: outline.restorePending?.reason,
+    outlineRevision: undefined as string | undefined,
+  }
+  const version = outline.current?.version
+  if (!version) return result
+  const directory = new Map(saved.map((row) => [row.id, row]))
+  const promises = new Map(outline.promises.map((promise) => [promise.id, promise]))
+  const references = new Map(outline.referenceVersions.map((card) => [card.id, card]))
+  try {
+    validateOutlineActiveBasis(version, {
+      projectVersionId: outline.projectVersionId,
+      settingsVersionId: outline.settings?.id ?? null,
+    })
+    await validateOutlineVersionSources(version, {
+      project: (id) => id === outline.projectVersionId,
+      settings: () => outline.settings,
+      outline: (id) => outline.versions.some(({ version }) => version.id === id),
+      chapter: (id) => directory.get(id),
+      promise: (id) => promises.get(id),
+      reference: (id) => references.get(id),
+    })
+  } catch (error) {
+    result.outlineIssue = error instanceof Error ? error.message : '当前大纲的依据待核对。'
+    return result
+  }
+  result.outlineRevision = version.id
+  result.volumes = version.plan.volumes.map(({ id, title, units }) => ({
+    id,
+    title,
+    ...summarize(
+      units.flatMap(({ chapters }) => chapters.map(({ chapter_id }) => directory.get(chapter_id)!)),
+    ),
+  }))
+  const observed = new Map(records.map((row) => [row.version.record_id, row]))
+  for (const window of version.plan.promises) {
+    const id = window.promise_id
+    const row = observed.get(id)
+    const record = row?.version.record
+    const seed = version.promise_sources[id]
+    const title = record?.title ?? seed?.title ?? id
+    if (row && (row.invalidReasons.length || row.version.archived || record?.kind !== 'promise')) {
+      result.promises.push({ id, title, state: 'review' })
+      continue
+    }
+    const status = record?.kind === 'promise' ? record.stages.at(-1)?.status : seed?.stages[0].status
+    if (status !== 'planned' && status !== 'planted' && status !== 'reinforced') continue
+    const closes = directory.get(window.closes_chapter_id)!
+    const opens = directory.get(window.opens_chapter_id)!
+    if (progress >= closes.position) result.promises.push({ id, title, state: 'due', chapter: closes })
+    else if (progress >= opens.position) result.promises.push({ id, title, state: 'open', chapter: closes })
+  }
+  return result
+}
+
+export type OfflineRules = Awaited<ReturnType<typeof calculateOfflineRules>>

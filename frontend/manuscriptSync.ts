@@ -62,12 +62,15 @@ export function cloudScope(service: string, workId: string, deviceId: string): S
   return { service: url.origin, workId, deviceId }
 }
 
-export function httpSyncTransport(scope: SyncScope, token: string): SyncTransport {
+export function httpSyncTransport(
+  scope: SyncScope,
+  token: string,
+): SyncTransport & { revokeDevice(): Promise<void> } {
   if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) throw new Error('请输入同步服务签发的设备凭据。')
   const endpoint = `${scope.service}/api/sync/works/${encodeURIComponent(scope.workId)}`
-  async function request(path: string, payload?: unknown, optional = false) {
-    const response = await fetch(endpoint + path, {
-      method: payload === undefined ? 'GET' : 'POST',
+  function send(path: string, method: 'GET' | 'POST' | 'DELETE', payload?: unknown) {
+    return fetch(endpoint + path, {
+      method,
       credentials: 'omit',
       redirect: 'error',
       cache: 'no-store',
@@ -78,6 +81,9 @@ export function httpSyncTransport(scope: SyncScope, token: string): SyncTranspor
       signal: AbortSignal.timeout(15_000),
       ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
     })
+  }
+  async function request(path: string, payload?: unknown, optional = false) {
+    const response = await send(path, payload === undefined ? 'GET' : 'POST', payload)
     if (optional && response.status === 404) return null
     const result = await response.json()
     if (!response.ok) {
@@ -93,6 +99,14 @@ export function httpSyncTransport(scope: SyncScope, token: string): SyncTranspor
     pull: (after) => request(`/pull?after=${after}&limit=50`),
     receipt: (id) => request('/receipts/' + encodeURIComponent(id), undefined, true),
     resolve: (id, data) => request('/conflicts/' + encodeURIComponent(id) + '/resolve', data),
+    async revokeDevice() {
+      const query = new URLSearchParams({ device_id: scope.deviceId })
+      const response = await send(`/device-session?${query}`, 'DELETE').catch(() => undefined)
+      if (response?.status === 204) return
+      if (response?.status === 401) throw new Error('凭据无效或已被更换，请核对设备凭据。')
+      if (response?.status === 403) throw new Error('设备编号与凭据不匹配，请核对后重试。')
+      throw new Error('尚未取得云端撤销回执，请用同一设备凭据重试。作品与待同步记录已保留。')
+    },
   }
 }
 

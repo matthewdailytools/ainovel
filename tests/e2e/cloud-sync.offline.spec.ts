@@ -380,7 +380,7 @@ test('桌面和离线 Web 同章修改产生可解决冲突，历史稿仍可查
   }
 })
 
-test('独立 Web 拉取中断后重开，使用持久保存的游标继续', async ({ page, browser }) => {
+test('独立 Web 从持久游标续传，还能安全撤销此设备的凭据', async ({ page, browser }) => {
   await page.goto('/')
   const { csrf } = await (await page.request.get('/api/session')).json()
   const headers = { 'X-Ainovel-CSRF': csrf }
@@ -470,8 +470,67 @@ test('独立 Web 拉取中断后重开，使用持久保存的游标继续', asy
     await sync.click()
     await expect(web.getByRole('button', { name: '1. 灯下辨铃', exact: true })).toBeVisible()
     await web.getByRole('button', { name: '1. 灯下辨铃', exact: true }).click()
-    await expect(web.getByRole('textbox', { name: '章节正文', exact: true })).toHaveValue(sourceText)
+    const editor = web.getByRole('textbox', { name: '章节正文', exact: true })
+    await expect(editor).toHaveValue(sourceText)
     expect(pullRequests[2]).toBe(savedCursor)
+
+    await web.getByRole('button', { name: '停用作品同步', exact: true }).click()
+    await expect(web.getByRole('status').filter({ hasText: '本地模式' })).toBeVisible()
+    const pullWith = (token: string) =>
+      page.request.get(endpoint + '/pull?after=0&limit=1', { headers: { Authorization: `Bearer ${token}` } })
+    expect((await pullWith(webToken)).ok()).toBe(true)
+    const edited = '暂存在本地的第二稿。'
+    await editor.fill(edited)
+    await web.getByRole('button', { name: '保存正文到浏览器', exact: true }).click()
+    await expect(web.getByRole('status').filter({ hasText: '本地已保存 · 修订 2' })).toBeVisible()
+
+    const revoke = web.getByRole('button', { name: '撤销此设备的云端凭据', exact: true })
+    const credential = web.getByLabel('设备凭据')
+    async function confirmRevoke() {
+      web.once('dialog', (dialog) => void dialog.accept())
+      await revoke.click()
+    }
+    await web.getByLabel('设备编号').fill('desktop')
+    await confirmRevoke()
+    await expect(web.getByRole('alert')).toContainText('设备编号与凭据不匹配')
+    expect((await pullWith(webToken)).ok()).toBe(true)
+
+    await web.getByLabel('设备编号').fill('web')
+    await web.route(
+      `${endpoint}/device-session?*`,
+      async (route) => {
+        const confirmed = await route.fetch()
+        expect(confirmed.status()).toBe(204)
+        await route.abort('connectionreset')
+      },
+      { times: 1 },
+    )
+    await confirmRevoke()
+    await expect(web.getByRole('alert')).toContainText('尚未取得云端撤销回执')
+    await expect(credential).toHaveValue(webToken)
+    expect((await pullWith(webToken)).status()).toBe(401)
+    expect((await pullWith(desktopToken)).ok()).toBe(true)
+    await confirmRevoke()
+    await expect(web.getByRole('status').filter({ hasText: '已撤销此设备在云端的凭据' })).toBeVisible()
+    await expect(credential).toHaveValue('')
+    await expect(editor).toHaveValue(edited)
+
+    const cursorBeforeResend = pullRequests.at(-1)!
+    const replacement = await grant('web')
+    await credential.fill(replacement)
+    await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
+    const finalStatus = web.getByRole('status').filter({ hasText: /已启用 · 游标 \d+ · 0 条待发送或确认/ })
+    await sync.click()
+    await expect(sync).toBeEnabled()
+    await expect
+      .poll(async () => Number((await finalStatus.innerText()).match(/游标 (\d+)/)?.[1]))
+      .toBeGreaterThan(cursorBeforeResend)
+    const received = await page.request.post(`${branch}/desktop-sync/run`, {
+      headers,
+      data: { origin: cloud, token: desktopToken },
+    })
+    expect(received.ok(), await received.text()).toBe(true)
+    expect((await (await page.request.get(`/api/chapters/${id}`)).json()).content).toBe(edited)
   } finally {
     await web.close()
   }

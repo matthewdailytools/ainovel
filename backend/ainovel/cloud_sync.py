@@ -305,12 +305,20 @@ class SyncStore:
             if not found.rowcount:
                 raise DomainError("sync_device", "同步设备不存在。", 404)
 
+    def revoke_current(self, work, digest, expected_device):
+        with self.transaction(write=True) as tx:
+            # Keep a revoked digest usable for replay of this operation until the device is reprovisioned.
+            device = self._authorize(tx, work, digest, allow_inactive=True)
+            if expected_device is not None and expected_device != device:
+                raise DomainError("sync_device_mismatch", "设备编号与提供的同步凭据不匹配。", 403)
+            tx.execute("UPDATE sync_devices SET active=0 WHERE work_id=? AND id=?", (work, device))
+
     @staticmethod
-    def _authorize(tx, work, digest):
+    def _authorize(tx, work, digest, *, allow_inactive=False):
         row = tx.execute(
-            "SELECT id FROM sync_devices WHERE work_id=? AND token_sha256=? AND active=1", (work, digest)
+            "SELECT id,active FROM sync_devices WHERE work_id=? AND token_sha256=?", (work, digest)
         ).fetchone()
-        if not row:
+        if not row or (not row["active"] and not allow_inactive):
             raise DomainError("sync_auth", "同步凭据无效。", 401)
         return row["id"]
 
@@ -790,6 +798,13 @@ def create_sync_app(database_path: Path, provisioning_token: str, browser_origin
     def revoke(work_id: Identifier, device_id: Identifier, authorization: Authorization = ""):
         admin(authorization)
         store.revoke(work_id, device_id)
+        return Response(status_code=204)
+
+    @app.delete(prefix + "/device-session", status_code=204)
+    def revoke_current(
+        work_id: Identifier, device_id: Identifier | None = None, authorization: Authorization = ""
+    ):
+        store.revoke_current(work_id, _credential(authorization), device_id)
         return Response(status_code=204)
 
     @app.post(prefix + "/push")
