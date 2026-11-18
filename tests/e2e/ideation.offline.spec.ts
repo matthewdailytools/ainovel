@@ -217,13 +217,33 @@ test('取消构思后保留想法及中断片段；不产生采用设定', async
 test('生成中刷新后继续等待完整方案，新候选不会显示为已采用', async ({ page }) => {
   const { novel } = await openIdea(page, '后台验证 · 完整构思刷新续看')
   await page.getByRole('textbox', { name: '你的想法', exact: true }).fill('后台慢速构思：' + idea)
+  const submitted = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/modules',
+  )
   await page.getByRole('button', { name: '帮我展开', exact: true }).click()
+  const queued = await submitted
+  expect(queued.status()).toBe(202)
+  const { id }: { id: string } = await queued.json()
   await expect(page.getByRole('status')).toContainText('执行中')
   await page.reload()
   await page.getByRole('button', { name: '小说构思', exact: true }).click()
   await page.getByRole('button', { name: '快速构思', exact: true }).click()
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get(`/api/tasks/${encodeURIComponent(id)}`)
+        expect(response.status()).toBe(200)
+        const { status, error } = await response.json()
+        if (!['queued', 'running', 'succeeded'].includes(status))
+          throw new Error(`原构思任务进入 ${status}：${error}`)
+        return status
+      },
+      { message: '刷新前提交的构思任务应保存完整方案', timeout: 40_000, intervals: [500, 1000, 1500] },
+    )
+    .toBe('succeeded')
   const plan = page.getByRole('textbox', { name: '修改构思方案', exact: true })
-  await expect(plan).toHaveValue(/结局与人物变化/, { timeout: 20000 })
+  await expect(plan).toHaveValue(/结局与人物变化/)
   await expect(page.getByRole('button', { name: '采用构思', exact: true })).toBeEnabled()
   await expect(page.getByRole('heading', { name: '构思方案', exact: true })).toBeVisible()
   expect(

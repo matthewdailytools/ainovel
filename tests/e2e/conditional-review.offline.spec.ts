@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Request } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import type { Task } from '../../frontend/api'
 
@@ -122,8 +122,12 @@ test('未触发全书约定：写作与复检只读呈现、键盘和320px实际
   await page.route(`**/api/artifacts/${report.id}`, (route) => route.fulfill({ json: report }))
   const writes: string[] = [],
     errors: string[] = []
+  const navigationWrites: Request[] = []
+  const readingStateUrl = new URL(`/api/branches/${novel.branch_id}/reading-state`, page.url()).href
   page.on('request', (request) => {
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())) writes.push(request.url())
+    const method = request.method()
+    if (method === 'PUT' && request.url() === readingStateUrl) navigationWrites.push(request)
+    else if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) writes.push(request.url())
   })
   page.on('pageerror', (error) => errors.push(error.message))
   const measurements = []
@@ -170,13 +174,31 @@ test('未触发全书约定：写作与复检只读呈现、键盘和320px实际
       await expect(page.getByRole('textbox', { name: '候选内容', exact: true })).toHaveValue(text)
     }
   }
-  expect(writes).toEqual([])
-  expect(errors).toEqual([])
   expect(await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).toEqual(original)
   expect((await (await page.request.get('/api/config')).json()).budget).toEqual(budgetBefore)
+  expect(writes).toEqual([])
+  expect(errors).toEqual([])
+  const readingPositions = navigationWrites.map((request) => request.postDataJSON())
+  for (const position of readingPositions) {
+    expect(position).toEqual({
+      chapter_id: chapter.id,
+      cursor: 0,
+      note: '',
+      base_revision: expect.any(Number),
+    })
+    expect(Number.isSafeInteger(position.base_revision)).toBe(true)
+    expect(position.base_revision).toBeGreaterThanOrEqual(0)
+  }
   await info.attach('conditional-review-ui-summary', {
     contentType: 'application/json',
-    body: JSON.stringify({ browserFixtures: true, measurements, writes, errors, modelCalls: 0 }),
+    body: JSON.stringify({
+      browserFixtures: true,
+      measurements,
+      writes,
+      errors,
+      readingPositions,
+      modelCalls: 0,
+    }),
   })
 })
 

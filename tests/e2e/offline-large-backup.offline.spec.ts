@@ -132,8 +132,10 @@ test('36 章超限长稿断网下载独立备份，截断拒绝且完整恢复�
     await reader.reload()
     await projects(reader).selectOption(keptId)
     await reader.getByRole('button', { name: '1. 仍须保留的章稿', exact: true }).click()
+    await expect(reader.getByLabel('章节正文')).toHaveValue(kept)
 
     const restore = reader.getByLabel('从独立备份恢复作品', { exact: true })
+    await expect(restore).toBeEnabled()
     await restore.setInputFiles(truncated)
     await expect(reader.getByRole('alert')).toContainText('独立备份的格式、分段或校验值无效')
     await expect(projects(reader).getByRole('option')).toHaveCount(2)
@@ -141,6 +143,7 @@ test('36 章超限长稿断网下载独立备份，截断拒绝且完整恢复�
     await expect(reader.getByLabel('章节正文')).toHaveValue(kept)
     expect(await manifest(reader, keptId)).toEqual(unrelated)
 
+    await expect(restore).toBeEnabled()
     await restore.setInputFiles(backup)
     await expect(reader.getByText('已校验并恢复独立作品备份。', { exact: true })).toBeVisible()
     await expect(projects(reader)).toHaveValue(sourceId)
