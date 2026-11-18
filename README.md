@@ -87,6 +87,22 @@ uv run python -m ainovel
 
 开发模式分别启动 `uv run uvicorn ainovel.api:create_app --factory --host 127.0.0.1 --port 8765 --no-access-log`、`uv run python -m ainovel.worker` 与 `npm run dev`。Vite 默认代理到 8765；若修改后端端口，同步代理配置。
 
+### 独立云同步服务
+
+在同步服务的运行环境注入 `AINOVEL_SYNC_DB`、`AINOVEL_SYNC_PROVISION_TOKEN` 和允许接入的 `AINOVEL_SYNC_BROWSER_ORIGINS`。数据库需使用独立路径。管理员开通凭据从运行环境的密钥存储注入。浏览器来源填完整的 HTTPS origin，多个以逗号分隔，本地联调可填回环 HTTP。
+
+```powershell
+# 隔离联调。默认只监听 127.0.0.1。
+uv run python -m ainovel.cloud_sync_server --port 8888
+
+# 非回环监听。路径替换为部署环境中的证书链和匹配私钥。
+uv run python -m ainovel.cloud_sync_server --host 0.0.0.0 --port 8443 --tls-certfile 'fullchain.pem' --tls-keyfile 'private-key.pem'
+```
+
+启动入口要求非回环监听提供 TLS 证书和私钥，最低 TLS 1.2。加密私钥的口令可由 `AINOVEL_SYNC_TLS_KEY_PASSWORD` 注入。使用客户端访问实际同步地址的 `/api/sync/health` 核对证书链与主机名，再以独立设备凭据核对作品权限。本机工作台的 `AINOVEL_OFFLINE_SYNC_ORIGINS` 配置相应同步服务地址。
+
+生产部署需为 SQLite、WAL、备份和含正文的附件配置加密存储，另行确认密钥恢复、账户退出及数据保留策略。设备凭据的签发、撤销与本机停用见 [七台云同步验收](docs/acceptance/七台云同步验收.md)。
+
 ### 备份、恢复与付费验收
 
 ```powershell

@@ -29,6 +29,36 @@ export function Editor({
   const callbacks = useRef({ onChange, onSelection })
   callbacks.current = { onChange, onSelection }
   useEffect(() => {
+    let publishedText = initial
+    let pendingChange = false
+    let commitCheck: number | undefined
+    function publish(view: EditorView) {
+      if (view.compositionStarted) {
+        // Confirming the displayed candidate can end composition without another document change.
+        if (pendingChange && commitCheck === undefined)
+          commitCheck = window.setTimeout(() => {
+            commitCheck = undefined
+            publish(view)
+          }, 50)
+        return
+      }
+      window.clearTimeout(commitCheck)
+      commitCheck = undefined
+      if (pendingChange) {
+        pendingChange = false
+        const text = view.state.doc.toString()
+        if (text !== publishedText) {
+          publishedText = text
+          callbacks.current.onChange(text)
+        }
+      }
+      const range = view.state.selection.main
+      callbacks.current.onSelection({
+        start: range.from,
+        end: range.to,
+        text: view.state.sliceDoc(range.from, range.to),
+      })
+    }
     const view = new EditorView({
       parent: mount.current!,
       state: EditorState.create({
@@ -45,15 +75,8 @@ export function Editor({
           keymap.of([...defaultKeymap, ...historyKeymap]),
           EditorView.contentAttributes.of({ 'aria-label': '章节正文', spellcheck: 'false' }),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) callbacks.current.onChange(update.state.doc.toString())
-            if (update.selectionSet || update.docChanged) {
-              const range = update.state.selection.main
-              callbacks.current.onSelection({
-                start: range.from,
-                end: range.to,
-                text: update.state.sliceDoc(range.from, range.to),
-              })
-            }
+            pendingChange ||= update.docChanged
+            if (update.selectionSet || pendingChange) publish(update.view)
           }),
           EditorView.theme({
             '&': { height: '100%', fontSize: '17px' },
@@ -68,6 +91,7 @@ export function Editor({
     })
     instance.current = view
     return () => {
+      window.clearTimeout(commitCheck)
       instance.current = null
       view.destroy()
     }

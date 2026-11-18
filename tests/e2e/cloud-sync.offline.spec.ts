@@ -326,7 +326,153 @@ test('桌面和离线 Web 同章修改产生可解决冲突，历史稿仍可查
     await editor.fill('副本继续独立编辑。')
     await web.getByRole('button', { name: '保存正文到浏览器', exact: true }).click()
     await expect(web.getByRole('status').filter({ hasText: '本地已保存 · 修订' })).toBeVisible()
+    const forkExport = web.waitForEvent('download')
+    await web.getByRole('button', { name: '导出稿件交换包', exact: true }).click()
+    const forkFile = await readFile((await (await forkExport).path())!)
+    const forkPack = JSON.parse(forkFile.toString('utf8'))
+    expect(forkPack.branch.id).not.toBe(branch_id)
+    const forkReceipt = forkPack.evidence.find(({ title }: { title: string }) => title === '冲突另存来源')
+    const forkOrigin = JSON.parse(forkReceipt.body)
+    const originDigest = createHash('sha256').update(desktopBeforeMerge).digest('hex')
+    expect(forkOrigin).toMatchObject({
+      原工作版本: branch_id,
+      原章节: chapterId,
+      '原章稿 SHA-256': originDigest,
+    })
+    expect(forkReceipt.chapters[0]).toMatchObject({
+      revision_id: forkOrigin.本机副本修订,
+      sha256: originDigest,
+    })
+    expect(forkPack.revisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: forkOrigin.本机副本修订, content: desktopBeforeMerge }),
+        expect.objectContaining({ chapter_id: forkOrigin.本机副本章节, content: '副本继续独立编辑。' }),
+      ]),
+    )
+    await web.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const request = indexedDB.deleteDatabase('ainovel-offline-workspace')
+          request.onsuccess = () => resolve()
+          request.onerror = () => reject(request.error)
+          request.onblocked = () => reject(new Error('Offline database unexpectedly blocked'))
+        }),
+    )
+    await web.reload()
+    await expect(
+      web.getByRole('combobox', { name: '离线作品', exact: true }).getByRole('option'),
+    ).toHaveCount(1)
+    await web.getByLabel('导入新离线作品').setInputFiles({
+      name: 'fork.json',
+      mimeType: 'application/json',
+      buffer: forkFile,
+    })
+    await web
+      .getByRole('combobox', { name: '离线作品', exact: true })
+      .selectOption({ label: '遗铃 · 留存桌面草稿' })
+    await web.getByRole('button', { name: '1. 拾铃', exact: true }).click()
+    await expect(editor).toHaveValue('副本继续独立编辑。')
+    await web.getByText('冲突另存来源', { exact: true }).click()
+    await web.getByRole('button', { name: /^查看来源修订/ }).click()
+    await expect(web.getByRole('region', { name: '来源章稿正文' })).toContainText(desktopBeforeMerge)
   } finally {
     await context.close()
+  }
+})
+
+test('独立 Web 拉取中断后重开，使用持久保存的游标继续', async ({ page, browser }) => {
+  await page.goto('/')
+  const { csrf } = await (await page.request.get('/api/session')).json()
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const novel = await page.request.post('/api/novels', {
+    headers,
+    data: { title: '遗铃 · 断点续传', brief: '双端验证同步断点。' },
+  })
+  expect(novel.ok()).toBe(true)
+  const { branch_id } = await novel.json()
+  const branch = `/api/branches/${branch_id}`
+  const emptyPack = await (await page.request.get(branch + '/manuscript-package')).body()
+  const chapter = await page.request.post(branch + '/chapters', { headers, data: { title: '灯下辨铃' } })
+  expect(chapter.ok()).toBe(true)
+  const { id } = await chapter.json()
+  const sourceText = '匠人把两枚铜铃放在同一盏灯下。'
+  const saved = await page.request.put(`/api/chapters/${id}`, {
+    headers,
+    data: { base_revision: 0, content: sourceText },
+  })
+  expect(saved.ok()).toBe(true)
+  const endpoint = `${cloud}/api/sync/works/${branch_id}`
+  async function grant(device_id: string) {
+    const response = await page.request.post(endpoint + '/devices', {
+      headers: { Authorization: 'Bearer e2e-test-only-provisioning-token' },
+      data: { device_id },
+    })
+    expect(response.ok()).toBe(true)
+    return (await response.json()).token as string
+  }
+  const desktopToken = await grant('desktop')
+  const webToken = await grant('web')
+  for (const action of ['enable', 'run']) {
+    const response = await page.request.post(`${branch}/desktop-sync/${action}`, {
+      headers,
+      data: { origin: cloud, token: desktopToken },
+    })
+    expect(response.ok(), await response.text()).toBe(true)
+  }
+  const web = await browser.newPage()
+  try {
+    const sync = web.getByRole('button', { name: '同步当前工作版本', exact: true })
+    async function openSync() {
+      await web
+        .getByRole('combobox', { name: '离线作品', exact: true })
+        .selectOption({ label: '遗铃 · 断点续传' })
+      await web.getByText('作品云同步', { exact: true }).click()
+      await web.getByLabel('同步服务地址').fill(cloud)
+      await web.getByLabel('设备编号').fill('web')
+      await web.getByLabel('设备凭据').fill(webToken)
+    }
+    await web.goto('http://127.0.0.1:8877/offline/')
+    await web.getByLabel('导入新离线作品').setInputFiles({
+      name: 'base.json',
+      mimeType: 'application/json',
+      buffer: emptyPack,
+    })
+    await openSync()
+    await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
+    await expect(sync).toBeEnabled()
+    const pullRequests: number[] = []
+    let savedCursor = 0
+    let interrupted = false
+    await web.route(`${endpoint}/pull?*`, async (route) => {
+      const url = new URL(route.request().url())
+      pullRequests.push(Number(url.searchParams.get('after')))
+      if (pullRequests.length === 1) {
+        url.searchParams.set('limit', '1')
+        const first = await route.fetch({ url: url.toString() })
+        const data = await first.json()
+        expect(data.has_more).toBe(true)
+        savedCursor = data.cursor
+        await route.fulfill({ response: first })
+      } else if (!interrupted) {
+        interrupted = true
+        await route.abort('connectionreset')
+      } else {
+        await route.continue()
+      }
+    })
+    await sync.click()
+    await expect(web.getByRole('alert')).toBeVisible()
+    expect(savedCursor).toBeGreaterThan(0)
+    expect(pullRequests).toEqual([0, savedCursor])
+    await web.reload()
+    await openSync()
+    await expect(web.getByText(`已启用 · 游标 ${savedCursor} · 0 条待发送或确认`)).toBeVisible()
+    await sync.click()
+    await expect(web.getByRole('button', { name: '1. 灯下辨铃', exact: true })).toBeVisible()
+    await web.getByRole('button', { name: '1. 灯下辨铃', exact: true }).click()
+    await expect(web.getByRole('textbox', { name: '章节正文', exact: true })).toHaveValue(sourceText)
+    expect(pullRequests[2]).toBe(savedCursor)
+  } finally {
+    await web.close()
   }
 })

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { errors, expect, test } from '@playwright/test'
 
 test('新作可确认四级章纲，并从台账跳到对应章节', async ({ page }) => {
   await page.goto('/')
@@ -125,4 +125,68 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   await page.locator('.cm-content[contenteditable=true]').focus()
   await page.keyboard.insertText('学徒迈过门槛，铜铃响了。')
   await expect(page.getByLabel('今日事项')).toContainText('2 条伏笔处于回收窗口或已到期')
+})
+
+test('窄屏正文的原生中文组合输入仅在确认后自动保存', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Chromium DevTools Protocol 提供真实组合输入。')
+  await page.setViewportSize({ width: 320, height: 850 })
+  await page.goto('/')
+  const { csrf } = await (await page.request.get('/api/session')).json()
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const novel = await page.request.post('/api/novels', { headers, data: { title: '遗铃 · 组合输入' } })
+  expect(novel.ok(), await novel.text()).toBe(true)
+  const { id, branch_id } = await novel.json()
+  const chapter = await page.request.post(`/api/branches/${branch_id}/chapters`, {
+    headers,
+    data: { title: '门外听铃' },
+  })
+  expect(chapter.ok(), await chapter.text()).toBe(true)
+  const { id: chapterId } = await chapter.json()
+  const chapterUrl = `/api/chapters/${chapterId}`
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(id)
+  await page.getByRole('button', { name: '写作', exact: true }).press('Enter')
+
+  const editor = page.locator('.cm-content[contenteditable=true]')
+  await editor.focus()
+  await expect(editor).toBeFocused()
+  const cdp = await context.newCDPSession(page)
+  const draftSave = page
+    .waitForRequest((request) => request.method() === 'PUT' && request.url().endsWith(chapterUrl), {
+      timeout: 1400,
+    })
+    .then(
+      () => true,
+      (error) => {
+        if (error instanceof errors.TimeoutError) return false
+        throw error
+      },
+    )
+  const composition = 'menwailing'
+  await cdp.send('Input.imeSetComposition', {
+    text: composition,
+    selectionStart: composition.length,
+    selectionEnd: composition.length,
+  })
+  await expect(editor).toContainText(composition)
+  expect(await draftSave).toBe(false)
+  expect(await (await page.request.get(chapterUrl)).json()).toMatchObject({ revision: 0, content: '' })
+  await cdp.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 })
+  await expect(editor).toHaveText('')
+
+  const committed = '学徒在门外听见铃声。'
+  await cdp.send('Input.imeSetComposition', {
+    text: committed,
+    selectionStart: committed.length,
+    selectionEnd: committed.length,
+  })
+  await expect(editor).toContainText(committed)
+  await cdp.send('Input.insertText', { text: committed })
+  await expect(editor).toContainText(committed)
+  await expect(editor).toBeFocused()
+  await expect.poll(async () => (await (await page.request.get(chapterUrl)).json()).revision).toBe(1)
+  expect(await (await page.request.get(chapterUrl)).json()).toMatchObject({ content: committed })
+  const history = await (await page.request.get(chapterUrl + '/history')).json()
+  expect(history.map((entry: { revision: number }) => entry.revision)).toEqual([1, 0])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
 })
