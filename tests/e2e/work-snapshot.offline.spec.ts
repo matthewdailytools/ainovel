@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test'
+import { createHash } from 'node:crypto'
+
+import { authorSettingPlan } from './fixtures/authorSettingPlan'
 
 test('卷快照预览列出受影响报告，检查并发基线后仅恢复该卷稿件', async ({ page }) => {
   await page.goto('/')
@@ -134,4 +137,70 @@ test('卷快照预览列出受影响报告，检查并发基线后仅恢复该�
     id: otherReport.id,
     current: true,
   })
+})
+
+test('作品快照要求重新预览晚到的正文使用证明，并展示原位恢复与另存的影响', async ({ page }) => {
+  const { novel, chapter, original, headers } = await authorSettingPlan(page, '作品恢复核对正文证明')
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
+  await page.getByRole('button', { name: '故事与审阅', exact: true }).press('Enter')
+  await page.setViewportSize({ width: 360, height: 840 })
+  const panel = page.getByRole('region', { name: '作品快照与回滚', exact: true })
+  await panel.getByRole('textbox', { name: '快照名称' }).fill('保持原稿的恢复点')
+  await panel.getByRole('button', { name: '保存快照' }).press('Enter')
+  await expect(panel.getByRole('status')).toHaveText('已保存作品快照。')
+  const retry = panel.getByRole('button', { name: '预览恢复差异' })
+  await retry.press('Enter')
+  const preview = panel.getByRole('region', { name: '恢复差异预览' })
+  await expect(preview).toBeFocused()
+  const affected = preview.getByRole('region', { name: '原位恢复后待重核的设定正文使用' })
+  await expect(affected).toHaveCount(0)
+
+  const endpoint = `/api/chapters/${chapter.id}/setting-uses`
+  const { basis } = await (await page.request.get(endpoint)).json()
+  const confirmed = await page.request.post(endpoint, {
+    headers,
+    data: {
+      outline_version_id: basis.outline_version_id,
+      settings_version_id: basis.settings_version_id,
+      item_id: 'keeper',
+      parent_id: null,
+      chapter_sha256: basis.chapter_sha256,
+      evidence: {
+        chapter_id: chapter.id,
+        revision_id: basis.chapter_revision_id,
+        start: 0,
+        end: original.length,
+        quote_sha256: createHash('sha256').update(original).digest('hex'),
+      },
+      idempotency_key: `work-snapshot-proof-${chapter.id}`,
+    },
+  })
+  expect(confirmed.status(), await confirmed.text()).toBe(201)
+  const proof = (await confirmed.json()).version
+  const reviewed = preview.getByRole('checkbox', { name: '我已核对恢复影响' })
+  const apply = preview.getByRole('button', { name: '提交恢复' })
+  await reviewed.check()
+  await apply.press('Enter')
+  await expect(panel.getByRole('alert')).toContainText('请重新预览')
+  await expect(retry).toBeFocused()
+  await expect(apply).toBeDisabled()
+
+  await retry.press('Enter')
+  await expect(affected).toContainText('归还赤钥 · 守铃人阿陶')
+  await expect(affected).toContainText(proof.id)
+  const mode = preview.getByRole('combobox', { name: '恢复方式' })
+  await mode.selectOption('new_branch')
+  await expect(affected).toHaveCount(0)
+  await expect(preview.getByText('既有报告和证明可在来源分支查看。', { exact: false })).toBeVisible()
+  await mode.selectOption('in_place')
+  await expect(reviewed).not.toBeChecked()
+  await expect(affected).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+  await reviewed.check()
+  await apply.press('Enter')
+  await expect(panel.getByRole('status')).toContainText('已恢复为新的当前修订')
+  const proofAfter = await page.request.get(`${endpoint}/${proof.id}`)
+  expect(proofAfter.ok(), await proofAfter.text()).toBe(true)
+  expect(await proofAfter.json()).toMatchObject({ status: 'outdated', quote: original })
 })

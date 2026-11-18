@@ -3,7 +3,7 @@ from hashlib import sha256
 from fastapi.testclient import TestClient
 
 from test_outline_workspace import chapter_plan, setting_confirmation
-from test_setting_use import QUOTE, TEXT, select, verified
+from test_setting_use import TEXT, select, verified
 from test_setting_use import author_plan as author_plan
 
 
@@ -251,12 +251,11 @@ def test_chapter_restore_rejects_preview_after_another_session_saves_and_keeps_l
 
 def test_chapter_restore_reads_author_setting_use_and_requires_fresh_preview(client, domain, author_plan):
     plan = author_plan
-    chapter = plan["first"]
+    chapter = plan["second"]
+    quote = "守门人"
     chapter_url = f"/api/chapters/{chapter['id']}"
     old = verified(client.get(chapter_url + "/history"))[0]
-    current = domain.save(chapter["id"], chapter["revision"], TEXT + "她核对名单后收起铜牌。")
-    second = plan["second"]
-    domain.save(second["id"], second["revision"], "在😀渡口，守门人留在木门外。")
+    current = domain.save(chapter["id"], chapter["revision"], "在😀渡口，守门人留在木门外。")
     history = f"{chapter_url}/history/{old['id']}"
 
     def preview():
@@ -265,18 +264,22 @@ def test_chapter_restore_reads_author_setting_use_and_requires_fresh_preview(cli
     def restore(value):
         return client.post(history + "/restore", json={"basis_sha256": value["basis_sha256"]})
 
+    def guard_request(window, url, key, parent=None):
+        request = select(verified(window.get(url)), key, parent) | {"item_id": "guard"}
+        request["evidence"].update(start=6, end=9, quote_sha256=sha256(quote.encode()).hexdigest())
+        return request
+
     baseline = preview()
     assert not any(row["kind"] == "setting_use" for row in baseline["references"])
     with TestClient(client.app) as another:
         another.headers["X-Ainovel-CSRF"] = another.get("/api/session").json()["csrf"]
-        other_url = plan["other"]
-        other_proof = select(verified(another.get(other_url)), "other-chapter-proof") | {"item_id": "guard"}
-        other_proof["evidence"].update(start=6, end=9, quote_sha256=sha256("守门人".encode()).hexdigest())
+        other_url = plan["route"]
+        other_proof = select(verified(another.get(other_url)), "other-chapter-proof")
         verified(another.post(other_url, json=other_proof), 201)
         assert preview()["basis_sha256"] == baseline["basis_sha256"]
 
-        url = plan["route"]
-        request = select(verified(another.get(url)), "current-chapter-proof")
+        url = plan["other"]
+        request = guard_request(another, url, "current-chapter-proof")
         proof = verified(another.post(url, json=request), 201)["version"]
         expired = restore(baseline)
         assert expired.status_code == 409 and expired.json()["code"] == "chapter_restore_changed"
@@ -284,14 +287,14 @@ def test_chapter_restore_reads_author_setting_use_and_requires_fresh_preview(cli
         expected = {
             "kind": "setting_use",
             "id": proof["id"],
-            "title": "领航人阿禾",
+            "title": quote,
             "source": {
                 "chapter_id": chapter["id"],
                 "revision_id": proof["evidence"]["revision_id"],
                 "revision": current["revision"],
                 "start": proof["evidence"]["start"],
                 "end": proof["evidence"]["end"],
-                "quote": QUOTE,
+                "quote": quote,
             },
         }
         reviewed = preview()
@@ -309,7 +312,7 @@ def test_chapter_restore_reads_author_setting_use_and_requires_fresh_preview(cli
         latest = verified(
             another.post(
                 url,
-                json=select(verified(another.get(url)), "reauthor-chapter-proof", withdrawn["id"]),
+                json=guard_request(another, url, "reauthor-chapter-proof", withdrawn["id"]),
             ),
             201,
         )["version"]
@@ -320,9 +323,35 @@ def test_chapter_restore_reads_author_setting_use_and_requires_fresh_preview(cli
     ]
     restored = verified(restore(reviewed_again))
     assert (restored["revision"], restored["content"]) == (current["revision"] + 1, old["content"])
-    history_record = verified(client.get(plan["route"] + "/" + latest["id"]))
+    history_record = verified(client.get(plan["other"] + "/" + latest["id"]))
     assert (history_record["status"], history_record["quote"], history_record["version"]) == (
         "outdated",
-        QUOTE,
+        quote,
         latest,
     )
+
+
+def test_chapter_restore_previews_continuity_impact_for_later_setting_proofs(client, domain, author_plan):
+    first, second = author_plan["first"], author_plan["second"]
+    history = verified(client.get(f"/api/chapters/{first['id']}/history"))
+    target = next(row for row in history if row["revision"] == 0)
+    route = f"/api/chapters/{first['id']}/history/{target['id']}"
+    proof_route = author_plan["other"]
+    domain.save(second["id"], second["revision"], TEXT + "守门人留在木门外。")
+    # Preserve the current chapter-restore dependencies while confirming a new proof on the later chapter.
+    before = verified(client.get(route + "/restore-preview"))
+    request = select(verified(client.get(proof_route)), "later-chapter-proof") | {"item_id": "guard"}
+    start = len(TEXT.encode("utf-16-le")) // 2
+    request["evidence"].update(start=start, end=start + 3, quote_sha256=sha256("守门人".encode()).hexdigest())
+    proof = verified(client.post(proof_route, json=request), 201)["version"]
+    fresh = verified(client.get(route + "/restore-preview"))
+    [impact] = [row for row in fresh["references"] if row["kind"] == "setting_use"]
+    assert (impact["id"], impact["source"]["chapter_id"], impact["source"]["quote"]) == (
+        proof["id"],
+        second["id"],
+        "守门人",
+    )
+    assert client.post(route + "/restore", json={"basis_sha256": before["basis_sha256"]}).status_code == 409
+    verified(client.post(route + "/restore", json={"basis_sha256": fresh["basis_sha256"]}))
+    assert domain.chapter(second["id"])["revision"] == second["revision"] + 1
+    assert verified(client.get(f"{proof_route}/{proof['id']}"))["status"] == "outdated"

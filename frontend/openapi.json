@@ -10981,6 +10981,11 @@
             "type": "array",
             "title": "Affected Reports"
           },
+          "affected_setting_uses": {
+            "items": { "$ref": "#/components/schemas/SnapshotSettingUseImpact" },
+            "type": "array",
+            "title": "Affected Setting Uses"
+          },
           "notes": { "items": { "type": "string" }, "type": "array", "title": "Notes" }
         },
         "additionalProperties": false,
@@ -10993,9 +10998,23 @@
           "shared_changes",
           "reports",
           "affected_reports",
+          "affected_setting_uses",
           "notes"
         ],
         "title": "SnapshotRestorePreview"
+      },
+      "SnapshotSettingUseImpact": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "chapter_title": { "type": "string", "title": "Chapter Title" },
+          "item_id": { "type": "string", "title": "Item Id" },
+          "title": { "type": "string", "title": "Title" },
+          "version_id": { "type": "string", "title": "Version Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "chapter_title", "item_id", "title", "version_id"],
+        "title": "SnapshotSettingUseImpact"
       },
       "Source": {
         "properties": {

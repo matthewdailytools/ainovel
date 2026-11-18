@@ -70,6 +70,14 @@ class RestoreInput(Input):
         return self
 
 
+class SnapshotSettingUseImpact(Input):
+    chapter_id: str
+    chapter_title: str
+    item_id: str
+    title: str
+    version_id: str
+
+
 class SnapshotRestorePreview(Input):
     snapshot: dict[str, JsonValue]
     basis_sha256: str
@@ -78,6 +86,7 @@ class SnapshotRestorePreview(Input):
     shared_changes: dict[str, JsonValue]
     reports: dict[str, str]
     affected_reports: list[AffectedReport]
+    affected_setting_uses: list[SnapshotSettingUseImpact]
     notes: list[str]
 
 
@@ -350,11 +359,51 @@ def _restore_plan(snapshot, current):
     return wanted, currently_scoped, outside, shared, blockers
 
 
-def _restore_basis(snapshot, current, reports):
-    return _hash(dumps([snapshot["id"], current, reports]))
+def _live_setting_uses(tx, branch_id, state):
+    from .outline_sync import read_outline_head
+    from .setting_use import current_outline_uses
+    from .settings_sync import settings_source_id
+
+    if not state["outline_live"]:
+        return []
+    outline = state["confirmed_outline"]
+    basis = outline["setting_basis"]
+    settings = {
+        item["id"]: item["title"] for item in basis["items"] if item.get("category_id") not in (None, "world")
+    }
+    if not settings:
+        return []
+    uses = current_outline_uses(
+        tx,
+        branch_id,
+        read_outline_head(tx, branch_id),
+        settings_source_id(tx, branch_id, basis["confirmation_id"]),
+    )
+    if not uses:
+        return []
+    titles = {row["id"]: row["title"] for row in state["chapters"]}
+    live = []
+    for _, _, chapter in _chapter_plans(outline["plan"]):
+        chapter_id = chapter["chapter_id"]
+        for item_id in chapter["setting_ids"]:
+            if item_id in settings and (proof := uses.get((chapter_id, item_id))):
+                live.append(
+                    {
+                        "chapter_id": chapter_id,
+                        "chapter_title": titles[chapter_id],
+                        "item_id": item_id,
+                        "title": settings[item_id],
+                        "version_id": proof["version"]["id"],
+                    }
+                )
+    return live
 
 
-def _preview(snapshot, current, reports):
+def _restore_basis(snapshot, current, reports, setting_uses):
+    return _hash(dumps([snapshot["id"], current, reports, setting_uses]))
+
+
+def _preview(snapshot, current, reports, setting_uses):
     wanted, scoped, _, shared, blockers = _restore_plan(snapshot, current)
     historical = snapshot["manifest"]
     previous = {chapter["id"]: chapter for chapter in historical["chapters"]}
@@ -399,7 +448,7 @@ def _preview(snapshot, current, reports):
         cautions.append("本次恢复范围内的篇幅目标将随快照恢复，旧修订仍可追溯。")
     return {
         "snapshot": _summary(snapshot),
-        "basis_sha256": _restore_basis(snapshot, current, reports),
+        "basis_sha256": _restore_basis(snapshot, current, reports, setting_uses),
         "changes": changes,
         "in_place_blockers": blockers,
         "shared_changes": {
@@ -414,6 +463,7 @@ def _preview(snapshot, current, reports):
         },
         "reports": current["reports"],
         "affected_reports": [],
+        "affected_setting_uses": [],
         "notes": cautions,
     }
 
@@ -924,7 +974,9 @@ def restore(domain, branch_id, snapshot_id, data):
         branch = _branch(tx, branch_id)
         snapshot = _read_snapshot(tx, branch_id, snapshot_id)
         current = _capture(tx, branch_id)
-        if _restore_basis(snapshot, current, report_basis(tx, branch_id)) != data.basis_sha256:
+        reports = report_basis(tx, branch_id)
+        setting_uses = _live_setting_uses(tx, branch_id, current)
+        if _restore_basis(snapshot, current, reports, setting_uses) != data.basis_sha256:
             raise DomainError("snapshot_changed", "工作版本已有变化，请重新预览影响后恢复。", 409)
         recovery = _save_snapshot(tx, branch, "恢复前检查点", "book", None, current, "pre_restore")
         result = _execute_restore(tx, domain, branch, snapshot, current, data)
@@ -966,17 +1018,32 @@ def register_routes(app, domain):
             snapshot = _read_snapshot(tx, branch_id, snapshot_id)
             current = _capture(tx, branch_id)
             checked = report_basis(tx, branch_id)
-            preview = _preview(snapshot, current, checked)
-            if checked and not preview["in_place_blockers"]:
+            setting_uses = _live_setting_uses(tx, branch_id, current)
+            preview = _preview(snapshot, current, checked, setting_uses)
+            if (checked or setting_uses) and not preview["in_place_blockers"]:
                 simulated = RestoreInput(
                     basis_sha256=preview["basis_sha256"], mode="in_place", idempotency_key="forecast-only"
                 )
                 try:
                     with forecast(tx):
                         _execute_restore(tx, domain, branch, snapshot, current, simulated)
-                        preview["affected_reports"] = invalidated_reports(
-                            checked, report_basis(tx, branch_id)
-                        )
+                        if checked:
+                            preview["affected_reports"] = invalidated_reports(
+                                checked, report_basis(tx, branch_id)
+                            )
+                        if setting_uses:
+                            live_ids = set()
+                            head = latest_outline(tx, branch_id, True)
+                            # A restored confirmation gets a new outline ID. The existing
+                            # proofs stay bound to the confirmation they were made against.
+                            if head and head["id"] == current["confirmed_outline"]["id"]:
+                                live_ids = {
+                                    proof["version_id"]
+                                    for proof in _live_setting_uses(tx, branch_id, _capture(tx, branch_id))
+                                }
+                            preview["affected_setting_uses"] = [
+                                proof for proof in setting_uses if proof["version_id"] not in live_ids
+                            ]
                 except DomainError as error:
                     preview["in_place_blockers"].append(error.message)
             return preview

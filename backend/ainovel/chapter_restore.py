@@ -12,6 +12,7 @@ from .domain import utf16_slice
 from .models import Input
 from .outline_workspace import WINDOW_CHAPTERS, _chapter_plans, _decode, _latest as latest_outline
 from .restore_impact import AffectedReport, forecast, invalidated_reports, report_basis
+from .setting_use import KIND as SETTING_USE_KIND
 from .setting_use import current_chapter_uses
 from .story_graph import graph_snapshot, references as record_references, sources
 from .workflow_inspection import _card_references
@@ -144,14 +145,26 @@ def _outline_references(tx, chapter):
     return [*refs, *by_id.values()], windows
 
 
+def _setting_use_references(tx, chapter):
+    # Saving a revision also makes the saved continuity of later chapters stale.
+    affected = tx.execute(
+        "SELECT c.* FROM chapters c WHERE c.branch_id=? AND c.archived=0 AND c.stale=0 "
+        "AND (c.id=? OR c.position>?) AND c.id IN (SELECT chapter_id FROM artifacts WHERE branch_id=? AND kind=? "
+        "AND status='accepted' AND json_extract(basis,'$.head')=1 AND json_extract(payload,'$.action')='confirmed') "
+        "ORDER BY c.position,c.id",
+        (chapter["branch_id"], chapter["id"], chapter["position"], chapter["branch_id"], SETTING_USE_KIND),
+    )
+    for row in affected:
+        for title, version, revision, quote in current_chapter_uses(tx, row):
+            source = version.evidence.model_dump(exclude={"quote_sha256"}) | {
+                "revision": revision,
+                "quote": quote,
+            }
+            yield _reference(version.id, "setting_use", title, source)
+
+
 def _other_references(tx, chapter):
     branch_id = chapter["branch_id"]
-    for title, version, revision, quote in current_chapter_uses(tx, chapter):
-        source = version.evidence.model_dump(exclude={"quote_sha256"}) | {
-            "revision": revision,
-            "quote": quote,
-        }
-        yield _reference(version.id, "setting_use", title, source)
     if row := latest_setting(tx, branch_id, CONFIRMATION):
         setting = _read_payload(row)
         items = {
@@ -188,6 +201,7 @@ def _other_references(tx, chapter):
 
 def _references(tx, chapter, graph):
     refs, windows = _outline_references(tx, chapter)
+    refs.extend(_setting_use_references(tx, chapter))
     refs.extend(_other_references(tx, chapter))
     records = [row for row in graph["records"] if not row["archived"]]
     citations = {row["id"]: _bound_sources(chapter, sources(row["payload"])) for row in records}

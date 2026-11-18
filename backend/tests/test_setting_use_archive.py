@@ -436,3 +436,54 @@ def test_volume_restore_keeps_source_proofs_historical_and_fork_requires_own_con
         first_proof_id,
         second_proof_id,
     }
+
+
+@pytest.mark.parametrize("scope", ["volume", "book"])
+def test_snapshot_restore_rechecks_late_proofs_even_without_an_inspection(client, domain, author_plan, scope):
+    branch = author_plan["branch_id"]
+    endpoint = snapshot_route(branch)
+    scope_fields = {"scope": scope, **({"scope_id": "v1"} if scope == "volume" else {})}
+    snapshot = verified(client.post(endpoint, json={"label": "等作者核对快照", **scope_fields}), 201)
+    location = f"{endpoint}/{snapshot['id']}"
+    before = verified(client.get(location + "/preview"))
+    assert before["affected_reports"] == before["affected_setting_uses"] == []
+
+    first = record(client, author_plan["route"], "late-proof-first-volume")
+    second = record(client, author_plan["other"], "late-proof-second-volume", item_id="guard")
+    assert first["status"] == second["status"] == "current"
+    data = {
+        "mode": "in_place",
+        "basis_sha256": before["basis_sha256"],
+        "idempotency_key": "snapshot-late-proof",
+    }
+    refused = client.post(location + "/restore", json=data)
+    assert refused.status_code == 409 and refused.json()["code"] == "snapshot_changed"
+    assert all(row["purpose"] != "pre_restore" for row in verified(client.get(endpoint)))
+
+    latest = verified(client.get(location + "/preview"))
+    assert latest["affected_reports"] == []
+    assert latest["affected_setting_uses"] == [
+        {
+            "chapter_id": chapter["id"],
+            "chapter_title": chapter["title"],
+            "item_id": proof["version"]["item_id"],
+            "title": title,
+            "version_id": proof["version"]["id"],
+        }
+        for chapter, proof, title in (
+            (author_plan["first"], first, "领航人阿禾"),
+            (author_plan["second"], second, "守门人"),
+        )
+    ]
+    assert (
+        verified(client.get(author_plan["request"] + "/outline-workspace"))["confirmed"]
+        == author_plan["outline"]
+    )
+    successful = verified(
+        client.post(location + "/restore", json=data | {"basis_sha256": latest["basis_sha256"]}), 201
+    )
+    assert successful["outline_id"] != author_plan["outline"]["id"]
+    second_chapter = author_plan["second"]
+    assert domain.chapter(second_chapter["id"])["revision"] == second_chapter["revision"]
+    for endpoint, proof in ((author_plan["route"], first), (author_plan["other"], second)):
+        assert verified(client.get(f"{endpoint}/{proof['version']['id']}")) == {**proof, "status": "outdated"}

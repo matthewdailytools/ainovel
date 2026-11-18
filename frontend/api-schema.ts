@@ -6112,8 +6112,23 @@ export interface components {
       }
       /** Affected Reports */
       affected_reports: components['schemas']['AffectedReport'][]
+      /** Affected Setting Uses */
+      affected_setting_uses: components['schemas']['SnapshotSettingUseImpact'][]
       /** Notes */
       notes: string[]
+    }
+    /** SnapshotSettingUseImpact */
+    SnapshotSettingUseImpact: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Chapter Title */
+      chapter_title: string
+      /** Item Id */
+      item_id: string
+      /** Title */
+      title: string
+      /** Version Id */
+      version_id: string
     }
     /** Source */
     Source: {

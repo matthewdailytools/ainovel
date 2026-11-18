@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError, type Chapter } from './api'
+import type { components } from './api-schema'
 import { RestoreReportList, type RestoreAffectedReport } from './ChapterRestorePreview'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 
@@ -27,6 +28,7 @@ type Preview = {
   in_place_blockers: string[]
   shared_changes: { definitions: string[]; conception: boolean; outline: boolean }
   affected_reports: RestoreAffectedReport[]
+  affected_setting_uses: components['schemas']['SnapshotSettingUseImpact'][]
   notes: string[]
 }
 type ChapterDiff = {
@@ -316,9 +318,23 @@ export function WorkSnapshotPanel({
             </p>
           )}
           {mode === 'in_place' ? (
-            <RestoreReportList reports={preview.affected_reports} scopeNames={scopeNames} />
+            <>
+              <RestoreReportList reports={preview.affected_reports} scopeNames={scopeNames} />
+              {!!preview.affected_setting_uses.length && (
+                <section aria-label="原位恢复后待重核的设定正文使用">
+                  <h4>原位恢复后待重核的设定正文使用</h4>
+                  <ul>
+                    {preview.affected_setting_uses.map((proof) => (
+                      <li key={proof.version_id}>
+                        {proof.chapter_title} · {proof.title} · 证明 <code>{proof.version_id}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+            </>
           ) : (
-            <p>在新分支重新体检，来源工作版本的报告仍可在来源分支查看。</p>
+            <p>在新分支重新体检和确认正文使用，既有报告和证明可在来源分支查看。</p>
           )}
           {previewStale && <p>这份预览已过期。请重新预览恢复差异。</p>}
           {preview.in_place_blockers.map((note) => (
