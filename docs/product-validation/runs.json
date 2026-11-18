@@ -8668,5 +8668,27 @@
     "result": "passed",
     "record": "2026-11-18-three-chapter-workbench.md",
     "fix_of": "three-chapter-advice-hidden-20261118"
+  },
+  {
+    "id": "three-chapter-daily-reference-cached-draft-fail-20261118",
+    "date": "2026-11-18",
+    "commit": "2fe3e01",
+    "module": "三章工作台日常发布",
+    "scenario": "精确CI 44254801165全量无头169项通过、参考仿写1项超时。本机Chromium复现参照稿采纳后旧保存缓存使编辑器只读，保留失败证据。该提交未发布。",
+    "phase": "stability",
+    "result": "failed",
+    "record": "2026-11-18-three-chapter-workbench.md",
+    "fix_of": ""
+  },
+  {
+    "id": "three-chapter-daily-d06b5a9-20261118",
+    "date": "2026-11-18",
+    "commit": "d06b5a9",
+    "module": "三章工作台日常发布",
+    "scenario": "CI 44261491540通过。先备份及隔离恢复，再上线8766。7个只读无头会话核对逐步确认、冲突对照及恢复入口，两种缺失状态在浏览器补验。原12章批次、39张业务表、2张账本表、25份资料及1692条用量保持。新增模型费用0。",
+    "phase": "stability",
+    "result": "passed",
+    "record": "2026-11-18-three-chapter-workbench.md",
+    "fix_of": "three-chapter-daily-reference-cached-draft-fail-20261118"
   }
 ]
