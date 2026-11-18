@@ -442,9 +442,10 @@ def export_evidence(settings, task_ids, *, usage_ledger=None):
             else:
                 entry["completion"] = domain.completion(branch_id)
             run = entry.get("seven_stage")
-            billed_ids = [task_id, *run["child_task_ids"]] if run else [task_id]
-            if usage_ledger is None:
-                billed_ids = related_ids
+            if run:
+                billed_ids = [task_id, *run["child_task_ids"]]
+            else:
+                billed_ids = related_ids if usage_ledger is None else [task_id]
             calls = _ledger_calls(usage, billed_ids) if usage is not None else []
             if run or usage_ledger is not None:
                 entry["billing_evidence"] = {

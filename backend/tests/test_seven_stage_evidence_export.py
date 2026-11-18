@@ -8,7 +8,7 @@ from zipfile import ZipFile
 import pytest
 
 from ainovel.budget import Budget
-from ainovel.db import DomainError
+from ainovel.db import DomainError, uid
 from ainovel import evidence_export
 from ainovel.evidence_export import export_evidence
 from test_seven_stage_run import Model, drain, start
@@ -131,6 +131,56 @@ def test_seven_stage_evidence_rejects_missing_original_adoption_receipt(client, 
         tx.execute("DELETE FROM receipts WHERE artifact_id=?", (artifact_id,))
     with pytest.raises(DomainError, match=rf"{artifact_id} 的原采纳回执"):
         export_evidence(settings, [task_id])
+
+
+def test_seven_stage_backup_ledger_keeps_same_branch_batches_separate(client, domain, settings, story):
+    branch, endpoint, first_id = start(client, domain, story, "idea")
+    assert client.post(f"{endpoint}/{first_id}/pause").json()["status"] == "paused"
+    assert client.post(f"{endpoint}/{first_id}/resume").json()["status"] == "queued"
+    drain(settings, Model())
+    first_state = domain.task(first_id)["result"]["seven_stage_run"]
+    assert first_state["stage"] == "inspection"
+    assert client.post(f"{endpoint}/{first_id}/cancel").json()["status"] == "cancelled"
+
+    queued = client.post(
+        endpoint,
+        json={
+            "start_from": "outline",
+            "source_id": first_state["outline_id"],
+            "account": "deepseek",
+            "budget_limit": 1,
+            "client_request_id": uid(),
+        },
+    )
+    assert queued.status_code == 202, queued.text
+    second_id = queued.json()["id"]
+    manual = domain.queue(
+        "module", {"account": "deepseek", "novel_id": domain.task(first_id)["novel_id"]}, branch
+    )
+
+    ledger = Budget(settings)
+    provider = settings.providers["deepseek"]
+    first_call = ledger.reserve(provider, first_state["children"][0], 10, 10)
+    ledger.settle(first_call, {"input": 2, "output": 1})
+    second_call = ledger.reserve(provider, second_id, 10, 10)
+    manual_call = ledger.reserve(provider, manual["id"], 10, 10)
+    ledger.metadata(manual_call, "manual", "非当前七台批次的请求")
+    before = ledger.report()
+
+    folder = Path(export_evidence(settings, [first_id, second_id])["folder"])
+    first, second = json.loads((folder / "evidence.json").read_text("utf-8"))["tasks"]
+    assert [row["id"] for row in first["calls"]] == [first_call]
+    assert [row["id"] for row in second["calls"]] == [second_call]
+    assert first["billing_evidence"] == {
+        "source": "data_directory_backup",
+        "task_ids": [first_id, *first_state["children"]],
+        "state": "captured",
+        "row_count": 1,
+    }
+    assert second["billing_evidence"]["task_ids"] == [second_id]
+    assert first["cost_by_currency"]["CNY"] == {"settled": 0.000012, "held_unknown": 0}
+    assert second["cost_by_currency"]["CNY"] == {"settled": 0, "held_unknown": 0.0001}
+    assert ledger.report() == before
 
 
 def test_seven_stage_shared_ledger_filters_families_in_one_read_snapshot(
