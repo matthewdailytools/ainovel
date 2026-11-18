@@ -1,7 +1,13 @@
-param([switch]$Install, [int]$Port = 8765)
+param([switch]$Install, [ValidateRange(1, 65535)][int]$Port = 8765, [switch]$AppWindow)
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $taskRoot
+if ($AppWindow) {
+    $windowScript = Join-Path $PSScriptRoot 'workbench-window.ps1'
+    . $windowScript
+    $browser = Find-WorkbenchChromium
+    if (-not $browser) { throw 'The desktop window requires an installed Microsoft Edge or Google Chrome.' }
+}
 $nodeRuntime = Join-Path $taskRoot '.tools/node/node_modules/node/bin/node.exe'
 if (-not (Test-Path -LiteralPath $nodeRuntime)) {
     & npm install --prefix .tools/node --no-audit --no-fund node@24.22.3
@@ -24,4 +30,22 @@ if ($LASTEXITCODE -ne 0) { throw 'Type check failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
 $env:AINOVEL_PORT = "$Port"
 Write-Host "ainovel: http://127.0.0.1:$Port (keep this window open)"
-& .venv/Scripts/python.exe -m ainovel
+if (-not $AppWindow) {
+    & .venv/Scripts/python.exe -m ainovel
+    return
+}
+$windowJob = Start-ThreadJob -StreamingHost $Host -ArgumentList $windowScript, $browser, $Port, $PID -ScriptBlock {
+    param($windowScript, $browser, $Port, $launcherId)
+    . $windowScript
+    try {
+        $windowArguments = Get-WorkbenchReadyWindowArguments $Port $launcherId
+        Start-Process -FilePath $browser -ArgumentList $windowArguments
+    } catch {
+        Write-Warning "$($_.Exception.Message) Open http://127.0.0.1:$Port in a browser."
+    }
+}
+try {
+    & .venv/Scripts/python.exe -m ainovel
+} finally {
+    Remove-Job -Job $windowJob -Force
+}

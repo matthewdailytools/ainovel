@@ -22,6 +22,8 @@ if (-not (Test-Path ainovel.toml)) { Copy-Item ainovel.example.toml ainovel.toml
 
 已有配置和依赖时双击 [启动工作台.cmd](启动工作台.cmd)，或运行 `./scripts/run-workbench.ps1`。打开 [本机工作台](http://127.0.0.1:8765)，保持启动窗口运行；关闭浏览器不会取消 Worker。端口占用时用 `./scripts/run-workbench.ps1 -Port 8766`，访问对应端口。
 
+Windows 可运行 `./启动工作台.cmd -AppWindow` 打开独立桌面窗口。启动器使用已安装的 Microsoft Edge 或 Google Chrome，在本机服务就绪后打开工作台。桌面窗口和普通浏览器读写同一份 SQLite，桌面窗口的浏览器配置保存在本机数据目录的 `desktop-browser`。使用其他端口时可加 `-Port 8766`，并保持启动控制台运行。
+
 **费用：两个 OpenAI Key 合计 USD 20，DeepSeek 单独 CNY 80。** 可在 `ainovel.toml` 降低额度，并为批次再设上限。换 Key、重启和恢复稿件不清零。配置为保守单价估算，未知调用保留费用预留；没有已配置单价的模型不会付费调用。当前用量与剩余额度在页面右上角查看。
 
 需要更多账户时，在 `ainovel.toml` 增加一组 `[accounts.账户名]`，填写 `kind = "openai"` 与新的 `key_env` 名称，再在 `.env` 配置对应 Key；所有 `kind = "openai"` 的账户仍共用同一美元上限。
