@@ -712,6 +712,9 @@ test('从确认大纲、保存正文和有效全书体检接力，逐段到达�
   })
   const run = await response.json()
   await expect(panel.getByRole('status')).toHaveText('校验 · 等待处理检查点', { timeout: 20_000 })
+  const batchId = panel.getByRole('textbox', { name: '父批次编号', exact: true })
+  await expect(batchId).toHaveValue(run.id)
+  await expect(batchId).toHaveAttribute('readonly', '')
   const saved = await (await page.request.get(`/api/chapters/${chapter.id}`)).json()
   expect(saved.revision).toBe(1)
   expect(saved.content).toContain('先把公开刻度抄进本子')
@@ -763,6 +766,27 @@ test('从确认大纲、保存正文和有效全书体检接力，逐段到达�
     auto_confirm_planning: false,
   })
   const writing = await next.json()
+  await expect(batchId).toHaveValue(writing.id)
+  const historyPicker = panel.getByRole('combobox', { name: '接力记录', exact: true })
+  await historyPicker.selectOption(run.id)
+  await expect(batchId).toHaveValue(run.id)
+  await historyPicker.press('Tab')
+  await expect(batchId).toBeFocused()
+  await batchId.evaluate((input: HTMLInputElement) => {
+    input.addEventListener(
+      'copy',
+      (event) => {
+        event.preventDefault()
+        input.dataset.copied = input.value.slice(input.selectionStart ?? 0, input.selectionEnd ?? 0)
+      },
+      { once: true },
+    )
+  })
+  await batchId.press('ControlOrMeta+A')
+  await batchId.press('ControlOrMeta+C')
+  await expect(batchId).toHaveAttribute('data-copied', run.id)
+  await historyPicker.selectOption(writing.id)
+  await expect(batchId).toHaveValue(writing.id)
   const writtenChapters = [{ id: chapter.id, revision: updated.revision, existing: true }]
   expect(writing.result.seven_stage_run).toMatchObject({
     stage: 'inspection',

@@ -427,6 +427,10 @@ export function SevenStageRunPanel({
               </select>
             </label>
           )}
+          <label>
+            父批次编号
+            <input type="text" value={run.id} readOnly spellCheck={false} />
+          </label>
           <p role="status">
             {stageLabels[status.stage]} · {runStatus[run.status] ?? label(run.status)}
           </p>
