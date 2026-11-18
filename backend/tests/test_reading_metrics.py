@@ -83,6 +83,70 @@ def test_diagnosis_uses_comparable_transitions_and_explicit_release_changes():
     assert not calculate_report(parse({**data, "window_hours": 48})).diagnostics
 
 
+def test_diagnosis_attributes_each_reader_to_one_source_channel_and_keeps_exclusions():
+    data = {
+        **source("events"),
+        "window_hours": 24,
+        "events": [
+            *(event("one", reader, 1) for reader in ("followed", "opted-out", "ambiguous")),
+            event("two", "followed", 5, channel="first"),
+            event("two", "followed", 6, channel="later"),
+            event("three", "followed", 13, channel="destination"),
+            event("two", "opted-out", 5, channel="newsletter"),
+            event("two", "ambiguous", 5, channel="first"),
+            event("two", "ambiguous", 5, channel="newsletter"),
+            event("two", "ambiguous", 5, channel="newsletter"),
+            event("three", "ambiguous", 13),
+            {**event("two", "window-unfinished", 13, channel="first"), "at": "2026-11-13T02:00:00+08:00"},
+            event("three", "already-read", 13),
+            {**event("two", "already-read", 13, channel="archive"), "at": "2026-11-13T03:00:00+08:00"},
+        ],
+    }
+    report = calculate_report(parse(data))
+    [diagnosis] = report.diagnostics
+    assert (diagnosis.chapter_id, diagnosis.target_chapter_id) == ("two", "three")
+    rows = diagnosis.channel_breakdown
+    assert [row.channel for row in rows] == ["archive", "first", "newsletter", None]
+    assert [
+        (row.numerator, row.denominator, row.rate, row.excluded_incomplete, row.excluded_prior_or_tied)
+        for row in rows
+    ] == [(0, 0, None, 0, 1), (1, 1, 1.0, 1, 0), (0, 1, 0.0, 0, 0), (1, 1, 1.0, 0, 0)]
+    overall = select(report, "adjacent_follow", "two", "three")
+    for key in ("numerator", "denominator", "excluded_incomplete", "excluded_prior_or_tied"):
+        assert sum(getattr(row, key) for row in rows) == getattr(overall, key)
+    assert report == calculate_report(parse({**data, "events": list(reversed(data["events"]))}))
+
+
+def test_saved_diagnosis_can_distinguish_preexisting_reports_without_channel_breakdown(client, domain, story):
+    branch = story["branch_id"]
+    first = story["chapter_id"]
+    second = domain.create_chapter(branch, "二")["id"]
+    third = domain.create_chapter(branch, "三")["id"]
+    data = {
+        **source("events", (first, second, third)),
+        "window_hours": 24,
+        "events": [
+            *(event(first, reader, 1) for reader in ("anonymous-1", "anonymous-2")),
+            *(event(second, reader, 5) for reader in ("anonymous-1", "anonymous-2")),
+            event(third, "anonymous-1", 13),
+        ],
+    }
+    base = f"/api/branches/{branch}/reading-metrics"
+    response = client.post(base + "/import", files={"file": ("reading.json", json.dumps(data))})
+    assert response.status_code == 201, response.text
+    document = response.json()
+    item = document["report"]["diagnostics"][0]
+    assert item["channel_breakdown"][0]["denominator"] == 2 and "anonymous-" not in response.text
+    del item["channel_breakdown"]
+    with domain.db.connect(True) as tx:
+        tx.execute(
+            "UPDATE artifacts SET payload=? WHERE id=?", (json.dumps(document["report"]), document["id"])
+        )
+    historical = client.get(f"{base}/history/{document['id']}")
+    assert historical.status_code == 200
+    assert historical.json()["report"]["diagnostics"] == [{**item, "channel_breakdown": None}]
+
+
 def test_dedup_prior_reader_late_release_and_incomplete_window():
     data = {
         **source("events"),

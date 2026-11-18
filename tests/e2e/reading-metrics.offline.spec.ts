@@ -122,7 +122,11 @@ test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范�
         release_version: '遗铃发布版 3',
         window_hours: 24,
         events: [
-          ...['甲', '乙', '丙'].flatMap((reader) => [event(0, reader, '01'), event(1, reader, '05')]),
+          ...['甲', '乙', '丙'].map((reader) => event(0, reader, '01')),
+          { ...event(1, '甲', '05'), channel: '推荐' },
+          { ...event(1, '乙', '05'), channel: '搜索' },
+          { ...event(1, '丙', '05'), channel: '推荐' },
+          { ...event(1, '丙', '05'), channel: '搜索' },
           event(2, '甲', '13'),
         ],
         publication_changes: [
@@ -141,4 +145,28 @@ test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范�
   await expect(diagnosis).toContainText('入门 → 回声')
   await expect(diagnosis).toContainText('33.33%')
   await expect(diagnosis).toContainText('本章开始仅订阅读者可读。')
+  const breakdown = diagnosis.getByRole('table', { name: '入门 → 回声 · 首读渠道分解' })
+  await expect(breakdown).toBeVisible()
+  for (const [channel, counts] of [
+    ['推荐', ['1', '1', '100%', '0', '0']],
+    ['搜索', ['0', '1', '0%', '0', '0']],
+    ['同刻多个首读渠道', ['0', '1', '0%', '0', '0']],
+  ] as const) {
+    const row = breakdown
+      .getByRole('row')
+      .filter({ has: page.getByRole('rowheader', { name: channel, exact: true }) })
+    await expect(row.getByRole('cell')).toHaveText([...counts])
+  }
+  const channelScroll = diagnosis.getByRole('region', { name: '入门 → 回声 · 首读渠道分解' })
+  await channelScroll.focus()
+  await expect(channelScroll).toBeFocused()
+
+  const latestPath = `/api/branches/${novel.branch_id}/reading-metrics`
+  const oldResponse = await (await page.request.get(latestPath)).json()
+  delete oldResponse.latest.report.diagnostics[0].channel_breakdown
+  await page.route(`**${latestPath}`, (route) => route.fulfill({ json: oldResponse }))
+  await page.reload()
+  await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await expect(diagnosis.getByText('该报告未保存渠道细分。', { exact: true })).toBeVisible()
+  await expect(breakdown).toHaveCount(0)
 })

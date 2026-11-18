@@ -3056,6 +3056,21 @@ export interface components {
       /** Evidence End */
       evidence_end: number | null
     }
+    /** ChannelFollow */
+    ChannelFollow: {
+      /** Channel */
+      channel: string | null
+      /** Numerator */
+      numerator: number
+      /** Denominator */
+      denominator: number
+      /** Rate */
+      rate: number | null
+      /** Excluded Incomplete */
+      excluded_incomplete: number
+      /** Excluded Prior Or Tied */
+      excluded_prior_or_tied: number
+    }
     /** ChapterBinding */
     ChapterBinding: {
       /** Id */
@@ -4669,6 +4684,8 @@ export interface components {
       median_publication_gap_hours: number
       /** Changes */
       changes: components['schemas']['PublicationChange'][]
+      /** Channel Breakdown */
+      channel_breakdown?: components['schemas']['ChannelFollow'][] | null
     }
     /** ReadingHistoryEntry */
     ReadingHistoryEntry: {

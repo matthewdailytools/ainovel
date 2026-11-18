@@ -5993,6 +5993,27 @@
         ],
         "title": "CardCitation"
       },
+      "ChannelFollow": {
+        "properties": {
+          "channel": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Channel" },
+          "numerator": { "type": "integer", "title": "Numerator" },
+          "denominator": { "type": "integer", "title": "Denominator" },
+          "rate": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Rate" },
+          "excluded_incomplete": { "type": "integer", "title": "Excluded Incomplete" },
+          "excluded_prior_or_tied": { "type": "integer", "title": "Excluded Prior Or Tied" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "channel",
+          "numerator",
+          "denominator",
+          "rate",
+          "excluded_incomplete",
+          "excluded_prior_or_tied"
+        ],
+        "title": "ChannelFollow"
+      },
       "ChapterBinding": {
         "properties": {
           "id": {
@@ -8458,6 +8479,13 @@
             "items": { "$ref": "#/components/schemas/PublicationChange" },
             "type": "array",
             "title": "Changes"
+          },
+          "channel_breakdown": {
+            "anyOf": [
+              { "items": { "$ref": "#/components/schemas/ChannelFollow" }, "type": "array" },
+              { "type": "null" }
+            ],
+            "title": "Channel Breakdown"
           }
         },
         "additionalProperties": false,

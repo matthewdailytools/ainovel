@@ -1,7 +1,7 @@
 """Calculate release-aware reading metrics from an explicitly scoped import."""
 
 from bisect import bisect_left
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import timedelta
 from hashlib import sha256
 from statistics import median
@@ -150,6 +150,15 @@ class Metric(Input):
     excluded_prior_or_tied: int = 0
 
 
+class ChannelFollow(Input):
+    channel: str | None
+    numerator: int
+    denominator: int
+    rate: float | None
+    excluded_incomplete: int
+    excluded_prior_or_tied: int
+
+
 class ReadingDiagnosis(Input):
     chapter_id: str
     target_chapter_id: str
@@ -161,6 +170,7 @@ class ReadingDiagnosis(Input):
     publication_gap_hours: float
     median_publication_gap_hours: float
     changes: list[PublicationChange]
+    channel_breakdown: list[ChannelFollow] | None = None
 
 
 class ReadingReport(Input):
@@ -245,24 +255,35 @@ def _eligible(data, earliest):
     )
 
 
-def _transition(data, reads, source, target, kind, window):
+def _transition(data, reads, source, target, kind, window, by_channel=None):
     source_id, target_id = source.chapter_id, target.chapter_id
-    numerator = denominator = incomplete = prior = 0
+    totals = Counter()
     for reader, first in reads[source_id].items():
         if not _eligible(data, first):
             continue
         destination = reads[target_id].get(reader)
-        if destination and destination[0] <= first[0]:
-            prior += 1
-            continue
         start = max(first[0], target.published_at)
-        if data.observed_until - start < window:
-            incomplete += 1
-            continue
-        denominator += 1
-        numerator += destination is not None and destination[0] - start <= window
+        if destination and destination[0] <= first[0]:
+            outcome = "prior"
+        elif data.observed_until - start < window:
+            outcome = "incomplete"
+        elif destination and destination[0] - start <= window:
+            outcome = "followed"
+        else:
+            outcome = "did_not_follow"
+        totals[outcome] += 1
+        if by_channel is not None:
+            channels = first[1]
+            channel = next(iter(channels)) if len(channels) == 1 else None
+            by_channel[channel][outcome] += 1
     return _metric(
-        kind, source_id, numerator, denominator, target=target_id, incomplete=incomplete, prior=prior
+        kind,
+        source_id,
+        totals["followed"],
+        totals["followed"] + totals["did_not_follow"],
+        target=target_id,
+        incomplete=totals["incomplete"],
+        prior=totals["prior"],
     )
 
 
@@ -283,7 +304,26 @@ def _completion(data, starts, finishes, chapter_id, window, covered):
     )
 
 
-def _diagnose(data, transitions):
+def _channel_breakdown(counts):
+    rows = []
+    for channel in sorted(counts, key=lambda name: (name is None, name or "")):
+        outcomes = counts[channel]
+        numerator = outcomes["followed"]
+        denominator = numerator + outcomes["did_not_follow"]
+        rows.append(
+            ChannelFollow(
+                channel=channel,
+                numerator=numerator,
+                denominator=denominator,
+                rate=numerator / denominator if denominator else None,
+                excluded_incomplete=outcomes["incomplete"],
+                excluded_prior_or_tied=outcomes["prior"],
+            )
+        )
+    return rows
+
+
+def _diagnose(data, transitions, channel_counts):
     measured = [row for row in transitions if row.rate is not None]
     if len(measured) < 2:
         return []
@@ -315,6 +355,7 @@ def _diagnose(data, transitions):
             changes=sorted(
                 [*changes[row.chapter_id], *changes[row.target_chapter_id]], key=lambda change: change.at
             ),
+            channel_breakdown=_channel_breakdown(channel_counts[row.chapter_id, row.target_chapter_id]),
         )
         for row in sorted(measured, key=lambda row: row.rate)
         if row.rate < baseline
@@ -325,10 +366,12 @@ def _event_report(data):
     reads, starts, finishes = _walk(data)
     window = timedelta(hours=data.window_hours)
     first = data.chapters[0]
-    adjacent = [
-        _transition(data, reads, left, right, "adjacent_follow", window)
-        for left, right in zip(data.chapters, data.chapters[1:])
-    ]
+    adjacent = []
+    channel_counts = {}
+    for left, right in zip(data.chapters, data.chapters[1:]):
+        counts = defaultdict(Counter)
+        channel_counts[left.chapter_id, right.chapter_id] = counts
+        adjacent.append(_transition(data, reads, left, right, "adjacent_follow", window, counts))
     metrics = adjacent + [
         _transition(data, reads, first, target, "first_chapter_retention", window)
         for target in data.chapters[1:]
@@ -348,7 +391,7 @@ def _event_report(data):
         "追读和留存以发行清单中的章节顺序计算。窗口从源章首个有效阅读与目标章发布时间较晚者起算。",
         "按匿名读者键在同一发布版本去重。来源章首读时已有目标章阅读或两者时间相同的读者单列排除。",
         "区分完整和未到期的观察窗口。发布时间代表导入数据中的共同可读时点，按读者限制访问时应先划分可访问样本。",
-        "可按首次事件的渠道划分样本。同一首读时刻出现不同渠道时，分渠道样本不纳入该读者。",
+        "渠道按来源章首次有效阅读划分。限定单一渠道的样本排除同时来自多个渠道的首读。",
         "率为空表示无可计算数据。观察差异只能作为待验证的原因线索，须结合渠道、发布时间、收费或修订等变化判断。",
     ]
     if min(chapter.published_at for chapter in data.chapters) < data.observed_from:
@@ -360,7 +403,7 @@ def _event_report(data):
         "distinct_readers": len({event.reader_key for event in data.events}),
         "event_channels": sorted({event.channel for event in data.events}),
         "metrics": metrics,
-        "diagnostics": _diagnose(data, adjacent),
+        "diagnostics": _diagnose(data, adjacent, channel_counts),
         "notes": notes,
     }
 

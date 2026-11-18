@@ -1,25 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api, type Chapter } from './api'
+import type { components } from './api-schema'
 
 type PublishedChapter = { chapter_id: string; published_at: string }
-type PublicationChange = {
-  chapter_id: string
-  kind: 'access' | 'recommendation' | 'revision'
-  at: string
-  note: string
-}
-type Diagnosis = {
-  chapter_id: string
-  target_chapter_id: string
-  rate: number
-  numerator: number
-  denominator: number
-  baseline_rate: number
-  baseline_pairs: number
-  publication_gap_hours: number
-  median_publication_gap_hours: number
-  changes: PublicationChange[]
-}
+type Diagnosis = components['schemas']['ReadingDiagnosis']
+type ChannelFollow = components['schemas']['ChannelFollow']
 type MetricKind = 'adjacent_follow' | 'first_chapter_retention' | 'chapter_completion' | 'aggregate_ratio'
 type Metric = {
   kind: MetricKind
@@ -74,6 +59,42 @@ const percent = new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFracti
 const number = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 6 })
 const missing = '无可计算数据'
 const changeName = { access: '可读范围', recommendation: '推荐', revision: '发布稿修订' }
+
+function DiagnosisChannels({ title, rows }: { title: string; rows?: ChannelFollow[] | null }) {
+  if (!rows) return <p>该报告未保存渠道细分。</p>
+  return (
+    <>
+      <p>按来源章首次有效阅读的渠道归属。同一首读时刻出现多个渠道的读者合计一次。</p>
+      <div className="table-scroll" tabIndex={0} role="region" aria-label={title}>
+        <table>
+          <caption>{title}</caption>
+          <thead>
+            <tr>
+              <th scope="col">首读渠道</th>
+              <th scope="col">分子</th>
+              <th scope="col">分母</th>
+              <th scope="col">追读率</th>
+              <th scope="col">观察窗口未满</th>
+              <th scope="col">已先读或同时读到目标章</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={JSON.stringify(row.channel)}>
+                <th scope="row">{row.channel ?? '同刻多个首读渠道'}</th>
+                <td>{number.format(row.numerator)}</td>
+                <td>{number.format(row.denominator)}</td>
+                <td>{row.rate === null ? missing : percent.format(row.rate)}</td>
+                <td>{number.format(row.excluded_incomplete)}</td>
+                <td>{number.format(row.excluded_prior_or_tied)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
 
 function downloadTemplate(mode: ReadingReport['mode'], chapters: ChapterOption[]) {
   const ordered = [...chapters].sort((left, right) => left.position - right.position)
@@ -245,6 +266,10 @@ function ReportDetails({ report, chapters }: { report: ReadingReport; chapters: 
                   两章发布相隔 {number.format(item.publication_gap_hours)} 小时，本次可计算章对的中位间隔为{' '}
                   {number.format(item.median_publication_gap_hours)} 小时。
                 </p>
+                <DiagnosisChannels
+                  title={`${chapterTitle(item.chapter_id)} → ${chapterTitle(item.target_chapter_id)} · 首读渠道分解`}
+                  rows={item.channel_breakdown}
+                />
                 {item.changes.length ? (
                   <ul>
                     {item.changes.map((change, index) => (
