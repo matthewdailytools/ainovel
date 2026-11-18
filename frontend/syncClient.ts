@@ -1,3 +1,5 @@
+import { workflowTransferRestrictions } from './workflowPrivacy'
+
 type JSONValue = null | boolean | number | string | JSONValue[] | { [key: string]: JSONValue }
 export type SyncPayload = { [key: string]: JSONValue }
 
@@ -39,6 +41,14 @@ export type SyncTransport = {
 type Pending =
   | { kind: 'push'; request: PushChange }
   | { kind: 'resolve'; object_id: string; conflict_id: string; request: ResolutionRequest }
+
+export function pendingPayloads(pending: readonly Pending[]): [string, SyncPayload | null][] {
+  return pending.map((entry) =>
+    entry.kind === 'push'
+      ? [entry.request.object_id, entry.request.payload]
+      : [entry.object_id, entry.request.choice === 'merge' ? entry.request.payload : null],
+  )
+}
 
 export class SyncResolutionChanged extends Error {}
 type Replica = { key: string; enabled: boolean; cursor: number; serial: number }
@@ -481,14 +491,21 @@ function checkReply(scope: SyncScope, pending: Pending, receipt: SyncReceipt) {
     invalid('回执与发出的变更不一致。')
 }
 
-export async function pushSyncPending(scope: SyncScope, transport: SyncTransport, limit = 50) {
+export async function pushSyncPending(
+  scope: SyncScope,
+  transport: SyncTransport,
+  limit = 50,
+  privateInspections?: ReadonlySet<string>,
+) {
   const key = scopeKey(scope)
   let count = 0
   while (count < limit) {
     const state = await readSyncState(scope)
-    const pending = state.pending.find(
-      (entry) => entry.kind === 'resolve' || !state.blockedObjects.includes(entry.request.object_id),
-    )
+    const { deferred } = workflowTransferRestrictions(pendingPayloads(state.pending), privateInspections)
+    const pending = state.pending.find((entry) => {
+      const id = entry.kind === 'push' ? entry.request.object_id : entry.object_id
+      return !deferred.has(id) && (entry.kind === 'resolve' || !state.blockedObjects.includes(id))
+    })
     if (!state.enabled || !pending) break
     let response: unknown
     try {

@@ -28,11 +28,13 @@ import {
   type StoryVersion,
 } from './storySyncModel'
 import { workflowSyncEntry } from './workflowArchive'
+import { workflowTransferRestrictions } from './workflowPrivacy'
 import { referenceCardKey, referenceHeadObjectId } from './referenceArchive'
 import {
   approveSyncResolution,
   listSyncHeads,
   markSyncBaseline,
+  pendingPayloads,
   pullSyncPage,
   pushSyncPending,
   queueSyncChange,
@@ -464,8 +466,10 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
   const heads = new Map((await listSyncHeads(scope)).map((head) => [head.id, head]))
   const snapshot = await localObjects(project)
   const { objects, publications, settings, outline, story } = snapshot
+  const privacy = workflowTransferRestrictions([...objects, ...pendingPayloads(state.pending)])
   const storyHeads = new Map(story.records.map(({ version }) => [version.record_id, version]))
   for (const [id, object] of objects) {
+    if (privacy.deferred.has(id)) continue
     if (object && new TextEncoder().encode(JSON.stringify(object)).length > 1024 * 1024 - 4096) {
       unsent.set(id, '本机对象超过单项同步限制，可导出稿件包供独立工作区检查。')
       continue
@@ -549,7 +553,7 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
     )
     pending.add(id)
   }
-  return unsent
+  return { unsent, privacy }
 }
 
 export async function syncWebManuscript(project: LocalProject, scope: SyncScope, transport: SyncTransport) {
@@ -558,15 +562,18 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
     await pull(scope, transport)
     await acknowledgePublications(scope)
     const deferred = await reconcile(project, scope)
-    const unsent = await draftChanges(project, scope, deferred)
-    await pushSyncPending(scope, transport)
+    const { unsent, privacy } = await draftChanges(project, scope, deferred)
+    await pushSyncPending(scope, transport, undefined, privacy.inspectionIds)
     await pull(scope, transport)
     await acknowledgePublications(scope)
     const remaining = await reconcile(project, scope)
     return {
       ...(await readSyncState(scope)),
       localPending: (await readLocalPublications(scope.workId)).length,
-      deferred: [...new Map([...unsent, ...remaining])].map(([object_id, reason]) => ({ object_id, reason })),
+      deferred: [...new Map([...unsent, ...remaining, ...privacy.deferred])].map(([object_id, reason]) => ({
+        object_id,
+        reason,
+      })),
     }
   }
   if (typeof navigator !== 'undefined' && navigator.locks) {

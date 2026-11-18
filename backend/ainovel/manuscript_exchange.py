@@ -17,6 +17,7 @@ from .reference_portability import HashId as ReferenceVersionId, ReferenceHistor
 from .settings_portability import SettingsHistory
 from .story_portability import PortableStoryArchive
 from .workflow_archive import WorkflowHistory
+from .workflow_privacy import REFERENCE_SCOPE, evidence_has_reference_selection
 
 FORMAT = "ainovel-manuscript/1"
 EVIDENCE = "portable_workbench_evidence"
@@ -228,7 +229,10 @@ def _index(package):
         from .outline_archive import validate_outline_history
 
         validate_outline_history(
-            package.outline_history, package.project_history, package.settings_history, package.chapters,
+            package.outline_history,
+            package.project_history,
+            package.settings_history,
+            package.chapters,
             package.reference_history,
         )
     if package.story_history:
@@ -352,13 +356,23 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=()):
     from .reference_sync import export_reference_archive
     from .settings_archive import export_settings_history, validate_settings_history
     from .story_archive import export_story_archive, validate_story_archive
-    from .workflow_archive import export_workflow_history, validate_workflow_history
+    from .workflow_archive import (
+        export_workflow_history,
+        has_frozen_reference_selection,
+        validate_workflow_history,
+    )
 
     with domain.db.connect() as tx:
         tx.execute("BEGIN")
         branch = tx.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
         if not branch:
             raise DomainError("not_found", "工作版本不存在。", 404)
+        workflow = export_workflow_history(tx, branch_id)
+        evidence = _evidence(tx, branch_id)
+        if (workflow and any(map(has_frozen_reference_selection, workflow.inspections))) or any(
+            map(evidence_has_reference_selection, evidence)
+        ):
+            raise DomainError("manuscript_reference_scope", REFERENCE_SCOPE + "本次稿件包未导出。", 409)
         novel = tx.execute("SELECT * FROM novels WHERE id=?", (branch["novel_id"],)).fetchone()
         chapters = [
             dict(row)
@@ -386,13 +400,13 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=()):
                 "branch": dict(branch),
                 "chapters": chapters,
                 "revisions": revisions,
-                "evidence": _evidence(tx, branch_id),
+                "evidence": evidence,
                 "source_revisions": source_revisions(tx, branch_id),
                 "project_history": export_project_history(tx, branch_id),
                 "settings_history": export_settings_history(tx, branch_id),
                 "outline_history": export_outline_history(tx, branch_id),
                 "story_history": export_story_archive(tx, branch_id),
-                "workflow_history": export_workflow_history(tx, branch_id),
+                "workflow_history": workflow,
                 "reference_history": export_reference_archive(
                     tx, branch_id, include_evidence_for=include_reference_evidence_for
                 ),
@@ -406,7 +420,10 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=()):
             )
         if package.outline_history:
             validate_outline_history(
-                package.outline_history, package.project_history, package.settings_history, package.chapters,
+                package.outline_history,
+                package.project_history,
+                package.settings_history,
+                package.chapters,
                 package.reference_history,
             )
         if package.story_history or package.workflow_history:

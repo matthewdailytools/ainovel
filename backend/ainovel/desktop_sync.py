@@ -49,6 +49,7 @@ from .project_sync import (
     read_project_version,
     version_object,
 )
+from .workflow_privacy import REFERENCE_SCOPE, sync_completion_report, sync_has_reference_selection
 
 FORMAT = "ainovel-manuscript-sync/1"
 RESPONSE_LIMIT = 8 * 1024 * 1024
@@ -64,6 +65,7 @@ PROSE_MERGE_REJECTIONS = {
 }
 WORKFLOW_REJECTIONS = {
     "sync_workflow": "云端未能核对这份体检或交付历史，原记录已保留本机。",
+    "sync_workflow_reference_scope": REFERENCE_SCOPE,
     "sync_workflow_dependency": "云端尚缺原章稿修订或通过的体检单，将继续等待来源。",
     "sync_parent_unknown": "云端无法核对父修订，原记录已保留本机。",
     "sync_object_size": "同步对象超过单次大小限制，原记录已保留本机。",
@@ -805,6 +807,14 @@ class DesktopSync:
             hydrate=hydrate,
         )
 
+    def _reference_scope_blocked(self, tx, branch_id, payload):
+        if sync_has_reference_selection(payload):
+            return True
+        identifier = sync_completion_report(payload)
+        return bool(
+            identifier and workflow_archive.inspection_retains_reference_selection(tx, branch_id, identifier)
+        )
+
     def _consume_workflow(self, tx, branch_id, event):
         try:
             entry = workflow_archive.parse_workflow_object(
@@ -1064,6 +1074,9 @@ class DesktopSync:
                     blocked = True
                     continue
                 value = formal.get(object_id) or documents.get(object_id) or _local(tx, branch_id, object_id)
+                if sync_has_reference_selection(value):
+                    self._pending_workflow(tx, branch_id, object_id, REFERENCE_SCOPE)
+                    continue
                 known = _shadow(tx, branch_id, object_id)
                 current = _digest(value)
                 if (value is None and not known) or (known and current == known["local_sha256"]):
@@ -1095,6 +1108,8 @@ class DesktopSync:
             try:
                 entry = workflow_archive.read_workflow_entry(tx, branch_id, kind, identifier)
                 value = workflow_archive.workflow_object(branch_id, entry)
+                if self._reference_scope_blocked(tx, branch_id, value):
+                    raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
                 if len(dumps(value).encode("utf-8")) > MAX_OBJECT_BYTES:
                     raise DomainError("sync_object_size", "体检或交付历史超过单次同步大小，已保留本机。")
                 self._verify_workflow(tx, branch_id, entry)
@@ -1119,11 +1134,19 @@ class DesktopSync:
                 )
             ]
         for row in todo:
+            request = json.loads(row["request"])
+            if row["object_id"].startswith((*workflow_archive.WORKFLOW_PREFIXES, "evidence:")):
+                with self.domain.db.connect(True) as tx:
+                    if self._reference_scope_blocked(tx, branch_id, request.get("payload")):
+                        self._pending_workflow(tx, branch_id, row["object_id"], REFERENCE_SCOPE)
+                        tx.execute(
+                            "DELETE FROM desktop_sync_outbox WHERE branch_id=? AND change_id=?",
+                            (branch_id, row["change_id"]),
+                        )
+                        continue
             path = f"/conflicts/{row['conflict_id']}/resolve" if row["conflict_id"] else "/push"
             try:
-                result = self._call(
-                    branch_id, origin, token, path, Receipt, method="POST", data=json.loads(row["request"])
-                )
+                result = self._call(branch_id, origin, token, path, Receipt, method="POST", data=request)
             except DomainError as error:
                 known_rejections = PROSE_MERGE_REJECTIONS if _is_prose_merge(row) else CONFLICT_REJECTIONS
                 if row["conflict_id"] and known_rejections.get(error.code) == error.status:
@@ -1140,8 +1163,9 @@ class DesktopSync:
                     with self.domain.db.connect(True) as tx:
                         self._pending_story(tx, branch_id, row["object_id"], error.message)
                     continue
-                if row["object_id"].startswith(workflow_archive.WORKFLOW_PREFIXES) and error.code in (
-                    WORKFLOW_REJECTIONS
+                if error.code == "sync_workflow_reference_scope" or (
+                    row["object_id"].startswith(workflow_archive.WORKFLOW_PREFIXES)
+                    and error.code in WORKFLOW_REJECTIONS
                 ):
                     with self.domain.db.connect(True) as tx:
                         self._pending_workflow(tx, branch_id, row["object_id"], error.message)

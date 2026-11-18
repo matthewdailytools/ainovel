@@ -4,18 +4,25 @@ import {
   confirmLocalProjectBrief,
   createLocalChapter,
   createLocalProject,
+  exportLocalManuscript,
+  importLocalManuscript,
+  manuscriptHash,
   readLocalHistory,
   readLocalPublications,
+  readLocalWorkflowHistory,
   saveLocalChapter,
 } from './offlineStore'
 import { syncWebManuscript } from './manuscriptSync'
 import {
+  queueSyncChange,
+  queueSyncResolution,
   readSyncState,
   setSyncEnabled,
   type PushChange,
   type SyncReceipt,
   type SyncTransport,
 } from './syncClient'
+import { inspectionExcerptTransferReason } from './workflowPrivacy'
 
 beforeEach(() => {
   globalThis.indexedDB = new IDBFactory()
@@ -139,4 +146,206 @@ test('M1 workspace retains its later adoption when the prior head push must be r
     parent_id: first.id,
   })
   expect(await readLocalPublications(scope.workId)).toEqual([])
+})
+
+const externalQuote = '只留本机的外部原句。'
+const format = 'ainovel-manuscript-sync/1'
+
+async function privacyPackage(
+  mode: 'card_references' | 'planned_card_references' | 'projected' | 'addresses',
+) {
+  const work = await createLocalProject('正文与历史体检')
+  const chapter = await createLocalChapter(work.novel.id, '保存的一章')
+  const [root] = await readLocalHistory(work.novel.id, chapter.id)
+  const revision = await saveLocalChapter(work.novel.id, chapter.id, root.id, '作者自己的原稿。')
+  const pack = await exportLocalManuscript(work.novel.id)
+  const chapter_basis = {
+    id: chapter.id,
+    title: chapter.title,
+    position: chapter.position,
+    revision: revision.revision,
+    sha256: revision.sha256,
+  }
+  const chapter_bindings = [
+    { id: chapter.id, revision: revision.revision, revision_id: revision.id, sha256: revision.sha256 },
+  ]
+  const source = {
+    start: 4,
+    end: 4 + externalQuote.length,
+    quote_sha256: await manuscriptHash(externalQuote),
+  }
+  const risk = [{ source: { ...source, quote: externalQuote } }]
+  const reportId = 'original-inspection'
+  const checks = await Promise.all(
+    Array.from({ length: 10 }, async (_, index) => ({
+      check_id: String(index + 1).padStart(2, '0'),
+      status: 'green',
+      title: '已核对',
+      summary: '原历史记录',
+      basis: index === 4 ? { rules: [] } : index === 7 ? { card_references: [{ source }] } : {},
+      basis_sha256: await manuscriptHash(`basis-${index}`),
+      can_mark_not_applicable: false,
+    })),
+  )
+  const report = {
+    version: 'm6-inspection/1',
+    scope: 'book',
+    scope_id: null,
+    chapters: [{ ...chapter_basis, chars: revision.content.length, stale: false }],
+    items: checks,
+    basis_sha256: await manuscriptHash(JSON.stringify(['book', null, checks.map((row) => row.basis_sha256)])),
+  }
+  if (mode === 'card_references' || mode === 'planned_card_references')
+    report.items[7].basis = { [mode]: risk }
+  const inspection = { id: reportId, created: 1, chapter_bindings, report }
+  const ownBody = `## ${chapter.title}\n\n${revision.content}\n`
+  const title = work.novel.title
+  const materials = {
+    '正文.md': `# ${title}\n\n${ownBody}`,
+    '设定册.md': `# ${title} · 设定册\n\n本作没有单独确认的世界设定条目。\n`,
+    '简介.md': `# ${title} · 简介\n\n剧透范围：仅开篇\n\n试读简介。\n`,
+    '试读.md': `# ${title} · 试读\n\n${ownBody}`,
+  }
+  const files = Object.fromEntries(
+    await Promise.all(
+      Object.entries(materials).map(async ([name, content]) => [name, await manuscriptHash(content)]),
+    ),
+  )
+  const basis_sha256 = await manuscriptHash('完本依据')
+  const closure = { note: '作者已经核对。', sources: [] }
+  const completion = {
+    id: 'original-delivery',
+    created: 2,
+    chapter_bindings,
+    basis_sha256,
+    manifest: {
+      format: 'book-completion/1',
+      title,
+      branch_id: work.branch.id,
+      story_revision: 1,
+      chapters: [chapter_basis],
+      inspection_id: reportId,
+      promises: [],
+      files,
+      spoiler_scope: 'opening',
+      sample_chapter_ids: [chapter.id],
+    },
+    review: {
+      basis_sha256,
+      read_note: '通读完成。',
+      ending: closure,
+      characters: closure,
+      promises: closure,
+      intro: '试读简介。',
+      spoiler_scope: 'opening',
+      sample_chapter_ids: [chapter.id],
+      materials_reviewed: true,
+    },
+    checks: ['manuscript', 'ending', 'characters', 'promises', 'inspection', 'delivery'].map((id) => ({
+      id,
+      title: '完成核对',
+      status: 'green',
+      detail: '',
+    })),
+    materials,
+  }
+  const projected = JSON.stringify({
+    scope: 'book',
+    items: checks.map((item) =>
+      mode === 'projected' && item.check_id === '08'
+        ? { ...item, basis: { planned_card_references: risk } }
+        : item,
+    ),
+  })
+  const document = {
+    id: reportId,
+    kind: 'inspection',
+    title: '只读体检',
+    body: projected,
+    sha256: await manuscriptHash(projected),
+    chapters: [],
+  }
+  globalThis.indexedDB = new IDBFactory()
+  const project = await importLocalManuscript(
+    new Blob([
+      JSON.stringify({
+        ...pack,
+        evidence: [document],
+        workflow_history: { inspections: [inspection], completions: [completion] },
+      }),
+    ]),
+  )
+  return { project, inspection, completion, document, chapter, revision }
+}
+
+test.each([
+  ['card_references', false],
+  ['planned_card_references', true],
+  ['projected', true],
+] as const)('withholds %s excerpts from Web export and sync (persisted queue=%s)', async (mode, queued) => {
+  const { project, inspection, completion, document, chapter, revision } = await privacyPackage(mode)
+  const scope = { service: 'http://127.0.0.1:8888', workId: project.branch.id, deviceId: 'web' }
+  const cloud = service(scope.deviceId, 'not-submitted-in-this-test', false)
+  const original = await readLocalWorkflowHistory(project.novel.id)
+  expect(original.inspections[0].report.basis_sha256).toBe(inspection.report.basis_sha256)
+  expect(JSON.stringify({ original, document })).toContain(externalQuote)
+  await expect(exportLocalManuscript(project.novel.id)).rejects.toThrow(inspectionExcerptTransferReason)
+  await setSyncEnabled(scope, true)
+  const inspectionId = `workflow-inspection:${inspection.id}`
+  const completionId = `workflow-completion:${completion.id}`
+  const documentId = `evidence:${document.id}`
+  if (queued) {
+    for (const [id, entry, kind] of [
+      [completionId, completion, 'workflow-completion'],
+      [inspectionId, inspection, 'workflow-inspection'],
+    ] as const) {
+      await queueSyncChange(scope, {
+        object_id: id,
+        parent_revision: null,
+        tombstone: false,
+        payload: { format, kind, branch_id: project.branch.id, entry_json: JSON.stringify(entry) },
+      })
+    }
+    await queueSyncResolution(scope, documentId, 'conflict', {
+      choice: 'merge',
+      parent_revision: 'parent',
+      tombstone: false,
+      payload: { format, kind: 'evidence', document },
+    })
+  }
+  const state = await syncWebManuscript(project, scope, cloud.transport)
+  const withheld = new Map(state.deferred.map(({ object_id, reason }) => [object_id, reason]))
+  expect(withheld.get(mode === 'projected' ? documentId : inspectionId)).toBe(inspectionExcerptTransferReason)
+  expect(withheld.get(completionId)).toContain('引用了含外部资料原句的旧体检')
+  expect(cloud.submitted.map(({ object_id }) => object_id)).not.toContain(completionId)
+  expect(cloud.latest.has(inspectionId)).toBe(mode === 'projected')
+  expect(JSON.stringify(cloud.submitted)).not.toContain(externalQuote)
+  expect(cloud.latest.get(`chapter:${chapter.id}`)?.payload?.head).toMatchObject({
+    content: revision.content,
+  })
+  expect(await readLocalWorkflowHistory(project.novel.id)).toEqual(original)
+  expect(project.evidence?.[0].sha256).toBe(document.sha256)
+  const expectedPending = queued
+    ? mode === 'projected'
+      ? [completionId, documentId]
+      : [completionId, inspectionId, documentId]
+    : []
+  expect(
+    (await readSyncState(scope)).pending.map((entry) =>
+      entry.kind === 'push' ? entry.request.object_id : entry.object_id,
+    ),
+  ).toEqual(expectedPending)
+})
+
+test('frozen addresses go through Web export and sync with the dependent delivery', async () => {
+  const { project, inspection, completion } = await privacyPackage('addresses')
+  const scope = { service: 'http://127.0.0.1:8888', workId: project.branch.id, deviceId: 'web' }
+  await setSyncEnabled(scope, true)
+  const cloud = service(scope.deviceId, 'not-submitted-in-this-test', false)
+  expect((await exportLocalManuscript(project.novel.id)).workflow_history?.completions[0].id).toBe(
+    completion.id,
+  )
+  expect((await syncWebManuscript(project, scope, cloud.transport)).deferred).toEqual([])
+  expect(cloud.latest.has(`workflow-inspection:${inspection.id}`)).toBe(true)
+  expect(cloud.latest.has(`workflow-completion:${completion.id}`)).toBe(true)
 })

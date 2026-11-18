@@ -33,10 +33,12 @@ from .story_sync import validate_version_sources as validate_story_sources
 from .workflow_archive import (
     ArchivedInspection,
     WORKFLOW_PREFIXES,
+    has_frozen_reference_selection,
     parse_workflow_object,
     same_workflow_entry,
     validate_workflow_object,
 )
+from .workflow_privacy import REFERENCE_SCOPE, sync_has_reference_selection
 
 MAX_OBJECT_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = MAX_OBJECT_BYTES * 2
@@ -388,6 +390,8 @@ class SyncStore:
     def push(self, work, digest, data):
         with self.transaction(write=True) as tx:
             device = self._authorize(tx, work, digest)
+            if sync_has_reference_selection(data.payload):
+                raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
             payload = _payload(data.payload)
             fingerprint = _digest(_encoded(["push", device, data.model_dump()]))
             if replay := self._replay(tx, work, data.change_id, fingerprint):
@@ -543,7 +547,10 @@ class SyncStore:
         def inspection(identifier):
             object_id = f"workflow-inspection:{identifier}"
             if row := source(object_id):
-                return parse_workflow_object(work, object_id, json.loads(row["payload"]), row["tombstone"])
+                entry = parse_workflow_object(work, object_id, json.loads(row["payload"]), row["tombstone"])
+                if has_frozen_reference_selection(entry):
+                    raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
+                return entry
             return None
 
         def revision(identifier):
@@ -654,6 +661,8 @@ class SyncStore:
             request = data.model_dump(exclude={"content"} if data.choice != "merge_prose" else None)
             fingerprint = _digest(_encoded(["resolve", device, identifier, request]))
             if replay := self._replay(tx, work, data.change_id, fingerprint):
+                if sync_has_reference_selection(replay.payload):
+                    raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
                 return replay
             incoming = self._change(tx, work, identifier)
             conflict = self._conflict(tx, work, incoming)
@@ -675,6 +684,8 @@ class SyncStore:
                     incoming if data.choice == "incoming" else self._change(tx, work, conflict.head_revision)
                 )
                 payload, tombstone = _receipt(chosen).payload, bool(chosen["tombstone"])
+            if sync_has_reference_selection(payload):
+                raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
             change = Push(
                 change_id=data.change_id,
                 object_id=conflict.object_id,

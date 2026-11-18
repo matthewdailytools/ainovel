@@ -39,6 +39,11 @@ import {
   type WorkflowHistory,
   type WorkflowSyncObject,
 } from './workflowArchive'
+import {
+  hasInspectionReferenceQuote,
+  hasProjectedInspectionReferenceQuote,
+  inspectionExcerptTransferReason,
+} from './workflowPrivacy'
 import { createStoryOfflineStore, storyReadStores, storyWriteStores } from './storyOfflineStore'
 import { buildOfflineFork, type OfflineForkSelection } from './offlineForkModel'
 import { calculateOfflineRules } from './offlineRules'
@@ -626,7 +631,7 @@ async function readManuscript(tx: IDBTransaction, project: LocalProject): Promis
   }
 }
 
-export function exportLocalManuscript(
+function readManuscriptPackage(
   projectId: string,
   includeReferenceEvidenceFor: readonly string[] = [],
 ): Promise<ManuscriptPack> {
@@ -703,6 +708,20 @@ export function exportLocalManuscript(
         : {}),
     }
   })
+}
+
+export async function exportLocalManuscript(
+  projectId: string,
+  includeReferenceEvidenceFor: readonly string[] = [],
+): Promise<ManuscriptPack> {
+  const pack = await readManuscriptPackage(projectId, includeReferenceEvidenceFor)
+  if (
+    pack.workflow_history?.inspections.some(({ report }) => hasInspectionReferenceQuote(report)) ||
+    pack.evidence?.some(hasProjectedInspectionReferenceQuote)
+  ) {
+    invalid(inspectionExcerptTransferReason)
+  }
+  return pack
 }
 
 async function readReferenceHistory(tx: IDBTransaction, branchId: string) {
@@ -1844,7 +1863,7 @@ export async function forkLocalManuscript(
     publicationId: string | null
   },
 ): Promise<LocalProject> {
-  const source = await exportLocalManuscript(projectId)
+  const source = await readManuscriptPackage(projectId)
   if (source.branch.id !== expected.branchId)
     throw new OfflineStoreError('ownership', '冲突比较属于另一工作版本。')
   const { pack, provenance } = await buildOfflineFork(source, selected, name, {

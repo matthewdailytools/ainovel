@@ -12,6 +12,7 @@ from .domain import utf16_slice
 from .models import Input
 from .project_portability import Identifier
 from .workflow_inspection import AuthorReview, CheckId, KIND as INSPECTION, LengthTargets, Scope, _item, _sha
+from .workflow_privacy import has_reference_selection
 
 MATERIAL_FILES = frozenset({"正文.md", "设定册.md", "简介.md", "试读.md"})
 CHECKS = ("manuscript", "ending", "characters", "promises", "inspection", "delivery")
@@ -88,6 +89,12 @@ class ArchivedInspection(Input):
     created: float = Field(ge=0, allow_inf_nan=False)
     chapter_bindings: list[ChapterBinding] = Field(max_length=5000)
     report: InspectionReport
+
+
+def has_frozen_reference_selection(entry):
+    return isinstance(entry, ArchivedInspection) and has_reference_selection(
+        [item.model_dump() for item in entry.report.items if item.check_id == "08"]
+    )
 
 
 class PromiseManifest(Input):
@@ -500,6 +507,14 @@ def read_workflow_entry(tx, branch_id, kind, identifier):
         model = ArchivedInspection if kind == INSPECTION else ArchivedCompletion
         return model.model_validate_json(row["payload"])
     return None
+
+
+def inspection_retains_reference_selection(tx, branch_id, identifier):
+    if row := _native_row(tx, branch_id, INSPECTION, identifier):
+        return has_reference_selection(json.loads(row["payload"]).get("items"))
+    if row := archived_workflow(tx, branch_id, INSPECTION, identifier):
+        return has_reference_selection(json.loads(row["payload"]).get("report", {}).get("items"))
+    return False
 
 
 def workflow_ids(tx, branch_id):

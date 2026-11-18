@@ -204,10 +204,13 @@ def main(argv=None):
         parser.error("请先为同步工作库配置 AINOVEL_SYNC_DB。")
     try:
         result = verify_storage(database, args.backup_dir)
-    except StorageProofError as error:
-        parser.error(str(error))
-    except OSError, ValueError:
-        parser.error("无法读取数据库或备份目标路径。请检查目录和访问权限。")
+    except (OSError, ValueError) as error:
+        detail = (
+            str(error)
+            if isinstance(error, StorageProofError)
+            else "无法读取数据库或备份目标路径。请检查目录和访问权限。"
+        )
+        parser.error(detail)
     print(json.dumps(result, ensure_ascii=False))
 
 
