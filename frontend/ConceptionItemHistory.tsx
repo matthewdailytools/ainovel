@@ -10,10 +10,11 @@ type RestoreBasis = Omit<components['schemas']['RestoreSettingItem'], 'idempoten
 function provenanceLabel(provenance: ItemState['provenance']) {
   if (provenance.origin === 'author') return '作者设定'
   if (provenance.origin === 'ai') return '来自 AI 草案'
+  const label = provenance.origin === 'archive' ? '稿件包恢复' : '同步设定'
   const origin = provenance.source_origin
-  if (origin === 'author') return '同步设定 · 源端作者设定'
-  if (origin === 'ai') return '同步设定 · 源端 AI 草案'
-  return '同步设定'
+  if (origin === 'author') return `${label} · 源端作者设定`
+  if (origin === 'ai') return `${label} · 源端 AI 草案`
+  return label
 }
 
 function ItemVersion({ title, value }: { title: string; value: ItemState | null }) {
@@ -51,7 +52,9 @@ function ItemVersion({ title, value }: { title: string; value: ItemState | null 
           {value.provenance.source_revision_id && (
             <p className="small">
               源端修订 {value.provenance.source_revision_id}
-              {value.provenance.source_device_id ? ` · 设备 ${value.provenance.source_device_id}` : ''}
+              {value.provenance.source_device_id
+                ? ` · ${value.provenance.origin === 'archive' ? '稿件包记录设备' : '设备'} ${value.provenance.source_device_id}`
+                : ''}
               {value.provenance.source_artifact_id
                 ? ` · 草案编号 ${value.provenance.source_artifact_id}`
                 : ''}

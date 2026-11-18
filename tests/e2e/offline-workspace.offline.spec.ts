@@ -33,7 +33,7 @@ test('离线重开可写，双标签冲突留稿，清理浏览器后从交换�
   const conflicting = '第二窗口保留的线索。'
   await author.getByLabel('章节正文').fill(original)
   await author.getByRole('button', { name: '保存正文到浏览器' }).click()
-  await expect(author.getByRole('status')).toHaveText('本地已保存 · 修订 1')
+  await expect(author.getByRole('status').filter({ hasText: /^本地已保存 · 修订 1$/ })).toBeVisible()
   await other.getByLabel('章节正文').fill(conflicting)
   await other.getByRole('button', { name: '保存正文到浏览器' }).click()
   await expect(other.getByRole('alert')).toContainText('本章已有新修订')
@@ -41,7 +41,7 @@ test('离线重开可写，双标签冲突留稿，清理浏览器后从交换�
   await expect(other.getByRole('region', { name: '并发稿件' })).toContainText(original)
   await other.getByRole('button', { name: '保留我的输入，改用新基线' }).click()
   await other.getByRole('button', { name: '保存正文到浏览器' }).click()
-  await expect(other.getByRole('status')).toHaveText('本地已保存 · 修订 2')
+  await expect(other.getByRole('status').filter({ hasText: /^本地已保存 · 修订 2$/ })).toBeVisible()
   const started = other.waitForEvent('download')
   await other.getByRole('button', { name: '导出稿件交换包' }).click()
   const file = await started
@@ -80,7 +80,7 @@ test('离线重开可写，双标签冲突留稿，清理浏览器后从交换�
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(fromDesktop)),
   })
-  await expect(other.getByRole('status')).toHaveText('已校验并导入稿件及历史。')
+  await expect(other.getByRole('status').filter({ hasText: /^已校验并导入稿件及历史。$/ })).toBeVisible()
   await other.getByRole('button', { name: '1. 门外拾铃', exact: true }).click()
   await expect(other.getByLabel('章节正文')).toHaveValue(conflicting)
   await other.getByText('本章版本历史').click()

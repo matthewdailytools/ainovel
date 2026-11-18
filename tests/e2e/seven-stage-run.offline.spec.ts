@@ -83,4 +83,24 @@ test('从作者确认的大纲接力写作，在体检检查点等待处理', as
   expect(task.result.seven_stage_run.children).toHaveLength(2)
   expect(task.result.seven_stage_run.inspection_candidate_id).toBeTruthy()
   await expect(panel.getByRole('button', { name: '继续接力' })).toBeVisible()
+
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await panel.getByRole('button', { name: '停止本次接力' }).click()
+  await expect(panel.getByLabel('接力起点')).toBeEnabled()
+  await panel.getByRole('button', { name: '核对接力起点' }).click()
+  await expect(panel.getByRole('option', { name: '从已保存的完整正文接力' })).toBeEnabled()
+  await expect(panel.getByRole('option', { name: '从已通过的全书体检接力' })).toBeDisabled()
+  await panel.getByLabel('接力起点').selectOption('writing')
+  await expect(panel.getByRole('checkbox', { name: '授权采纳通过检查的空章正文候选' })).toHaveCount(0)
+  const nextRequest = page.waitForResponse(
+    (entry) => entry.request().method() === 'POST' && entry.url().endsWith('/seven-stage-runs'),
+  )
+  await panel.getByRole('button', { name: '启动七台接力' }).click()
+  const next = await nextRequest
+  expect(next.ok(), await next.text()).toBe(true)
+  expect(next.request().postDataJSON()).toMatchObject({ start_from: 'writing', auto_adopt_body: false })
+  expect((await next.json()).result.seven_stage_run).toMatchObject({
+    stage: 'inspection',
+    completed_chapters: [{ id: chapter.id, revision: 1, existing: true }],
+  })
 })

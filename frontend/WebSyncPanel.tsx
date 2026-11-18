@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { CloudAttachments } from './CloudAttachments'
 import type { LocalProject } from './offlineStore'
+import { describeOutlineVersion } from './outlineSyncModel'
 import { describeProjectVersion } from './projectSyncModel'
+import { describeSettingsVersion } from './settingsSyncModel'
 import { readSyncState, setSyncEnabled, type SyncPayload } from './syncClient'
 import {
   cloudScope,
@@ -22,6 +24,14 @@ function excerpt(value: SyncPayload | null, comparison: Comparison) {
   if (value.kind === 'project-head') {
     const source = comparison.versions.find(({ version }) => version.id === value.revision_id)
     return source ? describeProjectVersion(source.version) : '尚未取得该版本的立项来源。'
+  }
+  if (value.kind === 'settings-head') {
+    const source = comparison.settings.versions.find(({ version }) => version.id === value.revision_id)
+    return source ? describeSettingsVersion(source.version) : '尚未取得该版本的设定来源。'
+  }
+  if (value.kind === 'outline-head') {
+    const source = comparison.outline.versions.find(({ version }) => version.id === value.revision_id)
+    return source ? describeOutlineVersion(source.version) : '尚未取得该版本的大纲来源。'
   }
   const part = value.head ?? value.novel
   if (part && typeof part === 'object' && !Array.isArray(part)) {
@@ -97,7 +107,7 @@ export function WebSyncPanel({
         setStatus(await readSyncState(scope))
         return
       }
-      if (unsaved) throw new Error('请先保存当前写作或立项修改，再进行同步或合并。')
+      if (unsaved) throw new Error('请先保存当前章稿、立项或设定修改，再进行同步或合并。')
       const next =
         action === 'choose' && compared && (value === 'local' || value === 'current' || value === 'incoming')
           ? await resolveWebManuscript(project, scope, transport, compared, value)
@@ -122,7 +132,7 @@ export function WebSyncPanel({
   return (
     <details>
       <summary>作品云同步</summary>
-      <p>同步目录、章稿、已确认立项和随稿依据。设备凭据仅用于本次页面。</p>
+      <p>同步目录、章稿、已确认立项、已确认设定和随稿依据。设备凭据仅用于本次页面。</p>
       <p>
         工作版本编号 <code>{project.branch.id}</code>
       </p>
@@ -218,7 +228,15 @@ export function WebSyncPanel({
               type="button"
               disabled={busy || !token || unsaved}
               onClick={() => {
-                const history = compared.current.payload?.kind === 'project-head' ? '立项版本' : '原稿修订'
+                const kind = compared.current.payload?.kind
+                const history =
+                  kind === 'outline-head'
+                    ? '大纲版本'
+                    : kind === 'settings-head'
+                      ? '设定版本'
+                      : kind === 'project-head'
+                        ? '立项版本'
+                        : '原稿修订'
                 if (window.confirm(`${label}并结束冲突？${history}保留。`)) void run('choose', choice)
               }}
             >

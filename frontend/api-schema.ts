@@ -239,6 +239,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/manuscript-outline/restore': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Restore Outline */
+    post: operations['restore_outline_api_branches__branch_id__manuscript_outline_restore_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/manuscript-evidence': {
     parameters: {
       query?: never
@@ -2506,6 +2523,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/seven-stage-runs/sources': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Review Sources */
+    get: operations['review_sources_api_branches__branch_id__seven_stage_runs_sources_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/seven-stage-runs/{task_id}/pause': {
     parameters: {
       query?: never
@@ -3651,6 +3685,8 @@ export interface components {
       /** Source Revisions */
       source_revisions?: components['schemas']['PortableRevision'][]
       project_history?: components['schemas']['ProjectHistory'] | null
+      settings_history?: components['schemas']['SettingsHistory'] | null
+      outline_history?: components['schemas']['OutlineHistory'] | null
     }
     /** Mapping */
     Mapping: {
@@ -3891,6 +3927,19 @@ export interface components {
       /** Artifact Id */
       artifact_id: string | null
     }
+    /** OutlineHistory */
+    OutlineHistory: {
+      /** Adopted Revision Id */
+      adopted_revision_id: string | null
+      /** Versions */
+      versions: components['schemas']['OutlineVersion'][]
+      /** Source Devices */
+      source_devices?: {
+        [key: string]: string
+      }
+      /** Required Story Records */
+      required_story_records?: string[]
+    }
     /** OutlinePlan */
     OutlinePlan: {
       /** Summary */
@@ -3915,6 +3964,24 @@ export interface components {
       /** Current */
       current: boolean
       plan: components['schemas']['OutlinePlan']
+    }
+    /** OutlineVersion */
+    OutlineVersion: {
+      /** Id */
+      id: string
+      /** Parent Id */
+      parent_id: string | null
+      /** Project Version Id */
+      project_version_id: string | null
+      /** Settings Version Id */
+      settings_version_id: string | null
+      plan: components['schemas']['OutlinePlan']
+      /** Reference Cards */
+      reference_cards?: components['schemas']['OutlineCard'][]
+      /** Promise Sources */
+      promise_sources?: {
+        [key: string]: components['schemas']['Promise']
+      }
     }
     /** PlanRestartInput */
     PlanRestartInput: {
@@ -4527,6 +4594,13 @@ export interface components {
        */
       pause_after_maintenance: boolean
     }
+    /** ReviewSources */
+    ReviewSources: {
+      /** Writing Id */
+      writing_id: string | null
+      /** Inspection Id */
+      inspection_id: string | null
+    }
     /** SaveConception */
     SaveConception: {
       /** Base Revision */
@@ -4744,7 +4818,7 @@ export interface components {
        * Origin
        * @enum {string}
        */
-      origin: 'author' | 'ai' | 'sync'
+      origin: 'author' | 'ai' | 'sync' | 'archive'
       /** Artifact Id */
       artifact_id?: string | null
       /** Source Origin */
@@ -4812,6 +4886,74 @@ export interface components {
        */
       exceptions: string
     }
+    /** SettingsEvidence */
+    SettingsEvidence: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Revision Id */
+      revision_id: string
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Quote Sha256 */
+      quote_sha256: string
+    }
+    /** SettingsHistory */
+    SettingsHistory: {
+      /** Adopted Revision Id */
+      adopted_revision_id: string | null
+      /** Versions */
+      versions: components['schemas']['SettingsVersion'][]
+      /** Source Devices */
+      source_devices?: {
+        [key: string]: string
+      }
+    }
+    /** SettingsOrigin */
+    SettingsOrigin: {
+      /**
+       * Origin
+       * @enum {string}
+       */
+      origin: 'author' | 'ai'
+      /**
+       * Edited
+       * @default false
+       */
+      edited: boolean
+      /** Artifact Id */
+      artifact_id?: string | null
+      /** Device Id */
+      device_id?: string | null
+      /** Project Version Id */
+      project_version_id?: string | null
+      evidence?: components['schemas']['SettingsEvidence'] | null
+    }
+    /** SettingsVersion */
+    SettingsVersion: {
+      /** Id */
+      id: string
+      /** Parent Id */
+      parent_id: string | null
+      /** Project Version Id */
+      project_version_id: string | null
+      /** Categories */
+      categories: components['schemas']['ConceptionCategory'][]
+      /** Origins */
+      origins: {
+        [key: string]: components['schemas']['SettingsOrigin']
+      }
+      /**
+       * Note
+       * @default
+       */
+      note: string
+      /** Reconciled Project Items */
+      reconciled_project_items?: string[]
+      /** Reviewed Setting Findings */
+      reviewed_setting_findings?: string[]
+    }
     /** SnapshotInput */
     SnapshotInput: {
       /** Label */
@@ -4867,7 +5009,7 @@ export interface components {
        * Start From
        * @enum {string}
        */
-      start_from: 'idea' | 'settings' | 'outline'
+      start_from: 'idea' | 'project' | 'settings' | 'outline' | 'writing' | 'inspection'
       /** Source Id */
       source_id?: string | null
       /** Idea */
@@ -5632,6 +5774,37 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  restore_outline_api_branches__branch_id__manuscript_outline_restore_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
         headers: {
           [name: string]: unknown
         }
@@ -10612,6 +10785,37 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  review_sources_api_branches__branch_id__seven_stage_runs_sources_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReviewSources']
         }
       }
       /** @description Validation Error */

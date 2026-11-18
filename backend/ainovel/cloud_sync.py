@@ -19,9 +19,13 @@ from pydantic import Field, JsonValue, StringConstraints, ValidationError, model
 from .db import DomainError
 from .cloud_attachments import SCHEMA as ATTACHMENT_SCHEMA, register_routes as register_attachments
 from .manuscript_exchange import RevisionObject, _source_link
+from .outline_sync import OutlineVersionObject, parse_outline_object
+from .outline_sync import validate_version_sources as validate_outline_sources
 from .models import Input
 from .project_sync import ProjectVersionObject, parse_project_object
 from .settings_sync import SettingsVersionObject, parse_settings_object, validate_version_sources
+from .story_sync import StoryVersionObject, parse_story_object
+from .story_sync import validate_version_sources as validate_story_sources
 
 MAX_OBJECT_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = MAX_OBJECT_BYTES * 2
@@ -351,12 +355,11 @@ class SyncStore:
                 return replay
             if data.object_id.startswith("revision:"):
                 return self._push_source_revision(tx, work, device, data, payload, fingerprint)
-            formal = None
-            if data.object_id.startswith(("project-version:", "project:")):
-                formal = self._validate_project(tx, work, data.object_id, data.payload, data.tombstone)
-            if data.object_id.startswith(("settings-version:", "settings:")):
-                formal = self._validate_settings(tx, work, data.object_id, data.payload, data.tombstone)
-            if isinstance(formal, (ProjectVersionObject, SettingsVersionObject)):
+            formal = self._validate_formal(tx, work, data.object_id, data.payload, data.tombstone)
+            if isinstance(
+                formal,
+                (ProjectVersionObject, SettingsVersionObject, OutlineVersionObject, StoryVersionObject),
+            ):
                 if data.parent_revision is not None:
                     base = self._change(tx, work, data.parent_revision)
                     if not base or base["object_id"] != data.object_id:
@@ -404,44 +407,65 @@ class SyncStore:
             raise DomainError("sync_history", "来源修订须等待同一章的连续父稿入库。", 409)
         return self._append(tx, work, device, data, fingerprint, payload, data.change_id, "applied")
 
-    def _validate_project(self, tx, work, object_id, payload, tombstone):
-        value = parse_project_object(work, object_id, payload, tombstone)
-        if isinstance(value, ProjectVersionObject):
-            version = value.version
-            if version.parent_id and not self._head(tx, work, f"project-version:{version.parent_id}"):
-                raise DomainError("sync_project", "立项要先提交连续父版本。", 409)
-            if head := self._head(tx, work, object_id):
-                prior = self._change(tx, work, head)
-                if ProjectVersionObject.model_validate_json(prior["payload"]) != value:
-                    raise DomainError("sync_project", "同一立项修订编号不能改写。", 409)
-        elif not self._head(tx, work, f"project-version:{value.revision_id}"):
-            raise DomainError("sync_project", "尚未收到要采用的立项修订。", 409)
-        return value
+    def _validate_formal(self, tx, work, object_id, payload, tombstone):
+        family = object_id.partition(":")[0].removesuffix("-version")
+        contracts = {
+            "project": ("立项", ProjectVersionObject, parse_project_object),
+            "settings": ("设定", SettingsVersionObject, parse_settings_object),
+            "outline": ("大纲", OutlineVersionObject, parse_outline_object),
+            "story": ("故事记录", StoryVersionObject, parse_story_object),
+        }
+        if family not in contracts:
+            return None
+        title, immutable, parse = contracts[family]
+        value = parse(work, object_id, payload, tombstone)
+        error_code = f"sync_{family}"
 
-    def _validate_settings(self, tx, work, object_id, payload, tombstone):
-        value = parse_settings_object(work, object_id, payload, tombstone)
-        if isinstance(value, SettingsVersionObject):
-            version = value.version
-            if version.parent_id and not self._head(tx, work, f"settings-version:{version.parent_id}"):
-                raise DomainError("sync_settings", "设定要先提交连续父版本。", 409)
-            if head := self._head(tx, work, object_id):
-                previous = self._change(tx, work, head)
-                if SettingsVersionObject.model_validate_json(previous["payload"]) != value:
-                    raise DomainError("sync_settings", "同一设定修订编号不能改写。", 409)
+        def source(object_id, model):
+            head = self._head(tx, work, object_id)
+            return model.model_validate_json(self._change(tx, work, head)["payload"]) if head else None
 
-            def revision(identifier):
-                head = self._head(tx, work, f"revision:{identifier}")
-                if head:
-                    return RevisionObject.model_validate_json(
-                        self._change(tx, work, head)["payload"]
-                    ).revision
-                return None
+        if not isinstance(value, immutable):
+            stored = source(f"{family}-version:{value.revision_id}", immutable)
+            if not stored or (family == "story" and stored.version.record_id != value.record_id):
+                raise DomainError(error_code, f"尚未收到要采用的{title}修订。", 409)
+            return value
+        version = value.version
+        if version.parent_id and not self._head(tx, work, f"{family}-version:{version.parent_id}"):
+            raise DomainError(error_code, f"{title}要先提交连续父版本。", 409)
+        if head := self._head(tx, work, object_id):
+            previous = self._change(tx, work, head)
+            if immutable.model_validate_json(previous["payload"]) != value:
+                raise DomainError(error_code, f"同一{title}修订编号不能改写。", 409)
 
-            validate_version_sources(
-                version, lambda identifier: self._head(tx, work, f"project-version:{identifier}"), revision
+        def project_exists(identifier):
+            return self._head(tx, work, f"project-version:{identifier}")
+
+        def revision(identifier):
+            stored = source(f"revision:{identifier}", RevisionObject)
+            return stored.revision if stored else None
+
+        if family == "settings":
+            validate_version_sources(version, project_exists, revision)
+        if family == "story":
+
+            def story(identifier):
+                stored = source(f"story-version:{identifier}", StoryVersionObject)
+                return stored.version if stored else None
+
+            validate_story_sources(version, story, revision)
+        if family == "outline":
+
+            def settings(identifier):
+                stored = source(f"settings-version:{identifier}", SettingsVersionObject)
+                return stored.version if stored else None
+
+            validate_outline_sources(
+                version,
+                project_exists,
+                settings,
+                lambda identifier: self._head(tx, work, f"chapter:{identifier}"),
             )
-        elif not self._head(tx, work, f"settings-version:{value.revision_id}"):
-            raise DomainError("sync_settings", "尚未收到要采用的设定修订。", 409)
         return value
 
     def receipt(self, work, digest, change_id):
@@ -546,10 +570,7 @@ class SyncStore:
                 payload=payload,
                 tombstone=tombstone,
             )
-            if change.object_id.startswith("project:"):
-                self._validate_project(tx, work, change.object_id, payload, tombstone)
-            if change.object_id.startswith("settings:"):
-                self._validate_settings(tx, work, change.object_id, payload, tombstone)
+            self._validate_formal(tx, work, change.object_id, payload, tombstone)
             receipt = self._append(
                 tx,
                 work,

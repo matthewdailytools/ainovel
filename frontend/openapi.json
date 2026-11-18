@@ -497,6 +497,32 @@
         }
       }
     },
+    "/api/branches/{branch_id}/manuscript-outline/restore": {
+      "post": {
+        "summary": "Restore Outline",
+        "operationId": "restore_outline_api_branches__branch_id__manuscript_outline_restore_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/manuscript-evidence": {
       "get": {
         "summary": "Get Evidence",
@@ -5012,6 +5038,32 @@
         }
       }
     },
+    "/api/branches/{branch_id}/seven-stage-runs/sources": {
+      "get": {
+        "summary": "Review Sources",
+        "operationId": "review_sources_api_branches__branch_id__seven_stage_runs_sources_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReviewSources" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/seven-stage-runs/{task_id}/pause": {
       "post": {
         "summary": "Pause Run",
@@ -6751,6 +6803,12 @@
           },
           "project_history": {
             "anyOf": [{ "$ref": "#/components/schemas/ProjectHistory" }, { "type": "null" }]
+          },
+          "settings_history": {
+            "anyOf": [{ "$ref": "#/components/schemas/SettingsHistory" }, { "type": "null" }]
+          },
+          "outline_history": {
+            "anyOf": [{ "$ref": "#/components/schemas/OutlineHistory" }, { "type": "null" }]
           }
         },
         "additionalProperties": false,
@@ -7069,6 +7127,43 @@
         "required": ["id", "status", "error", "created", "artifact_id"],
         "title": "OutlineGenerationTask"
       },
+      "OutlineHistory": {
+        "properties": {
+          "adopted_revision_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Adopted Revision Id"
+          },
+          "versions": {
+            "items": { "$ref": "#/components/schemas/OutlineVersion" },
+            "type": "array",
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Versions"
+          },
+          "source_devices": {
+            "patternProperties": {
+              "^[a-zA-Z0-9_-]+$": { "type": "string", "maxLength": 128, "minLength": 1 }
+            },
+            "propertyNames": { "maxLength": 128, "minLength": 1 },
+            "type": "object",
+            "maxProperties": 5000,
+            "title": "Source Devices"
+          },
+          "required_story_records": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+            "type": "array",
+            "maxItems": 250,
+            "title": "Required Story Records"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["adopted_revision_id", "versions"],
+        "title": "OutlineHistory"
+      },
       "OutlinePlan": {
         "properties": {
           "summary": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Summary" },
@@ -7115,6 +7210,56 @@
         "type": "object",
         "required": ["id", "base_revision", "confirmation_id", "project_revision", "current", "plan"],
         "title": "OutlineProposal"
+      },
+      "OutlineVersion": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Parent Id"
+          },
+          "project_version_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Project Version Id"
+          },
+          "settings_version_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Settings Version Id"
+          },
+          "plan": { "$ref": "#/components/schemas/OutlinePlan" },
+          "reference_cards": {
+            "items": { "$ref": "#/components/schemas/OutlineCard" },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Reference Cards"
+          },
+          "promise_sources": {
+            "patternProperties": { "^[a-zA-Z0-9_-]+$": { "$ref": "#/components/schemas/Promise" } },
+            "propertyNames": { "maxLength": 128, "minLength": 1 },
+            "type": "object",
+            "maxProperties": 250,
+            "title": "Promise Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "parent_id", "project_version_id", "settings_version_id", "plan"],
+        "title": "OutlineVersion"
       },
       "PlanRestartInput": {
         "properties": {
@@ -7917,6 +8062,22 @@
         "type": "object",
         "title": "ResumeInput"
       },
+      "ReviewSources": {
+        "properties": {
+          "writing_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Writing Id"
+          },
+          "inspection_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Inspection Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["writing_id", "inspection_id"],
+        "title": "ReviewSources"
+      },
       "SaveConception": {
         "properties": {
           "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
@@ -8217,7 +8378,7 @@
       },
       "SettingItemProvenance": {
         "properties": {
-          "origin": { "type": "string", "enum": ["author", "ai", "sync"], "title": "Origin" },
+          "origin": { "type": "string", "enum": ["author", "ai", "sync", "archive"], "title": "Origin" },
           "artifact_id": {
             "anyOf": [
               { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
@@ -8322,6 +8483,147 @@
         "required": ["strength"],
         "title": "SettingPolicy"
       },
+      "SettingsEvidence": {
+        "properties": {
+          "chapter_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Chapter Id"
+          },
+          "revision_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Revision Id"
+          },
+          "start": { "type": "integer", "minimum": 0, "title": "Start" },
+          "end": { "type": "integer", "exclusiveMinimum": 0, "title": "End" },
+          "quote_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Quote Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "revision_id", "start", "end", "quote_sha256"],
+        "title": "SettingsEvidence"
+      },
+      "SettingsHistory": {
+        "properties": {
+          "adopted_revision_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Adopted Revision Id"
+          },
+          "versions": {
+            "items": { "$ref": "#/components/schemas/SettingsVersion" },
+            "type": "array",
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Versions"
+          },
+          "source_devices": {
+            "patternProperties": {
+              "^[a-zA-Z0-9_-]+$": { "type": "string", "maxLength": 128, "minLength": 1 }
+            },
+            "propertyNames": { "maxLength": 128, "minLength": 1 },
+            "type": "object",
+            "maxProperties": 5000,
+            "title": "Source Devices"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["adopted_revision_id", "versions"],
+        "title": "SettingsHistory"
+      },
+      "SettingsOrigin": {
+        "properties": {
+          "origin": { "type": "string", "enum": ["author", "ai"], "title": "Origin" },
+          "edited": { "type": "boolean", "title": "Edited", "default": false },
+          "artifact_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Artifact Id"
+          },
+          "device_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Device Id"
+          },
+          "project_version_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Project Version Id"
+          },
+          "evidence": { "anyOf": [{ "$ref": "#/components/schemas/SettingsEvidence" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["origin"],
+        "title": "SettingsOrigin"
+      },
+      "SettingsVersion": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Parent Id"
+          },
+          "project_version_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Project Version Id"
+          },
+          "categories": {
+            "items": { "$ref": "#/components/schemas/ConceptionCategory" },
+            "type": "array",
+            "maxItems": 24,
+            "minItems": 8,
+            "title": "Categories"
+          },
+          "origins": {
+            "patternProperties": { "^[a-zA-Z0-9_-]+$": { "$ref": "#/components/schemas/SettingsOrigin" } },
+            "propertyNames": { "maxLength": 128, "minLength": 1 },
+            "type": "object",
+            "maxProperties": 240,
+            "title": "Origins"
+          },
+          "note": { "type": "string", "maxLength": 4000, "title": "Note", "default": "" },
+          "reconciled_project_items": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+            "type": "array",
+            "maxItems": 240,
+            "title": "Reconciled Project Items"
+          },
+          "reviewed_setting_findings": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+            "type": "array",
+            "maxItems": 7440,
+            "title": "Reviewed Setting Findings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "parent_id", "project_version_id", "categories", "origins"],
+        "title": "SettingsVersion"
+      },
       "SnapshotInput": {
         "properties": {
           "label": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Label" },
@@ -8391,7 +8693,11 @@
       },
       "StartRun": {
         "properties": {
-          "start_from": { "type": "string", "enum": ["idea", "settings", "outline"], "title": "Start From" },
+          "start_from": {
+            "type": "string",
+            "enum": ["idea", "project", "settings", "outline", "writing", "inspection"],
+            "title": "Start From"
+          },
           "source_id": {
             "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
             "title": "Source Id"

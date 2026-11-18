@@ -13,6 +13,7 @@ type SyncStatus = {
   pending: number
   project_source?: FormalSource | null
   settings_source?: FormalSource | null
+  outline_source?: FormalSource | null
   conflicts: Conflict[]
   deferred: { object_id: string; reason: string }[]
 }
@@ -22,6 +23,21 @@ type Side = {
   head?: { content: string }
   novel?: { title: string; brief: string }
 } | null
+type StoryEvidence = { chapter_id: string; revision_id: string; start: number; end: number }
+type StoryVersion = {
+  record_id: string
+  archived: boolean
+  record: {
+    kind: string
+    title: string
+    notes: string
+    status?: string
+    truth?: string
+    stages?: { status: string; note: string }[]
+  }
+  evidence: { record: StoryEvidence[]; stages: StoryEvidence[][] }
+  dependencies: Record<string, string>
+}
 type Comparison = {
   local_sha256: string
   local: Side
@@ -34,6 +50,21 @@ type Comparison = {
       project_version_id: string | null
     }
   >
+  outline_versions?: Record<
+    string,
+    {
+      plan: {
+        summary: string
+        volumes: {
+          title: string
+          summary: string
+          units: { title: string; chapters: { goal: string; result: string }[] }[]
+        }[]
+      }
+      settings_version_id: string | null
+    }
+  >
+  story_versions?: Record<string, StoryVersion>
   remote: {
     head_revision: string
     parent_revision: string | null
@@ -41,6 +72,25 @@ type Comparison = {
     incoming: { payload: Side }
     base?: { payload: Side } | null
   }
+}
+
+const storyKinds: Record<string, string> = {
+  character: '人物',
+  event: '事件',
+  state: '状态',
+  relationship: '关系',
+  promise: '伏笔',
+}
+const storyStates: Record<string, string> = {
+  planned: '计划',
+  actual: '实际',
+  unknown: '待核',
+  conflict: '冲突',
+  planted: '已埋设',
+  reinforced: '已强化',
+  resolved: '已回收',
+  retained: '已保留',
+  abandoned: '已放弃',
 }
 
 function readable(side: Side, comparison: Comparison) {
@@ -59,6 +109,45 @@ function readable(side: Side, comparison: Comparison) {
         `${category.title}${category.skipped ? ' · 暂缓' : ''}`,
         ...category.items.map((item) => `${item.title} · ${item.detail}`),
       ]),
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
+  if (side.kind === 'outline-head' && side.revision_id) {
+    const version = comparison.outline_versions?.[side.revision_id]
+    if (!version) return '尚未取得该版本的大纲来源。'
+    return [
+      `设定来源 ${version.settings_version_id ?? '无'}`,
+      version.plan.summary,
+      ...version.plan.volumes.flatMap((volume) => [
+        `${volume.title} · ${volume.summary}`,
+        ...volume.units.flatMap((unit) => [
+          unit.title,
+          ...unit.chapters.map((chapter) => `${chapter.goal} → ${chapter.result}`),
+        ]),
+      ]),
+    ].join('\n')
+  }
+  if (side.kind === 'story-head' && side.revision_id) {
+    const version = comparison.story_versions?.[side.revision_id]
+    if (!version) return '尚未取得该版本的故事记录来源。'
+    const { record, evidence } = version
+    const status = record.status ?? record.truth
+    const proof = ({ chapter_id, revision_id, start, end }: StoryEvidence) =>
+      `章 ${chapter_id} · 原稿 ${revision_id} · 选区 ${start}–${end}`
+    return [
+      `${storyKinds[record.kind] ?? record.kind} · ${record.title}${version.archived ? ' · 已归档' : ''}`,
+      `故事记录编号 ${version.record_id}`,
+      status ? (storyStates[status] ?? status) : '',
+      record.notes,
+      ...evidence.record.map(proof),
+      ...(record.stages ?? []).flatMap((stage, index) => [
+        [storyStates[stage.status] ?? stage.status, stage.note].filter(Boolean).join(' · '),
+        ...(evidence.stages[index] ?? []).map(proof),
+      ]),
+      ...Object.entries(version.dependencies).map(
+        ([recordId, revisionId]) => `关联记录 ${recordId} · 版本 ${revisionId}`,
+      ),
     ]
       .filter(Boolean)
       .join('\n')
@@ -120,7 +209,9 @@ export function DesktopSyncPanel({
   return (
     <section className="card" aria-label="作品云同步">
       <h2>作品云同步</h2>
-      <p>同步当前工作版本的目录、章稿、已确认立项和设定，以及随稿依据。启用前请确认云服务及作品范围。</p>
+      <p>
+        同步当前工作版本的目录、章稿、已确认立项、设定、大纲和故事记录，以及随稿依据。启用前请确认云服务及作品范围。
+      </p>
       <p>
         工作版本编号 <code>{branchId}</code>
       </p>
@@ -169,6 +260,7 @@ export function DesktopSyncPanel({
       {[
         { label: '立项', source: status?.project_source },
         { label: '设定', source: status?.settings_source },
+        { label: '大纲', source: status?.outline_source },
       ].map(
         ({ label, source }) =>
           source && (
@@ -259,11 +351,7 @@ export function DesktopSyncPanel({
               disabled={busy || !ready}
               onClick={() =>
                 void run(async () => {
-                  const history =
-                    comparison.value.remote.current.payload?.kind === 'project-head'
-                      ? '立项版本'
-                      : '原章稿修订'
-                  if (!window.confirm(`${label}并保存为解决后的版本？${history}保留。`)) return
+                  if (!window.confirm(`${label}并保存为解决后的版本？历史修订会保留。`)) return
                   setStatus(
                     await api<SyncStatus>(`${path}/conflicts/${comparison.id}/resolve`, 'POST', {
                       ...credential,

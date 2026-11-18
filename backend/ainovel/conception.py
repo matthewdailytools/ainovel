@@ -154,7 +154,7 @@ class SettingInspection(Input):
 
 
 class SettingItemProvenance(Input):
-    origin: Literal["author", "ai", "sync"]
+    origin: Literal["author", "ai", "sync", "archive"]
     artifact_id: Identifier | None = None
     source_origin: Literal["author", "ai"] | None = None
     source_device_id: str | None = None
@@ -468,12 +468,18 @@ def _definitions(tx, branch_id):
     ]
 
 
-def _source_current(tx, branch_id, source):
+def _source_current(tx, branch_id, source, revision_id=None):
     row = tx.execute(
-        "SELECT revision,archived,stale FROM chapters WHERE id=? AND branch_id=?",
+        "SELECT c.revision,c.archived,c.stale,r.id AS revision_id FROM chapters c "
+        "LEFT JOIN revisions r ON r.chapter_id=c.id AND r.revision=c.revision WHERE c.id=? AND c.branch_id=?",
         (source["chapter_id"], branch_id),
     ).fetchone()
-    return bool(row and row["revision"] == source["revision"] and not row["archived"] and not row["stale"])
+    return bool(
+        row
+        and not row["archived"]
+        and not row["stale"]
+        and (row["revision_id"] == revision_id if revision_id else row["revision"] == source["revision"])
+    )
 
 
 def _source_records(tx, branch_id, workspace):
@@ -485,7 +491,7 @@ def _source_records(tx, branch_id, workspace):
                 {
                     "item_id": identifier,
                     "evidence": evidence,
-                    "current": _source_current(tx, branch_id, evidence),
+                    "current": _source_current(tx, branch_id, evidence, origin.get("evidence_revision_id")),
                     "author_edited": origin.get("edited", False),
                 }
             )
@@ -655,7 +661,9 @@ def _item_history_state(tx, branch_id, entry):
             "project_revision": origin.get("project_revision"),
             "author_edited": origin.get("edited", False),
             "evidence": evidence,
-            "evidence_current": bool(evidence and _source_current(tx, branch_id, evidence)),
+            "evidence_current": bool(
+                evidence and _source_current(tx, branch_id, evidence, origin.get("evidence_revision_id"))
+            ),
         },
     }
 
@@ -907,7 +915,7 @@ def confirm(domain, branch_id, data, *, before_write=None):
         return confirm_tx(tx, branch_id, data, before_write=before_write)
 
 
-def confirm_tx(tx, branch_id, data, *, before_write=None, sync_source=None):
+def confirm_tx(tx, branch_id, data, *, before_write=None, sync_source=None, archive_source=None):
     if before_write is not None:
         before_write(tx)
     branch = _branch(tx, branch_id)
@@ -918,6 +926,8 @@ def confirm_tx(tx, branch_id, data, *, before_write=None, sync_source=None):
     _check_basis(branch, workspace, data)
     project = confirmed_project_tx(tx, branch_id)
     project_id = project["id"] if project else None
+    if archive_source is not None:
+        project_id = archive_source["project_confirmation_id"]
     impacted = [item["item_id"] for item in _project_impacts(workspace, project_id)]
     accepted = set(data.reconciled_project_items)
     if accepted != set(impacted) or len(accepted) != len(data.reconciled_project_items):
@@ -947,7 +957,7 @@ def confirm_tx(tx, branch_id, data, *, before_write=None, sync_source=None):
         "note": data.note.strip(),
         "planning_brief": planning_brief if len(planning_brief) <= 30_000 else "",
     }
-    if project:
+    if project_id:
         payload["project_confirmation_id"] = project_id
     if impacted:
         payload["reconciled_project_items"] = impacted
@@ -957,6 +967,8 @@ def confirm_tx(tx, branch_id, data, *, before_write=None, sync_source=None):
     basis = {"story_revision": branch["story_revision"]}
     if sync_source:
         basis["sync_settings_source"] = sync_source
+    if archive_source is not None:
+        basis["manuscript_settings_source"] = archive_source
     identifier = _insert(tx, branch, CONFIRMATION, payload, basis)
     _receipt(tx, data, identifier, fingerprint)
     return _snapshot_tx(tx, branch)

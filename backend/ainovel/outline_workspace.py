@@ -256,7 +256,9 @@ def save_outline(domain, branch_id, data, *, before_write=None):
         return save_outline_tx(tx, branch_id, data, before_write=before_write)
 
 
-def save_outline_tx(tx, branch_id, data, *, before_write=None, frozen_cards=None, sync_source=None):
+def save_outline_tx(
+    tx, branch_id, data, *, before_write=None, frozen_cards=None, sync_source=None, archive_source=None
+):
     if before_write is not None:
         before_write(tx)
     previous = _decode(_latest(tx, branch_id))
@@ -279,6 +281,8 @@ def save_outline_tx(tx, branch_id, data, *, before_write=None, frozen_cards=None
         basis["reference_cards"] = cards
     if sync_source:
         basis["sync_outline_source"] = sync_source
+    if archive_source:
+        basis["manuscript_outline_source"] = archive_source
     if data.source_generation_id:
         from .outline_generation import check_candidate_tx
 
@@ -323,7 +327,11 @@ def confirm_outline_tx(tx, branch_id, data, *, before_write=None):
         _insert(tx, branch_id, data.base_revision + 1, True, plan, basis)
         from .work_snapshot import checkpoint_tx
 
-        checkpoint_tx(tx, branch_id, "确认四级大纲")
+        checkpoint_tx(
+            tx,
+            branch_id,
+            "从稿件包恢复四级大纲" if basis.get("manuscript_outline_source") else "确认四级大纲",
+        )
     return _view(tx, branch_id)
 
 

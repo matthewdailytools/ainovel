@@ -1,15 +1,17 @@
 import json
+from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from ainovel import conception, project_sync, settings_sync
 from ainovel.cloud_sync import create_sync_app
 from ainovel.db import Database, DomainError
 from ainovel.desktop_sync import DesktopSync, Resolve
 from ainovel.domain import Domain
-from ainovel.manuscript_exchange import export_manuscript, import_manuscript
+from ainovel.manuscript_exchange import ManuscriptPackage, export_manuscript, import_manuscript
 from ainovel.project_brief import ConfirmProject, confirm
 from ainovel.setting_review import confirmed_world_basis
 from test_project_brief import BRIEF
@@ -40,6 +42,146 @@ def save_settings(domain, branch_id, categories, origins, reconcile):
                 reconciled_project_items=reconcile,
                 reviewed_setting_findings=[found["id"] for found in conception.setting_findings(categories)],
             ),
+        )
+
+
+def test_settings_package_keeps_stale_project_side_branch_and_exact_source_evidence(domain, story, tmp_path):
+    branch, chapter_id = story["branch_id"], story["chapter_id"]
+    chapter = domain.save(chapter_id, 0, "旧铃📯在门外响。")
+    first = confirm(
+        domain,
+        branch,
+        ConfirmProject(
+            base_revision=0,
+            idempotency_key="m3-file-project-a",
+            idea="追查来源",
+            brief=BRIEF,
+        ),
+    )
+    categories = conception.snapshot(domain, branch)["categories"]
+    world = next(row for row in categories if row["id"] == "world")
+    world["items"] = [{"id": "bell", "title": "门外的号角", "detail": "响声来自号角。", "links": []}]
+    save_settings(
+        domain,
+        branch,
+        categories,
+        {
+            "bell": {
+                "origin": "ai",
+                "artifact_id": "source-only-candidate",
+                "project_confirmation_id": first["id"],
+                "project_revision": 1,
+                "evidence": {
+                    "chapter_id": chapter_id,
+                    "revision": chapter["revision"],
+                    "start": 2,
+                    "end": 4,
+                    "quote": "📯",
+                },
+            }
+        },
+        [],
+    )
+    assert conception.snapshot(domain, branch)["confirmation"]["current"]
+    source_package = export_manuscript(domain, branch)
+    current = Domain(Database(tmp_path / "current-settings.sqlite"))
+    import_manuscript(current, source_package)
+    assert conception.snapshot(current, branch)["confirmation"]["current"]
+    with current.db.connect() as tx:
+        assert [item["id"] for item in confirmed_world_basis(tx, branch)["items"]] == []
+        row = tx.execute("SELECT payload FROM artifacts WHERE kind=?", (conception.CONFIRMATION,)).fetchone()
+        assert json.loads(row["payload"])["sources"][0]["current"]
+    second = confirm(
+        domain,
+        branch,
+        ConfirmProject(
+            base_revision=1,
+            idempotency_key="m3-file-project-b",
+            idea="改为追查船夫",
+            brief=BRIEF,
+        ),
+    )
+    pack = export_manuscript(domain, branch)
+    assert pack.project_history.adopted_revision_id == second["id"]
+    root = pack.settings_history.versions[0]
+    assert pack.settings_history.adopted_revision_id == root.id
+    assert root.project_version_id == first["id"]
+    payload = pack.model_dump()
+    payload["settings_history"]["source_devices"] = {root.id: "writer-remote"}
+    payload["settings_history"]["versions"].append(
+        root.model_copy(
+            update={
+                "id": "alternate-settings",
+                "parent_id": root.id,
+                "note": "另一版保留。",
+            }
+        ).model_dump()
+    )
+
+    source = payload["revisions"][-1]
+    payload["source_revisions"] = [source]
+    replacement = "同编号的本机稿没有号角。"
+    payload["revisions"][-1] = {
+        **source,
+        "id": "different-native-head",
+        "content": replacement,
+        "sha256": sha256(replacement.encode()).hexdigest(),
+    }
+    frozen = ManuscriptPackage.model_validate(payload)
+    restored = Domain(Database(tmp_path / "restored-settings.sqlite"))
+    import_manuscript(restored, frozen)
+    assert restored.chapter(chapter_id)["content"] == replacement
+    state = conception.snapshot(restored, branch)
+    assert not state["confirmation"]["current"]
+    history = export_manuscript(restored, branch).settings_history
+    assert history == frozen.settings_history
+    with restored.db.connect() as tx:
+        row = tx.execute(
+            "SELECT payload,basis FROM artifacts WHERE kind=?", (conception.CONFIRMATION,)
+        ).fetchone()
+        official = json.loads(row["payload"])
+        basis = json.loads(row["basis"])
+        assert official["project_confirmation_id"] == first["id"]
+        assert basis["manuscript_settings_source"]["recorded_device_id"] == "writer-remote"
+        assert "sync_settings_source" not in basis
+        assert official["origins"]["bell"]["origin"] == "archive"
+        assert official["origins"]["bell"]["source_origin"] == "ai"
+        assert official["origins"]["bell"]["source_artifact_id"] == "source-only-candidate"
+        assert official["origins"]["bell"]["evidence_revision_id"] == source["id"]
+        assert official["sources"][0]["evidence"]["quote"] == "📯"
+        assert not official["sources"][0]["current"]
+
+    missing = {**payload, "source_revisions": []}
+    unopened = Domain(Database(tmp_path / "unopened-settings.sqlite"))
+    with pytest.raises(DomainError, match="准确正文修订"):
+        import_manuscript(unopened, ManuscriptPackage.model_validate(missing))
+    with unopened.db.connect() as tx:
+        assert not tx.execute("SELECT 1 FROM novels").fetchone()
+        assert not tx.execute("SELECT 1 FROM manuscript_settings_versions").fetchone()
+
+    with pytest.raises(DomainError, match="缺少设定引用的立项版本"):
+        import_manuscript(unopened, ManuscriptPackage.model_validate({**payload, "project_history": None}))
+    damaged = frozen.model_dump()
+    damaged["settings_history"]["versions"][0]["origins"]["bell"]["evidence"]["quote_sha256"] = "0" * 64
+    with pytest.raises(DomainError, match="设定引用与源正文不符"):
+        import_manuscript(unopened, ManuscriptPackage.model_validate(damaged))
+    unrelated = frozen.model_dump()
+    unrelated["settings_history"]["versions"][0]["origins"]["bell"]["evidence"]["chapter_id"] = (
+        "different-work-chapter"
+    )
+    with pytest.raises(DomainError, match="准确正文修订"):
+        import_manuscript(unopened, ManuscriptPackage.model_validate(unrelated))
+    with unopened.db.connect() as tx:
+        assert not tx.execute("SELECT 1 FROM branches").fetchone()
+    with pytest.raises(ValidationError, match="设定父修订"):
+        ManuscriptPackage.model_validate(
+            {
+                **payload,
+                "settings_history": {
+                    "adopted_revision_id": "alternate-settings",
+                    "versions": [payload["settings_history"]["versions"][-1]],
+                },
+            }
         )
 
 

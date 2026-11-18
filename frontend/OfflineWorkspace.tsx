@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   OfflineStoreError,
+  confirmLocalOutline,
+  confirmLocalSettings,
   createLocalChapter,
   createLocalProject,
   exportLocalManuscript,
@@ -9,7 +11,9 @@ import {
   listLocalProjects,
   maxManuscriptBytes,
   readLocalHistory,
+  readLocalOutline,
   readLocalSourceRevision,
+  readLocalSettings,
   saveLocalChapter,
   type LocalChapter,
   type LocalProject,
@@ -19,6 +23,8 @@ import './offlineWorkspace.css'
 import { WebSyncPanel } from './WebSyncPanel'
 import { PortableEvidence } from './PortableEvidence'
 import { LocalProjectBrief } from './OfflineProjectBrief'
+import { OfflineSettings } from './OfflineSettings'
+import { OfflineOutline } from './OfflineOutline'
 import { discardOwnDraft, readDraft, writeDraft, type Draft } from './drafts'
 
 type EditorState = {
@@ -72,13 +78,25 @@ export function OfflineWorkspace() {
   const [localBusy, setBusy] = useState(false)
   const [syncBusy, setSyncBusy] = useState(false)
   const [projectDirty, setProjectDirty] = useState(false)
-  const [syncedProjectVersion, setSyncedProjectVersion] = useState(0)
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  const [outlineDirty, setOutlineDirty] = useState(false)
+  const [workbenchRefresh, setWorkbenchRefresh] = useState(0)
   const busy = localBusy || syncBusy
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const locked = useRef(false)
   const dirty = !!editor && editor.text !== editor.base.content
   const draftId = selected && editor ? `offline/${selected.branch.id}/${editor.chapter.id}` : undefined
+  const projectId = selected?.novel.id
+  const loadSettings = useCallback(() => {
+    if (!projectId) return Promise.resolve({ versions: [], projectVersionId: null })
+    return readLocalSettings(projectId)
+  }, [projectId])
+  const loadOutline = useCallback(() => {
+    if (!projectId) throw new Error('请先打开离线作品。')
+    return readLocalOutline(projectId)
+  }, [projectId])
+  const refreshWorkbench = useCallback(() => setWorkbenchRefresh((revision) => revision + 1), [])
 
   useEffect(() => {
     let active = true
@@ -146,7 +164,12 @@ export function OfflineWorkspace() {
   }
 
   function mayLeave(workChange = false) {
-    if (workChange && projectDirty && !window.confirm('立项卡有未确认的修改。是否离开当前作品？')) return false
+    if (
+      workChange &&
+      (projectDirty || settingsDirty || outlineDirty) &&
+      !window.confirm('立项、设定或大纲有未确认的修改。是否离开当前作品？')
+    )
+      return false
     return !dirty || window.confirm('这一章有未提交的输入。是否离开当前编辑区？')
   }
 
@@ -289,9 +312,29 @@ export function OfflineWorkspace() {
               <LocalProjectBrief
                 key={`project-${selected.branch.id}`}
                 projectId={selected.novel.id}
-                refreshToken={syncedProjectVersion}
+                refreshToken={workbenchRefresh}
                 disabled={busy}
                 onDirty={setProjectDirty}
+                onConfirmed={refreshWorkbench}
+              />
+              <OfflineSettings
+                key={`settings-${selected.branch.id}`}
+                read={loadSettings}
+                refreshToken={workbenchRefresh}
+                disabled={busy}
+                onDirty={setSettingsDirty}
+                onConfirm={async (base, version) => {
+                  await confirmLocalSettings(selected.novel.id, base, version)
+                  refreshWorkbench()
+                }}
+              />
+              <OfflineOutline
+                key={`outline-${selected.branch.id}`}
+                read={loadOutline}
+                refreshToken={workbenchRefresh}
+                disabled={busy}
+                onDirty={setOutlineDirty}
+                onConfirm={(base, version) => confirmLocalOutline(selected.novel.id, base, version)}
               />
               <PortableEvidence
                 key={selected.branch.id}
@@ -302,14 +345,14 @@ export function OfflineWorkspace() {
               <WebSyncPanel
                 key={selected.branch.id}
                 project={selected}
-                unsaved={dirty || projectDirty || localBusy}
+                unsaved={dirty || projectDirty || settingsDirty || outlineDirty || localBusy}
                 onBusy={setSyncBusy}
                 onApplied={async () => {
                   const saved = (await listLocalProjects()).find(
                     (work) => work.branch.id === selected.branch.id,
                   )
                   if (!saved) return
-                  setSyncedProjectVersion((version) => version + 1)
+                  refreshWorkbench()
                   setProjects(await listLocalProjects())
                   const latest = await listLocalChapters(saved.novel.id)
                   setSelected(saved)
@@ -327,6 +370,7 @@ export function OfflineWorkspace() {
                     const chapter = await createLocalChapter(selected.novel.id, chapterTitle)
                     setChapters((rows) => [...rows, chapter])
                     setChapterTitle('')
+                    refreshWorkbench()
                     await openChapter(chapter)
                   })
                 }}

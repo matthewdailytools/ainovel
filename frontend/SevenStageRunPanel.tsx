@@ -3,7 +3,8 @@ import { api, label, type Task } from './api'
 import type { Notify } from './App'
 import type { ConceptionState } from './conception'
 
-type StartFrom = 'idea' | 'settings' | 'outline'
+type StartFrom = 'idea' | 'project' | 'settings' | 'outline' | 'writing' | 'inspection'
+type ReviewSources = { writing_id: string | null; inspection_id: string | null }
 type OutlineState = {
   confirmed: { id: string; revision: number } | null
   draft: unknown
@@ -66,6 +67,7 @@ export function SevenStageRunPanel({
   const endpoint = `${prefix}/seven-stage-runs`
   const [outline, setOutline] = useState<OutlineState>()
   const [settings, setSettings] = useState<ConceptionState>()
+  const [reviewSources, setReviewSources] = useState<ReviewSources>()
   const [references, setReferences] = useState<ReferenceOption[]>([])
   const [runs, setRuns] = useState<Run[]>([])
   const [runId, setRunId] = useState('')
@@ -84,18 +86,20 @@ export function SevenStageRunPanel({
   const pending = useRef<{ signature: string; key: string } | undefined>(undefined)
 
   const refreshSources = useCallback(async () => {
-    const [concept, plan, savedReferences] = await Promise.all([
+    const [concept, plan, savedReferences, sources] = await Promise.all([
       api<ConceptionState>(`${prefix}/conception`),
       api<OutlineState>(`${prefix}/outline-workspace`),
       api<ReferenceOption[]>(`/reference-sessions?branch_id=${encodeURIComponent(branchId)}`),
+      api<ReviewSources>(`${endpoint}/sources`),
     ])
     if (!alive.current) return
     setSettings(concept)
     setOutline(plan)
+    setReviewSources(sources)
     setReferences(
       savedReferences.filter((entry) => entry.payload.goal.trim() && entry.payload.source.quote.trim()),
     )
-  }, [branchId, prefix])
+  }, [branchId, endpoint, prefix])
 
   useEffect(() => {
     alive.current = true
@@ -129,22 +133,31 @@ export function SevenStageRunPanel({
     }
   }, [endpoint])
 
+  const validProject = settings?.project
   const validSettings = settings?.confirmation?.current ? settings.confirmation : undefined
   const validOutline = outline && !outline.stale.length ? outline.confirmed : undefined
   const blank =
     settings?.revision === 0 && !settings.project && outline && !outline.chapters.length && !outline.draft
-  const origin = from ?? (validOutline ? 'outline' : validSettings ? 'settings' : 'idea')
-  const chapterCount = origin === 'idea' || (origin === 'settings' && !outline?.chapters.length)
+  const origin =
+    from ?? (validOutline ? 'outline' : validSettings ? 'settings' : validProject ? 'project' : 'idea')
+  const sources = {
+    project: validProject?.id,
+    settings: validSettings?.id,
+    outline: validOutline?.id,
+    writing: reviewSources?.writing_id,
+    inspection: reviewSources?.inspection_id,
+  }
+  const plansRemaining = origin === 'idea' || origin === 'project' || origin === 'settings'
+  const writingRemaining = plansRemaining || origin === 'outline'
+  const chapterCount = plansRemaining && !outline?.chapters.length
   const run = runs.find((entry) => entry.id === runId) ?? runs[0]
-  const reference =
-    origin === 'outline'
-      ? undefined
-      : references.find((entry) => `${entry.id}/${entry.revision}` === referenceChoice)
-  const referenceChanged = origin !== 'outline' && !!referenceChoice && !reference
+  const reference = plansRemaining
+    ? references.find((entry) => `${entry.id}/${entry.revision}` === referenceChoice)
+    : undefined
+  const referenceChanged = plansRemaining && !!referenceChoice && !reference
   const activeRun = runs.some((entry) => unresolved.includes(entry.status))
   const status = run?.result.seven_stage_run
-  const permitted =
-    origin === 'idea' ? !!blank && !!idea.trim() : origin === 'settings' ? !!validSettings : !!validOutline
+  const permitted = origin === 'idea' ? !!blank && !!idea.trim() : !!sources[origin]
   const ready =
     permitted &&
     modelReady &&
@@ -178,16 +191,12 @@ export function SevenStageRunPanel({
     if (!ready || activeRun) return
     const body = {
       start_from: origin,
-      ...(origin === 'idea'
-        ? { idea: idea.trim() }
-        : {
-            source_id: origin === 'settings' ? validSettings?.id : validOutline?.id,
-          }),
+      ...(origin === 'idea' ? { idea: idea.trim() } : { source_id: sources[origin] }),
       ...(chapterCount ? { chapter_count: Number(chapters) } : {}),
       account,
       budget_limit: Number(budget),
-      auto_confirm_planning: autoConfirm,
-      auto_adopt_body: autoAdopt,
+      auto_confirm_planning: plansRemaining && autoConfirm,
+      auto_adopt_body: writingRemaining && autoAdopt,
       ...(reference && {
         reference_session_id: reference.id,
         reference_revision: reference.revision,
@@ -234,16 +243,25 @@ export function SevenStageRunPanel({
             <option value="idea" disabled={!blank}>
               从创意开始
             </option>
+            <option value="project" disabled={!validProject}>
+              从已确认立项接力{validProject && ` · 修订 ${validProject.revision}`}
+            </option>
             <option value="settings" disabled={!validSettings}>
               从已确认设定接力{validSettings && ` · 修订 ${validSettings.revision}`}
             </option>
             <option value="outline" disabled={!validOutline}>
               从已确认大纲接力{validOutline && ` · 修订 ${validOutline.revision}`}
             </option>
+            <option value="writing" disabled={!sources.writing}>
+              从已保存的完整正文接力
+            </option>
+            <option value="inspection" disabled={!sources.inspection}>
+              从已通过的全书体检接力
+            </option>
           </select>
         </label>
-        {!blank && !validSettings && !validOutline && (
-          <p>请先确认设定或大纲。只有新建空白作品可从创意启动。</p>
+        {!blank && !Object.values(sources).some(Boolean) && (
+          <p>请先确认一份立项，或保存符合当前创作范围的正式版本。</p>
         )}
         {origin === 'idea' && (
           <label>
@@ -268,7 +286,7 @@ export function SevenStageRunPanel({
             />
           </label>
         )}
-        {origin !== 'outline' && (
+        {plansRemaining && (
           <div>
             <label>
               自动拆解的保存选段（可选）
@@ -316,7 +334,7 @@ export function SevenStageRunPanel({
             onChange={(event) => setBudget(event.target.value)}
           />
         </label>
-        {origin !== 'outline' && (
+        {plansRemaining && (
           <label className="check">
             <input
               type="checkbox"
@@ -326,14 +344,16 @@ export function SevenStageRunPanel({
             授权确认本次生成的规划产物
           </label>
         )}
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={autoAdopt}
-            onChange={(event) => setAutoAdopt(event.target.checked)}
-          />
-          授权采纳通过检查的空章正文候选
-        </label>
+        {writingRemaining && (
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={autoAdopt}
+              onChange={(event) => setAutoAdopt(event.target.checked)}
+            />
+            授权采纳通过检查的空章正文候选
+          </label>
+        )}
         <button className="primary" type="button" disabled={!ready} onClick={() => void execute(start)}>
           启动七台接力
         </button>

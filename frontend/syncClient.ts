@@ -305,7 +305,9 @@ async function record(tx: IDBTransaction, key: string, receipt: SyncReceipt, pen
     const store = tx.objectStore('heads')
     const head = await wait<Head | undefined>(store.get([key, receipt.object_id]))
     const firstRevision =
-      receipt.object_id.startsWith('project-version:') &&
+      (receipt.object_id.startsWith('project-version:') ||
+        receipt.object_id.startsWith('settings-version:') ||
+        receipt.object_id.startsWith('outline-version:')) &&
       (!head?.firstRevision || head.firstRevision.sequence > receipt.sequence)
         ? { id: receipt.change_id, sequence: receipt.sequence }
         : head?.firstRevision

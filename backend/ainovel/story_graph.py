@@ -23,6 +23,22 @@ CREATE TABLE IF NOT EXISTS story_record_dependencies(
  record_id TEXT NOT NULL REFERENCES story_records(id),parent_id TEXT NOT NULL REFERENCES story_records(id),
  parent_revision INTEGER NOT NULL,PRIMARY KEY(record_id,parent_id));
 INSERT OR IGNORE INTO extension_migrations VALUES('story-graph/1',unixepoch());
+CREATE TABLE IF NOT EXISTS story_record_dependency_history(
+ record_id TEXT NOT NULL,revision INTEGER NOT NULL,parent_id TEXT NOT NULL,parent_revision INTEGER NOT NULL,
+ PRIMARY KEY(record_id,revision,parent_id),
+ FOREIGN KEY(record_id,revision) REFERENCES story_record_history(record_id,revision) ON DELETE CASCADE);
+CREATE TRIGGER IF NOT EXISTS story_dependency_history_add AFTER INSERT ON story_record_dependencies BEGIN
+ INSERT OR REPLACE INTO story_record_dependency_history
+ SELECT r.id,r.revision,NEW.parent_id,NEW.parent_revision FROM story_records r
+ JOIN story_record_history h ON h.record_id=r.id AND h.revision=r.revision WHERE r.id=NEW.record_id;
+END;
+CREATE TRIGGER IF NOT EXISTS story_dependency_history_archive AFTER INSERT ON story_record_history
+ WHEN NEW.archived=1 BEGIN
+ INSERT OR IGNORE INTO story_record_dependency_history
+ SELECT NEW.record_id,NEW.revision,parent_id,parent_revision FROM story_record_dependencies
+ WHERE record_id=NEW.record_id;
+END;
+INSERT OR IGNORE INTO extension_migrations VALUES('story-graph/2',unixepoch());
 """
 
 
@@ -246,7 +262,7 @@ def graph_snapshot(conn, branch_id):
     }
 
 
-def validate_record(tx, branch_id, identifier, payload):
+def validate_record(tx, branch_id, identifier, payload, *, historical_sources=False):
     from .domain import utf16_slice
 
     if not payload["title"].strip():
@@ -261,10 +277,17 @@ def validate_record(tx, branch_id, identifier, payload):
         if ref not in rows:
             raise DomainError("ownership", "关联须属于当前工作版本且尚未归档。", 409)
     for source in sources(payload):
-        chapter = tx.execute(
-            "SELECT * FROM chapters WHERE id=? AND branch_id=? AND archived=0",
-            (source["chapter_id"], branch_id),
-        ).fetchone()
+        if historical_sources:
+            chapter = tx.execute(
+                "SELECT r.revision,r.content FROM revisions r JOIN chapters c ON c.id=r.chapter_id "
+                "WHERE c.id=? AND c.branch_id=? AND r.revision=?",
+                (source["chapter_id"], branch_id, source["revision"]),
+            ).fetchone()
+        else:
+            chapter = tx.execute(
+                "SELECT revision,content FROM chapters WHERE id=? AND branch_id=? AND archived=0",
+                (source["chapter_id"], branch_id),
+            ).fetchone()
         if not chapter or chapter["revision"] != source["revision"]:
             raise DomainError("revision_conflict", "来源章节已改变或不属于当前版本。", 409)
         if utf16_slice(chapter["content"], source["start"], source["end"])[1] != source["quote"]:
@@ -359,7 +382,7 @@ def save_record(domain, branch_id, data, identifier=None):
         return graph_snapshot(tx, branch_id)
 
 
-def save_record_tx(tx, branch_id, data, identifier=None, *, new_identifier=None):
+def save_record_tx(tx, branch_id, data, identifier=None, *, new_identifier=None, sync_import=False):
     creating = identifier is None
     if new_identifier and (
         not creating or tx.execute("SELECT 1 FROM story_records WHERE id=?", (new_identifier,)).fetchone()
@@ -377,11 +400,11 @@ def save_record_tx(tx, branch_id, data, identifier=None, *, new_identifier=None)
     ).fetchone()
     if not creating and (not old or old["revision"] != data.base_revision):
         raise DomainError("record_changed", "记录已改变，请重新载入。", 409)
-    if creating and (data.base_revision is not None or data.archived):
+    if creating and (data.base_revision is not None or (data.archived and not sync_import)):
         raise DomainError("story_record", "新记录不能指定旧修订或直接归档。")
     if old and old["kind"] != payload["kind"]:
         raise DomainError("story_record", "记录类型不可改变，请新建对应记录。")
-    validate_record(tx, branch_id, identifier, payload)
+    validate_record(tx, branch_id, identifier, payload, historical_sources=sync_import)
     revision = old["revision"] + 1 if old else 0
     tx.execute(
         "INSERT INTO story_records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "

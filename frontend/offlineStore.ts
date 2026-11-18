@@ -9,6 +9,26 @@ import {
   type ProjectVersionObject,
   type ProjectVersionRecord,
 } from './projectSyncModel'
+import {
+  prepareSettingsVersion,
+  validateSettingsHistory,
+  validateSettingsSyncObject,
+  validateSettingsVersionSources,
+  type SettingsHeadObject,
+  type SettingsHistory,
+  type SettingsVersion,
+  type SettingsVersionObject,
+  type SettingsVersionRecord,
+} from './settingsSyncModel'
+import { createOutlineOfflineStore, outlineReadStores, outlineWriteStores } from './outlineOfflineStore'
+import {
+  outlineObjectSignature,
+  validateOutlineHistory,
+  validateOutlineSyncObject,
+  type OutlineHeadObject,
+  type OutlineHistory,
+  type OutlineVersionObject,
+} from './outlineSyncModel'
 
 const DATABASE = 'ainovel-offline-workspace'
 const FORMAT = 'ainovel-manuscript/1'
@@ -59,6 +79,8 @@ export type ManuscriptPack = LocalProject & {
   revisions: LocalRevision[]
   source_revisions?: LocalRevision[]
   project_history?: ProjectHistory
+  settings_history?: SettingsHistory
+  outline_history?: OutlineHistory
 }
 const SYNC_FORMAT = 'ainovel-manuscript-sync/1'
 export type SyncedObject =
@@ -68,6 +90,10 @@ export type SyncedObject =
   | { format: typeof SYNC_FORMAT; kind: 'evidence'; document: LocalEvidence }
   | ProjectHeadObject
   | ProjectVersionObject
+  | SettingsHeadObject
+  | SettingsVersionObject
+  | OutlineHeadObject
+  | OutlineVersionObject
 
 function revisionSignature(row: LocalRevision) {
   return [row.id, row.chapter_id, row.revision, row.parent_id, row.sha256, row.cause, row.created]
@@ -96,10 +122,19 @@ export function syncObjectSignature(object: SyncedObject | null) {
   if (object?.kind === 'revision') {
     return JSON.stringify(['revision', object.branch_id, ...revisionSignature(object.revision)])
   }
-  if (object?.kind === 'project-head')
+  if (object?.kind === 'project-head' || object?.kind === 'settings-head')
     return JSON.stringify([object.kind, object.branch_id, object.revision_id])
   if (object?.kind === 'project-version')
     return JSON.stringify([object.kind, object.branch_id, object.version])
+  if (object?.kind === 'settings-version') {
+    const { origins, ...data } = object.version
+    const sources = Object.keys(origins)
+      .sort()
+      .map((id) => [id, origins[id]])
+    return JSON.stringify([object.kind, object.branch_id, data, sources])
+  }
+  if (object?.kind === 'outline-head' || object?.kind === 'outline-version')
+    return outlineObjectSignature(object)
   return 'null'
 }
 
@@ -142,12 +177,25 @@ type Store =
   | 'projectHeads'
   | 'projectVersions'
   | 'publications'
+  | 'settingsHeads'
+  | 'settingsVersions'
+  | 'outlineHeads'
+  | 'outlineVersions'
+  | 'outlinePromiseSeeds'
 type LocalProjectVersion = ProjectVersionRecord & { branchId: string }
 type LocalProjectHead = { branchId: string; versionId: string }
+type LocalSettingsVersion = SettingsVersionRecord & { branchId: string }
 export type LocalPublication = { branchId: string; objectId: string; id: string }
 type ApplyOptions = { source?: ProjectSource; publicationId?: string | null; consumePublication?: boolean }
 const projectStores = ['projects', 'projectHeads', 'projectVersions'] satisfies Store[]
 const manuscriptStores = ['projects', 'chapters', 'revisions', 'sourceRevisions'] satisfies Store[]
+const settingsDependencyStores = [
+  ...manuscriptStores,
+  'projectHeads',
+  'projectVersions',
+  'settingsHeads',
+  'settingsVersions',
+] satisfies Store[]
 
 export class OfflineStoreError extends Error {
   constructor(
@@ -167,7 +215,7 @@ function result<T>(request: IDBRequest<T>): Promise<T> {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 4)
+    const request = indexedDB.open(DATABASE, 6)
     let blocked = false
     request.onblocked = () => {
       blocked = true
@@ -197,7 +245,25 @@ function openDatabase(): Promise<IDBDatabase> {
           'branchId',
         )
       }
-      db.createObjectStore('publications', { keyPath: ['branchId', 'objectId'] }).createIndex(
+      if (event.oldVersion < 4) {
+        db.createObjectStore('publications', { keyPath: ['branchId', 'objectId'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
+      }
+      if (event.oldVersion < 5) {
+        db.createObjectStore('settingsHeads', { keyPath: 'branchId' })
+        db.createObjectStore('settingsVersions', { keyPath: ['branchId', 'version.id'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
+      }
+      db.createObjectStore('outlineHeads', { keyPath: 'branchId' })
+      db.createObjectStore('outlineVersions', { keyPath: ['branchId', 'version.id'] }).createIndex(
+        'byBranch',
+        'branchId',
+      )
+      db.createObjectStore('outlinePromiseSeeds', { keyPath: ['branchId', 'id'] }).createIndex(
         'byBranch',
         'branchId',
       )
@@ -480,12 +546,19 @@ async function readManuscript(tx: IDBTransaction, project: LocalProject): Promis
 }
 
 export function exportLocalManuscript(projectId: string): Promise<ManuscriptPack> {
-  return transact([...manuscriptStores, 'projectHeads', 'projectVersions'], 'readonly', async (tx) => {
+  const stores = [...new Set([...settingsDependencyStores, ...outlineReadStores])]
+  return transact(stores, 'readonly', async (tx) => {
     const project = await readProject(tx, projectId)
-    const [manuscript, brief] = await Promise.all([
+    const [manuscript, brief, settings, outlineHistory] = await Promise.all([
       readManuscript(tx, project),
       readProjectBrief(tx, project.branch.id),
+      readSettings(tx, project.branch.id),
+      outlineStore.readOutlineHistoryTx(tx, project),
     ])
+    const sourceDevices = settings.versions.flatMap(({ version, source, recordedDevice }) => {
+      const device = source?.device_id ?? recordedDevice
+      return device ? [[version.id, device] as const] : []
+    })
     return {
       ...manuscript,
       ...(brief.versions.length
@@ -496,6 +569,16 @@ export function exportLocalManuscript(projectId: string): Promise<ManuscriptPack
             },
           }
         : {}),
+      ...(settings.versions.length
+        ? {
+            settings_history: {
+              adopted_revision_id: settings.current?.version.id ?? null,
+              versions: settings.versions.map(({ version }) => version),
+              ...(sourceDevices.length ? { source_devices: Object.fromEntries(sourceDevices) } : {}),
+            },
+          }
+        : {}),
+      ...(outlineHistory ? { outline_history: outlineHistory } : {}),
     }
   })
 }
@@ -578,20 +661,19 @@ export function acknowledgeLocalPublications(records: LocalPublication[]) {
 }
 
 export function readLocalSyncSnapshot(projectId: string) {
-  return transact(
-    [...manuscriptStores, 'projectHeads', 'projectVersions', 'publications'],
-    'readonly',
-    async (tx) => {
-      const project = await readProject(tx, projectId)
-      const branchId = project.branch.id
-      const [manuscript, brief, publications] = await Promise.all([
-        readManuscript(tx, project),
-        readProjectBrief(tx, branchId),
-        publicationRows(tx, branchId),
-      ])
-      return { manuscript, brief, publications }
-    },
-  )
+  const stores = [...new Set([...settingsDependencyStores, ...outlineReadStores, 'publications' as const])]
+  return transact(stores, 'readonly', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const branchId = project.branch.id
+    const [manuscript, brief, settings, outline, publications] = await Promise.all([
+      readManuscript(tx, project),
+      readProjectBrief(tx, branchId),
+      readSettings(tx, branchId),
+      outlineStore.readOutlineTx(tx, project),
+      publicationRows(tx, branchId),
+    ])
+    return { manuscript, brief, settings, outline, publications }
+  })
 }
 
 export function confirmLocalProjectBrief(
@@ -658,11 +740,188 @@ async function applyProjectObject(
   })
 }
 
+function getSettingsHead(tx: IDBTransaction, branchId: string) {
+  return result<LocalProjectHead | undefined>(tx.objectStore('settingsHeads').get(branchId))
+}
+
+function getSettingsVersion(tx: IDBTransaction, branchId: string, id: string) {
+  return result<LocalSettingsVersion | undefined>(tx.objectStore('settingsVersions').get([branchId, id]))
+}
+
+async function readSettings(tx: IDBTransaction, branchId: string) {
+  const [head, project, versions] = await Promise.all([
+    getSettingsHead(tx, branchId),
+    getProjectHead(tx, branchId),
+    result<LocalSettingsVersion[]>(tx.objectStore('settingsVersions').index('byBranch').getAll(branchId)),
+  ])
+  return {
+    current: versions.find(({ version }) => version.id === head?.versionId),
+    versions,
+    projectVersionId: project?.versionId ?? null,
+  }
+}
+
+export function readLocalSettings(projectId: string) {
+  return transact(['projects', 'settingsHeads', 'settingsVersions', 'projectHeads'], 'readonly', async (tx) =>
+    readSettings(tx, (await readProject(tx, projectId)).branch.id),
+  )
+}
+
+// Keep WebCrypto outside of IndexedDB transactions. The final write compares the immutable
+// source IDs and hashes again, together with the adopted project and settings preconditions.
+async function checkSettingsSources(projectId: string, version: SettingsVersion) {
+  const checked = await transact(settingsDependencyStores, 'readonly', async (tx) => {
+    const branchId = (await readProject(tx, projectId)).branch.id
+    const origins = Object.values(version.origins)
+    const projectIds = new Set([
+      version.project_version_id,
+      ...origins.map(({ project_version_id }) => project_version_id),
+    ])
+    const revisionIds = new Set(origins.flatMap(({ evidence }) => (evidence ? [evidence.revision_id] : [])))
+    const projects = new Set<string>()
+    const revisions = new Map<string, LocalRevision>()
+    for (const id of projectIds) {
+      if (id && (await getProjectVersion(tx, branchId, id))) projects.add(id)
+    }
+    for (const id of revisionIds) {
+      const evidence = await sourceRevision(tx, branchId, id)
+      if (evidence) revisions.set(id, evidence)
+    }
+    const parent = version.parent_id ? await getSettingsVersion(tx, branchId, version.parent_id) : undefined
+    return { branchId, projects, revisions, parent }
+  })
+  await validateSettingsVersionSources(version, {
+    project: (id) => checked.projects.has(id),
+    settings: (id) => checked.parent?.version.id === id,
+    revision: (id) => checked.revisions.get(id),
+  })
+  return checked
+}
+
+async function recheckSettingsSources(
+  tx: IDBTransaction,
+  branchId: string,
+  checked: Awaited<ReturnType<typeof checkSettingsSources>>,
+) {
+  if (checked.branchId !== branchId) throw new OfflineStoreError('ownership', '设定来源不属于当前工作版本。')
+  if (checked.parent && !(await getSettingsVersion(tx, branchId, checked.parent.version.id)))
+    throw new OfflineStoreError('missing', '设定父版本不再可用，请重新同步。')
+  for (const id of checked.projects) {
+    if (!(await getProjectVersion(tx, branchId, id)))
+      throw new OfflineStoreError('missing', '设定引用的立项版本不再可用，请重新同步。')
+  }
+  for (const original of checked.revisions.values()) {
+    const found = await sourceRevision(tx, branchId, original.id)
+    if (found?.sha256 !== original.sha256 || found.chapter_id !== original.chapter_id)
+      throw new OfflineStoreError('missing', '设定引用的原稿已无法核验，请重新同步。')
+  }
+}
+
+async function putSettingsHead(tx: IDBTransaction, project: LocalProject, versionId: string) {
+  await result(
+    tx
+      .objectStore('settingsHeads')
+      .put({ branchId: project.branch.id, versionId } satisfies LocalProjectHead),
+  )
+  project.branch.story_revision++
+  await result(tx.objectStore('projects').put(project))
+}
+
+function assertSettingsProject(version: SettingsVersion, projectVersionId: string | null) {
+  if (version.project_version_id !== projectVersionId)
+    throw new OfflineStoreError('conflict', '本机采用的立项与设定依据不同，待核对并采用对应立项。')
+}
+
+export async function confirmLocalSettings(projectId: string, base: string | null, draft: SettingsVersion) {
+  const version = await prepareSettingsVersion(draft)
+  if (version.parent_id !== base) throw new OfflineStoreError('conflict', '设定父版本和当前确认依据不一致。')
+  const sources = await checkSettingsSources(projectId, version)
+  return transact([...settingsDependencyStores, 'publications'], 'readwrite', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const branchId = project.branch.id
+    const current = await getSettingsHead(tx, branchId)
+    if ((current?.versionId ?? null) !== base)
+      throw new OfflineStoreError('conflict', '本机已有另一版确认设定，请重新核对。')
+    assertSettingsProject(version, (await getProjectHead(tx, branchId))?.versionId ?? null)
+    await recheckSettingsSources(tx, branchId, sources)
+    await result(tx.objectStore('settingsVersions').add({ branchId, version } satisfies LocalSettingsVersion))
+    await putSettingsHead(tx, project, version.id)
+    await markPublication(tx, branchId, `settings-version:${version.id}`, `settings:${branchId}`)
+  })
+}
+
+async function applySettingsObject(
+  projectId: string,
+  object: SettingsHeadObject | SettingsVersionObject,
+  expected: string,
+  options: ApplyOptions,
+) {
+  const sources =
+    object.kind === 'settings-version' ? await checkSettingsSources(projectId, object.version) : null
+  return transact([...settingsDependencyStores, 'publications'], 'readwrite', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const branchId = project.branch.id
+    if (object.branch_id !== branchId) invalid('设定范围与工作版本不符。')
+    if (object.kind === 'settings-version' && sources) {
+      const { version } = object
+      const existing = await getSettingsVersion(tx, branchId, version.id)
+      if (
+        existing &&
+        syncObjectSignature({ ...object, version: existing.version }) !== syncObjectSignature(object)
+      )
+        invalid('同一设定的源修订保存了不同内容。')
+      await recheckSettingsSources(tx, branchId, sources)
+      const { source } = options
+      if (source && (!existing?.source || source.sequence < existing.source.sequence)) {
+        await result(
+          tx
+            .objectStore('settingsVersions')
+            .put({ branchId, version, source } satisfies LocalSettingsVersion),
+        )
+      }
+      return !!existing || !!source
+    }
+    if (object.kind !== 'settings-head') return false
+    const local = await getSettingsHead(tx, branchId)
+    const before = local ? { ...object, revision_id: local.versionId } : null
+    const publication = await readPublication(tx, branchId, `settings:${branchId}`)
+    if (
+      syncObjectSignature(before) !== expected ||
+      (options.publicationId !== undefined && options.publicationId !== (publication?.id ?? null))
+    )
+      return false
+    const chosen = await getSettingsVersion(tx, branchId, object.revision_id)
+    if (!chosen?.source) throw new OfflineStoreError('missing', '缺少采用设定的云端来源记录。')
+    assertSettingsProject(chosen.version, (await getProjectHead(tx, branchId))?.versionId ?? null)
+    if (local?.versionId !== object.revision_id) await putSettingsHead(tx, project, object.revision_id)
+    if (options.consumePublication && publication)
+      await result(tx.objectStore('publications').delete([branchId, publication.objectId]))
+    return true
+  })
+}
+
 function sourceLink(revision: LocalRevision, parent: LocalRevision | undefined) {
   return revision.revision === 0
     ? revision.parent_id === null
     : !!parent && parent.chapter_id === revision.chapter_id && parent.revision + 1 === revision.revision
 }
+
+const outlineStore = createOutlineOfflineStore({
+  transact,
+  result,
+  readProject,
+  listChaptersTx,
+  getProjectHead,
+  getProjectVersion,
+  getSettingsHead,
+  getSettingsVersion,
+  readPublication,
+  markPublication,
+  fail: (code, message) => {
+    throw new OfflineStoreError(code, message)
+  },
+})
+export const { readLocalOutline, confirmLocalOutline } = outlineStore
 
 function evidenceMatches(source: LocalEvidence['chapters'][number], target: LocalRevision | undefined) {
   return (
@@ -677,6 +936,10 @@ export async function validateSyncedObject(
 ): Promise<SyncedObject | null> {
   if (objectId.startsWith('project:') || objectId.startsWith('project-version:'))
     return validateProjectSyncObject(project.branch.id, objectId, value)
+  if (objectId.startsWith('settings:') || objectId.startsWith('settings-version:'))
+    return validateSettingsSyncObject(project.branch.id, objectId, value)
+  if (objectId.startsWith('outline:') || objectId.startsWith('outline-version:'))
+    return validateOutlineSyncObject(project.branch.id, objectId, value)
   if (value === null && objectId.startsWith('chapter:')) {
     identity(objectId.slice(8))
     return null
@@ -691,7 +954,7 @@ export async function validateSyncedObject(
     return { format: SYNC_FORMAT, kind: 'revision', branch_id: project.branch.id, revision }
   }
   if (object.kind === 'evidence') {
-    const pack = await exportLocalManuscript(project.novel.id)
+    const pack = await transact(manuscriptStores, 'readonly', (tx) => readManuscript(tx, project))
     const histories = new Map<string, LocalRevision[]>()
     for (const revision of pack.revisions) {
       if (!histories.has(revision.chapter_id)) histories.set(revision.chapter_id, [])
@@ -754,6 +1017,10 @@ export function applySyncedObject(
 ) {
   if (object?.kind === 'project-head' || object?.kind === 'project-version')
     return applyProjectObject(projectId, object, expected, options)
+  if (object?.kind === 'settings-head' || object?.kind === 'settings-version')
+    return applySettingsObject(projectId, object, expected, options)
+  if (object?.kind === 'outline-head' || object?.kind === 'outline-version')
+    return outlineStore.applyOutlineObject(projectId, object, expected, options)
   return transact([...manuscriptStores, 'publications'], 'readwrite', async (tx) => {
     const project = await readProject(tx, projectId)
     const projectStore = tx.objectStore('projects')
@@ -960,6 +1227,8 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     'evidence',
     'source_revisions',
     'project_history',
+    'settings_history',
+    'outline_history',
   ])
   if (pack.format !== FORMAT) invalid('稿件交换包格式无法读取，请使用兼容版本。')
   const n = fields(pack.novel, ['id', 'title', 'brief', 'created'])
@@ -1060,6 +1329,27 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
       invalid(error instanceof Error ? error.message : '立项历史格式无效。')
     }
   }
+  let settings_history: SettingsHistory | undefined
+  const projects = new Set(project_history?.versions.map(({ id }) => id))
+  if (pack.settings_history != null) {
+    try {
+      settings_history = await validateSettingsHistory(pack.settings_history, projects, byId)
+    } catch (error) {
+      invalid(error instanceof Error ? error.message : '设定历史格式无效。')
+    }
+  }
+  let outline_history: OutlineHistory | undefined
+  if (pack.outline_history != null) {
+    try {
+      outline_history = await validateOutlineHistory(pack.outline_history, {
+        projects,
+        settings: new Map(settings_history?.versions.map((row) => [row.id, row])),
+        chapters: new Set(chaptersById.keys()),
+      })
+    } catch (error) {
+      invalid(error instanceof Error ? error.message : '大纲历史格式无效。')
+    }
+  }
   return {
     format: FORMAT,
     novel,
@@ -1069,6 +1359,8 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     ...(evidence.length ? { evidence } : {}),
     ...(source_revisions.length ? { source_revisions } : {}),
     ...(project_history ? { project_history } : {}),
+    ...(settings_history ? { settings_history } : {}),
+    ...(outline_history ? { outline_history } : {}),
   }
 }
 
@@ -1080,9 +1372,19 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
   } catch {
     invalid('无法读取稿件交换包 JSON。')
   }
-  const { novel, branch, chapters, revisions, evidence, source_revisions, project_history } =
-    await validateManuscript(value)
-  return transact([...manuscriptStores, 'projectHeads', 'projectVersions'], 'readwrite', async (tx) => {
+  const {
+    novel,
+    branch,
+    chapters,
+    revisions,
+    evidence,
+    source_revisions,
+    project_history,
+    settings_history,
+    outline_history,
+  } = await validateManuscript(value)
+  const stores = [...new Set([...settingsDependencyStores, ...outlineWriteStores])]
+  return transact(stores, 'readwrite', async (tx) => {
     const project = { novel, branch, ...(evidence?.length ? { evidence } : {}) }
     await result(tx.objectStore('projects').add(project))
     for (const chapter of chapters) await result(tx.objectStore('chapters').add(chapter))
@@ -1105,6 +1407,28 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
           } satisfies LocalProjectHead),
         )
     }
+    if (settings_history) {
+      for (const version of settings_history.versions) {
+        const devices = settings_history.source_devices
+        const recordedDevice = devices && Object.hasOwn(devices, version.id) ? devices[version.id] : undefined
+        await result(
+          tx.objectStore('settingsVersions').add({
+            branchId: branch.id,
+            version,
+            fromPackage: true,
+            ...(recordedDevice ? { recordedDevice } : {}),
+          } satisfies LocalSettingsVersion),
+        )
+      }
+      if (settings_history.adopted_revision_id)
+        await result(
+          tx.objectStore('settingsHeads').add({
+            branchId: branch.id,
+            versionId: settings_history.adopted_revision_id,
+          } satisfies LocalProjectHead),
+        )
+    }
+    if (outline_history) await outlineStore.restoreOutlineHistoryTx(tx, project, outline_history)
     return project
   })
 }

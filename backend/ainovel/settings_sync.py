@@ -4,12 +4,10 @@ from hashlib import sha256
 import json
 from typing import Literal
 
-from pydantic import Field, ValidationError
+from pydantic import ValidationError
 
 from .conception import (
-    BUILTINS,
     CONFIRMATION,
-    ConceptionCategory,
     ConfirmConception,
     _branch,
     _items,
@@ -27,6 +25,7 @@ from .manuscript_exchange import Identifier, native_revision, source_revision
 from .models import Input
 from .project_brief import KIND as PROJECT, confirmed_project_tx
 from .project_sync import FORMAT, read_project_head, read_project_version
+from .settings_portability import SettingsEvidence, SettingsOrigin, SettingsVersion
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS synced_settings_versions(
@@ -34,34 +33,6 @@ CREATE TABLE IF NOT EXISTS synced_settings_versions(
  payload TEXT NOT NULL, device_id TEXT NOT NULL, change_id TEXT NOT NULL, sequence INTEGER NOT NULL,
  PRIMARY KEY(branch_id,id));
 """
-
-
-class SettingsEvidence(Input):
-    chapter_id: Identifier
-    revision_id: Identifier
-    start: int = Field(ge=0, strict=True)
-    end: int = Field(gt=0, strict=True)
-    quote_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-
-
-class SettingsOrigin(Input):
-    origin: Literal["author", "ai"]
-    edited: bool = Field(default=False, strict=True)
-    artifact_id: Identifier | None = None
-    device_id: str | None = Field(default=None, min_length=1, max_length=128)
-    project_version_id: Identifier | None = None
-    evidence: SettingsEvidence | None = None
-
-
-class SettingsVersion(Input):
-    id: Identifier
-    parent_id: Identifier | None
-    project_version_id: Identifier | None
-    categories: list[ConceptionCategory] = Field(min_length=len(BUILTINS), max_length=24)
-    origins: dict[Identifier, SettingsOrigin] = Field(max_length=240)
-    note: str = Field(default="", max_length=4000)
-    reconciled_project_items: list[Identifier] = Field(default_factory=list, max_length=240)
-    reviewed_setting_findings: list[Identifier] = Field(default_factory=list, max_length=7440)
 
 
 class SettingsVersionObject(Input):
@@ -165,7 +136,8 @@ def _settings_rows(tx, branch_id):
 
 
 def _source_version_id(basis, fallback):
-    return basis.get("sync_settings_source", {}).get("revision_id", fallback)
+    source = basis.get("sync_settings_source") or basis.get("manuscript_settings_source")
+    return source["revision_id"] if source else fallback
 
 
 def project_source_id(tx, branch_id, local_id):
@@ -175,20 +147,19 @@ def project_source_id(tx, branch_id, local_id):
         "SELECT basis FROM artifacts WHERE id=? AND branch_id=? AND kind=? AND status='accepted'",
         (local_id, branch_id, PROJECT),
     ).fetchone()
-    return (
-        json.loads(row["basis"]).get("sync_project_source", {}).get("revision_id", local_id)
-        if row
-        else local_id
-    )
+    basis = json.loads(row["basis"]) if row else {}
+    source = basis.get("sync_project_source") or basis.get("manuscript_project_source")
+    return source["revision_id"] if source else local_id
 
 
 def _portable_origin(tx, branch_id, origin):
     evidence = None
     if local := origin.get("evidence"):
-        revision = None
         if source_id := origin.get("evidence_revision_id"):
             revision = source_revision(tx, branch_id, source_id)
-        if not revision or revision.chapter_id != local["chapter_id"]:
+            if not revision or revision.chapter_id != local["chapter_id"]:
+                raise DomainError("sync_settings_evidence", "缺少设定引用的准确正文修订。", 409)
+        else:
             row = tx.execute(
                 "SELECT r.id FROM revisions r JOIN chapters c ON c.id=r.chapter_id "
                 "WHERE c.branch_id=? AND r.chapter_id=? AND r.revision=?",
@@ -241,7 +212,7 @@ def _native_settings_versions(tx, branch_id):
     native = {}
     for row in _settings_rows(tx, branch_id):
         basis = json.loads(row["basis"])
-        if "sync_settings_source" not in basis:
+        if _source_version_id(basis, None) is None:
             native[row["id"]] = _native_version(tx, branch_id, row, current)
         current = _source_version_id(basis, row["id"])
     return current, native
@@ -253,14 +224,26 @@ def _cached_version(tx, branch_id, version_id):
     ).fetchone()
 
 
+def _archive_versions(tx, branch_id):
+    return tx.execute(
+        "SELECT id,payload,source_device FROM manuscript_settings_versions WHERE branch_id=? ORDER BY rowid",
+        (branch_id,),
+    )
+
+
 def read_settings_version(tx, branch_id, version_id):
     cached = _cached_version(tx, branch_id, version_id)
     if cached:
         return SettingsVersion.model_validate_json(cached["payload"])
+    archived = tx.execute(
+        "SELECT payload FROM manuscript_settings_versions WHERE branch_id=? AND id=?", (branch_id, version_id)
+    ).fetchone()
+    if archived:
+        return SettingsVersion.model_validate_json(archived["payload"])
     current = None
     for row in _settings_rows(tx, branch_id):
         basis = json.loads(row["basis"])
-        if row["id"] == version_id and "sync_settings_source" not in basis:
+        if row["id"] == version_id and _source_version_id(basis, None) is None:
             return _native_version(tx, branch_id, row, current)
         current = _source_version_id(basis, row["id"])
     return None
@@ -297,10 +280,27 @@ def current_settings_source(tx, branch_id):
 
 def draft_settings_objects(tx, branch_id):
     current, native = _native_settings_versions(tx, branch_id)
-    values = [version_object(branch_id, version) for version in native.values()]
+    archived = {
+        row["id"]: SettingsVersion.model_validate_json(row["payload"])
+        for row in _archive_versions(tx, branch_id)
+    }
+    values = [version_object(branch_id, version) for version in _parents_first({**archived, **native})]
     if current:
         values.append(head_object(branch_id, current))
     return values
+
+
+def _parents_first(versions):
+    result = []
+    visited = set()
+    for item in versions.values():
+        path = []
+        while item and item.id not in visited:
+            visited.add(item.id)
+            path.append(item)
+            item = versions.get(item.parent_id)
+        result.extend(reversed(path))
+    return result
 
 
 def observe_settings_version(tx, branch_id, version, receipt):
@@ -330,11 +330,11 @@ def observe_settings_version(tx, branch_id, version, receipt):
     )
 
 
-def _local_origins(tx, branch_id, version, project, device_id):
+def _local_origins(tx, branch_id, version, project, device_id, *, from_package=False):
     origins = {}
     for item_id, origin in version.origins.items():
         data = {
-            "origin": "sync",
+            "origin": "archive" if from_package else "sync",
             "source_origin": origin.origin,
             "source_device_id": origin.device_id or device_id,
             "source_revision_id": version.id,
@@ -348,7 +348,8 @@ def _local_origins(tx, branch_id, version, project, device_id):
             else:
                 data["project_confirmation_id"] = origin.project_version_id
         if evidence := origin.evidence:
-            revision = native_revision(tx, branch_id, evidence.revision_id)
+            read_revision = source_revision if from_package else native_revision
+            revision = read_revision(tx, branch_id, evidence.revision_id)
             quote = _evidence_quote(evidence, revision)
             data["evidence_revision_id"] = evidence.revision_id
             data["evidence"] = {

@@ -101,7 +101,7 @@ test('quota failure aborts the whole browser write and preserves existing formal
 
 test('an unsupported newer database opens read-only from this app’s perspective and keeps records intact', async () => {
   await new Promise<void>((resolve, reject) => {
-    const opening = indexedDB.open('ainovel-offline-workspace', 5)
+    const opening = indexedDB.open('ainovel-offline-workspace', 6)
     opening.onupgradeneeded = () => opening.result.createObjectStore('v2').add('保留新版数据', 'data')
     opening.onsuccess = () => {
       opening.result.close()
@@ -111,7 +111,7 @@ test('an unsupported newer database opens read-only from this app’s perspectiv
   })
   await expect(listLocalProjects()).rejects.toMatchObject({ code: 'database' })
   const record = await new Promise((resolve, reject) => {
-    const opening = indexedDB.open('ainovel-offline-workspace', 5)
+    const opening = indexedDB.open('ainovel-offline-workspace', 6)
     opening.onsuccess = () => {
       const tx = opening.result.transaction('v2')
       const read = tx.objectStore('v2').get('data')

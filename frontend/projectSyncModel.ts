@@ -100,28 +100,37 @@ function validateProjectVersion(source: unknown): ProjectVersion {
   return { id, parent_id, ...validateProjectDraft(value.idea, value.brief) }
 }
 
-export function validateProjectHistory(source: unknown): ProjectHistory {
-  const history = fields(source, ['adopted_revision_id', 'versions'])
-  if (!Array.isArray(history.versions) || !history.versions.length || history.versions.length > 5000)
-    throw new Error('立项历史缺失或版本数量超出限制。')
-  const versions = history.versions.map(validateProjectVersion)
+export function validateVersionGraph<T extends { id: string; parent_id: string | null }>(
+  versions: T[],
+  adoptedId: string | null,
+  label: string,
+) {
   const byId = new Map(versions.map((version) => [version.id, version]))
-  if (byId.size !== versions.length) throw new Error('立项历史的修订编号重复。')
-  const adopted_revision_id =
-    history.adopted_revision_id === null ? null : projectId(history.adopted_revision_id)
-  if (adopted_revision_id && !byId.has(adopted_revision_id)) throw new Error('稿件包缺少采用的立项修订。')
+  if (byId.size !== versions.length) throw new Error(`${label}历史的修订编号重复。`)
+  if (adoptedId && !byId.has(adoptedId)) throw new Error(`稿件包缺少采用的${label}修订。`)
   const proven = new Set<string>()
   for (const version of versions) {
     const path = new Set<string>()
     let id: string | null = version.id
     while (id && !proven.has(id)) {
       const row = byId.get(id)
-      if (!row || path.has(id)) throw new Error('立项父修订缺失或形成循环。')
+      if (!row || path.has(id)) throw new Error(`${label}父修订缺失或形成循环。`)
       path.add(id)
       id = row.parent_id
     }
     for (const id of path) proven.add(id)
   }
+  return byId
+}
+
+export function validateProjectHistory(source: unknown): ProjectHistory {
+  const history = fields(source, ['adopted_revision_id', 'versions'])
+  if (!Array.isArray(history.versions) || !history.versions.length || history.versions.length > 5000)
+    throw new Error('立项历史缺失或版本数量超出限制。')
+  const versions = history.versions.map(validateProjectVersion)
+  const adopted_revision_id =
+    history.adopted_revision_id === null ? null : projectId(history.adopted_revision_id)
+  validateVersionGraph(versions, adopted_revision_id, '立项')
   return { adopted_revision_id, versions }
 }
 

@@ -38,6 +38,15 @@ CREATE INDEX IF NOT EXISTS manuscript_sources_chapter ON manuscript_revision_sou
 CREATE TABLE IF NOT EXISTS manuscript_project_versions(
  branch_id TEXT NOT NULL REFERENCES branches(id),id TEXT NOT NULL,payload TEXT NOT NULL,
  PRIMARY KEY(branch_id,id));
+CREATE TABLE IF NOT EXISTS manuscript_settings_versions(
+ branch_id TEXT NOT NULL REFERENCES branches(id),id TEXT NOT NULL,payload TEXT NOT NULL,source_device TEXT,
+ PRIMARY KEY(branch_id,id));
+CREATE TABLE IF NOT EXISTS manuscript_outline_versions(
+ branch_id TEXT NOT NULL REFERENCES branches(id),id TEXT NOT NULL,payload TEXT NOT NULL,source_device TEXT,
+ PRIMARY KEY(branch_id,id));
+CREATE TABLE IF NOT EXISTS manuscript_outline_restore(
+ branch_id TEXT PRIMARY KEY REFERENCES branches(id),revision_id TEXT NOT NULL,required_records TEXT NOT NULL,
+ waiting_reason TEXT);
 CREATE TABLE IF NOT EXISTS outline_revisions(
  id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),revision INTEGER NOT NULL,
  confirmed INTEGER NOT NULL,payload TEXT NOT NULL,setting_basis TEXT NOT NULL,created REAL NOT NULL,

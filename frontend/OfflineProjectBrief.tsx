@@ -16,12 +16,14 @@ type Draft = { base: string | null; idea: string; brief: ProjectBrief }
 export function LocalProjectBrief({
   projectId,
   refreshToken,
+  onConfirmed,
   ...controls
 }: {
   projectId: string
   refreshToken: number
   disabled: boolean
   onDirty: (value: boolean) => void
+  onConfirmed?: () => void
 }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof readLocalProjectBrief>>>()
   const [error, setError] = useState('')
@@ -56,6 +58,7 @@ export function LocalProjectBrief({
           throw failure
         }
         setData(await readLocalProjectBrief(projectId))
+        onConfirmed?.()
       }}
     />
   )

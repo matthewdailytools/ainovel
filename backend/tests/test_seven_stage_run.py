@@ -352,6 +352,129 @@ def test_seven_stage_run_reaches_verified_checkpoints(client, domain, settings, 
     assert len(final["children"]) == child_count + 1
 
 
+def test_resume_from_adopted_project_keeps_author_ending_and_skips_ideation(client, domain, settings):
+    branch = domain.create_novel("从立项接力的遗铃")["branch_id"]
+    prefix = f"/api/branches/{branch}"
+    endpoint = f"{prefix}/seven-stage-runs"
+    project = f"{prefix}/conception/project-brief"
+    body = {"idea": IDEA, "brief": {**BRIEF, "ending": "和师姐一起把铃交还铸铃师。"}}
+    first = client.put(project, json={**body, "base_revision": 0, "idempotency_key": uid()}).json()
+    body["brief"]["ending"] = "师姐亲手将铜铃挂回城门。"
+    adopted = client.put(project, json={**body, "base_revision": 1, "idempotency_key": uid()}).json()
+    request = {
+        "start_from": "project",
+        "source_id": first["id"],
+        "chapter_count": 1,
+        "account": "deepseek",
+        "budget_limit": 1,
+        "client_request_id": uid(),
+        "auto_confirm_planning": True,
+        "auto_adopt_body": True,
+    }
+    assert client.post(endpoint, json=request).json()["code"] == "project_brief_changed"
+    started = client.post(endpoint, json={**request, "source_id": adopted["id"]})
+    assert started.status_code == 202, started.text
+    identifier = started.json()["id"]
+    model = Model(settings=settings)
+    drain(settings, model)
+    task = domain.task(identifier)
+    assert task["status"] == "needs_review", task["error"]
+    state = task["result"]["seven_stage_run"]
+    assert state["stage"] == "inspection" and state["project_id"] == adopted["id"]
+    assert "conception.generate.project" not in model.calls
+    assert "conception.generate.category" in model.calls
+    confirmed = client.get(f"{prefix}/conception").json()
+    assert confirmed["project"]["brief"]["ending"] == body["brief"]["ending"]
+    assert confirmed["confirmation"]["current"]
+    adopted_settings = domain.artifact(confirmed["confirmation"]["id"])
+    assert adopted_settings["payload"]["project_confirmation_id"] == adopted["id"]
+
+
+def test_resume_from_written_manuscript_or_passed_inspection_only_runs_remaining_stages(
+    client, domain, settings, story
+):
+    branch = story["branch_id"]
+    chapter_id = story["chapter_id"]
+    prefix = f"/api/branches/{branch}"
+    endpoint = f"{prefix}/seven-stage-runs"
+    report_url = f"{prefix}/workflow-inspections"
+    setting_id = setting_confirmation(client, branch)
+    put_and_confirm(
+        client,
+        f"{prefix}/outline-workspace",
+        {"base_revision": 0, "confirmation_id": setting_id, "plan": plan([{"id": chapter_id}], ["bell"])},
+    )
+    assert client.get(endpoint + "/sources").json() == {"writing_id": None, "inspection_id": None}
+
+    def launch(origin, source, status=202):
+        response = client.post(
+            endpoint,
+            json={
+                "start_from": origin,
+                "source_id": source,
+                "account": "deepseek",
+                "budget_limit": 1,
+                "client_request_id": uid(),
+            },
+        )
+        assert response.status_code == status, response.text
+        return response.json()
+
+    first = domain.save(chapter_id, 0, BODY)
+    original_source = client.get(endpoint + "/sources").json()
+    assert original_source["writing_id"] and not original_source["inspection_id"]
+    chapter = domain.save(chapter_id, first["revision"], BODY + "夜已深。")
+    current_source = client.get(endpoint + "/sources").json()
+    assert current_source["writing_id"] != original_source["writing_id"]
+    assert launch("writing", original_source["writing_id"], 409)["code"] == "inspection_changed"
+    writing = launch("writing", current_source["writing_id"])
+    model = Model(settings=settings)
+    drain(settings, model)
+    run = domain.task(writing["id"])
+    assert run["status"] == "needs_review", run["error"]
+    state = run["result"]["seven_stage_run"]
+    assert state["stage"] == "inspection"
+    assert state["completed_chapters"] == [
+        {"id": chapter_id, "revision": chapter["revision"], "existing": True}
+    ]
+    assert model.calls == ["对账立项章纲与节奏"]
+    assert launch("inspection", state["inspection_id"], 409)["code"] == "seven_stage_active"
+    assert client.post(f"{endpoint}/{run['id']}/cancel").status_code == 200
+    assert launch("inspection", state["inspection_id"], 409)["code"] == "inspection_changed"
+
+    def confirm_report():
+        preview = client.get(report_url).json()["preview"]
+        response = client.post(
+            report_url,
+            json={
+                "basis_sha256": preview["basis_sha256"],
+                "author_reviews": [
+                    author(row["check_id"], chapter) for row in preview["items"] if row["status"] == "pending"
+                ],
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    adopted = confirm_report()
+    assert client.get(endpoint + "/sources").json()["inspection_id"] == adopted
+    completion = launch("inspection", adopted)
+    updated = confirm_report()
+    assert updated != adopted
+    drain(settings, model)
+    run = domain.task(completion["id"])
+    assert run["status"] == "needs_review" and "选定" in run["error"]
+    assert model.calls == ["对账立项章纲与节奏"]
+    assert client.post(f"{endpoint}/{run['id']}/resume").status_code == 200
+    drain(settings, model)
+    run = domain.task(completion["id"])
+    assert run["status"] == "needs_review", run["error"]
+    state = run["result"]["seven_stage_run"]
+    assert state["stage"] == "completion" and state["inspection_id"] == updated
+    assert model.calls == ["对账立项章纲与节奏", "准备完本收束核对建议", "起草完本交付简介"]
+    assert domain.chapter(chapter_id)["revision"] == chapter["revision"]
+
+
 def test_budget_and_concurrent_edit_leave_original_intact(client, domain, settings, story):
     _, endpoint, run_id = start(client, domain, story, "outline", budget_limit=0.000001)
     model = Model(settings=settings)

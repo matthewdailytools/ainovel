@@ -23,19 +23,24 @@ class ProjectHistory(Input):
 
     @model_validator(mode="after")
     def check_links(self):
-        by_id = {row.id: row for row in self.versions}
-        if len(by_id) != len(self.versions):
-            raise ValueError("立项历史的修订编号重复。")
-        if self.adopted_revision_id and self.adopted_revision_id not in by_id:
-            raise ValueError("稿件包缺少采用的立项修订。")
-        proven = set()
-        for revision in self.versions:
-            path = set()
-            cursor = revision.id
-            while cursor and cursor not in proven:
-                if cursor in path or cursor not in by_id:
-                    raise ValueError("立项父修订缺失或形成循环。")
-                path.add(cursor)
-                cursor = by_id[cursor].parent_id
-            proven.update(path)
+        check_version_graph(self.adopted_revision_id, self.versions, "立项")
         return self
+
+
+def check_version_graph(adopted_revision_id, versions, label):
+    by_id = {row.id: row for row in versions}
+    if len(by_id) != len(versions):
+        raise ValueError(f"{label}历史的修订编号重复。")
+    if adopted_revision_id and adopted_revision_id not in by_id:
+        raise ValueError(f"稿件包缺少采用的{label}修订。")
+    proven = set()
+    for revision in versions:
+        path = set()
+        cursor = revision.id
+        while cursor and cursor not in proven:
+            if cursor in path or cursor not in by_id:
+                raise ValueError(f"{label}父修订缺失或形成循环。")
+            path.add(cursor)
+            cursor = by_id[cursor].parent_id
+        proven.update(path)
+    return by_id

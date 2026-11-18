@@ -32,7 +32,7 @@ STALE_BASIS = {
 
 
 class StartRun(Input):
-    start_from: Literal["idea", "settings", "outline"]
+    start_from: Literal["idea", "project", "settings", "outline", "writing", "inspection"]
     source_id: Identifier | None = None
     idea: IdeaText | None = None
     chapter_count: int | None = Field(default=None, ge=1, le=100, strict=True)
@@ -51,10 +51,10 @@ class StartRun(Input):
             if not self.idea or not self.chapter_count or self.source_id:
                 raise ValueError("从创意启动需提供创作思路和章数。")
         elif not self.source_id or self.idea:
-            raise ValueError("接力时请选择已确认设定或大纲。")
+            raise ValueError("接力时请选择有效的保存版本。")
         if self.reference_session_id:
-            if self.reference_revision is None or self.start_from == "outline":
-                raise ValueError("从创意或设定接力时，可选择绑定修订的拆解会话。")
+            if self.reference_revision is None or self.start_from not in {"idea", "project", "settings"}:
+                raise ValueError("生成大纲前可选择绑定修订的拆解会话。")
         elif self.reference_revision is not None or self.auto_adopt_reference:
             raise ValueError("请先选择本工作版本的参考会话。")
         return self
@@ -122,6 +122,42 @@ def _reference_basis(tx, branch_id, identifier, revision):
     }
 
 
+class ReviewSources(Input):
+    writing_id: Identifier | None
+    inspection_id: Identifier | None
+
+
+def _review_sources(tx, branch_id, outline):
+    from .workflow_inspection import _scope, body_chars, latest_book_inspection
+
+    chapters = _scope(tx, branch_id, outline, "book", None)
+    if (
+        not chapters
+        or outline["stale"]
+        or any(row["stale"] or not body_chars(row["content"]) for row in chapters)
+    ):
+        return ReviewSources(writing_id=None, inspection_id=None), []
+    manifest = [
+        [
+            row["id"],
+            row["title"],
+            row["position"],
+            row["revision"],
+            sha256(row["content"].encode()).hexdigest(),
+        ]
+        for row in chapters
+    ]
+    outline_id = (outline["confirmed"] or {}).get("id")
+    writing_id = sha256(dumps([outline_id, manifest]).encode()).hexdigest()
+    report = latest_book_inspection(tx, branch_id)
+    return (
+        ReviewSources(
+            writing_id=writing_id, inspection_id=report["id"] if _inspection_ready(report) else None
+        ),
+        [{"id": row["id"], "revision": row["revision"], "existing": True} for row in chapters],
+    )
+
+
 def start_run(domain, branch_id, data):
     from .conception import revision_tx
     from .outline_workspace import _view
@@ -153,6 +189,8 @@ def start_run(domain, branch_id, data):
             project = confirmed_project_tx(tx, branch_id)
             setting_id = None
             outline_id = None
+            completed_chapters = []
+            report_id = None
             if data.start_from == "outline":
                 confirmed = outline["confirmed"]
                 if not confirmed or confirmed["id"] != data.source_id or outline["stale"]:
@@ -161,6 +199,20 @@ def start_run(domain, branch_id, data):
                 setting_id = confirmed["setting_basis"]["confirmation_id"]
             elif data.start_from == "settings":
                 setting_id = confirmed_world_basis(tx, branch_id, data.source_id)["confirmation_id"]
+            elif data.start_from == "project":
+                if not project or project["id"] != data.source_id:
+                    raise DomainError("project_brief_changed", "请选择当前已确认的立项。", 409)
+            elif data.start_from in {"writing", "inspection"}:
+                sources, completed_chapters = _review_sources(tx, branch_id, outline)
+                selected = sources.writing_id if data.start_from == "writing" else sources.inspection_id
+                if not selected or data.source_id != selected:
+                    raise DomainError("inspection_changed", "请重新核对当前已保存正文和全书体检。", 409)
+                confirmed = outline["confirmed"]
+                if confirmed:
+                    outline_id = confirmed["id"]
+                    setting_id = confirmed["setting_basis"]["confirmation_id"]
+                if data.start_from == "inspection":
+                    report_id = sources.inspection_id
             elif active_chapters or project or outline["draft"] or revision_tx(tx, branch_id):
                 raise DomainError("seven_stage_idea_scope", "请从新建空白作品启动创意自动流程。", 409)
             if not active_chapters and not data.chapter_count:
@@ -168,7 +220,14 @@ def start_run(domain, branch_id, data):
             if active_chapters and data.chapter_count and len(active_chapters) != data.chapter_count:
                 raise DomainError("seven_stage_chapters", "指定的章数与已存在的目录范围不一致。")
             state = {
-                "stage": {"idea": "project", "settings": "outline", "outline": "writing"}[data.start_from],
+                "stage": {
+                    "idea": "project",
+                    "project": "settings",
+                    "settings": "outline",
+                    "outline": "writing",
+                    "writing": "inspection",
+                    "inspection": "completion",
+                }[data.start_from],
                 "story_revision": story["story_revision"],
                 "conception_revision": revision_tx(tx, branch_id),
                 "project_id": project["id"] if project else None,
@@ -176,13 +235,15 @@ def start_run(domain, branch_id, data):
                 "outline_id": outline_id,
                 "outline_revision": outline["draft"]["revision"] if outline["draft"] else 0,
                 "children": [],
-                "completed_chapters": [],
+                "completed_chapters": completed_chapters,
             }
+            if report_id:
+                state.update(inspection_id=report_id, selected_inspection_id=report_id)
             if data.reference_session_id:
                 state["reference_basis"] = _reference_basis(
                     tx, branch_id, data.reference_session_id, data.reference_revision
                 )
-                if data.start_from == "settings":
+                if data.start_from != "idea":
                     state["stage"] = "reference"
             state["start_snapshot_id"] = checkpoint_tx(tx, branch_id, "启动七台接力")
             identifier = uid()
@@ -485,7 +546,7 @@ def _reference(worker, state):
             )
             return
         state["reference_references"] = refs
-    _transition(worker, state, "settings" if worker.task["payload"]["start_from"] == "idea" else "outline")
+    _transition(worker, state, "settings" if state["setting_id"] is None else "outline")
 
 
 def _settings(worker, state):
@@ -794,13 +855,20 @@ def _inspection_ready(report):
 def _completion(worker, state):
     from .book_completion import _evaluate, _latest
     from .completion_preparation import KEY, KIND as PREPARATION
+    from .workflow_inspection import latest_book_inspection
 
     branch = worker.task["branch_id"]
     _unchanged(_story_revision(worker.domain, branch), state["story_revision"])
     with worker.db.connect() as tx:
         tx.execute("BEGIN")
+        selected = state.get("selected_inspection_id")
+        report = latest_book_inspection(tx, branch) if selected else None
         preview = _evaluate(tx, branch)
         record = _latest(tx, branch, preview["basis_sha256"])
+    if selected and (not _inspection_ready(report) or report["id"] != selected):
+        state["completion_basis_changed"] = True
+        _checkpoint(worker, "needs_review", "选定的全书体检已有变化，请核对后继续。")
+        return
     if record and record["current"]:
         state["completion_id"] = record["id"]
         state["stage"] = "done"
@@ -869,6 +937,15 @@ def register_routes(app, domain, provider_ready):
         )
         return [domain.task(row["id"]) for row in rows]
 
+    @app.get(endpoint + "/sources")
+    def review_sources(branch_id: str) -> ReviewSources:
+        from .outline_workspace import _view
+
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            _story(tx, branch_id)
+            return _review_sources(tx, branch_id, _view(tx, branch_id))[0]
+
     @app.post(endpoint + "/{task_id}/pause")
     def pause_run(branch_id: str, task_id: str):
         _control(domain, branch_id, task_id, "pause")
@@ -916,11 +993,7 @@ def _control(domain, branch_id, task_id, action):
                 from .outline_workspace import _view
 
                 outline = _view(tx, branch_id)
-                if (
-                    not outline["confirmed"]
-                    or outline["confirmed"]["id"] != state["outline_id"]
-                    or outline["stale"]
-                ):
+                if (outline["confirmed"] or {}).get("id") != state["outline_id"] or outline["stale"]:
                     raise DomainError("seven_stage_changed", "上游规划已改变，请从有效版本重新接力。", 409)
                 # The author explicitly resumes against newer prose. Preserve the
                 # generated receipts and re-run inspection before any completion.
@@ -937,6 +1010,7 @@ def _control(domain, branch_id, task_id, action):
                     "artifact_id",
                     "child_recovery",
                     "completion_preparation_id",
+                    "selected_inspection_id",
                 ):
                     state.pop(key, None)
                 recovery = None

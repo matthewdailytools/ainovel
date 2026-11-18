@@ -9,8 +9,10 @@ from pydantic import Field, StringConstraints
 
 from .db import DomainError, dumps, uid
 from .models import Input
+from .outline_portability import OutlineHistory
 from .project_portability import Identifier, ProjectHistory
 from .project_sync import export_project_history, restore_project_history
+from .settings_portability import SettingsHistory
 
 FORMAT = "ainovel-manuscript/1"
 EVIDENCE = "portable_workbench_evidence"
@@ -90,6 +92,8 @@ class ManuscriptPackage(Input):
         default_factory=list, max_length=50_000, exclude_if=lambda value: not value
     )
     project_history: ProjectHistory | None = Field(default=None, exclude_if=lambda value: value is None)
+    settings_history: SettingsHistory | None = Field(default=None, exclude_if=lambda value: value is None)
+    outline_history: OutlineHistory | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def _digest(text):
@@ -205,6 +209,16 @@ def _index(package):
                 reference.sha256,
             ):
                 raise DomainError("manuscript_evidence", "依据与包中引用的章稿修订不一致。")
+    if package.settings_history:
+        from .settings_archive import validate_settings_history
+
+        validate_settings_history(package.settings_history, package.project_history, revisions)
+    if package.outline_history:
+        from .outline_archive import validate_outline_history
+
+        validate_outline_history(
+            package.outline_history, package.project_history, package.settings_history, package.chapters
+        )
     return histories
 
 
@@ -312,6 +326,9 @@ def store_portable_evidence(tx, branch_id, document):
 
 
 def export_manuscript(domain, branch_id):
+    from .outline_archive import export_outline_history, validate_outline_history
+    from .settings_archive import export_settings_history, validate_settings_history
+
     with domain.db.connect() as tx:
         tx.execute("BEGIN")
         branch = tx.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
@@ -337,7 +354,7 @@ def export_manuscript(domain, branch_id):
                 {**dict(row), "parent_id": previous.get(row["chapter_id"]), "sha256": _digest(row["content"])}
             )
             previous[row["chapter_id"]] = row["id"]
-        return ManuscriptPackage.model_validate(
+        package = ManuscriptPackage.model_validate(
             {
                 "format": FORMAT,
                 "novel": dict(novel),
@@ -347,12 +364,26 @@ def export_manuscript(domain, branch_id):
                 "evidence": _evidence(tx, branch_id),
                 "source_revisions": source_revisions(tx, branch_id),
                 "project_history": export_project_history(tx, branch_id),
+                "settings_history": export_settings_history(tx, branch_id),
+                "outline_history": export_outline_history(tx, branch_id),
             }
         )
+        if package.settings_history:
+            validate_settings_history(
+                package.settings_history,
+                package.project_history,
+                {row.id: row for row in [*package.revisions, *package.source_revisions]},
+            )
+        if package.outline_history:
+            validate_outline_history(
+                package.outline_history, package.project_history, package.settings_history, package.chapters
+            )
+        return package
 
 
 def import_manuscript(domain, package):
     histories = _index(package)
+    outline = None
     with domain.db.connect(True) as tx:
         if (
             tx.execute("SELECT 1 FROM novels WHERE id=?", (package.novel.id,)).fetchone()
@@ -410,7 +441,18 @@ def import_manuscript(domain, package):
         )
         if package.project_history:
             restore_project_history(tx, branch.id, package.project_history)
-    return {"id": novel.id, "branch_id": branch.id}
+        if package.settings_history:
+            from .settings_archive import import_settings_history
+
+            import_settings_history(tx, branch.id, package.settings_history)
+        if package.outline_history:
+            from .outline_archive import import_outline_history
+
+            outline = import_outline_history(tx, branch.id, package.outline_history)
+    result = {"id": novel.id, "branch_id": branch.id}
+    if outline:
+        result["outline_restore"] = outline
+    return result
 
 
 def register_routes(app, domain):
@@ -421,6 +463,17 @@ def register_routes(app, domain):
     @app.post("/api/manuscript-packages/import", status_code=201)
     def import_package(data: ManuscriptPackage):
         return import_manuscript(domain, data)
+
+    @app.post("/api/branches/{branch_id}/manuscript-outline/restore")
+    def restore_outline(branch_id: str):
+        from .outline_archive import restore_outline_archive
+
+        domain.branch(branch_id)
+        with domain.db.connect(True) as tx:
+            restored = restore_outline_archive(tx, branch_id)
+            if not restored:
+                raise DomainError("not_found", "没有可恢复的稿件包大纲。", 404)
+            return restored
 
     @app.get("/api/branches/{branch_id}/manuscript-evidence")
     def get_evidence(branch_id: str) -> list[PortableEvidence]:
