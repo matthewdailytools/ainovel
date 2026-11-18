@@ -6,6 +6,7 @@ import subprocess
 import socket
 import sys
 
+from .db import DomainError
 from .settings import ROOT, Settings
 
 
@@ -61,6 +62,8 @@ def main():
             )
             try:
                 uvicorn.run(create_app(settings), host="127.0.0.1", port=settings.port, access_log=False)
+            except DomainError as error:
+                parser.error(error.message)
             finally:
                 stop_file.write_text("stop", encoding="utf-8")
                 try:
@@ -70,21 +73,25 @@ def main():
                     worker.wait(timeout=5)
     else:
         from .backups import create_backup, restore_backup, verify_backup
-        from .db import Database
-        from .library import Library
 
-        db = Database(settings.data_dir / "manuscripts.sqlite")
-        Library(db, settings.data_dir)
-        if args.command == "backup":
-            result = create_backup(settings, db)
-        elif not args.file:
-            parser.error("需要 --file 备份文件路径")
-        else:
-            result = (
-                verify_backup(args.file)
-                if args.command == "verify"
-                else restore_backup(settings, db, args.file)
-            )
+        try:
+            if args.command == "backup":
+                from .db import Database
+                from .library import Library
+                from .runtime import data_directory_gate
+
+                with data_directory_gate(settings.data_dir, wait=True):
+                    db = Database(settings.data_dir / "manuscripts.sqlite")
+                    Library(db, settings.data_dir)
+                    result = create_backup(settings, db)
+            elif not args.file:
+                parser.error("需要 --file 备份文件路径")
+            elif args.command == "verify":
+                result = verify_backup(args.file)
+            else:
+                result = restore_backup(settings, None, args.file)
+        except DomainError as error:
+            parser.error(error.message)
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

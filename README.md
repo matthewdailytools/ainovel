@@ -146,6 +146,8 @@ uv run python -m ainovel.evidence_export --task '半自动任务标识' --task '
 uv run python -m ainovel.evidence_export --task '七台父任务标识' --usage-ledger 'D:/approved-usage/usage.sqlite'
 ```
 
+覆盖式整库恢复前先关闭本机工作台与 Worker。恢复、启动和整库备份会核对同一数据目录的占用状态。收到正在启动或恢复的提示时，待当前操作结束后重试。`verify` 在隔离位置验证备份，无需打开当前稿库。
+
 评测输出位于实际数据目录的 `acceptance` 文件夹。三种账户的固定原创样例每项重复 3 次；两种整书模式共享原创简报但不共享生成正文。失败、干预和用量不删除。验收目标、完整 N/U/F 矩阵与模板见 [15 产品验收与技术实施路径](15-产品验收与技术实施路径.md)，本轮结果见 [实施验收记录](docs/acceptance/实施验收记录.md)。
 
 证据导出包含两份独立正文、采用规划、可阅读的修订报告、未采纳候选及完整 JSON 记录；历史报告标明来源版本是否仍有效。历史两种模式各保存过 36 章，有限返修后仍有待审问题；它们保留为历史回归，不代替当前新版本验收。当前加强验证的两版本各保存3章并暂停在第4章检查点，见[联合更正记录](docs/product-validation/2026-11-15-chapter3-joint-corrections.md)。新两种整书、作者文学判断和使用收益仍未验证。

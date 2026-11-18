@@ -1,12 +1,16 @@
 """Interrupted SQLite restore and additive migration failures in disposable data."""
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
+from threading import Event
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
+from fastapi.testclient import TestClient
 
-from ainovel import backups, story_graph
+from ainovel import api, backups, runtime, story_graph, worker
 from ainovel.budget import Budget
 from ainovel.db import Database, DomainError
 from ainovel.library import Library
@@ -23,6 +27,7 @@ def source_bytes(settings):
 
 @pytest.fixture
 def restore_case(settings, domain, story):
+    api.create_app(settings)
     Library(domain.db, settings.data_dir).import_file("故障验证.txt", "渡船😀原件".encode())
     domain.save(story["chapter_id"], 0, "备份前原稿😀\n" + "临时工程样本。" * 4000)
     budget = Budget(settings)
@@ -48,6 +53,112 @@ def assert_current_unchanged(settings, domain, case):
     with domain.db.connect() as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+@pytest.mark.parametrize("preinitialized", [False, True])
+def test_api_started_during_unpack_waits_before_initialization_or_registration(
+    settings, domain, story, restore_case, monkeypatch, preinitialized
+):
+    blocked = Event()
+    database_opened = Event()
+    real_lock = runtime._try_data_lock
+    real_unpack = backups.unpack_verified
+    real_database = api.Database
+    chapter = story["chapter_id"]
+    app = api.create_app(settings) if preinitialized else None
+
+    def observed_lock(file):
+        try:
+            real_lock(file)
+        except OSError:
+            blocked.set()
+            raise
+
+    def observed_database(*args, **kwargs):
+        database_opened.set()
+        return real_database(*args, **kwargs)
+
+    def start_api_and_save():
+        with TestClient(app or api.create_app(settings)) as client:
+            headers = {"X-Ainovel-CSRF": client.get("/api/session").json()["csrf"]}
+            url = f"/api/chapters/{chapter}"
+            result = client.get(url)
+            assert result.status_code == 200, result.text
+            found = result.json()
+            saved = client.put(
+                url, headers=headers, json={"base_revision": found["revision"], "content": "恢复后的新稿。"}
+            )
+            assert saved.status_code == 200, saved.text
+            return found, saved.json()
+
+    future = None
+    with ThreadPoolExecutor(max_workers=1) as executor:
+
+        def late_start(source, target):
+            nonlocal future
+            counts = real_unpack(source, target)
+            future = executor.submit(start_api_and_save)
+            assert blocked.wait(5), "API did not encounter the lock while restoring"
+            assert not future.done()
+            assert not database_opened.is_set()
+            assert domain.db.all("SELECT * FROM processes") == []
+            assert_current_unchanged(settings, domain, restore_case)
+            return counts
+
+        monkeypatch.setattr(runtime, "_try_data_lock", observed_lock)
+        monkeypatch.setattr(backups, "unpack_verified", late_start)
+        monkeypatch.setattr(api, "Database", observed_database)
+        restored = backups.restore_backup(settings, domain.db, restore_case["path"])
+        found, saved = future.result(timeout=10)
+
+    assert restored["usage_ledger"] == "kept_current"
+    assert found["revision"] == 1 and found["content"].startswith("备份前原稿")
+    assert saved["revision"] == 2 and domain.chapter(chapter)["content"] == saved["content"]
+    assert Budget(settings).report() == restore_case["ledger"]
+    assert database_opened.is_set() is not preinitialized
+
+
+def test_worker_initialization_waits_for_gate_then_registers_alongside_running_api(settings, monkeypatch):
+    blocked = Event()
+    worker_opened = Event()
+    live_roles = []
+    real_lock = runtime._try_data_lock
+    real_worker = worker.Worker
+    real_run_once = real_worker.run_once
+
+    def observed_lock(file):
+        try:
+            real_lock(file)
+        except OSError:
+            blocked.set()
+            raise
+
+    def observed_worker(config):
+        worker_opened.set()
+        return real_worker(config)
+
+    async def observed_run_once(instance):
+        live_roles.extend(row["role"] for row in instance.db.all("SELECT role FROM processes"))
+        return await real_run_once(instance)
+
+    app = api.create_app(settings)
+    marker = settings.data_dir / "runtime" / "worker-stop-test.stop"
+    marker.write_text("stop", encoding="utf-8")
+    monkeypatch.setenv("AINOVEL_WORKER_STOP_FILE", str(marker))
+    monkeypatch.setenv("AINOVEL_PARENT_PID", "0")
+    monkeypatch.setattr(worker.Settings, "load", lambda: settings)
+    monkeypatch.setattr(runtime, "_try_data_lock", observed_lock)
+    monkeypatch.setattr(real_worker, "run_once", observed_run_once)
+    monkeypatch.setattr(worker, "Worker", observed_worker)
+
+    with TestClient(app), ThreadPoolExecutor(max_workers=1) as executor:
+        with runtime.data_directory_gate(settings.data_dir):
+            future = executor.submit(lambda: asyncio.run(worker.main()))
+            assert blocked.wait(5), "Worker did not encounter the held lock"
+            assert not worker_opened.is_set()
+        future.result(timeout=10)
+        assert set(live_roles) == {"api", "worker"}
+        assert app.state.db.all("SELECT role FROM processes") == [{"role": "api"}]
 
 
 def test_sqlite_backup_page_interruption_rolls_back_target_and_preserves_usage(

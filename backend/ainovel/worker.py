@@ -2128,10 +2128,12 @@ class Worker:
 
 
 async def main():
-    from .runtime import alive, register, unregister
+    from .runtime import alive, data_directory_gate, register, unregister
 
-    worker = Worker(Settings.load())
-    token = register(worker.db, "worker")
+    settings = Settings.load()
+    with data_directory_gate(settings.data_dir, wait=True):
+        worker = Worker(settings)
+        token = register(worker.db, "worker")
     parent_pid = int(os.environ.get("AINOVEL_PARENT_PID", "0"))
     stop_file = (
         Path(os.environ["AINOVEL_WORKER_STOP_FILE"]).resolve()

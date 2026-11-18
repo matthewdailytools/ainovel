@@ -20,6 +20,44 @@ def test_schema_is_read_only_even_with_occupied_port(tmp_path, monkeypatch):
     assert not (ROOT / "runtime").exists()
 
 
+def test_cli_restore_refuses_another_process_gate_before_creating_database(tmp_path):
+    from ainovel.runtime import data_directory_gate
+
+    config = tmp_path / "empty.toml"
+    config.write_text("")
+    with data_directory_gate(tmp_path):
+        result = subprocess.run(
+            [sys.executable, "-m", "ainovel", "restore", "--file", str(tmp_path / "unused.zip")],
+            env={
+                **os.environ,
+                "AINOVEL_CONFIG": str(config),
+                "AINOVEL_DATA_DIR": str(tmp_path),
+                "PYTHONIOENCODING": "utf-8",
+            },
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+    assert result.returncode == 2
+    assert "本机数据目录正在启动或恢复" in result.stderr
+    assert not (tmp_path / "manuscripts.sqlite").exists()
+
+
+def test_cli_verify_does_not_open_active_data_directory(tmp_path, monkeypatch, capsys):
+    from ainovel.backups import create_backup
+    from ainovel.db import Database
+
+    source, target = tmp_path / "source", tmp_path / "target"
+    db = Database(source / "manuscripts.sqlite")
+    snapshot = create_backup(Settings(source, {}, {}), db)
+    monkeypatch.setattr(Settings, "load", lambda *args: Settings(target, {}, {}))
+    monkeypatch.setattr(sys, "argv", ["ainovel", "verify", "--file", snapshot["path"]])
+    main()
+    assert '"integrity": "ok"' in capsys.readouterr().out
+    assert not any(target.iterdir())
+
+
 def test_serve_checks_port_before_starting_worker(tmp_path, monkeypatch):
     with socket.socket() as occupied:
         occupied.bind(("127.0.0.1", 0))

@@ -183,6 +183,44 @@ def test_seven_stage_backup_ledger_keeps_same_branch_batches_separate(client, do
     assert ledger.report() == before
 
 
+def test_source_snapshots_are_gated_and_isolated_evidence_unpack_does_not_hold_gate(
+    client, domain, settings, story, monkeypatch
+):
+    from ainovel.runtime import data_directory_gate
+
+    _, _, task_id = start(client, domain, story, "idea")
+    open_database = evidence_export.Database
+    make_backup = evidence_export.create_backup
+    unpack_backup = evidence_export.unpack_verified
+    observed = []
+
+    def assert_gate_held(step):
+        with pytest.raises(DomainError) as blocked, data_directory_gate(settings.data_dir):
+            pytest.fail("The live data directory was not locked")
+        assert blocked.value.code == "runtime_busy"
+        observed.append(step)
+
+    def open_checked(path):
+        if path == domain.db.path:
+            assert_gate_held("open")
+        return open_database(path)
+
+    def backup_checked(*args):
+        assert_gate_held("backup")
+        return make_backup(*args)
+
+    def unpack_checked(*args):
+        with data_directory_gate(settings.data_dir):
+            observed.append("unpack")
+        return unpack_backup(*args)
+
+    monkeypatch.setattr(evidence_export, "Database", open_checked)
+    monkeypatch.setattr(evidence_export, "create_backup", backup_checked)
+    monkeypatch.setattr(evidence_export, "unpack_verified", unpack_checked)
+    assert export_evidence(settings, [task_id])["restore"]["integrity"] == "ok"
+    assert observed == ["open", "backup", "unpack"]
+
+
 def test_seven_stage_shared_ledger_filters_families_in_one_read_snapshot(
     client, domain, settings, story, monkeypatch
 ):

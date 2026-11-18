@@ -12,7 +12,7 @@ from time import time
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from .db import Database, DomainError, uid
-from .library import MAX_FILE
+from .library import MAX_FILE, Library
 
 COPY_BLOCK = 64 * 1024
 
@@ -164,6 +164,16 @@ def verify_backup(path):
 
 
 def restore_backup(settings, database, path):
+    from .runtime import data_directory_gate
+
+    with data_directory_gate(settings.data_dir):
+        if database is None:
+            database = Database(settings.data_dir / "manuscripts.sqlite")
+            Library(database, settings.data_dir)
+        return _restore_backup(settings, database, path)
+
+
+def _restore_backup(settings, database, path):
     from .runtime import restore_process_active
 
     if any(

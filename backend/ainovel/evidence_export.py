@@ -12,6 +12,7 @@ from time import time
 from .backups import create_backup, unpack_verified
 from .db import Database, DomainError, dumps, uid
 from .domain import Domain, char_count
+from .runtime import data_directory_gate
 from .settings import Settings
 
 
@@ -386,7 +387,8 @@ def export_evidence(settings, task_ids, *, usage_ledger=None):
         local_usage = settings.data_dir / "usage.sqlite"
         if local_usage.is_file() and local_usage.samefile(usage_ledger):
             raise DomainError("acceptance_evidence", "共享费用账本须与验收稿件目录的费用账本分开。", 409)
-    backup = create_backup(settings, Database(settings.data_dir / "manuscripts.sqlite"))
+    with data_directory_gate(settings.data_dir, wait=True):
+        backup = create_backup(settings, Database(settings.data_dir / "manuscripts.sqlite"))
     folder = settings.data_dir / "acceptance" / ("export-" + uid())
     folder.mkdir(parents=True)
     report = {

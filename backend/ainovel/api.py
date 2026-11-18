@@ -102,21 +102,33 @@ class MoveInput(Input):
 
 
 def create_app(settings=None, schema_only=False):
+    from .runtime import data_directory_gate
+
     settings = settings or Settings.load()
+    if schema_only:
+        return _create_app(settings, schema_only=True)
+    with data_directory_gate(settings.data_dir, wait=True):
+        return _create_app(settings)
+
+
+def _create_app(settings, schema_only=False):
+    from .runtime import alive, data_directory_gate, register, unregister
+
     db = Database(settings.data_dir / "manuscripts.sqlite") if not schema_only else None
     domain, budget = (Domain(db), Budget(settings)) if not schema_only else (None, None)
     library = Library(db, settings.data_dir) if not schema_only else None
 
     @asynccontextmanager
     async def lifespan(app):
-        from .runtime import alive, register, unregister
-
-        if db and not any(alive(row["pid"]) for row in db.all("SELECT pid FROM processes WHERE role='api'")):
-            with db.connect(True) as tx:
-                tx.execute(
-                    "UPDATE library_jobs SET status='failed',error='上次本机服务中断，未确认取得原件；可明确重新获取。' WHERE status IN ('queued','downloading')"
-                )
-        token = register(db, "api") if db else None
+        token = None
+        if db:
+            with data_directory_gate(settings.data_dir, wait=True):
+                if not any(alive(row["pid"]) for row in db.all("SELECT pid FROM processes WHERE role='api'")):
+                    with db.connect(True) as tx:
+                        tx.execute(
+                            "UPDATE library_jobs SET status='failed',error='上次本机服务中断，未确认取得原件；可明确重新获取。' WHERE status IN ('queued','downloading')"
+                        )
+                token = register(db, "api")
         try:
             yield
         finally:

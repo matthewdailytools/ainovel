@@ -1,15 +1,18 @@
 """Record live app processes so a manuscript restore cannot race a running service."""
 
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 import errno
 import math
 from pathlib import Path, PureWindowsPath
 import re
 import sys
-from time import time
+from time import monotonic, sleep, time
 
-from .db import uid
+from .db import DomainError, uid
+
+_NATIVE_WINDOWS = os.name == "nt"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS process_identities(
@@ -24,6 +27,42 @@ class ProcessIdentity:
     birth_id: str | None = None
     created: float | None = None
     image: str | None = None
+
+
+def _try_data_lock(file):
+    if _NATIVE_WINDOWS:
+        import msvcrt
+
+        file.seek(0)
+        msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+@contextmanager
+def data_directory_gate(data_dir, *, wait=False):
+    """Serialize service startup and whole-library restoration outside SQLite."""
+    folder = data_dir / "runtime"
+    folder.mkdir(parents=True, exist_ok=True)
+    deadline = monotonic() + (10 if wait else 0)
+    # Keep the path stable so competing processes always lock the same file.
+    # Closing the handle releases its lock, including when the process stops.
+    with (folder / "manuscript-startup.lock").open("a+b") as gate:
+        while True:
+            try:
+                _try_data_lock(gate)
+                break
+            except OSError as error:
+                if error.errno not in {errno.EACCES, errno.EAGAIN}:
+                    raise
+                if monotonic() >= deadline:
+                    raise DomainError(
+                        "runtime_busy", "本机数据目录正在启动或恢复，请稍后重试。", 409
+                    ) from error
+                sleep(0.05)
+        yield
 
 
 def inspect_process(pid):
