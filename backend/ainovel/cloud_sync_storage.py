@@ -175,6 +175,7 @@ def verify_storage(database, backup_dir):
         ("database", database),
         ("wal", database.with_name(database.name + "-wal")),
         ("shm", database.with_name(database.name + "-shm")),
+        ("journal", database.with_name(database.name + "-journal")),
     ):
         try:
             mode = path.lstat().st_mode

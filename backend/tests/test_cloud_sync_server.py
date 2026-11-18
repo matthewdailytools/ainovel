@@ -105,8 +105,9 @@ def test_encrypted_startup_verifies_both_directories_before_creating_the_ledger(
     cloud_sync_server.main(["--port", "41234", "--require-encrypted-storage", "--backup-dir", "backups"])
 
 
-def test_encrypted_startup_refuses_unverified_backup_before_loading_an_existing_ledger(
-    tmp_path, monkeypatch, capsys
+@pytest.mark.parametrize("unverified", ["backup_directory", "journal"])
+def test_encrypted_startup_refuses_unverified_storage_before_loading_an_existing_ledger(
+    tmp_path, monkeypatch, capsys, unverified
 ):
     directory = tmp_path / "data"
     directory.mkdir()
@@ -116,14 +117,19 @@ def test_encrypted_startup_refuses_unverified_backup_before_loading_an_existing_
     provisioning = "isolated-preflight-rejection-token"
     create_sync_app(ledger, provisioning)
     before = ledger.read_bytes()
+    journal = ledger.with_name("sync.sqlite-journal")
+    journal_bytes = b"synthetic rollback journal fixture"
+    if unverified == "journal":
+        journal.write_bytes(journal_bytes)
+    unverified_path = backup if unverified == "backup_directory" else journal
     monkeypatch.setenv("AINOVEL_SYNC_DB", str(ledger))
     monkeypatch.setenv("AINOVEL_SYNC_PROVISION_TOKEN", provisioning)
     checked = []
 
     def proof(path):
         checked.append(path)
-        if path == backup:
-            raise cloud_sync_storage.StorageProofError("备份卷未通过核验。")
+        if path == unverified_path:
+            raise cloud_sync_storage.StorageProofError("目标卷未通过核验。")
         return "dm-crypt"
 
     monkeypatch.setattr(cloud_sync_storage, "_volume_proof", proof)
@@ -133,16 +139,21 @@ def test_encrypted_startup_refuses_unverified_backup_before_loading_an_existing_
         cloud_sync_server.main(["--require-encrypted-storage", "--backup-dir", str(backup)])
     assert stopped.value.code == 2
     error = capsys.readouterr().err
-    assert "静态加密核验未通过" in error and "backup_directory" in error
+    assert "静态加密核验未通过" in error and unverified in error
     assert provisioning not in error and str(tmp_path) not in error
-    assert checked == [directory, backup]
+    assert checked == (
+        [directory, backup] if unverified == "backup_directory" else [directory, backup, ledger, journal]
+    )
     assert ledger.read_bytes() == before
+    if unverified == "journal":
+        assert journal.read_bytes() == journal_bytes
 
 
-def test_encrypted_cli_rejects_invalid_sidecar_without_creating_database_or_listening(tmp_path):
+@pytest.mark.parametrize("sidecar", ["wal", "journal"])
+def test_encrypted_cli_rejects_invalid_sidecar_without_creating_database_or_listening(tmp_path, sidecar):
     ledger = tmp_path / "sync.sqlite"
-    invalid_wal = ledger.with_name("sync.sqlite-wal")
-    invalid_wal.mkdir()
+    invalid = ledger.with_name(f"sync.sqlite-{sidecar}")
+    invalid.mkdir()
     backup = tmp_path / "backups"
     backup.mkdir()
     environment = {
@@ -176,10 +187,10 @@ def test_encrypted_cli_rejects_invalid_sidecar_without_creating_database_or_list
         check=False,
     )
     assert process.returncode == 2, process.stderr
-    assert "静态加密核验未通过" in process.stderr and "wal 路径" in process.stderr
+    assert "静态加密核验未通过" in process.stderr and f"{sidecar} 路径" in process.stderr
     assert "Uvicorn running" not in process.stderr and "Application startup" not in process.stderr
     assert not ledger.exists() and not ledger.with_name("sync.sqlite-shm").exists()
-    assert invalid_wal.is_dir() and not any(backup.iterdir())
+    assert invalid.is_dir() and not any(backup.iterdir())
     with socket.socket() as connection:
         connection.settimeout(1)
         assert connection.connect_ex(("127.0.0.1", port)) != 0

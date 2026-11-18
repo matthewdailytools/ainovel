@@ -103,7 +103,7 @@ uv run python -m ainovel.cloud_sync_server --host 0.0.0.0 --port 8443 --tls-cert
 
 启动入口要求非回环监听提供 TLS 证书和私钥，最低 TLS 1.2。加密私钥的口令可由 `AINOVEL_SYNC_TLS_KEY_PASSWORD` 注入。使用客户端访问实际同步地址的 `/api/sync/health` 核对证书链、主机名及 SQLite 结构和读取状态。活动库不可读或缺少服务所需结构时返回 `503 sync_storage`，运行中的同步请求保持缺失的恢复路径可用。再以独立设备凭据核对作品权限。本机工作台的 `AINOVEL_OFFLINE_SYNC_ORIGINS` 配置相应同步服务地址。
 
-生产部署可通过 `--require-encrypted-storage` 把静态加密核验设为启动条件，并用 `--backup-dir` 指定现有备份目录。设置实际 `AINOVEL_SYNC_DB`，提前准备数据库父目录，并为服务运行身份配置读取系统加密状态的权限。服务会在打开或创建 SQLite 及监听端口之前核验数据库目录、现有数据库和 WAL／SHM，以及所指定的备份卷。附件跟随 SQLite 保存。任何核验失败均退出 `2`。隔离联调可沿用上方的回环启动方式。[七台云同步验收](docs/acceptance/七台云同步验收.md)
+生产部署可通过 `--require-encrypted-storage` 把静态加密核验设为启动条件，并用 `--backup-dir` 指定现有备份目录。设置实际 `AINOVEL_SYNC_DB`，提前准备数据库父目录，并为服务运行身份配置读取系统加密状态的权限。服务会在打开或创建 SQLite 及监听端口之前核验数据库目录、现有数据库、WAL／SHM 和现存 SQLite 回滚日志，以及所指定的备份卷。附件跟随 SQLite 保存。任何核验失败均退出 `2`。隔离联调可沿用上方的回环启动方式。[七台云同步验收](docs/acceptance/七台云同步验收.md)
 
 启动前也可单独运行 `uv run python -m ainovel.cloud_sync_storage --backup-dir <现有备份目录>` 做同一项只读核验。支持 Windows 已完成加密且保护开启的本地 BitLocker 固定卷，以及 Linux 直接挂载在完整 AES-XTS dm-crypt 映射上的 ext4。密钥恢复、账户退出与数据保留按实际部署验收。[静态加密验收](docs/acceptance/七台云同步验收.md)
 

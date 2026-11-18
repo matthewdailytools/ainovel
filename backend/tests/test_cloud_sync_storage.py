@@ -16,6 +16,8 @@ def test_preflight_covers_database_sidecars_attachments_and_backup_without_write
     database = data / "sync.sqlite"
     wal = database.with_name("sync.sqlite-wal")
     shm = database.with_name("sync.sqlite-shm")
+    journal = database.with_name("sync.sqlite-journal")
+    files = (database, wal, shm, journal)
     checked = []
 
     def probe(path):
@@ -28,14 +30,21 @@ def test_preflight_covers_database_sidecars_attachments_and_backup_without_write
         "attachments": "sqlite",
     }
     assert checked == [data, backup]
-    assert not database.exists() and not wal.exists() and not shm.exists()
-    for item in (database, wal, shm):
+    assert not any(item.exists() for item in files)
+    for item in files:
         item.write_bytes(b"synthetic fixture")
     checked.clear()
     result = storage.verify_storage(database, backup)
-    assert checked == [data, backup, database, wal, shm]
-    assert set(result["storage"]) == {"database_directory", "backup_directory", "database", "wal", "shm"}
-    assert all(item.read_bytes() == b"synthetic fixture" for item in (database, wal, shm))
+    assert checked == [data, backup, *files]
+    assert set(result["storage"]) == {
+        "database_directory",
+        "backup_directory",
+        "database",
+        "wal",
+        "shm",
+        "journal",
+    }
+    assert all(item.read_bytes() == b"synthetic fixture" for item in files)
 
 
 def test_refuses_unavailable_backup_or_invalid_sidecar_without_claiming_success(tmp_path, monkeypatch):
