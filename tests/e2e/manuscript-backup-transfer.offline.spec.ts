@@ -97,6 +97,217 @@ async function checked<T>(response: APIResponse): Promise<T> {
   }
 }
 
+test('独立 Web 原位恢复单个篇幅目标时只提示相关 09 及完本记录', async ({ page, browser, baseURL }) => {
+  await page.goto('/')
+  const { csrf } = await checked<{ csrf: string }>(await page.request.get('/api/session'))
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const call = async <T>(path: string, method = 'GET', data?: object) =>
+    checked<T>(await page.request.fetch(path, { method, headers, data }))
+  const { branch_id } = await call<Novel>('/api/novels', 'POST', { title: '验收 · 篇幅恢复影响' })
+  const branch = `/api/branches/${branch_id}`
+  const chapters: Chapter[] = []
+  for (const [title, content] of [
+    ['拾铃', '学徒循断痕找到了师姐。'],
+    ['还铃', '师姐接过铜铃，两人一同进屋。'],
+  ]) {
+    const { id } = await call<Chapter>(`${branch}/chapters`, 'POST', { title })
+    chapters.push(await call<Chapter>(`/api/chapters/${id}`, 'PUT', { base_revision: 0, content }))
+  }
+  const [first, last] = chapters
+  const outline = `${branch}/outline-workspace`
+  const { draft } = await call<{ draft: { revision: number } }>(outline, 'PUT', {
+    base_revision: 0,
+    plan: {
+      summary: '找到师姐并归还铜铃。',
+      volumes: chapters.map(({ id }, index) => ({
+        id: `size-volume-${index}`,
+        title: index ? '还铃卷' : '拾铃卷',
+        summary: '循断痕寻人。',
+        units: [
+          {
+            id: `size-unit-${index}`,
+            title: '追踪',
+            summary: '核对铜铃来历。',
+            chapters: [
+              { chapter_id: id, goal: '寻找失主', obstacle: '无署名', turn: '辨识断痕', result: '找回去向' },
+            ],
+          },
+        ],
+      })),
+    },
+  })
+  await call(`${outline}/confirm`, 'POST', { base_revision: draft.revision })
+  const inspections = `${branch}/workflow-inspections`
+  type Scope = { scope: 'book' | 'chapter' | 'volume'; scope_id: string | null }
+  const root: Scope = { scope: 'book', scope_id: null }
+  const child: Scope = { scope: 'chapter', scope_id: first.id }
+  const volume: Scope = { scope: 'volume', scope_id: 'size-volume-0' }
+  const sibling: Scope = { scope: 'volume', scope_id: 'size-volume-1' }
+  const targets = async (scope: Scope, minimum: number, base_target_id: string | null = null) => {
+    const { preview } = await call<{ preview: { length_target: { id: string } } }>(
+      `${inspections}/length-targets`,
+      'PUT',
+      { ...scope, base_target_id, targets: { min_chars: minimum } },
+    )
+    return preview.length_target.id
+  }
+  async function snapshot(label: string) {
+    return call<{ id: string }>(`${branch}/work-snapshots`, 'POST', { label, ...volume })
+  }
+  await targets(root, 1)
+  await targets(sibling, 1)
+  const childHigh = await targets(child, 80)
+  const volumeLow = await targets(volume, 1)
+  const chapterPoint = await snapshot('只恢复章的篇幅目标')
+  await targets(child, 1, childHigh)
+  const volumeHigh = await targets(volume, 80, volumeLow)
+  const volumePoint = await snapshot('只恢复卷的篇幅目标')
+  await targets(volume, 1, volumeHigh)
+
+  const evidence = {
+    chapter_id: last.id,
+    revision: last.revision,
+    start: 0,
+    end: last.content.length,
+    quote: last.content,
+  }
+  async function issue(scope: Scope) {
+    const params = new URLSearchParams({ scope: scope.scope })
+    if (scope.scope_id) params.set('scope_id', scope.scope_id)
+    const { preview } = await call<{
+      preview: { basis_sha256: string; items: { check_id: string; status: string }[] }
+    }>(`${inspections}?${params}`)
+    return call<{ id: string; current: boolean; items: { check_id: string; status: string }[] }>(
+      inspections,
+      'POST',
+      {
+        ...scope,
+        basis_sha256: preview.basis_sha256,
+        author_reviews:
+          scope.scope === 'book'
+            ? preview.items
+                .filter(({ status }) => status === 'pending')
+                .map(({ check_id }) => ({
+                  check_id,
+                  status: 'green',
+                  basis_note: '比较本次两章及收束安排。',
+                  reason: '师姐已接过铜铃。',
+                  evidence: [evidence],
+                }))
+            : [],
+      },
+    )
+  }
+  const chapterReport = await issue(child)
+  const volumeReport = await issue(volume)
+  const untouched = await issue(sibling)
+  const bookReport = await issue(root)
+  for (const report of [chapterReport, volumeReport, untouched, bookReport]) {
+    expect(report.current).toBe(true)
+    expect(report.items.find(({ check_id }) => check_id === '09')?.status).toBe('green')
+  }
+  const completionPath = `${branch}/book-completion`
+  const { basis_sha256 } = await call<{ basis_sha256: string }>(completionPath)
+  const completion = await call<{ id: string }>(`${completionPath}/confirm`, 'POST', {
+    basis_sha256,
+    read_note: '已复核两章。',
+    author_decisions: {
+      reading: 'verified',
+      ending: 'verified',
+      characters: 'verified',
+      promises: 'verified',
+    },
+    ending: { note: '师姐接到铜铃。', sources: [evidence] },
+    characters: { note: '学徒与师姐重逢。', sources: [evidence] },
+    promises: { note: '寻找师姐和归还铜铃已收束。', sources: [evidence] },
+    intro: '学徒沿铜铃断痕寻人。',
+    spoiler_scope: 'opening',
+    sample_chapter_ids: [first.id],
+    materials_reviewed: true,
+  })
+  type SizeTarget = { scope: string; scope_id: string | null; targets: { min_chars: number } }
+  type Exchange = {
+    chapters: Chapter[]
+    revisions: LocalRevision[]
+    outline_history: { adopted_revision_id: string }
+    restore_state: { length_targets: SizeTarget[] }
+    workflow_history: { inspections: { id: string }[] }
+  }
+  const pack = await call<Exchange>(`${branch}/manuscript-package`)
+
+  const context = await browser.newContext({ baseURL })
+  try {
+    const web = await context.newPage()
+    await web.goto('/offline/')
+    await expect(web.getByText('离线页面就绪', { exact: true })).toBeVisible()
+    await expect.poll(() => web.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+    await context.setOffline(true)
+    await web.reload()
+    await web.getByLabel('导入新离线作品', { exact: true }).setInputFiles({
+      name: '篇幅影响验收.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(pack)),
+    })
+    await expect(web.getByText('已校验并导入稿件及历史。', { exact: true })).toBeVisible()
+    const archive = web.getByLabel('已导入的卷书恢复点', { exact: true })
+    await archive.getByText('已导入的卷书恢复点', { exact: true }).press('Enter')
+    const picker = archive.getByRole('combobox', { name: '选择已归档恢复点' })
+    const preview = archive.getByRole('region', { name: '归档原位恢复预览', exact: true })
+    for (const [point, expected] of [
+      [volumePoint, [volumeReport, bookReport]],
+      [chapterPoint, [chapterReport, volumeReport, bookReport]],
+    ] as const) {
+      await picker.selectOption(point.id)
+      await archive.getByRole('button', { name: '预览归档原位恢复', exact: true }).click()
+      await preview.getByText('恢复范围说明', { exact: true }).click()
+      await expect(preview.getByText('更新 1 项篇幅目标。', { exact: true })).toBeVisible()
+      await expect(preview.getByRole('list', { name: '目录与章稿变化' })).toHaveCount(0)
+      await expect(preview.getByText(/共用依据有变化/)).toHaveCount(0)
+      const affected = preview.getByRole('region', { name: '受影响报告', exact: true }).getByRole('listitem')
+      await expect(affected).toHaveCount(expected.length + 1)
+      for (const { id } of expected) {
+        await expect(affected.filter({ hasText: id })).toHaveText(/检查项 09$/)
+      }
+      await expect(affected.filter({ hasText: completion.id })).toContainText('完本记录 · 全书')
+      await expect(affected.filter({ hasText: untouched.id })).toHaveCount(0)
+    }
+    await preview.getByRole('checkbox', { name: '我已核对恢复影响' }).check()
+    await preview.getByRole('button', { name: '原位恢复为新修订', exact: true }).click()
+    await expect(archive.getByRole('status').filter({ hasText: '恢复前检查点' })).toBeVisible()
+    const history = web.getByLabel('历次体检与完本交付', { exact: true })
+    await history.getByText('历次体检与完本交付', { exact: true }).click()
+    const reports = history.getByRole('combobox', { name: '选择历史报告' })
+    for (const report of [untouched, bookReport]) {
+      await reports.selectOption(report.id)
+      await expect(history.getByText('字数、章数与篇幅 · 绿 · 已核对', { exact: true })).toBeVisible()
+    }
+    await reports.selectOption(completion.id)
+    await expect(history.getByRole('button', { name: '下载历史交付 ZIP', exact: true })).toBeVisible()
+
+    const downloaded = web.waitForEvent('download')
+    await web.getByRole('button', { name: '导出稿件交换包', exact: true }).click()
+    const after = JSON.parse(await readFile(await (await downloaded).path(), 'utf8')) as Exchange
+    expect(after.chapters).toEqual(pack.chapters)
+    const byRevisionId = (left: LocalRevision, right: LocalRevision) => left.id.localeCompare(right.id)
+    expect([...after.revisions].sort(byRevisionId)).toEqual([...pack.revisions].sort(byRevisionId))
+    expect(after.outline_history.adopted_revision_id).toBe(pack.outline_history.adopted_revision_id)
+    const originalOutsideReport = pack.workflow_history.inspections.find(({ id }) => id === untouched.id)
+    expect(originalOutsideReport).toBeDefined()
+    expect(after.workflow_history.inspections.find(({ id }) => id === untouched.id)).toEqual(
+      originalOutsideReport,
+    )
+    expect(after.restore_state.length_targets).toEqual(
+      pack.restore_state.length_targets.map((row) =>
+        row.scope === child.scope && row.scope_id === child.scope_id
+          ? { ...row, targets: { ...row.targets, min_chars: 80 } }
+          : row,
+      ),
+    )
+  } finally {
+    await context.close()
+  }
+})
+
 test('独立 Web 在断网双标签下核对旧预览，整组恢复并从恢复前检查点撤回', async ({
   page,
   browser,
@@ -288,7 +499,7 @@ test('独立 Web 在断网双标签下核对旧预览，整组恢复并从恢复
 })
 
 type Novel = { id: string; branch_id: string }
-type Chapter = { id: string; revision: number; content: string }
+type Chapter = { id: string; title: string; revision: number; content: string }
 type Fingerprint = Pick<LocalRevision, 'id' | 'parent_id' | 'revision' | 'sha256'>
 type ChapterHistory = { id: string; versions: Fingerprint[] }
 

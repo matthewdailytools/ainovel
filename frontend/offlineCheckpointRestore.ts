@@ -185,11 +185,76 @@ function windowIds(window: OutlineVersion['plan']['promises'][number]) {
   return [window.plant_chapter_id, window.opens_chapter_id, window.closes_chapter_id]
 }
 
+function restoredVolumes(
+  current: OutlineVersion | undefined,
+  saved: OutlineVersion | undefined,
+  whole: boolean,
+  wanted: readonly string[],
+) {
+  if (!saved) return current?.plan.volumes ?? []
+  if (whole || !current) return saved.plan.volumes
+  const restored = saved.plan.volumes.find((volume) =>
+    volume.units.some(({ chapters }) => chapters.some(({ chapter_id }) => wanted.includes(chapter_id))),
+  )
+  return current.plan.volumes.map((volume) => (volume.id === restored?.id ? restored : volume))
+}
+
+function activeVolumeMembers(volumes: OutlineVersion['plan']['volumes'], active: ReadonlySet<string>) {
+  const members = new Map<string, string[]>()
+  for (const { id, units } of volumes) {
+    const ids = units.flatMap(({ chapters }) =>
+      chapters.map(({ chapter_id }) => chapter_id).filter((chapterId) => active.has(chapterId)),
+    )
+    if (ids.length) members.set(id, ids.sort())
+  }
+  return members
+}
+
+function effectiveLengthSources(
+  active: ReadonlySet<string>,
+  volumeMembers: ReadonlyMap<string, string[]>,
+  targets: readonly PortableCheckpointLengthTarget[],
+) {
+  const chapterVolumes = new Map<string, string>()
+  for (const [volumeId, members] of volumeMembers)
+    for (const chapterId of members) chapterVolumes.set(chapterId, volumeId)
+  const sources = new Map<string, [PortableCheckpointLengthTarget, readonly string[]][]>()
+  function add(scope: string, target: PortableCheckpointLengthTarget, members: readonly string[]) {
+    const entries = sources.get(scope) ?? []
+    entries.push([target, members])
+    sources.set(scope, entries)
+  }
+  // Only adopted scopes contribute to a report. A clear still has a formal source.
+  const ordered = [...targets].sort((left, right) =>
+    lengthTargetKey(left).localeCompare(lengthTargetKey(right)),
+  )
+  for (const target of ordered) {
+    const key = lengthTargetKey(target)
+    if (target.scope === 'book') {
+      add(key, target, [])
+    } else if (target.scope === 'chapter' && active.has(target.scope_id!)) {
+      const members = [target.scope_id!]
+      add(key, target, members)
+      add('book:', target, members)
+      const volumeId = chapterVolumes.get(target.scope_id!)
+      if (volumeId) add(`volume:${volumeId}`, target, members)
+    } else if (target.scope === 'volume') {
+      const members = volumeMembers.get(target.scope_id!)
+      if (members) {
+        add(key, target, members)
+        add('book:', target, members)
+      }
+    }
+  }
+  return new Map([...sources].map(([scope, entries]) => [scope, compactJSON(entries)]))
+}
+
 function activeImpacts(
   { pack, reportAliases }: Captured,
   changed: ReadonlySet<string>,
   shared: boolean,
   lengthChanges: ReadonlySet<string>,
+  volumeMembers: ReadonlyMap<string, string[]>,
 ) {
   const current = chapterHeads(pack)
   const active = new Map(pack.chapters.filter(({ archived }) => !archived).map((row) => [row.id, row]))
@@ -217,7 +282,12 @@ function activeImpacts(
     )
       continue
     const direct = chapter_bindings.some((row) => changed.has(row.id))
-    const lengthChanged = lengthChanges.has(lengthTargetKey(report))
+    const members = report.scope === 'volume' ? volumeMembers.get(report.scope_id!) : undefined
+    const ownsCurrentScope =
+      report.scope !== 'volume' ||
+      (members?.length === chapter_bindings.length &&
+        chapter_bindings.every(({ id }) => members.includes(id)))
+    const lengthChanged = ownsCurrentScope && lengthChanges.has(lengthTargetKey(report))
     const check_ids = report.items.flatMap((item) =>
       ['pending', 'outdated'].includes(item.status) ||
       !(
@@ -452,12 +522,30 @@ export function planCheckpointRestore(captured: Captured, source: PortableCheckp
   const factSources = (source.restore_sources?.facts ?? []).filter(({ evidence }) =>
     wanted.includes(evidence.chapter_id),
   )
-  const lengthTargets = restoreLengthTargets(source, pack.restore_state?.length_targets ?? [], touched)
+  const savedLengthTargets = pack.restore_state?.length_targets ?? []
+  const lengthTargets = restoreLengthTargets(source, savedLengthTargets, touched)
+  const currentChaptersSet = new Set(active)
+  const currentVolumes = activeVolumeMembers(currentOutline?.plan.volumes ?? [], currentChaptersSet)
+  const restoredChapters = new Set(whole ? wanted : [...outside, ...wanted])
+  const restoreVolumes = activeVolumeMembers(
+    outlineChanged
+      ? restoredVolumes(currentOutline, oldOutline, whole, wanted)
+      : (currentOutline?.plan.volumes ?? []),
+    restoredChapters,
+  )
+  const previousLengths = effectiveLengthSources(currentChaptersSet, currentVolumes, savedLengthTargets)
+  const nextLengths = effectiveLengthSources(restoredChapters, restoreVolumes, lengthTargets.values)
+  const changedLengthScopes = new Set(
+    [...new Set([...previousLengths.keys(), ...nextLengths.keys()])].filter(
+      (scope) => previousLengths.get(scope) !== nextLengths.get(scope),
+    ),
+  )
   const affectedReports = activeImpacts(
     captured,
     capturedChanges,
     allBasesChange || storyRecordCount > 0,
-    lengthTargets.changed,
+    changedLengthScopes,
+    currentVolumes,
   )
   const diagnoses = versions(pack.settings_history).get(current.settings_id ?? '')
   const proofIndex = new Map(pack.setting_use_history?.versions.map(({ version }) => [version.id, version]))
@@ -658,15 +746,12 @@ function buildReboundOutline(
 ) {
   const saved = plan.oldOutline!
   const current = plan.currentOutline
-  const oldScope = saved.plan.volumes.find((volume) =>
-    volume.units.some(({ chapters }) => chapters.some(({ chapter_id }) => plan.wanted.includes(chapter_id))),
-  )
   const chosen =
     plan.whole || !current
       ? saved.plan
       : {
           ...current.plan,
-          volumes: current.plan.volumes.map((volume) => (volume.id === oldScope?.id ? oldScope : volume)),
+          volumes: restoredVolumes(current, saved, plan.whole, plan.wanted),
           promises: [
             ...current.plan.promises.filter(
               (window) => !windowIds(window).every((id) => plan.touched.has(id)),
