@@ -672,9 +672,67 @@ test('卷和整书历史恢复点随独立备份往返，断网另存可保留�
   }
   const earlierPlan = await confirmOutline(0)
   const inspections = `${branch}/workflow-inspections`
-  const { preview } = await checked<{ preview: { basis_sha256: string } }>(
-    await page.request.get(inspections),
-  )
+  const targets = [
+    { scope: 'chapter', scope_id: second.id, minChars: 90, chapters: 1, status: 'red' },
+    { scope: 'volume', scope_id: 'portable-vol-2', minChars: 12, chapters: 1, status: 'green' },
+    { scope: 'book', scope_id: null, minChars: 20, chapters: 2, status: 'green' },
+  ] as const
+  type LengthTarget = { min_chars: number; max_chars: number | null; expected_chapters: number }
+  type Inspection = {
+    preview: {
+      basis_sha256: string
+      length_target: { id: string; targets: LengthTarget }
+      items: { check_id: string; status: string; basis: { length_target?: { targets: LengthTarget } } }[]
+    }
+    latest: { id: string } | null
+    history: { id: string }[]
+  }
+  for (const { scope, scope_id, minChars, chapters } of targets) {
+    await put(`${inspections}/length-targets`, {
+      scope,
+      scope_id,
+      base_target_id: null,
+      targets: { min_chars: minChars, expected_chapters: chapters },
+    })
+  }
+  const sourceScenes = `${branch}/chapters/${second.id}/scene-times`
+  type Scene = {
+    id: string
+    payload: { source_revision: number; start: number; end: number }
+    stale: boolean
+  }
+  const { story_revision } = await checked<StoryGraph>(await page.request.get(`${branch}/story-graph`))
+  const start = secondText.indexOf(oldQuote)
+  const end = start + oldQuote.length
+  const {
+    scenes: [scene],
+  } = await post<{ scenes: Scene[] }>(sourceScenes, {
+    base_story_revision: story_revision,
+    scene: {
+      title: oldEventTitle,
+      source_revision: opening.revision,
+      start,
+      end,
+      story_time: '暮色',
+      audience: 'reader',
+    },
+  })
+  const oldFact = '守铃人在暮色里听见第二声。'
+  const currentFact = '守铃人等明日归铃。'
+  function recordFact(revision: number, statement: string, evidence: string) {
+    return post('/api/facts', {
+      chapter_id: second.id,
+      source_revision: revision,
+      subject: '守铃人',
+      kind: 'event',
+      statement,
+      truth: 'fact',
+      story_time: '暮色',
+      evidence,
+    })
+  }
+  await recordFact(opening.revision, oldFact, oldQuote)
+  const { preview } = await checked<Inspection>(await page.request.get(inspections))
   const originalReport = await post<{ id: string }>(inspections, { basis_sha256: preview.basis_sha256 })
   const snapshots = `${branch}/work-snapshots`
   type Snapshot = { id: string; manifest_sha256: string }
@@ -697,6 +755,12 @@ test('卷和整书历史恢复点随独立备份往返，断网另存可保留�
   const pending = await post<Snapshot>(snapshots, { label: '含未确认编辑的恢复点', scope: 'book' })
   const rewritten = '当前稿决定明天归还铜铃。'
   const updated = await put<Chapter>(`/api/chapters/${second.id}`, { base_revision: 1, content: rewritten })
+  await recordFact(updated.revision, currentFact, '明天归还铜铃')
+  await put(`${inspections}/length-targets`, {
+    scope: 'book',
+    base_target_id: preview.length_target.id,
+    targets: { min_chars: 150, expected_chapters: 2 },
+  })
   const latestGraph = await checked<StoryGraph>(await page.request.get(`${branch}/story-graph`))
   const currentTitle = '改到明天归铃'
   await put(`${storyRoute}/${event.id}`, {
@@ -871,6 +935,7 @@ test('卷和整书历史恢复点随独立备份往返，断网另存可保留�
     await expect(fork.getByRole('heading', { name: '从「末卷旧恢复点」另存工作分支' })).toBeFocused()
     await expect(fork).toContainText('2 章')
     await expect(fork).toContainText('1 条故事记录')
+    await expect(fork).toContainText('1 处场景绑定需在恢复分支重新核对。')
     expect(await desktop.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(420)
     const branchName = '从归铃卷旧点恢复'
     await fork.getByRole('textbox', { name: '恢复分支名称', exact: true }).fill(branchName)
@@ -903,6 +968,56 @@ test('卷和整书历史恢复点随独立备份往返，断网另存可保留�
       title: oldEventTitle,
       sources: [{ chapter_id: recovered[1].id, quote: oldQuote }],
     })
+    const recoveredBranch = `/api/branches/${newBranchId}`
+    const recoveredChapter = recovered[1]
+    expect(recoveredChapter.id).not.toBe(second.id)
+    expect(await checked(await desktop.request.get(`${recoveredBranch}/facts`))).toEqual([
+      expect.objectContaining({
+        chapter_id: recoveredChapter.id,
+        source_revision: recoveredChapter.revision,
+        statement: oldFact,
+        evidence: oldQuote,
+        evidence_start: start,
+        evidence_end: end,
+        stale: 0,
+      }),
+    ])
+    for (const { scope, scope_id, minChars, chapters, status } of targets) {
+      const params = {
+        scope,
+        ...(scope_id ? { scope_id: scope === 'chapter' ? recoveredChapter.id : scope_id } : {}),
+      }
+      const state = await checked<Inspection>(
+        await desktop.request.get(`${recoveredBranch}/workflow-inspections`, { params }),
+      )
+      const length = { min_chars: minChars, max_chars: null, expected_chapters: chapters }
+      expect(state.preview.length_target.targets).toEqual(length)
+      expect(state.preview.items.find(({ check_id }) => check_id === '09')).toMatchObject({
+        status,
+        basis: { length_target: { targets: length } },
+      })
+      expect(state.latest).toBeNull()
+      expect(state.history).not.toContainEqual(expect.objectContaining({ id: originalReport.id }))
+    }
+    expect(
+      await checked(
+        await desktop.request.get(`${recoveredBranch}/chapters/${recoveredChapter.id}/scene-times`),
+      ),
+    ).toMatchObject({ scenes: [] })
+    expect(await checked(await page.request.get(sourceScenes))).toMatchObject({
+      scenes: [{ id: scene.id, payload: { source_revision: opening.revision, start, end }, stale: true }],
+    })
+    expect(await checked(await desktop.request.get(`${inspections}/${originalReport.id}`))).toMatchObject({
+      id: originalReport.id,
+      origin: 'manuscript_package',
+      current: false,
+    })
+    expect(
+      (await checked<Inspection>(await desktop.request.get(inspections))).preview.length_target.targets,
+    ).toMatchObject({ min_chars: 150, expected_chapters: 2 })
+    expect(await checked(await desktop.request.get(`${branch}/facts`))).toEqual([
+      expect.objectContaining({ chapter_id: second.id, statement: currentFact, stale: 0 }),
+    ])
     const sourceStory = await checked<StoryGraph>(await desktop.request.get(`${branch}/story-graph`))
     expect(sourceStory.records[0].payload.title).toBe(currentTitle)
     expect((await checked<Chapter>(await desktop.request.get(`/api/chapters/${second.id}`))).content).toBe(
