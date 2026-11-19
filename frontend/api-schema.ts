@@ -443,6 +443,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/fork-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Preview Portable Fork */
+    get: operations['preview_portable_fork_api_branches__branch_id__portable_checkpoints__snapshot_id__fork_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/fork': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Apply Portable Fork */
+    post: operations['apply_portable_fork_api_branches__branch_id__portable_checkpoints__snapshot_id__fork_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/chapters/{chapter_id}': {
     parameters: {
       query?: never
@@ -3534,6 +3568,37 @@ export interface components {
       /** Stale */
       stale: number
     }
+    /** CheckpointFact */
+    CheckpointFact: {
+      /** Subject */
+      subject: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'event' | 'knowledge' | 'capability' | 'resource' | 'relationship' | 'promise' | 'world'
+      /** Statement */
+      statement: string
+      /**
+       * Truth
+       * @enum {string}
+       */
+      truth: 'fact' | 'belief' | 'uncertain' | 'plan'
+      /** Story Time */
+      story_time: string
+      evidence: components['schemas']['SettingsEvidence']
+    }
+    /** CheckpointLengthTarget */
+    CheckpointLengthTarget: {
+      /**
+       * Scope
+       * @enum {string}
+       */
+      scope: 'chapter' | 'volume' | 'book'
+      /** Scope Id */
+      scope_id: string | null
+      targets: components['schemas']['LengthTargets'] | null
+    }
     /** CheckpointShared */
     CheckpointShared: {
       /** Project Id */
@@ -3542,6 +3607,13 @@ export interface components {
       settings_id: string | null
       /** Outline Id */
       outline_id: string | null
+    }
+    /** CheckpointStoryHead */
+    CheckpointStoryHead: {
+      /** Revision */
+      revision: number
+      /** Version Id */
+      version_id: string
     }
     /** ClosureReview */
     ClosureReview: {
@@ -5047,6 +5119,7 @@ export interface components {
       reports: {
         [key: string]: string
       }
+      restore_sources?: components['schemas']['PortableRestoreSources'] | null
     }
     /** PortableCheckpointEntry */
     PortableCheckpointEntry: {
@@ -5079,6 +5152,58 @@ export interface components {
       sha256: string
       /** Chapters */
       chapters?: components['schemas']['EvidenceChapter'][]
+    }
+    /** PortableForkInput */
+    PortableForkInput: {
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Branch Name */
+      branch_name: string
+      /** Idempotency Key */
+      idempotency_key: string
+    }
+    /** PortableForkPreview */
+    PortableForkPreview: {
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Chapter Count */
+      chapter_count: number
+      /** Story Record Count */
+      story_record_count: number
+      /** Scene Spans For Review */
+      scene_spans_for_review: number
+      /**
+       * Outline
+       * @enum {string}
+       */
+      outline: 'confirmed' | 'draft' | 'none'
+    }
+    /** PortableForkReceipt */
+    PortableForkReceipt: {
+      /** Branch Id */
+      branch_id: string
+      /** Snapshot Id */
+      snapshot_id: string
+    }
+    /** PortableRestoreSources */
+    PortableRestoreSources: {
+      /**
+       * Version
+       * @constant
+       */
+      version: 'ainovel-portable-restore-sources/1'
+      /** Outline Live */
+      outline_live: boolean
+      /** Story Heads */
+      story_heads: {
+        [key: string]: components['schemas']['CheckpointStoryHead']
+      }
+      /** Facts */
+      facts: components['schemas']['CheckpointFact'][]
+      /** Length Targets */
+      length_targets: components['schemas']['CheckpointLengthTarget'][]
+      /** Scene Spans For Review */
+      scene_spans_for_review: number
     }
     /** PortableRevision */
     PortableRevision: {
@@ -7718,6 +7843,74 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['PortableCheckpoint']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_portable_fork_api_branches__branch_id__portable_checkpoints__snapshot_id__fork_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        snapshot_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PortableForkPreview']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  apply_portable_fork_api_branches__branch_id__portable_checkpoints__snapshot_id__fork_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        snapshot_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PortableForkInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PortableForkReceipt']
         }
       }
       /** @description Validation Error */

@@ -136,10 +136,9 @@ def export_story_archive(tx, branch_id):
         raise _archive_error("本机故事档案的历史或采用头不完整。") from error
 
 
-def _validate_effective_cycles(history, versions):
+def validate_effective_cycles(adopted_heads, versions):
     refs = {
-        identifier: set(versions[version_id].dependencies)
-        for identifier, version_id in history.adopted_heads.items()
+        identifier: set(versions[version_id].dependencies) for identifier, version_id in adopted_heads.items()
     }
     ready = {identifier for identifier, parents in refs.items() if not parents}
     for _ in refs:
@@ -175,7 +174,7 @@ def validate_story_archive(history, branch_id, revisions, native_revisions):
             ):
                 raise _archive_error("故事本机修订的依赖与冻结版本不一致。")
             _bind_native(version, row, revisions.get, native_revisions.get)
-        _validate_effective_cycles(history, versions)
+        validate_effective_cycles(history.adopted_heads, versions)
     except DomainError as error:
         raise _archive_error(f"稿件包故事档案未通过校验。{error.message}") from error
 

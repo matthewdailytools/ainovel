@@ -265,6 +265,7 @@ def test_outline_package_restores_frozen_cards_and_defers_advanced_promise_recor
 
     changed_project = planned.model_dump()
     changed_project.pop("story_history", None)
+    changed_project.pop("snapshot_history", None)
     prior_project = changed_project["project_history"]["versions"][0]
     changed_project["project_history"]["versions"].append(
         {
@@ -335,9 +336,9 @@ def test_outline_package_restores_frozen_cards_and_defers_advanced_promise_recor
     with rejected.db.connect() as tx:
         assert not tx.execute("SELECT 1 FROM story_records").fetchone()
     deferred = Domain(Database(tmp_path / "outline-deferred.sqlite"))
-    pending = import_manuscript(deferred, advanced.model_copy(update={"story_history": None}))[
-        "outline_restore"
-    ]
+    pending = import_manuscript(
+        deferred, advanced.model_copy(update={"story_history": None, "snapshot_history": None})
+    )["outline_restore"]
     assert pending["status"] == "deferred" and to_resolve["id"] in pending["reason"]
     assert export_manuscript(deferred, branch).outline_history == advanced.outline_history
     assert read_outline(deferred, branch)["confirmed"] is None

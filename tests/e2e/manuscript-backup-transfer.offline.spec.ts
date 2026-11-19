@@ -382,7 +382,33 @@ test('卷和整书历史恢复点随独立备份往返，保持原编号、范�
   const firstText = '学徒在桥下拾到三齿钥匙。'
   const secondText = '😀门内响起第二声。\r\n守铃人接过铜铃。'
   await put(`/api/chapters/${first.id}`, { base_revision: 0, content: firstText })
-  await put(`/api/chapters/${second.id}`, { base_revision: 0, content: secondText })
+  const opening = await put<Chapter>(`/api/chapters/${second.id}`, { base_revision: 0, content: secondText })
+  type StoryGraph = {
+    story_revision: number
+    records: {
+      id: string
+      revision: number
+      payload: { title: string; sources: { chapter_id: string; quote: string }[] }
+    }[]
+  }
+  function witnessed(title: string, revision: number, text: string, quote: string) {
+    const start = text.indexOf(quote)
+    return {
+      kind: 'event',
+      title,
+      status: 'actual',
+      sources: [{ chapter_id: second.id, revision, start, end: start + quote.length, quote }],
+    }
+  }
+  const storyRoute = `${branch}/story-records`
+  const initialGraph = await checked<StoryGraph>(await page.request.get(`${branch}/story-graph`))
+  const oldEventTitle = '旧宅门内第二声'
+  const oldQuote = '门内响起第二声'
+  const oldGraph = await post<StoryGraph>(storyRoute, {
+    base_story_revision: initialGraph.story_revision,
+    record: witnessed(oldEventTitle, opening.revision, secondText, oldQuote),
+  })
+  const event = oldGraph.records.find(({ payload }) => payload.title === oldEventTitle)!
   const idea = '查清旧宅铜铃与桥下钥匙的来处。'
   await put(`${branch}/conception/project-brief`, {
     base_revision: 0,
@@ -480,7 +506,14 @@ test('卷和整书历史恢复点随独立备份往返，保持原编号、范�
   })
   const pending = await post<Snapshot>(snapshots, { label: '含未确认编辑的恢复点', scope: 'book' })
   const rewritten = '当前稿决定明天归还铜铃。'
-  await put(`/api/chapters/${second.id}`, { base_revision: 1, content: rewritten })
+  const updated = await put<Chapter>(`/api/chapters/${second.id}`, { base_revision: 1, content: rewritten })
+  const latestGraph = await checked<StoryGraph>(await page.request.get(`${branch}/story-graph`))
+  const currentTitle = '改到明天归铃'
+  await put(`${storyRoute}/${event.id}`, {
+    base_story_revision: latestGraph.story_revision,
+    base_revision: event.revision,
+    record: witnessed(currentTitle, updated.revision, rewritten, '明天归还铜铃'),
+  })
   const withPending = await checked<SettingDraft>(await page.request.get(conception))
   adopted = await post<{ confirmation: { id: string } }>(conception + '/confirm', {
     base_revision: withPending.revision,
@@ -496,6 +529,7 @@ test('卷和整书历史恢复点随独立备份往返，保持原编号、范�
     scoped_chapter_ids: string[]
     reports: { workflow_inspection?: string }
     shared: Record<string, string | null>
+    restore_sources?: { story_heads: Record<string, { revision: number }> }
   }
   type Pack = { snapshot_history: { entries: Entry[] } }
   const pack = await checked<Pack>(await page.request.get(`${branch}/manuscript-package`))
@@ -510,6 +544,7 @@ test('卷和整书历史恢复点随独立备份往返，保持原编号、范�
     expect(body.source_manifest_sha256).toBe(point.manifest_sha256)
     expect(body.reports.workflow_inspection).toBe(originalReport.id)
     expect(Object.values(body.shared).every(Boolean)).toBe(true)
+    expect(body.restore_sources?.story_heads[event.id]?.revision).toBe(event.revision)
     return { entry, body }
   })
   expect(archived.map(({ body }) => body.scoped_chapter_ids)).toEqual([[second.id], [first.id, second.id]])
@@ -563,7 +598,7 @@ test('卷和整书历史恢复点随独立备份往返，保持原编号、范�
   const target = await isolatedDesktop(testInfo.outputPath('portable-snapshot-target'), page.request)
   let context: BrowserContext | undefined
   try {
-    context = await browser.newContext({ baseURL: target.origin })
+    context = await browser.newContext({ baseURL: target.origin, viewport: { width: 420, height: 900 } })
     const desktop = await context.newPage()
     await desktop.goto('/')
     await desktop.getByText('离线写作与交换', { exact: true }).click()
@@ -590,6 +625,49 @@ test('卷和整书历史恢复点随独立备份往返，保持原编号、范�
     const original = panel.getByRole('region', { name: '归档章稿对照', exact: true })
     await expect(original).toContainText('已核验归档原稿')
     expect(await original.locator('pre').first().textContent()).toBe(secondText)
+
+    await panel.getByRole('button', { name: '预览归档另存', exact: true }).press('Enter')
+    const fork = panel.getByRole('region', { name: '归档另存预览', exact: true })
+    await expect(fork.getByRole('heading', { name: '从「末卷旧恢复点」另存工作分支' })).toBeFocused()
+    await expect(fork).toContainText('2 章')
+    await expect(fork).toContainText('1 条故事记录')
+    expect(await desktop.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(420)
+    const branchName = '从归铃卷旧点恢复'
+    await fork.getByRole('textbox', { name: '恢复分支名称', exact: true }).fill(branchName)
+    const confirm = fork.getByRole('button', { name: '建立恢复分支', exact: true })
+    await expect(confirm).toBeDisabled()
+    await fork.getByRole('checkbox', { name: '我已核对另存范围', exact: true }).check()
+    await expect(confirm).toBeEnabled()
+    await confirm.press('Enter')
+
+    const selectedBranch = desktop.getByRole('combobox', { name: '工作版本', exact: true })
+    await expect(selectedBranch.locator('option:checked')).toHaveText(branchName)
+    const newBranchId = await selectedBranch.inputValue()
+    expect(newBranchId).not.toBe(source.branch_id)
+    const recoveredDirectory = await checked<Chapter[]>(
+      await desktop.request.get(`/api/branches/${newBranchId}/chapters`),
+    )
+    const recovered = await Promise.all(
+      recoveredDirectory.map(async ({ id }) =>
+        checked<Chapter>(await desktop.request.get(`/api/chapters/${id}`)),
+      ),
+    )
+    expect(recovered.map(({ title, content }) => [title, content])).toEqual([
+      ['桥下钥匙', firstText],
+      ['旧宅归铃', secondText],
+    ])
+    const forkedStory = await checked<StoryGraph>(
+      await desktop.request.get(`/api/branches/${newBranchId}/story-graph`),
+    )
+    expect(forkedStory.records[0].payload).toMatchObject({
+      title: oldEventTitle,
+      sources: [{ chapter_id: recovered[1].id, quote: oldQuote }],
+    })
+    const sourceStory = await checked<StoryGraph>(await desktop.request.get(`${branch}/story-graph`))
+    expect(sourceStory.records[0].payload.title).toBe(currentTitle)
+    expect((await checked<Chapter>(await desktop.request.get(`/api/chapters/${second.id}`))).content).toBe(
+      rewritten,
+    )
   } finally {
     await Promise.all([context?.close(), target.stop()])
   }

@@ -9,6 +9,7 @@ from pydantic import Field, ValidationError
 
 from .db import DomainError, uid
 from .models import Input
+from .portable_restore_sources import PortableRestoreSources
 from .project_portability import Identifier
 
 ARCHIVE_KIND = "portable_checkpoint_archive"
@@ -54,6 +55,9 @@ class PortableCheckpoint(Input):
     chapters: list[CheckpointChapter] = Field(max_length=MAX_CHAPTERS)
     shared: CheckpointShared
     reports: dict[Literal["workflow_inspection", "book_completion"], Identifier]
+    restore_sources: PortableRestoreSources | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class PortableCheckpointEntry(Input):
@@ -102,6 +106,8 @@ def _utf8(value):
 
 
 def validate_checkpoint_history(package, revisions):
+    from .portable_restore_sources import RestoreSourceCatalog
+
     history = package.snapshot_history
     if not history:
         return
@@ -116,6 +122,7 @@ def validate_checkpoint_history(package, revisions):
         "book_completion": {row.id for row in workflow.completions} if workflow else set(),
     }
     seen = set()
+    catalog = None
     for entry in history.entries:
         state = decode_checkpoint(entry, package.branch.id)
         if state.id in seen or state.story_revision > package.branch.story_revision:
@@ -163,6 +170,9 @@ def validate_checkpoint_history(package, revisions):
                 or not set(scoped) <= set(active_ids)
             ):
                 raise checkpoint_error("分卷恢复点与所引用正式卷纲的有效章节不一致。")
+        if state.restore_sources is not None:
+            catalog = catalog or RestoreSourceCatalog(package)
+            catalog.resolve(state, state.restore_sources)
 
 
 def archived_checkpoints(tx, branch_id):

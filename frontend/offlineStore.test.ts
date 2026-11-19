@@ -25,7 +25,12 @@ import {
   validateSyncedObject,
 } from './offlineStore'
 import { encodeWebManuscriptBackup } from './webManuscriptBackup'
-import type { PortableCheckpoint } from './portableCheckpoint'
+import {
+  decodePortableCheckpointHistory,
+  verifyPortableCheckpoints,
+  type PortableCheckpoint,
+} from './portableCheckpoint'
+import type { SettingsVersion } from './settingsSyncModel'
 
 beforeEach(() => vi.stubGlobal('indexedDB', new IDBFactory()))
 
@@ -198,6 +203,35 @@ async function checkpointFixture() {
     created: 2,
     scoped_chapter_ids: [chapter.id, second.id],
   }
+  volume.restore_sources = {
+    version: 'ainovel-portable-restore-sources/1',
+    outline_live: true,
+    story_heads: {},
+    length_targets: [
+      {
+        scope: 'volume',
+        scope_id: 'old-city',
+        targets: { min_chars: 10, max_chars: null, expected_chapters: 1 },
+      },
+    ],
+    scene_spans_for_review: 0,
+    facts: [
+      {
+        subject: '学徒',
+        kind: 'event',
+        statement: '学徒看到了原先的文字。',
+        truth: 'fact',
+        story_time: '',
+        evidence: {
+          chapter_id: chapter.id,
+          revision_id: original.id,
+          start: 0,
+          end: 6,
+          quote_sha256: await manuscriptHash(original.content.slice(0, 6)),
+        },
+      },
+    ],
+  }
   const snapshot_history = { entries: [await sealCheckpoint(volume), await sealCheckpoint(book)] }
   return { pack: { ...pack, snapshot_history }, volume, book, original, secondRoot }
 }
@@ -229,6 +263,7 @@ test('sealed checkpoints survive manuscript and independent backup and point to 
 test('a checkpoint with invalid seals, ownership, scoped chapter order or missing basis rejects the entire pack', async () => {
   const { pack, volume, book, original, secondRoot } = await checkpointFixture()
   const valid = pack.snapshot_history.entries[0]
+  const sources = volume.restore_sources!
   const invalid = [
     { ...valid, sha256: 'a'.repeat(64) },
     await sealCheckpoint({ ...volume, branch_id: 'another-branch' }),
@@ -247,6 +282,17 @@ test('a checkpoint with invalid seals, ownership, scoped chapter order or missin
     await sealCheckpoint({ ...volume, shared: { ...volume.shared, outline_id: 'discarded-outline' } }),
     await sealCheckpoint({ ...volume, reports: { workflow_inspection: 'draft-reports-arent-accepted' } }),
     await sealCheckpoint({ ...book, scoped_chapter_ids: book.scoped_chapter_ids.slice().reverse() }),
+    await sealCheckpoint({
+      ...volume,
+      restore_sources: { ...sources, story_heads: { missing: { revision: 0, version_id: '1'.repeat(64) } } },
+    }),
+    await sealCheckpoint({
+      ...volume,
+      restore_sources: {
+        ...sources,
+        facts: sources.facts.map((fact) => ({ ...fact, evidence: { ...fact.evidence, end: 5 } })),
+      },
+    }),
     await sealCheckpoint(volume, valid.body.replace('"label":', '"l\\u0061bel":"隐匿文字", "label":')),
   ]
   vi.stubGlobal('indexedDB', new IDBFactory())
@@ -288,6 +334,56 @@ test('a checkpoint with invalid seals, ownership, scoped chapter order or missin
     failure.mockRestore()
   }
   await expect(importLocalManuscript(bundle(pack))).resolves.toMatchObject({ novel: pack.novel })
+})
+
+test('executable checkpoints bind setting proof to a native revision at or before the checkpoint', async () => {
+  const { pack, volume, original } = await checkpointFixture()
+  const latest = pack.revisions.find(
+    (row) => row.chapter_id === original.chapter_id && row.revision > original.revision,
+  )!
+  const setting: SettingsVersion = {
+    id: 'setting-with-proof',
+    parent_id: null,
+    project_version_id: null,
+    categories: [],
+    origins: {},
+    note: '',
+    reconciled_project_items: [],
+    reviewed_setting_findings: [],
+  }
+  const checkpoint = { ...volume, shared: { ...volume.shared, settings_id: setting.id } }
+  const sealed = decodePortableCheckpointHistory({ entries: [await sealCheckpoint(checkpoint)] })
+  const revisions = new Map(pack.revisions.map((row) => [row.id, row]))
+  const basis = {
+    branch: pack.branch,
+    chapterIds: new Set(pack.chapters.map(({ id }) => id)),
+    revisions,
+    sourceRevisions: new Map(),
+    projects: new Set<string>(),
+    settings: new Map([[setting.id, setting]]),
+    outlines: new Map(pack.outline_history?.versions.map((row) => [row.id, row])),
+    inspections: new Set<string>(),
+    completions: new Set<string>(),
+  }
+  for (const revision of [original, latest]) {
+    setting.origins.use = {
+      origin: 'author',
+      edited: false,
+      artifact_id: null,
+      device_id: null,
+      project_version_id: null,
+      evidence: {
+        chapter_id: revision.chapter_id,
+        revision_id: revision.id,
+        start: 0,
+        end: 1,
+        quote_sha256: await manuscriptHash(revision.content[0]),
+      },
+    }
+    const validation = verifyPortableCheckpoints(sealed, basis, manuscriptHash)
+    if (revision === original) await expect(validation).resolves.toBeUndefined()
+    else await expect(validation).rejects.toThrow('检查点')
+  }
 })
 
 test('quota failure aborts the whole browser write and preserves existing formal versions', async () => {

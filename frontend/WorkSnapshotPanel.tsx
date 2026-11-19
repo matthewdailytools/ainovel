@@ -409,7 +409,7 @@ export function WorkSnapshotPanel({
           </form>
         </section>
       )}
-      <PortableCheckpointPanel key={branchId} branchId={branchId} />
+      <PortableCheckpointPanel key={branchId} branchId={branchId} onRestored={onRestored} />
     </section>
   )
 }

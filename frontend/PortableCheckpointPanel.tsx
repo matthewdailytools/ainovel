@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ApiError, api } from './api'
 import type { PortableCheckpoint } from './portableCheckpoint'
+import { PortableCheckpointFork } from './PortableCheckpointFork'
 
 type ArchivedChapterDiff = {
   title: string
@@ -24,7 +25,13 @@ function chapterError(error: unknown) {
   return error instanceof Error ? error.message : '无法读取归档章稿。'
 }
 
-export function PortableCheckpointPanel({ branchId }: { branchId: string }) {
+export function PortableCheckpointPanel({
+  branchId,
+  onRestored,
+}: {
+  branchId: string
+  onRestored?: (branchId: string) => void | Promise<void>
+}) {
   const route = `/branches/${encodeURIComponent(branchId)}/portable-checkpoints`
   const [open, setOpen] = useState(false)
   const [checkpoints, setCheckpoints] = useState<PortableCheckpoint[]>()
@@ -93,8 +100,8 @@ export function PortableCheckpointPanel({ branchId }: { branchId: string }) {
     >
       <summary>跨端检查点归档</summary>
       {open && (
-        <section aria-label="跨端检查点归档（只读）">
-          <p>只读归档，用于核对作品备份保留的章稿。</p>
+        <section aria-label="跨端检查点归档详情">
+          <p>核对作品备份保留的章稿。来源齐全的检查点可另存工作分支。</p>
           {listError ? (
             <>
               <p role="alert">{listError}</p>
@@ -130,6 +137,14 @@ export function PortableCheckpointPanel({ branchId }: { branchId: string }) {
           {snapshot && (
             <>
               <h3>{snapshot.label}</h3>
+              {snapshot.restore_sources && (
+                <PortableCheckpointFork
+                  key={snapshot.id}
+                  checkpointUrl={`${route}/${encodeURIComponent(snapshot.id)}`}
+                  label={snapshot.label}
+                  onRestored={onRestored}
+                />
+              )}
               <p>
                 原范围 {scopeLabels[snapshot.scope]}
                 {snapshot.scope_id && (

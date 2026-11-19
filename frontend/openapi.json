@@ -981,6 +981,80 @@
         }
       }
     },
+    "/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/fork-preview": {
+      "get": {
+        "summary": "Preview Portable Fork",
+        "operationId": "preview_portable_fork_api_branches__branch_id__portable_checkpoints__snapshot_id__fork_preview_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Snapshot Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/PortableForkPreview" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/fork": {
+      "post": {
+        "summary": "Apply Portable Fork",
+        "operationId": "apply_portable_fork_api_branches__branch_id__portable_checkpoints__snapshot_id__fork_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Snapshot Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PortableForkInput" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/PortableForkReceipt" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/chapters/{chapter_id}": {
       "get": {
         "summary": "Diff Portable Checkpoint Chapter",
@@ -7031,6 +7105,41 @@
         "required": ["id", "position", "title", "revision", "revision_id", "sha256", "archived", "stale"],
         "title": "CheckpointChapter"
       },
+      "CheckpointFact": {
+        "properties": {
+          "subject": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Subject" },
+          "kind": {
+            "type": "string",
+            "enum": ["event", "knowledge", "capability", "resource", "relationship", "promise", "world"],
+            "title": "Kind"
+          },
+          "statement": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Statement" },
+          "truth": { "type": "string", "enum": ["fact", "belief", "uncertain", "plan"], "title": "Truth" },
+          "story_time": { "type": "string", "maxLength": 200, "title": "Story Time" },
+          "evidence": { "$ref": "#/components/schemas/SettingsEvidence" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["subject", "kind", "statement", "truth", "story_time", "evidence"],
+        "title": "CheckpointFact"
+      },
+      "CheckpointLengthTarget": {
+        "properties": {
+          "scope": { "type": "string", "enum": ["chapter", "volume", "book"], "title": "Scope" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "targets": { "anyOf": [{ "$ref": "#/components/schemas/LengthTargets" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["scope", "scope_id", "targets"],
+        "title": "CheckpointLengthTarget"
+      },
       "CheckpointShared": {
         "properties": {
           "project_id": {
@@ -7059,6 +7168,16 @@
         "type": "object",
         "required": ["project_id", "settings_id", "outline_id"],
         "title": "CheckpointShared"
+      },
+      "CheckpointStoryHead": {
+        "properties": {
+          "revision": { "type": "integer", "maximum": 9007199254740991, "minimum": 0, "title": "Revision" },
+          "version_id": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Version Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["revision", "version_id"],
+        "title": "CheckpointStoryHead"
       },
       "ClosureReview": {
         "properties": {
@@ -9406,6 +9525,9 @@
             "propertyNames": { "enum": ["workflow_inspection", "book_completion"] },
             "type": "object",
             "title": "Reports"
+          },
+          "restore_sources": {
+            "anyOf": [{ "$ref": "#/components/schemas/PortableRestoreSources" }, { "type": "null" }]
           }
         },
         "additionalProperties": false,
@@ -9488,6 +9610,95 @@
         "type": "object",
         "required": ["id", "kind", "title", "body", "sha256"],
         "title": "PortableEvidence"
+      },
+      "PortableForkInput": {
+        "properties": {
+          "basis_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Basis Sha256" },
+          "branch_name": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Branch Name" },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["basis_sha256", "branch_name", "idempotency_key"],
+        "title": "PortableForkInput"
+      },
+      "PortableForkPreview": {
+        "properties": {
+          "basis_sha256": { "type": "string", "title": "Basis Sha256" },
+          "chapter_count": { "type": "integer", "title": "Chapter Count" },
+          "story_record_count": { "type": "integer", "title": "Story Record Count" },
+          "scene_spans_for_review": { "type": "integer", "title": "Scene Spans For Review" },
+          "outline": { "type": "string", "enum": ["confirmed", "draft", "none"], "title": "Outline" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "basis_sha256",
+          "chapter_count",
+          "story_record_count",
+          "scene_spans_for_review",
+          "outline"
+        ],
+        "title": "PortableForkPreview"
+      },
+      "PortableForkReceipt": {
+        "properties": {
+          "branch_id": { "type": "string", "title": "Branch Id" },
+          "snapshot_id": { "type": "string", "title": "Snapshot Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["branch_id", "snapshot_id"],
+        "title": "PortableForkReceipt"
+      },
+      "PortableRestoreSources": {
+        "properties": {
+          "version": { "type": "string", "const": "ainovel-portable-restore-sources/1", "title": "Version" },
+          "outline_live": { "type": "boolean", "title": "Outline Live" },
+          "story_heads": {
+            "patternProperties": {
+              "^[a-zA-Z0-9_-]+$": { "$ref": "#/components/schemas/CheckpointStoryHead" }
+            },
+            "propertyNames": { "maxLength": 128, "minLength": 1 },
+            "type": "object",
+            "maxProperties": 20000,
+            "title": "Story Heads"
+          },
+          "facts": {
+            "items": { "$ref": "#/components/schemas/CheckpointFact" },
+            "type": "array",
+            "maxItems": 20000,
+            "title": "Facts"
+          },
+          "length_targets": {
+            "items": { "$ref": "#/components/schemas/CheckpointLengthTarget" },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Length Targets"
+          },
+          "scene_spans_for_review": {
+            "type": "integer",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Scene Spans For Review"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "outline_live",
+          "story_heads",
+          "facts",
+          "length_targets",
+          "scene_spans_for_review"
+        ],
+        "title": "PortableRestoreSources"
       },
       "PortableRevision": {
         "properties": {

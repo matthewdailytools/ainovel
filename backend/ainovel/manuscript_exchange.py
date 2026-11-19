@@ -1,5 +1,6 @@
 """Portable manuscript and revision history for desktop and offline Web."""
 
+from contextlib import nullcontext
 from hashlib import sha256
 import json
 from time import time
@@ -400,7 +401,15 @@ def store_portable_evidence(tx, branch_id, document):
     )
 
 
-def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), before_read=None):
+def export_manuscript(
+    domain,
+    branch_id,
+    *,
+    include_reference_evidence_for=(),
+    before_read=None,
+    transaction=None,
+    checkpoint_sources_only=False,
+):
     from .outline_archive import export_outline_history, validate_outline_history
     from .reference_sync import export_reference_archive
     from .setting_use_archive import export_setting_use_history
@@ -412,15 +421,16 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), b
         has_frozen_reference_selection,
     )
 
-    with domain.db.connect() as tx:
-        tx.execute("BEGIN")
+    with domain.db.connect() if transaction is None else nullcontext(transaction) as tx:
+        if transaction is None:
+            tx.execute("BEGIN")
         branch = tx.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
         if not branch:
             raise DomainError("not_found", "工作版本不存在。", 404)
         if before_read:
             before_read(tx, branch_id)
-        workflow = export_workflow_history(tx, branch_id)
-        evidence = _evidence(tx, branch_id)
+        workflow = None if checkpoint_sources_only else export_workflow_history(tx, branch_id)
+        evidence = [] if checkpoint_sources_only else _evidence(tx, branch_id)
         if (workflow and any(map(has_frozen_reference_selection, workflow.inspections))) or any(
             map(evidence_has_reference_selection, evidence)
         ):
@@ -462,10 +472,13 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), b
                 "reference_history": export_reference_archive(
                     tx, branch_id, include_evidence_for=include_reference_evidence_for
                 ),
-                "setting_use_history": export_setting_use_history(tx, branch_id),
-                "snapshot_history": export_checkpoint_history(tx, branch_id),
+                "setting_use_history": None
+                if checkpoint_sources_only
+                else export_setting_use_history(tx, branch_id),
             }
         )
+        if not checkpoint_sources_only:
+            package.snapshot_history = export_checkpoint_history(tx, branch_id, package)
         if package.settings_history:
             validate_settings_history(
                 package.settings_history,

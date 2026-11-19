@@ -110,6 +110,7 @@ def test_settings_package_keeps_stale_project_side_branch_and_exact_source_evide
     assert pack.settings_history.adopted_revision_id == root.id
     assert root.project_version_id == first["id"]
     payload = pack.model_dump()
+    payload.pop("snapshot_history", None)
     payload["settings_history"]["source_devices"] = {root.id: "writer-remote"}
     payload["settings_history"]["versions"].append(
         root.model_copy(

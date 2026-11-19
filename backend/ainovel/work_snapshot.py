@@ -7,7 +7,7 @@ import json
 from time import time
 from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue, StringConstraints, model_validator
+from pydantic import Field, JsonValue, StringConstraints, ValidationError, model_validator
 
 from .conception import (
     BUILTINS,
@@ -31,6 +31,7 @@ from .outline_workspace import (
     _validate,
 )
 from .portable_checkpoint import (
+    MAX_BODY as PORTABLE_CHECKPOINT_MAX_BODY,
     VERSION as PORTABLE_CHECKPOINT_VERSION,
     PortableCheckpoint,
     PortableCheckpointEntry,
@@ -79,6 +80,25 @@ class RestoreInput(Input):
         if (self.mode == "new_branch") != (self.branch_name is not None):
             raise ValueError("新分支须提供名称。")
         return self
+
+
+class PortableForkInput(Input):
+    basis_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    branch_name: Label
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class PortableForkPreview(Input):
+    basis_sha256: str
+    chapter_count: int
+    story_record_count: int
+    scene_spans_for_review: int
+    outline: Literal["confirmed", "draft", "none"]
+
+
+class PortableForkReceipt(Input):
+    branch_id: str
+    snapshot_id: str
 
 
 class SnapshotSettingUseImpact(Input):
@@ -312,8 +332,9 @@ def _summary(snapshot):
     }
 
 
-def export_checkpoint_history(tx, branch_id):
+def export_checkpoint_history(tx, branch_id, package):
     from .outline_sync import _source_id as outline_source_id
+    from .portable_restore_sources import RestoreSourceCatalog
     from .settings_sync import project_source_id, settings_source_id
 
     @cache
@@ -329,6 +350,7 @@ def export_checkpoint_history(tx, branch_id):
     portable_project = cache(lambda identifier: project_source_id(tx, branch_id, identifier))
     portable_settings = cache(lambda identifier: settings_source_id(tx, branch_id, identifier))
     entries = {row.id: row for row in archived_checkpoints(tx, branch_id)}
+    catalog = RestoreSourceCatalog(package)
     for row in tx.execute(
         "SELECT id FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
         "AND json_extract(payload,'$.scope') IN ('volume','book') ORDER BY rowid DESC",
@@ -336,38 +358,48 @@ def export_checkpoint_history(tx, branch_id):
     ):
         if row["id"] in entries:
             continue
-        saved = _summary(_read_snapshot(tx, branch_id, row["id"]))
-        body = dumps(
-            {
-                **{
-                    key: saved[key]
-                    for key in (
-                        "id",
-                        "label",
-                        "scope",
-                        "scope_id",
-                        "purpose",
-                        "created",
-                        "story_revision",
-                        "scoped_chapter_ids",
-                        "chapters",
-                    )
-                },
-                "version": PORTABLE_CHECKPOINT_VERSION,
-                "branch_id": branch_id,
-                "source_manifest_sha256": saved["manifest_sha256"],
-                "shared": {
-                    "project_id": portable_project(saved["project_id"]),
-                    "settings_id": portable_settings(saved["setting_id"]),
-                    "outline_id": outline_version(saved["outline_id"]) if saved["outline_id"] else None,
-                },
-                "reports": {
-                    kind: identifier
-                    for kind, identifier in saved["reports"].items()
-                    if kind in {"workflow_inspection", "book_completion"}
-                },
-            }
-        )
+        native = _read_snapshot(tx, branch_id, row["id"])
+        saved = _summary(native)
+        archive = {
+            **{
+                key: saved[key]
+                for key in (
+                    "id",
+                    "label",
+                    "scope",
+                    "scope_id",
+                    "purpose",
+                    "created",
+                    "story_revision",
+                    "scoped_chapter_ids",
+                    "chapters",
+                )
+            },
+            "version": PORTABLE_CHECKPOINT_VERSION,
+            "branch_id": branch_id,
+            "source_manifest_sha256": saved["manifest_sha256"],
+            "shared": {
+                "project_id": portable_project(saved["project_id"]),
+                "settings_id": portable_settings(saved["setting_id"]),
+                "outline_id": outline_version(saved["outline_id"]) if saved["outline_id"] else None,
+            },
+            "reports": {
+                kind: identifier
+                for kind, identifier in saved["reports"].items()
+                if kind in {"workflow_inspection", "book_completion"}
+            },
+        }
+        body = dumps(archive)
+        try:
+            restoration = catalog.capture(native["manifest"])
+            catalog.resolve(PortableCheckpoint.model_validate(archive), restoration)
+        except DomainError, ValidationError:
+            # Archival readback remains possible even when the source cannot support a fork.
+            pass
+        else:
+            complete = dumps({**archive, "restore_sources": restoration.model_dump()})
+            if len(complete) <= PORTABLE_CHECKPOINT_MAX_BODY:
+                body = complete
         entries[saved["id"]] = PortableCheckpointEntry(id=saved["id"], sha256=_hash(body), body=body)
     return PortableCheckpointHistory(entries=list(entries.values())) if entries else None
 
@@ -1058,6 +1090,212 @@ def restore(domain, branch_id, snapshot_id, data):
         return result
 
 
+def _portable_fork_sources(tx, domain, branch_id, snapshot_id):
+    from .manuscript_exchange import export_manuscript
+    from .portable_restore_sources import RestoreSourceCatalog
+
+    checkpoint = read_archived_checkpoint(tx, branch_id, snapshot_id)
+    if not checkpoint.restore_sources:
+        raise checkpoint_error("该归档仅保存原稿及版本地址，不能据此另存工作分支。", 409)
+    package = export_manuscript(domain, branch_id, transaction=tx, checkpoint_sources_only=True)
+    catalog = RestoreSourceCatalog(package)
+    dependencies = catalog.resolve(checkpoint, checkpoint.restore_sources)
+    _portable_setting_bindings(dependencies.settings, checkpoint, catalog)
+    return checkpoint, catalog, dependencies
+
+
+def _portable_fork_basis(checkpoint):
+    return _hash(dumps(checkpoint.model_dump()))
+
+
+def _portable_story_rows(tx, branch_id, stories, chapters):
+    mapping = {record_id: uid() for record_id in stories}
+    for original, rows in stories.items():
+        identifier = mapping[original]
+        history = []
+        for row in rows:
+            payload = rewrite_references(row.payload, mapping)
+            for proof in sources(payload):
+                _remap_source(proof, chapters)
+            history.append(
+                (
+                    identifier,
+                    row.native.revision,
+                    dumps(payload),
+                    int(row.version.archived),
+                    row.native.created,
+                )
+            )
+        _, revision, payload, archived, updated = history[-1]
+        tx.execute(
+            "INSERT INTO story_records VALUES(?,?,?,?,?,?,?,?)",
+            (
+                identifier,
+                branch_id,
+                rows[-1].version.record.kind,
+                revision,
+                payload,
+                archived,
+                history[0][-1],
+                updated,
+            ),
+        )
+        tx.executemany("INSERT INTO story_record_history VALUES(?,?,?,?,?)", history)
+    for original, rows in stories.items():
+        identifier = mapping[original]
+        tx.executemany(
+            "INSERT INTO story_record_dependency_history VALUES(?,?,?,?)",
+            [
+                (identifier, row.native.revision, mapping[parent], revision)
+                for row in rows
+                for parent, revision in row.native.dependencies.items()
+            ],
+        )
+        tx.executemany(
+            "INSERT INTO story_record_dependencies VALUES(?,?,?)",
+            [
+                (identifier, mapping[parent], revision)
+                for parent, revision in rows[-1].native.dependencies.items()
+            ],
+        )
+    return mapping
+
+
+def _portable_setting_bindings(settings, checkpoint, catalog):
+    if not settings:
+        return {}
+    chapters = {row.id: row for row in checkpoint.chapters}
+    return {
+        evidence.revision_id: catalog.native_setting_source(evidence, chapters)
+        for origin in settings.origins.values()
+        if (evidence := origin.evidence) is not None
+    }
+
+
+def _portable_fork_setup(tx, checkpoint, catalog, dependencies, target, chapters):
+    from .project_portability import ProjectHistory
+    from .project_sync import restore_project_history
+    from .settings_archive import import_settings_history
+    from .settings_portability import SettingsHistory
+
+    project, settings = dependencies.project, dependencies.settings
+    origins = settings.origins if settings else {}
+    lineage = {}
+    for identifier in [
+        project.id if project else None,
+        *(origin.project_version_id for origin in origins.values()),
+    ]:
+        while identifier and identifier not in lineage:
+            version = catalog.projects[identifier]
+            lineage[identifier] = version
+            identifier = version.parent_id
+    if lineage:
+        restore_project_history(
+            tx,
+            target["id"],
+            ProjectHistory(
+                adopted_revision_id=project.id if project else None, versions=list(lineage.values())
+            ),
+        )
+    if settings:
+        revisions = _portable_setting_bindings(settings, checkpoint, catalog)
+        rebound = {}
+        for item_id, origin in origins.items():
+            if evidence := origin.evidence:
+                initial = revisions[evidence.revision_id]
+                chapter_id = chapters[initial.chapter_id]["id"]
+                saved = tx.execute(
+                    "SELECT id FROM revisions WHERE chapter_id=? AND revision=?",
+                    (chapter_id, initial.revision),
+                ).fetchone()
+                evidence = evidence.model_copy(update={"chapter_id": chapter_id, "revision_id": saved["id"]})
+            rebound[item_id] = origin.model_copy(update={"evidence": evidence})
+        version = settings.model_copy(update={"id": uid(), "parent_id": None, "origins": rebound})
+        import_settings_history(
+            tx, target["id"], SettingsHistory(adopted_revision_id=version.id, versions=[version])
+        )
+    adopted = confirmed_project_tx(tx, target["id"])
+    confirmation = _latest(tx, target["id"], CONFIRMATION)
+    return adopted["id"] if adopted else None, confirmation["id"] if confirmation else None
+
+
+def _portable_fork_outline(
+    tx, origin, target, checkpoint, outline, records, chapters, project_id, settings_id
+):
+    if not outline:
+        return
+    cards = [card.model_dump(exclude_none=True) for card in outline.reference_cards]
+    reference_ids = fork_reference_cards(tx, origin["id"], target["id"], cards)
+    plan = outline.plan.model_dump()
+    _rebase_outline(plan, chapters, records)
+    cards = _restored_cards(plan, [{"reference_cards": cards}], reference_ids)
+    live = checkpoint.restore_sources.outline_live
+    settings = (
+        confirmed_outline_settings(tx, target["id"], settings_id)
+        if settings_id and outline.settings_version_id == checkpoint.shared.settings_id
+        else {"confirmation_id": None, "items": []}
+    )
+    basis = {
+        **settings,
+        "project_id": project_id if outline.project_version_id == checkpoint.shared.project_id else None,
+        "source_snapshot_id": checkpoint.id,
+        "restored_outline_id": outline.id,
+        "reference_cards": cards,
+    }
+    if live:
+        _validate(graph_snapshot(tx, target["id"]), plan, basis, True)
+    _append_outline(tx, target, plan, basis, live)
+
+
+def fork_portable_checkpoint(domain, branch_id, snapshot_id, data):
+    fingerprint = _hash(dumps([branch_id, snapshot_id, data.model_dump(exclude={"idempotency_key"})]))
+    with domain.db.connect(True) as tx:
+        prior = tx.execute("SELECT result FROM receipts WHERE key=?", (data.idempotency_key,)).fetchone()
+        if prior:
+            result = json.loads(prior["result"])
+            if result.get("portable_fork_sha256") != fingerprint:
+                raise DomainError("idempotency", "恢复提交标识已用于其他操作。", 409)
+            return {"branch_id": result["branch_id"], "snapshot_id": snapshot_id}
+        origin = _branch(tx, branch_id)
+        checkpoint, catalog, dependencies = _portable_fork_sources(tx, domain, branch_id, snapshot_id)
+        if _portable_fork_basis(checkpoint) != data.basis_sha256:
+            raise DomainError("snapshot_changed", "恢复归档已有变化，请重新预览。", 409)
+        if tx.execute(
+            "SELECT 1 FROM branches WHERE novel_id=? AND name=?", (origin["novel_id"], data.branch_name)
+        ).fetchone():
+            raise DomainError("snapshot_branch_name", "请给恢复分支输入不同的名称。", 409)
+        target_id = uid()
+        tx.execute(
+            "INSERT INTO branches VALUES(?,?,?,?,?,?)",
+            (target_id, origin["novel_id"], data.branch_name, origin["mode"], 1, time()),
+        )
+        target = _branch(tx, target_id)
+        chapter_state = {"chapters": [chapter.model_dump() for chapter in checkpoint.chapters]}
+        chapters = _new_chapters(tx, chapter_state, target)
+        records = _portable_story_rows(tx, target_id, dependencies.stories, chapters)
+        _restore_facts(tx, {"facts": dependencies.facts}, target, chapters)
+        project_id, settings_id = _portable_fork_setup(
+            tx, checkpoint, catalog, dependencies, target, chapters
+        )
+        _portable_fork_outline(
+            tx, origin, target, checkpoint, dependencies.outline, records, chapters, project_id, settings_id
+        )
+        for row in checkpoint.restore_sources.length_targets:
+            if row.targets:
+                identifier = chapters[row.scope_id]["id"] if row.scope == "chapter" else row.scope_id
+                _save_length_target(tx, target_id, row.scope, identifier, None, row.targets.model_dump())
+        receipt = {
+            "branch_id": target_id,
+            "snapshot_id": snapshot_id,
+            "source_branch_id": branch_id,
+            "source_manifest_sha256": checkpoint.source_manifest_sha256,
+            "portable_fork_sha256": fingerprint,
+        }
+        identifier = _artifact(tx, target, RESTORE_KIND, receipt, {"source_branch_id": branch_id})
+        tx.execute("INSERT INTO receipts VALUES(?,?,?)", (data.idempotency_key, identifier, dumps(receipt)))
+        return {"branch_id": target_id, "snapshot_id": snapshot_id}
+
+
 def register_routes(app, domain):
     endpoint = "/api/branches/{branch_id}/work-snapshots"
     archive_endpoint = "/api/branches/{branch_id}/portable-checkpoints"
@@ -1076,6 +1314,28 @@ def register_routes(app, domain):
     def portable_checkpoint(branch_id: str, snapshot_id: str) -> PortableCheckpoint:
         with domain.db.connect() as tx:
             return read_archived_checkpoint(tx, branch_id, snapshot_id)
+
+    @app.get(archive_endpoint + "/{snapshot_id}/fork-preview")
+    def preview_portable_fork(branch_id: str, snapshot_id: str) -> PortableForkPreview:
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            checkpoint, _, dependencies = _portable_fork_sources(tx, domain, branch_id, snapshot_id)
+            restore_sources = checkpoint.restore_sources
+            return PortableForkPreview(
+                basis_sha256=_portable_fork_basis(checkpoint),
+                chapter_count=sum(not row.archived for row in checkpoint.chapters),
+                story_record_count=len(dependencies.stories),
+                scene_spans_for_review=restore_sources.scene_spans_for_review,
+                outline="confirmed"
+                if restore_sources.outline_live
+                else "draft"
+                if dependencies.outline
+                else "none",
+            )
+
+    @app.post(archive_endpoint + "/{snapshot_id}/fork", status_code=201)
+    def apply_portable_fork(branch_id: str, snapshot_id: str, data: PortableForkInput) -> PortableForkReceipt:
+        return fork_portable_checkpoint(domain, branch_id, snapshot_id, data)
 
     @app.get(archive_endpoint + "/{snapshot_id}/chapters/{chapter_id}")
     def diff_portable_checkpoint_chapter(branch_id: str, snapshot_id: str, chapter_id: str):

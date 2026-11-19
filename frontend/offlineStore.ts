@@ -998,14 +998,18 @@ async function verifySnapshotHistory(
 }
 
 function checkpointArtifactSources(
-  pack: Pick<ManuscriptPack, 'project_history' | 'settings_history' | 'outline_history' | 'workflow_history'>,
+  pack: Pick<
+    ManuscriptPack,
+    'project_history' | 'settings_history' | 'outline_history' | 'workflow_history' | 'story_history'
+  >,
 ) {
   return {
     projects: new Set(pack.project_history?.versions.map(({ id }) => id)),
-    settings: new Set(pack.settings_history?.versions.map(({ id }) => id)),
+    settings: new Map(pack.settings_history?.versions.map((row) => [row.id, row])),
     outlines: new Map(pack.outline_history?.versions.map((row) => [row.id, row])),
     inspections: new Set(pack.workflow_history?.inspections.map(({ id }) => id)),
     completions: new Set(pack.workflow_history?.completions.map(({ id }) => id)),
+    storyHistory: pack.story_history,
   }
 }
 
@@ -1034,20 +1038,31 @@ export function hasLocalSnapshotHistory(projectId: string): Promise<boolean> {
 export async function readLocalSnapshotHistory(projectId: string): Promise<PortableCheckpoint[]> {
   const archive = await transact(
     [
-      ...manuscriptStores,
-      ...workflowStores,
-      'snapshotArchives',
-      'projectVersions',
-      'settingsVersions',
-      'outlineVersions',
+      ...new Set([
+        ...manuscriptStores,
+        ...workflowStores,
+        ...storyReadStores,
+        'snapshotArchives',
+        'projectVersions',
+        'settingsVersions',
+        'outlineVersions',
+      ] as const),
     ],
     'readonly',
     async (tx) => {
-      const { branch } = await readProject(tx, projectId)
+      const project = await readProject(tx, projectId)
+      const { branch } = project
       const stored = await readSnapshotHistoryTx(tx, branch.id)
       if (!stored.entries.length) return null
       const sealed = decodeSnapshotHistory(stored)
+      const storyHistory = sealed.some(
+        ({ checkpoint }) => Object.keys(checkpoint.restore_sources?.story_heads ?? {}).length,
+      )
+        ? await storyStore.readStoryHistoryTx(tx, project)
+        : undefined
       const revisions = new Map<string, LocalRevision>()
+      const sourceRevisions = new Map<string, LocalRevision>()
+      const settings = new Map<string, SettingsVersion>()
       const outlines = new Map<string, OutlineVersion>()
       const chapterIds = new Set((await listChaptersTx(tx, branch.id)).map(({ id }) => id))
       const revisionIds = new Set<string>()
@@ -1055,6 +1070,12 @@ export async function readLocalSnapshotHistory(projectId: string): Promise<Porta
       for (const { checkpoint } of sealed) {
         for (const { revision_id } of checkpoint.chapters) revisionIds.add(revision_id)
         if (checkpoint.shared.outline_id) outlineIds.add(checkpoint.shared.outline_id)
+        for (const [recordId, head] of Object.entries(checkpoint.restore_sources?.story_heads ?? {})) {
+          for (const row of storyHistory?.native_history[recordId] ?? []) {
+            if (row.revision > head.revision) break
+            for (const id of [...row.evidence.record, ...row.evidence.stages.flat()]) revisionIds.add(id)
+          }
+        }
       }
       for (const id of revisionIds) {
         const revision = await result<LocalRevision | undefined>(tx.objectStore('revisions').get(id))
@@ -1064,18 +1085,32 @@ export async function readLocalSnapshotHistory(projectId: string): Promise<Porta
         const outline = await outlineStore.readOutlineVersion(tx, branch.id, id)
         if (outline) outlines.set(id, outline.version)
       }
-      const [projects, settings, inspections, completions] = await Promise.all([
+      for (const id of new Set(sealed.map(({ checkpoint }) => checkpoint.shared.settings_id))) {
+        if (!id) continue
+        const settingsRecord = await getSettingsVersion(tx, branch.id, id)
+        if (!settingsRecord) continue
+        settings.set(id, settingsRecord.version)
+        if (
+          !sealed.some(({ checkpoint }) => checkpoint.shared.settings_id === id && checkpoint.restore_sources)
+        )
+          continue
+        for (const { evidence } of Object.values(settingsRecord.version.origins)) {
+          if (!evidence || sourceRevisions.has(evidence.revision_id)) continue
+          const source = await sourceRevision(tx, branch.id, evidence.revision_id)
+          if (!source) continue
+          sourceRevisions.set(source.id, source)
+          const revision = await result<LocalRevision | undefined>(
+            tx.objectStore('revisions').index('byRevision').get([source.chapter_id, source.revision]),
+          )
+          if (revision) revisions.set(revision.id, revision)
+        }
+      }
+      const [projects, inspections, completions] = await Promise.all([
         storedCheckpointArtifactIds(
           tx,
           'projectVersions',
           branch.id,
           sealed.map(({ checkpoint }) => checkpoint.shared.project_id),
-        ),
-        storedCheckpointArtifactIds(
-          tx,
-          'settingsVersions',
-          branch.id,
-          sealed.map(({ checkpoint }) => checkpoint.shared.settings_id),
         ),
         storedCheckpointArtifactIds(
           tx,
@@ -1092,7 +1127,18 @@ export async function readLocalSnapshotHistory(projectId: string): Promise<Porta
       ])
       return {
         sealed,
-        sources: { branch, chapterIds, revisions, outlines, projects, settings, inspections, completions },
+        sources: {
+          branch,
+          chapterIds,
+          revisions,
+          sourceRevisions,
+          outlines,
+          projects,
+          settings,
+          inspections,
+          completions,
+          storyHistory,
+        },
       }
     },
   )
@@ -1207,6 +1253,7 @@ export async function exportLocalManuscript(
       branch: pack.branch,
       chapterIds: new Set(pack.chapters.map(({ id }) => id)),
       revisions: new Map(pack.revisions.map((row) => [row.id, row])),
+      sourceRevisions: new Map(pack.source_revisions?.map((row) => [row.id, row])),
       ...checkpointArtifactSources(pack),
     })
   }
@@ -2457,11 +2504,13 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
           branch,
           chapterIds: new Set(chaptersById.keys()),
           revisions: new Map(revisions.map((row) => [row.id, row])),
+          sourceRevisions: new Map(source_revisions.map((row) => [row.id, row])),
           ...checkpointArtifactSources({
             project_history,
             settings_history,
             outline_history,
             workflow_history,
+            story_history,
           }),
         })
   return {

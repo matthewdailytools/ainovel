@@ -172,7 +172,7 @@ test('卷快照预览列出受影响报告，检查并发基线后仅恢复该�
     return route.fulfill({ status: 409, json: { code: 'snapshot_source', message: '原稿缺失。' } })
   })
   await panel.getByText('跨端检查点归档', { exact: true }).press('Enter')
-  const archivePanel = panel.getByRole('region', { name: '跨端检查点归档（只读）' })
+  const archivePanel = panel.getByRole('region', { name: '跨端检查点归档详情' })
   await archivePanel.getByRole('combobox', { name: '已归档检查点' }).selectOption(archived.id)
   await archivePanel.getByRole('combobox', { name: '核对原稿章节' }).selectOption(chapter.id)
   await expect(archivePanel.getByRole('alert')).toContainText('无法核验归档原稿')

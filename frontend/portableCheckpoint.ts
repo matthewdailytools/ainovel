@@ -1,8 +1,16 @@
 import type { OutlineVersion } from './outlineSyncModel'
+import { parseSettingsEvidence, type SettingsEvidence, type SettingsVersion } from './settingsSyncModel'
+import {
+  validateStoryEffectiveGraph,
+  verifyStoryEvidence,
+  type StoryHistory,
+  type StoryVersion,
+} from './storySyncModel'
 
 const version = 'ainovel-portable-checkpoint/1' as const
 const maxCheckpoints = 5000
 const maxChapters = 5000
+const maxStoryVersions = 20_000
 const maxBody = 4 * 1024 * 1024
 const hashPattern = /^[a-f0-9]{64}$/
 
@@ -17,6 +25,26 @@ type CheckpointChapter = {
   sha256: string
   archived: 0 | 1
   stale: 0 | 1
+}
+type LengthTarget = {
+  scope: 'chapter' | 'volume' | 'book'
+  scope_id: string | null
+  targets: { min_chars: number | null; max_chars: number | null; expected_chapters: number | null } | null
+}
+type CheckpointRestoreSources = {
+  version: 'ainovel-portable-restore-sources/1'
+  outline_live: boolean
+  story_heads: Record<string, { revision: number; version_id: string }>
+  facts: {
+    subject: string
+    kind: string
+    statement: string
+    truth: string
+    story_time: string
+    evidence: SettingsEvidence
+  }[]
+  length_targets: LengthTarget[]
+  scene_spans_for_review: number
 }
 export type PortableCheckpoint = {
   version: typeof version
@@ -33,6 +61,7 @@ export type PortableCheckpoint = {
   chapters: CheckpointChapter[]
   shared: { project_id: string | null; settings_id: string | null; outline_id: string | null }
   reports: { workflow_inspection?: string; book_completion?: string }
+  restore_sources?: CheckpointRestoreSources
 }
 
 type SealedCheckpoint = { entry: PortableCheckpointEntry; checkpoint: PortableCheckpoint }
@@ -41,11 +70,13 @@ export type PortableCheckpointSources = {
   branch: { id: string; story_revision: number }
   chapterIds: ReadonlySet<string>
   revisions: ReadonlyMap<string, ChapterRevision>
+  sourceRevisions: ReadonlyMap<string, ChapterRevision>
   projects: ReadonlySet<string>
-  settings: ReadonlySet<string>
+  settings: ReadonlyMap<string, SettingsVersion>
   outlines: ReadonlyMap<string, OutlineVersion>
   inspections: ReadonlySet<string>
   completions: ReadonlySet<string>
+  storyHistory?: StoryHistory
 }
 
 function invalid(): never {
@@ -72,15 +103,9 @@ function nullableId(value: unknown) {
   return value === null ? null : id(value)
 }
 
-function text(value: unknown): string {
-  if (
-    typeof value !== 'string' ||
-    !value.trim() ||
-    value.length > 400 ||
-    [...value].length > 200 ||
-    /\p{Surrogate}/u.test(value)
-  )
-    invalid()
+function text(value: unknown, limit = 200, allowEmpty = false): string {
+  if (typeof value !== 'string' || value.length > limit * 2 || /\p{Surrogate}/u.test(value)) invalid()
+  if ((!allowEmpty && !value.trim()) || [...value].length > limit) invalid()
   return value
 }
 
@@ -101,6 +126,80 @@ function flag(value: unknown): 0 | 1 {
 
 function sameIds(left: readonly string[], right: readonly string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function parseRestoreSources(value: unknown): CheckpointRestoreSources {
+  const source = fields(value, [
+    'version',
+    'outline_live',
+    'story_heads',
+    'facts',
+    'length_targets',
+    'scene_spans_for_review',
+  ])
+  if (source.version !== 'ainovel-portable-restore-sources/1' || typeof source.outline_live !== 'boolean')
+    invalid()
+  if (!source.story_heads || typeof source.story_heads !== 'object' || Array.isArray(source.story_heads))
+    invalid()
+  const heads = Object.entries(source.story_heads)
+  if (heads.length > maxStoryVersions) invalid()
+  const story_heads = Object.fromEntries(
+    heads.map(([key, value]) => {
+      const head = fields(value, ['revision', 'version_id'])
+      return [id(key), { revision: integer(head.revision), version_id: hash(head.version_id) }]
+    }),
+  )
+  if (!Array.isArray(source.facts) || source.facts.length > maxStoryVersions) invalid()
+  const facts = source.facts.map((value) => {
+    const row = fields(value, ['subject', 'kind', 'statement', 'truth', 'story_time', 'evidence'])
+    const kind = text(row.kind)
+    const truth = text(row.truth)
+    const subject = text(row.subject, 200, true)
+    const statement = text(row.statement, 2000, true)
+    if (
+      !subject ||
+      !statement ||
+      !['event', 'knowledge', 'capability', 'resource', 'relationship', 'promise', 'world'].includes(kind) ||
+      !['fact', 'belief', 'uncertain', 'plan'].includes(truth)
+    )
+      invalid()
+    return {
+      subject,
+      kind,
+      statement,
+      truth,
+      story_time: text(row.story_time, 200, true),
+      evidence: parseSettingsEvidence(row.evidence),
+    }
+  })
+  if (!Array.isArray(source.length_targets) || source.length_targets.length > maxChapters) invalid()
+  const length_targets = source.length_targets.map((value): LengthTarget => {
+    const row = fields(value, ['scope', 'scope_id', 'targets'])
+    const { scope } = row
+    if (scope !== 'chapter' && scope !== 'volume' && scope !== 'book') invalid()
+    const scope_id = nullableId(row.scope_id)
+    if ((scope === 'book') !== (scope_id === null)) invalid()
+    if (row.targets === null) return { scope, scope_id, targets: null }
+    const fieldsByName = fields(row.targets, ['min_chars', 'max_chars', 'expected_chapters'])
+    const min_chars = fieldsByName.min_chars == null ? null : integer(fieldsByName.min_chars)
+    const max_chars = fieldsByName.max_chars == null ? null : integer(fieldsByName.max_chars, 1)
+    const expected_chapters =
+      fieldsByName.expected_chapters == null ? null : integer(fieldsByName.expected_chapters, 1)
+    if (
+      (expected_chapters !== null && expected_chapters > 1000) ||
+      (min_chars !== null && max_chars !== null && min_chars > max_chars)
+    )
+      invalid()
+    return { scope, scope_id, targets: { min_chars, max_chars, expected_chapters } }
+  })
+  return {
+    version: source.version,
+    outline_live: source.outline_live,
+    story_heads,
+    facts,
+    length_targets,
+    scene_spans_for_review: integer(source.scene_spans_for_review),
+  }
 }
 
 // JSON.parse has already checked the syntax. Inspect keys because re-export preserves the exact source
@@ -161,6 +260,7 @@ function decode(value: unknown): SealedCheckpoint {
     'chapters',
     'shared',
     'reports',
+    'restore_sources',
   ])
   const { scope, purpose, created } = checkpoint
   if (
@@ -248,6 +348,9 @@ function decode(value: unknown): SealedCheckpoint {
           : { workflow_inspection: id(reports.workflow_inspection) }),
         ...(reports.book_completion === undefined ? {} : { book_completion: id(reports.book_completion) }),
       },
+      ...(checkpoint.restore_sources != null
+        ? { restore_sources: parseRestoreSources(checkpoint.restore_sources) }
+        : {}),
     },
   }
 }
@@ -267,15 +370,20 @@ export async function verifyPortableCheckpoints(
     branch,
     chapterIds,
     revisions,
+    sourceRevisions,
     projects,
     settings,
     outlines,
     inspections,
     completions,
+    storyHistory,
   }: PortableCheckpointSources,
   digest: (body: string) => Promise<string>,
 ) {
   const checkedRevisions = new Set<string>()
+  const nativeByAddress = new Map(
+    [...revisions.values()].map((row) => [`${row.chapter_id}:${row.revision}`, row]),
+  )
   for (const { entry, checkpoint } of sealed) {
     const { project_id, settings_id, outline_id } = checkpoint.shared
     const { workflow_inspection, book_completion } = checkpoint.reports
@@ -305,8 +413,8 @@ export async function verifyPortableCheckpoints(
         checkedRevisions.add(chapter.revision_id)
       }
     }
+    const outline = outline_id ? outlines.get(outline_id) : undefined
     if (checkpoint.scope === 'volume') {
-      const outline = outline_id && outlines.get(outline_id)
       if (!outline) invalid()
       const volume = outline.plan.volumes.find(({ id }) => id === checkpoint.scope_id)
       if (
@@ -318,5 +426,104 @@ export async function verifyPortableCheckpoints(
       )
         invalid()
     }
+    if (checkpoint.restore_sources)
+      await verifyRestoreSources(checkpoint, checkpoint.restore_sources, outline, storyHistory, revisions, {
+        version: settings_id === null ? undefined : settings.get(settings_id),
+        sourceRevisions,
+        nativeByAddress,
+      })
+  }
+}
+
+async function verifyRestoreSources(
+  checkpoint: PortableCheckpoint,
+  sources: CheckpointRestoreSources,
+  outline: OutlineVersion | undefined,
+  story: StoryHistory | undefined,
+  revisions: PortableCheckpointSources['revisions'],
+  settings: {
+    version?: SettingsVersion
+    sourceRevisions: PortableCheckpointSources['sourceRevisions']
+    nativeByAddress: ReadonlyMap<string, ChapterRevision>
+  },
+) {
+  const chapterById = new Map(checkpoint.chapters.map((row) => [row.id, row]))
+  if (settings.version) {
+    if (settings.version.project_version_id !== checkpoint.shared.project_id) invalid()
+    for (const { evidence } of Object.values(settings.version.origins)) {
+      if (!evidence) continue
+      const revision =
+        settings.sourceRevisions.get(evidence.revision_id) ?? revisions.get(evidence.revision_id)
+      const captured = chapterById.get(evidence.chapter_id)
+      if (
+        !revision ||
+        !captured ||
+        revision.chapter_id !== captured.id ||
+        revision.revision > captured.revision ||
+        settings.nativeByAddress.get(`${captured.id}:${revision.revision}`)?.sha256 !== revision.sha256
+      )
+        invalid()
+      await verifyStoryEvidence(evidence, { id: evidence.revision_id, ...revision })
+    }
+  }
+  const volumes = new Set(outline?.plan.volumes.map(({ id }) => id))
+  const targetKeys = new Set<string>()
+  for (const { scope, scope_id } of sources.length_targets) {
+    const key = `${scope}:${scope_id ?? ''}`
+    if (
+      targetKeys.has(key) ||
+      (scope === 'chapter' && !chapterById.has(scope_id!)) ||
+      (scope === 'volume' && !volumes.has(scope_id!))
+    )
+      invalid()
+    targetKeys.add(key)
+  }
+  const heads = new Map(Object.entries(sources.story_heads))
+  const versions = new Map(story?.versions.map((row) => [row.id, row]))
+  const selectedStories = new Map<string, StoryVersion>()
+  for (const [recordId, head] of heads) {
+    const version = versions.get(head.version_id)
+    const history =
+      story && Object.hasOwn(story.native_history, recordId) ? story.native_history[recordId] : undefined
+    if (
+      !version ||
+      version.record_id !== recordId ||
+      !history ||
+      !history.some((row) => row.revision === head.revision && row.version_id === head.version_id)
+    )
+      invalid()
+    selectedStories.set(recordId, version)
+    for (const row of history) {
+      if (row.revision > head.revision) break
+      if (
+        Object.entries(row.dependencies).some(([id, revision]) => (heads.get(id)?.revision ?? -1) < revision)
+      )
+        invalid()
+      for (const id of [...row.evidence.record, ...row.evidence.stages.flat()]) {
+        const revision = revisions.get(id)
+        const captured = revision && chapterById.get(revision.chapter_id)
+        if (!revision || !captured || revision.revision > captured.revision) invalid()
+      }
+    }
+  }
+  validateStoryEffectiveGraph(selectedStories)
+  if (sources.outline_live) {
+    if (
+      !outline ||
+      outline.project_version_id !== checkpoint.shared.project_id ||
+      (outline.settings_version_id !== null && outline.settings_version_id !== checkpoint.shared.settings_id)
+    )
+      invalid()
+    for (const window of outline.plan.promises) {
+      const version = selectedStories.get(window.promise_id)
+      if (!version || version.archived || version.record.kind !== 'promise') invalid()
+    }
+  }
+  for (const { evidence } of sources.facts) {
+    const chapter = chapterById.get(evidence.chapter_id)
+    const version = revisions.get(evidence.revision_id)
+    if (!chapter || !version || evidence.revision_id !== chapter.revision_id) invalid()
+    const quote = await verifyStoryEvidence(evidence, { id: evidence.revision_id, ...version })
+    if ([...quote].length > 2000) invalid()
   }
 }
