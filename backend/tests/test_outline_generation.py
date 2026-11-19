@@ -156,6 +156,87 @@ def test_outline_ai_candidate_is_reviewable_and_author_save_is_separate(client, 
     assert result.json()["promises"][0]["state"] == "planned"
 
 
+@pytest.mark.parametrize("repair_complete", [False, True], ids=["empty-containers", "two-units"])
+def test_generated_outline_requires_nonempty_lists_within_the_frozen_directory(
+    client, domain, settings, story, repair_complete
+):
+    endpoint, prompt, _, second = prepare(client, domain, story)
+    assert client.post(endpoint + "/generation", json=prompt).status_code == 202
+    chapter_ids = [story["chapter_id"], second["id"]]
+    future = "后续可以继续追查铜铃的来历。"
+    extra_volumes = [{"id": f"v{index}", "title": "后续故事", "summary": future} for index in range(2, 5)]
+
+    class Candidate(Model):
+        async def generate(self, *args, **kwargs):
+            output = await super().generate(*args, **kwargs)
+            schema = kwargs["schema"]
+            definitions = schema["$defs"]
+            for container, field in (
+                (schema, "volumes"),
+                (definitions["VolumePlan"], "units"),
+                (definitions["UnitPlan"], "chapters"),
+            ):
+                items = container["properties"][field]
+                assert field in container["required"]
+                assert (items["minItems"], items["maxItems"]) == (1, 2)
+            assert definitions["ChapterPlan"]["properties"]["chapter_id"]["enum"] == chapter_ids
+            request = self.requests[-1]
+            assert "冻结目录的 2 章" in request["要求"]
+            assert "后续故事走向保留在总纲或相关摘要" in request["要求"]
+            plan = json.loads(output["text"])
+            volume = plan["volumes"][0]
+            if len(self.requests) == 1:
+                plan["volumes"] = [
+                    {key: value for key, value in volume.items() if key != "units"},
+                    *extra_volumes,
+                ]
+            else:
+                assert len(request["前次产物"]["volumes"]) == 4
+                assert all(entry["units"] == [] for entry in request["前次产物"]["volumes"])
+                assert "删除没有章纲的单元和卷" in request["修正要求"]
+                assert "每个 chapter_id，各一次" in request["修正要求"]
+                [unit] = volume["units"]
+                if repair_complete:
+                    volume["units"] = [
+                        {**unit, "id": f"u{index}", "chapters": [chapter]}
+                        for index, chapter in enumerate(unit["chapters"], 1)
+                    ]
+                    volume["summary"] += future
+                else:
+                    plan["volumes"] += [
+                        {**extra, "units": [{**unit, "id": f"u{extra['id']}", "chapters": []}]}
+                        for extra in extra_volumes
+                    ]
+            return {**output, "text": dumps(plan), "call_id": f"outline-directory-{len(self.requests)}"}
+
+    provider = Candidate()
+    assert asyncio.run(Worker(settings, provider).run_once())
+    assert len(provider.requests) == 2
+    completed = client.get(endpoint + "/generation").json()[0]
+    assert client.get(endpoint).json()["draft"] is None
+    if repair_complete:
+        assert completed["status"] == "succeeded", completed
+        artifact = client.get(endpoint + "/generation/" + completed["artifact_id"]).json()
+        [volume] = artifact["plan"]["volumes"]
+        assert future in volume["summary"]
+        assert [[chapter["chapter_id"] for chapter in unit["chapters"]] for unit in volume["units"]] == [
+            [identifier] for identifier in chapter_ids
+        ]
+    else:
+        assert completed["status"] == "blocked_runtime" and completed["artifact_id"] is None
+        assert "每单元至少一份章纲" in completed["error"]
+        saved = client.put(
+            endpoint,
+            json={
+                "base_revision": 0,
+                "confirmation_id": prompt["confirmation_id"],
+                "plan": {"summary": future, "volumes": extra_volumes},
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["draft"]["plan"]["volumes"][0]["units"] == []
+
+
 def test_outline_directory_bootstrap_replays_and_freezes_existing_ids(client, domain):
     branch = domain.create_novel("遗铃 · 零章大纲")["branch_id"]
     root = f"/api/branches/{branch}"

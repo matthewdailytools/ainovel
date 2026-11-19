@@ -243,6 +243,15 @@ async def run(worker, request, frozen):
     }
     schema = OutlinePlan.model_json_schema()
     definitions = schema["$defs"]
+    chapter_count = len(chapter_ids)
+    for container, field in (
+        (schema, "volumes"),
+        (definitions["VolumePlan"], "units"),
+        (definitions["UnitPlan"], "chapters"),
+    ):
+        items = container["properties"][field]
+        items.update(minItems=1, maxItems=min(items["maxItems"], chapter_count))
+        container.setdefault("required", []).append(field)
     chapter = definitions["ChapterPlan"]["properties"]
     chapter["chapter_id"]["enum"] = chapter_ids
     eligible = {_card_key(card) for card in frozen.get("reference_cards", [])}
@@ -262,6 +271,12 @@ async def run(worker, request, frozen):
             definitions[window_kind]["properties"][field]["enum"] = chapter_ids
     setting_items = frozen["setting_basis"]["items"]
     other_settings = [item for item in setting_items if "category_id" in item]
+    directory_scope = (
+        f"本次结构只安排冻结目录的 {chapter_count} 章。按目录顺序填写每个 chapter_id，各一次。"
+        "请显式返回 volumes、每卷的 units 和每单元的 chapters，三层列表都至少有一项。"
+        f"本次生成的卷数和单元总数都不得超过 {chapter_count}，只保留含本次章纲的卷与单元。"
+        "目录外的后续故事走向保留在总纲或相关摘要中，勿为未来内容增设章纲、空卷或空单元。"
+    )
     instruction = {
         "动作": ACTION,
         "作者本次要求": request["instruction"],
@@ -273,7 +288,8 @@ async def run(worker, request, frozen):
         "可用伏笔": frozen["promises"],
         "要求": (
             "生成总纲、卷纲、单元纲和章纲，尊重作者原话、已确认终局、已采用设定和已保存大纲。"
-            "逐章安排目标、阻碍、转折和结果，每格用一两句。章纲按目录顺序覆盖全部章节，各一次。"
+            f"{directory_scope}"
+            "逐章安排目标、阻碍、转折和结果，每格用一两句。"
             "卷与单元的 id 使用互不相同的简短字母数字编号。"
             "按需引用世界设定、其他可引用设定及伏笔编号。缺少合适伏笔时，在 new_promises 填写唯一标题和计划说明。"
             "新旧伏笔窗口均须使用目录章号，按埋设、进入回收窗口、最迟回收排列。"
@@ -354,7 +370,14 @@ async def run(worker, request, frozen):
         except DomainError as error:
             if attempt:
                 raise
-            instruction = {**instruction, "前次产物": value, "修正要求": error.message}
+            repair = error.message
+            if error.code in {"outline_incomplete", "outline_coverage", "outline_chapter", "outline_order"}:
+                repair += (
+                    "按冻结目录重组整份大纲，保留有效章纲，补齐现有章的缺漏，"
+                    "将有章纲的单元归入有内容的卷，删除没有章纲的单元和卷。"
+                    f"{directory_scope}"
+                )
+            instruction = {**instruction, "前次产物": value, "修正要求": repair}
     if worker.cancelled():
         raise DomainError("cancelled", "任务已停止。", 409)
     artifact = worker.domain.stage(
