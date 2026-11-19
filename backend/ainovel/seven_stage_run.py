@@ -406,8 +406,13 @@ def _conception_child(worker, state, operation):
 
     if not state.get("child_id"):
         _unchanged(_story_revision(worker.domain, worker.task["branch_id"]), state["story_revision"])
+    request = worker.task["payload"]
     input_fields = (
-        {"operation": "project_brief", "idea": worker.task["payload"]["idea"]}
+        {
+            "operation": "project_brief",
+            "idea": request["idea"],
+            "project_chapter_count": request.get("chapter_count"),
+        }
         if operation == "project"
         else {
             "category_id": None,

@@ -294,17 +294,28 @@ async def generate(worker, frozen):
     catalogue = get_catalog()["genres"]
     contract = ProjectBrief.model_json_schema()
     contract["properties"]["genre_ids"]["items"]["enum"] = [entry["id"] for entry in catalogue]
+    requirements = (
+        "生成供作者编辑的立项建议。position 写核心定位，track 写赛道，genre_ids 首项为主类型，"
+        "其余为辅类型。audience 写读者定位，distinction 写差异化，length 写篇幅目标，"
+        "cadence 写更新计划或留空，ending 写终局，final_image 写最后一镜或留空。"
+        "尊重作者原话、已采用创作约定和明确限制。尚无结局时提出一个可编辑的具体方案。"
+    )
+    planning = {}
+    if scope := frozen.get("project_planning_scope"):
+        planning["自动接力的整书范围"] = {"约束版本": scope["version"], "计划总章数": scope["chapter_count"]}
+        requirements += (
+            "计划总章数是启动自动接力时选定的整书范围。length 写清固定总章数及与之匹配的建议总字数范围，"
+            "预留开局、推进和终局的空间，卷与支线规模应能在指定章数内完成。"
+            "保留作者已明确且能与章数相容的篇幅、节奏和结构。若明显冲突，标明两项要求并指出需作者确认之处。"
+            "区分作者确实写出的限制和模型建议，勿从题材推定长篇连载篇幅或把建议字数写成作者原话。"
+        )
     return await worker.call(
         {
             "action": "conception.generate.project",
             "作者创作思路": frozen["idea"],
+            **planning,
             "可选题材": [{"id": entry["id"], "name": entry["name"]} for entry in catalogue],
-            "要求": (
-                "生成供作者编辑的立项建议。position 写核心定位，track 写赛道，genre_ids 首项为主类型，"
-                "其余为辅类型。audience 写读者定位，distinction 写差异化，length 写篇幅目标，"
-                "cadence 写更新计划或留空，ending 写终局，final_image 写最后一镜或留空。"
-                "尊重作者原话、已采用创作约定和明确限制。尚无结局时提出一个可编辑的具体方案。"
-            ),
+            "要求": requirements,
         },
         schema=ProjectBrief,
         context={},

@@ -23,6 +23,7 @@ LEGACY_VERSION = "conception-generate/2"
 CONSISTENCY_VERSION = "conception-consistency/1"
 WORLD_EXTRACTION_VERSION = "conception-world-extract/1"
 SETTING_FRAME_VERSION = "conception-setting-frame/1"
+PROJECT_PLANNING_SCOPE_VERSION = "project-planning-scope/1"
 WORLD_SOURCE_LIMIT = 20_000
 Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
 Reference = Annotated[str, StringConstraints(pattern=r"^[SN][1-9][0-9]{0,3}$")]
@@ -220,6 +221,11 @@ def freeze(domain, payload, *, genre_profile):
         return {**basis, "target_ids": ["world"], "world_sources": freeze_world_sources(domain, payload)}
     project = current["project"]
     if payload.get("operation") == "project_brief":
+        if (count := payload.get("project_chapter_count")) is not None:
+            basis["project_planning_scope"] = {
+                "version": PROJECT_PLANNING_SCOPE_VERSION,
+                "chapter_count": count,
+            }
         return {**basis, "idea": payload["idea"], "project_revision": project["revision"] if project else 0}
     if identifier := payload.get("project_confirmation_id"):
         if not project or project["id"] != identifier:
@@ -727,13 +733,16 @@ async def run(worker):
 
         brief = await generate(worker, frozen)
         identifier = uid()
+        basis = {"story_revision": frozen["story_revision"], "project_revision": frozen["project_revision"]}
+        if "project_planning_scope" in frozen:
+            basis["project_planning_scope"] = frozen["project_planning_scope"]
         persist_generation(
             worker,
             result,
             identifier,
             DRAFT_KIND,
             {"idea": frozen["idea"], "brief": brief},
-            {"story_revision": frozen["story_revision"], "project_revision": frozen["project_revision"]},
+            basis,
             {"artifact_id": identifier},
             "succeeded",
             artifact_status="accepted",

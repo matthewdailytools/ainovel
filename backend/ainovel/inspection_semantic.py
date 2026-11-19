@@ -1,10 +1,11 @@
 """Grounded M6 proposals that never stand in for an author's signed inspection."""
 
+from collections import Counter
 import json
-from typing import Literal
+import re
+from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints
-from typing import Annotated
 
 from .db import DomainError
 from .evidence import source_units
@@ -15,9 +16,12 @@ from .workflow_inspection import Scope, _evaluate
 
 KIND = "inspection_semantic_candidate"
 ACTION = "对账立项章纲与节奏"
-PROMPT_VERSION = "m6-semantic/2"
+_REFERENCE_SCOPE_VERSION = "m6-semantic/3"
+PROMPT_VERSION = _REFERENCE_SCOPE_VERSION
 KEYS = ("01", "02", "10")
 SemanticId = Literal["01", "02", "10"]
+_REFERENCE_ID = re.compile(r"(?:B[0-9]{2}-[0-9]{1,12}|C[0-9]{4,12}P[0-9]{4,12})")
+_MAX_LISTED_REFS = 6
 
 
 class GenerateInspectionCandidate(Input):
@@ -242,17 +246,45 @@ def _prompt_data(chapters, input_limit):
     return paragraphs
 
 
-def _validate(proposal, paragraphs, basis):
+def _label_refs(refs):
+    listed = [ref for ref in refs if _REFERENCE_ID.fullmatch(ref)][:_MAX_LISTED_REFS]
+    hidden = len(refs) - len(listed)
+    labels = json.dumps(listed, separators=(",", ":")) if listed else ""
+    if not hidden:
+        return labels
+    unlisted = f"未列出 {hidden} 个（格式不符或超过列举上限）"
+    return f"{labels}，{unlisted}" if labels else unlisted
+
+
+def _validate(proposal, paragraphs, basis, *, detailed=False):
     if [item["check_id"] for item in proposal["items"]] != list(KEYS):
         return "须按 01、02、10 的顺序各返回一次。"
+    issues = []
     for item in proposal["items"]:
         key = item["check_id"]
-        for refs, allowed in ((item["paragraph_refs"], paragraphs), (item["basis_refs"], basis[key])):
-            if len(refs) != len(set(refs)) or not set(refs) <= allowed.keys():
+        for side, allowed, permitted in (
+            ("paragraph_refs", paragraphs, "保存原文的 C…P… 编号"),
+            ("basis_refs", basis[key], f"对照依据 {key} 下的 B{key}- 编号"),
+        ):
+            counts = Counter(item[side])
+            invalid = [ref for ref in counts if ref not in allowed]
+            repeated = [ref for ref, count in counts.items() if count > 1]
+            if not invalid and not repeated:
+                continue
+            if not detailed:
                 return f"{key} 引用了不存在或重复的依据编号。"
+            parts = []
+            if invalid:
+                parts.append(f"含本侧不接受的编号 {_label_refs(invalid)}")
+            if repeated:
+                parts.append(f"含重复编号 {_label_refs(repeated)}")
+            issues.append(f"{key} 的 {side} {'，'.join(parts)}。只用{permitted}，每个编号只填一次。")
         if item["result"] != "unknown" and not (item["basis_refs"] and item["paragraph_refs"]):
-            return f"{key} 候选结论须同时引用对照依据和实际正文；缺证据请标 unknown。"
-    return None
+            missing = f"{key} 候选结论须同时引用对照依据和实际正文；缺证据请标 unknown。"
+            if not detailed:
+                return missing
+            issues.append(missing)
+    return " ".join(issues) if issues else None
 
 
 async def run(worker, request, frozen):
@@ -267,11 +299,25 @@ async def run(worker, request, frozen):
     paragraphs = _prompt_data(rows, provider.max_input_bytes)
     basis = {key: {row["id"]: row for row in rows} for key, rows in frozen["basis_excerpts"].items()}
     chapters = frozen["chapters"]
+    version = frozen["template_version"]
+    # An existing frozen task must replay its original prompt and repair fingerprint.
+    detailed = version == _REFERENCE_SCOPE_VERSION
     instruction = {
         "动作": ACTION,
-        "核对提示版本": frozen["template_version"],
+        "核对提示版本": version,
         "送审范围": frozen["scope"],
         "送审目录": chapters,
+        **(
+            {
+                "引用编号范围": {
+                    "paragraph_refs": "只用「保存原文」中的 C…P… 编号。各项可引用同一段正文。",
+                    "basis_refs": {key: f"只用「对照依据」{key} 下实际给出的 B{key}- 编号。" for key in KEYS},
+                    "约束": "每项同一列表的编号各填一次。有一侧缺少可引用证据时，该侧留空，结论给 unknown。",
+                }
+            }
+            if detailed
+            else {}
+        ),
         "对照依据": frozen["basis_excerpts"],
         "保存原文": paragraphs,
         "要求": (
@@ -295,7 +341,7 @@ async def run(worker, request, frozen):
             raise DomainError(
                 "inspection_scope_limit", "送审内容超出账户输入上限，请改按章或卷送审。", 409
             ) from failure
-        error = _validate(proposal, paragraphs, basis)
+        error = _validate(proposal, paragraphs, basis, detailed=detailed)
         if not error:
             break
         instruction = {**instruction, "修正要求": error}
@@ -320,7 +366,7 @@ async def run(worker, request, frozen):
         request,
         KIND,
         evidence,
-        {"inspection_basis_sha256": frozen["basis_sha256"]},
+        {"inspection_basis_sha256": frozen["basis_sha256"], "inspection_prompt_version": version},
         worker.task["id"],
         worker.attempt,
         on_stage=lambda tx, identifier: tx.execute(

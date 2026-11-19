@@ -357,6 +357,53 @@ def start(client, domain, story, origin, **extra):
     return branch, endpoint, task_id
 
 
+def test_idea_run_freezes_whole_book_chapter_count_separately_from_author_idea(client, domain, settings):
+    idea = "学徒循遗铃查明师姐为何失踪。\n全书写一卷，约四千字，同一夜内收束。"
+    branch, _, run_id = start(
+        client, domain, None, "idea", idea=idea, chapter_count=2, auto_confirm_planning=False
+    )
+    instructions = []
+    length = "全书一卷两章，约四千字，同一夜内收束。"
+
+    class ProjectModel:
+        async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+            instructions.append(json.loads(prompt.split("\n只返回")[0])["任务"])
+            return {"text": dumps({**BRIEF, "length": length}), "usage": {"input": 1, "output": 1}}
+
+    drain(settings, ProjectModel())
+    run = domain.task(run_id)
+    assert run["status"] == "needs_review", run["error"]
+    state = run["result"]["seven_stage_run"]
+    assert state["stage"] == "project"
+    child = domain.task(state["child_id"])
+    frozen = child["result"]["conception_generation_snapshot"]
+    scope = {"version": "project-planning-scope/1", "chapter_count": 2}
+    assert child["payload"]["project_chapter_count"] == 2
+    assert frozen["idea"] == idea and frozen["project_planning_scope"] == scope
+    assert len(instructions) == 1
+    instruction = instructions[0]
+    assert instruction["作者创作思路"] == idea
+    assert instruction["自动接力的整书范围"] == {"约束版本": scope["version"], "计划总章数": 2}
+    assert "保留作者已明确且能与章数相容的篇幅" in instruction["要求"]
+    assert "把建议字数写成作者原话" in instruction["要求"]
+    candidate = domain.artifact(state["artifact_id"])
+    assert candidate["basis"]["project_planning_scope"] == scope
+    assert candidate["payload"] == {"idea": idea, "brief": {**BRIEF, "length": length}}
+    project_route = f"/api/branches/{branch}/conception/project-brief"
+    confirmed = verify(
+        client.put(
+            project_route,
+            json={
+                "base_revision": 0,
+                "idempotency_key": uid(),
+                "candidate_id": candidate["id"],
+                **candidate["payload"],
+            },
+        )
+    )
+    assert confirmed["idea"] == idea and confirmed["brief"]["length"] == length
+
+
 @pytest.mark.parametrize("origin", ["idea", "settings", "outline"])
 def test_seven_stage_run_reaches_verified_checkpoints(client, domain, settings, story, origin):
     count = 2 if origin == "idea" else 1
