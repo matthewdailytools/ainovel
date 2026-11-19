@@ -810,9 +810,11 @@ test('卷和整书历史恢复点随独立备份往返，断网另存可保留�
     await (await outgoing).saveAs(webFile)
 
     await web.reload()
-    await projects.selectOption({ label: copyName })
-    copyId = await projects.inputValue()
+    const [selectedCopy] = await projects.selectOption({ label: copyName })
+    copyId = selectedCopy
+    expect(copyId).toBeTruthy()
     expect(copyId).not.toBe(source.id)
+    await expect(projects).toHaveValue(copyId)
     const evidence = web.getByRole('region', { name: '随稿依据', exact: true })
     await evidence.getByText('从归档另存的来源', { exact: true }).press('Enter')
     await expect(evidence).toContainText(source.branch_id)
