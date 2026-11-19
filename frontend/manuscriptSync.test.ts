@@ -3,6 +3,7 @@ import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import {
   acknowledgeLocalPublications,
   applySyncedObject,
+  confirmLocalOutline,
   confirmLocalProjectBrief,
   createLocalChapter,
   createLocalProject,
@@ -20,7 +21,12 @@ import {
   syncObjectSignature,
   validateSyncedObject,
 } from './offlineStore'
-import { httpSyncTransport, syncWebManuscript } from './manuscriptSync'
+import {
+  httpSyncTransport,
+  readWebChapterOrderConflicts,
+  resolveWebChapterOrder,
+  syncWebManuscript,
+} from './manuscriptSync'
 import {
   markSyncBaseline,
   pullSyncPage,
@@ -128,6 +134,185 @@ function service(device: string, objectId: string, acceptedBeforeDisconnect: boo
   }
   return { transport, latest, submitted, log }
 }
+
+test.each([false, true])(
+  'a lost chapter-order receipt is replayed and does not send or replace a newer local save=%s',
+  async (newer) => {
+    const project = await createLocalProject('反转目录')
+    const key = project.novel.id
+    const chapter = await createLocalChapter(key, '铜铃')
+    const [initial] = await readLocalHistory(key, chapter.id)
+    const original = await saveLocalChapter(key, chapter.id, initial.id, '只调整章位的原稿')
+    const objectId = `chapter:${chapter.id}`
+    const scope = { service: 'http://127.0.0.1:8888', workId: project.branch.id, deviceId: 'web-order' }
+    const cloud = service(scope.deviceId, 'unused', false)
+    const ledger = 'c'.repeat(32)
+    const attempts: string[] = []
+    let applied: SyncReceipt | undefined
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const { pathname, searchParams } = new URL(String(url))
+      const path = pathname.split(`/works/${scope.workId}`)[1]
+      if (path === '/checkpoint') return Response.json({ ledger_id: ledger, cursor: cloud.log.length })
+      expect(new Headers(init?.headers).get('X-Ainovel-Ledger')).toBe(ledger)
+      if (path === '/pull')
+        return Response.json(await cloud.transport.pull(Number(searchParams.get('after'))))
+      if (path === '/push') return Response.json(await cloud.transport.push(JSON.parse(String(init?.body))))
+      if (path.startsWith('/receipts/')) {
+        return applied && path === `/receipts/${applied.change_id}`
+          ? Response.json(applied)
+          : new Response(null, { status: 404 })
+      }
+      expect(path).toBe('/chapter-order-conflicts/resolve')
+      expect(searchParams.get('device_id')).toBe(scope.deviceId)
+      const request = JSON.parse(String(init?.body))
+      attempts.push(request.change_id)
+      expect(request.chapter_id).toBe(chapter.id)
+      expect(request.position).toBe(chapter.position)
+      if (applied) return Response.json(applied)
+      const old = cloud.latest.get(objectId)
+      expect(request.heads[chapter.id]).toBe(old?.change_id)
+      const payload = JSON.parse(JSON.stringify(old?.payload))
+      payload.chapter.position = chapter.position + 2
+      applied = (await cloud.transport.push({
+        change_id: request.change_id,
+        object_id: objectId,
+        parent_revision: old!.change_id,
+        payload,
+        tombstone: false,
+      })) as SyncReceipt
+      throw new Error('章位已写入但响应中断')
+    })
+    const transport = httpSyncTransport(scope, 'a'.repeat(32))
+    await transport.enable()
+    await syncWebManuscript(project, scope, transport)
+    const selection = {
+      chapter_id: chapter.id,
+      position: chapter.position,
+      heads: { unrelated: 'other-chapter-head', [chapter.id]: cloud.latest.get(objectId)!.change_id },
+    }
+    const before = cloud.submitted.length
+    await expect(resolveWebChapterOrder(project, scope, transport, selection, ledger)).rejects.toThrow(
+      '章位已写入但响应中断',
+    )
+    const saved = newer
+      ? await saveLocalChapter(key, chapter.id, original.id, '断线后继续保存的正文。')
+      : original
+    const resolved = await resolveWebChapterOrder(project, scope, transport, selection, ledger)
+    expect(attempts).toHaveLength(2)
+    expect(attempts[0]).toBe(attempts[1])
+    expect(cloud.submitted).toHaveLength(before + 1)
+    const pack = await exportLocalManuscript(key)
+    expect(pack.chapters.find(({ id }) => id === chapter.id)?.position).toBe(
+      newer ? chapter.position : chapter.position + 2,
+    )
+    const history = await readLocalHistory(key, chapter.id)
+    expect(history).toHaveLength(newer ? 3 : 2)
+    expect(history.at(-1)).toMatchObject({
+      id: saved.id,
+      content: saved.content,
+    })
+    expect(resolved.receivedUnapplied).toBe(newer ? 1 : 0)
+    expect(resolved.localPending > 0).toBe(newer)
+    if (newer) {
+      const continued = await syncWebManuscript(project, scope, transport)
+      expect(continued.conflicts).toHaveLength(1)
+      expect(cloud.latest.get(objectId)?.payload).toMatchObject({
+        chapter: { position: chapter.position + 2 },
+        head: { id: original.id },
+      })
+      expect((await readLocalHistory(key, chapter.id)).at(-1)).toMatchObject({
+        id: saved.id,
+        content: saved.content,
+      })
+    }
+  },
+)
+
+test('an adopted local outline protects its chapter before that outline reaches the cloud', async () => {
+  const project = await createLocalProject('未同步的正式大纲')
+  const chapter = await createLocalChapter(project.novel.id, '仍在大纲里的章节')
+  const scope = { service: 'http://127.0.0.1:8888', workId: project.branch.id, deviceId: 'web-order' }
+  const ledger = 'c'.repeat(32)
+  let missing = false
+  let submitted = false
+  const cloudChapters = [
+    { chapter_id: chapter.id, head_revision: 'local-head', title: chapter.title, scheduled: false },
+    { chapter_id: 'remote', head_revision: 'remote-head', title: '其他章', scheduled: false },
+  ]
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    const { pathname, searchParams } = new URL(String(url))
+    if (pathname.endsWith('/checkpoint')) return Response.json({ ledger_id: ledger, cursor: 0 })
+    expect(new Headers(init?.headers).get('X-Ainovel-Ledger')).toBe(ledger)
+    if (pathname.endsWith('/chapter-order-conflicts')) {
+      expect(searchParams.get('device_id')).toBe(scope.deviceId)
+      return missing
+        ? Response.json({ code: 'sync_work_missing', message: '云端工作版本不存在。' }, { status: 404 })
+        : Response.json({ conflicts: [{ position: chapter.position, chapters: cloudChapters }] })
+    }
+    if (pathname.includes('/receipts/')) return new Response(null, { status: 404 })
+    submitted = true
+    throw new Error('未获准提交')
+  })
+  const transport = httpSyncTransport(scope, 'a'.repeat(32))
+  await transport.enable()
+  expect((await readWebChapterOrderConflicts(project, transport))[0].chapters).toEqual(cloudChapters)
+  await confirmLocalOutline(project.novel.id, null, {
+    id: 'web-outline',
+    parent_id: null,
+    project_version_id: null,
+    settings_version_id: null,
+    plan: {
+      summary: '见到铜铃',
+      promises: [],
+      volumes: [
+        {
+          id: 'first-volume',
+          title: '第一卷',
+          summary: '旧城线索',
+          units: [
+            {
+              id: 'first-unit',
+              title: '寻找铜铃',
+              summary: '比对铸记',
+              chapters: [
+                {
+                  chapter_id: chapter.id,
+                  goal: '拿到铜铃',
+                  obstacle: '桥已截断',
+                  turn: '发现摆渡人',
+                  result: '找到新线索',
+                  setting_ids: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    reference_cards: [],
+    promise_sources: {},
+  })
+  expect((await readWebChapterOrderConflicts(project, transport))[0].chapters).toEqual([
+    { ...cloudChapters[0], scheduled: true },
+    cloudChapters[1],
+  ])
+  await expect(
+    resolveWebChapterOrder(
+      project,
+      scope,
+      transport,
+      {
+        chapter_id: chapter.id,
+        position: chapter.position,
+        heads: { [chapter.id]: cloudChapters[0].head_revision, remote: cloudChapters[1].head_revision },
+      },
+      ledger,
+    ),
+  ).rejects.toThrow('该章已编入本机正式大纲')
+  expect(submitted).toBe(false)
+  missing = true
+  await expect(readWebChapterOrderConflicts(project, transport)).rejects.toThrow('云端工作版本不存在')
+})
 
 test('formal fact and length heads publish their checked versions first and chapter edit publishes an empty set once', async () => {
   const original = await createLocalProject('正式依据同步')

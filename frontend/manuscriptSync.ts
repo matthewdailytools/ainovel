@@ -6,6 +6,7 @@ import {
   forkLocalManuscript,
   hasLocalChapterAdoption,
   manuscriptHash,
+  readLocalOutline,
   readLocalPublications,
   readLocalSyncSnapshot,
   syncManuscriptObjects,
@@ -33,6 +34,7 @@ import {
 import { workflowSyncEntry } from './workflowArchive'
 import { workflowTransferRestrictions } from './workflowPrivacy'
 import type { SettingsConflictMerge } from './settingsSyncModel'
+import type { ChapterOrderConflict, ChapterOrderResolution } from './ChapterOrderConflicts'
 import { referenceCardKey, referenceHeadObjectId } from './referenceArchive'
 import {
   isRestoreStateObjectId,
@@ -82,12 +84,10 @@ export function cloudScope(service: string, workId: string, deviceId: string): S
   return { service: url.origin, workId, deviceId }
 }
 
-export function httpSyncTransport(
-  scope: SyncScope,
-  token: string,
-): SyncTransport & { enable(): Promise<void>; revokeDevice(): Promise<void> } {
+export function httpSyncTransport(scope: SyncScope, token: string) {
   if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) throw new Error('请输入同步服务签发的设备凭据。')
   const endpoint = `${scope.service}/api/sync/works/${encodeURIComponent(scope.workId)}`
+  const deviceQuery = new URLSearchParams({ device_id: scope.deviceId })
   function send(path: string, method: 'GET' | 'POST' | 'DELETE', payload?: unknown, ledgerId?: string) {
     return fetch(endpoint + path, {
       method,
@@ -103,23 +103,36 @@ export function httpSyncTransport(
       ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
     })
   }
-  async function request(path: string, payload?: unknown, optional = false) {
-    const ledgerId = path === '/checkpoint' ? undefined : await requireSyncLedger(scope)
+  async function request(path: string, payload?: unknown, optional = false, boundLedger?: string) {
+    const ledgerId = path === '/checkpoint' ? undefined : (boundLedger ?? (await requireSyncLedger(scope)))
     const response = await send(path, payload === undefined ? 'GET' : 'POST', payload, ledgerId)
     if (optional && response.status === 404) return null
-    const result = await response.json()
+    const result = await response.json().catch(() => {
+      if (response.ok) throw new Error('同步服务返回了无法核对的响应。')
+      return null
+    })
     if (!response.ok) {
-      if (response.status === 409 && result.code === 'sync_ledger_replaced') throw new SyncLedgerChanged()
-      if (response.status === 409 && ['sync_head_changed', 'sync_conflict_resolved'].includes(result.code)) {
+      const code = result?.code
+      const message = typeof result?.message === 'string' ? result.message : undefined
+      if (response.status === 409 && code === 'sync_ledger_replaced') throw new SyncLedgerChanged()
+      if (response.status === 409 && ['sync_head_changed', 'sync_conflict_resolved'].includes(code)) {
         throw new SyncResolutionChanged('云端版本已更新。请再次同步并重新比较。')
       }
       if (
-        result.code === 'sync_restore_state_dependency' ||
-        result.code === 'sync_restore_state_integrity' ||
-        result.code === 'sync_object_size'
+        response.status === 409 &&
+        ['sync_chapter_order_changed', 'sync_chapter_order_scheduled', 'sync_chapter_order_limit'].includes(
+          code,
+        )
+      ) {
+        throw new SyncResolutionChanged(message || '章位已变化，请刷新后重新核对。')
+      }
+      if (
+        code === 'sync_restore_state_dependency' ||
+        code === 'sync_restore_state_integrity' ||
+        code === 'sync_object_size'
       )
-        throw new SyncRestoreStateRejected(result.code, result.message || '正式事实或篇幅目标暂未提交。')
-      throw new Error(result.message || `同步请求失败（HTTP ${response.status}）。`)
+        throw new SyncRestoreStateRejected(code, message || '正式事实或篇幅目标暂未提交。')
+      throw new Error(message || `同步请求失败（HTTP ${response.status}）。`)
     }
     return result
   }
@@ -130,19 +143,85 @@ export function httpSyncTransport(
     async verifyLedger() {
       await requireSyncLedger(scope, await request('/checkpoint'))
     },
+    async chapterOrderConflicts(): Promise<ChapterOrderConflict[]> {
+      const result = await request(`/chapter-order-conflicts?${deviceQuery}`)
+      const conflicts: unknown = result?.conflicts
+      if (
+        !Array.isArray(conflicts) ||
+        conflicts.some(
+          (conflict) =>
+            !Number.isSafeInteger(conflict?.position) ||
+            conflict.position < 1 ||
+            !Array.isArray(conflict.chapters) ||
+            conflict.chapters.length < 2 ||
+            conflict.chapters.some(
+              (chapter: ChapterOrderConflict['chapters'][number]) =>
+                typeof chapter?.chapter_id !== 'string' ||
+                typeof chapter.title !== 'string' ||
+                typeof chapter.head_revision !== 'string' ||
+                typeof chapter.scheduled !== 'boolean',
+            ),
+        )
+      ) {
+        throw new Error('云端章位冲突数据无法核对。')
+      }
+      return conflicts
+    },
+    async resolveChapterOrder(
+      selection: ChapterOrderResolution,
+      ledgerId: string,
+      checkUnsubmitted: () => Promise<void>,
+    ) {
+      const heads = Object.keys(selection.heads)
+        .sort()
+        .map((id) => [id, selection.heads[id]])
+      const changeId = await manuscriptHash(
+        JSON.stringify([
+          'chapter-order',
+          ledgerId,
+          scope.workId,
+          scope.deviceId,
+          selection.chapter_id,
+          selection.position,
+          heads,
+        ]),
+      )
+      const prior = await request(`/receipts/${changeId}`, undefined, true, ledgerId)
+      if (prior === null) await checkUnsubmitted()
+      const receipt = await request(
+        `/chapter-order-conflicts/resolve?${deviceQuery}`,
+        { ...selection, change_id: changeId },
+        false,
+        ledgerId,
+      )
+      if (
+        receipt?.status !== 'applied' ||
+        receipt.change_id !== changeId ||
+        receipt.head_revision !== changeId ||
+        receipt.device_id !== scope.deviceId ||
+        receipt.object_id !== `chapter:${selection.chapter_id}` ||
+        receipt.parent_revision !== selection.heads[selection.chapter_id] ||
+        receipt.tombstone !== false ||
+        receipt.payload?.kind !== 'chapter' ||
+        receipt.payload.chapter?.id !== selection.chapter_id ||
+        !Number.isSafeInteger(receipt.payload.chapter.position) ||
+        receipt.payload.chapter.position <= selection.position
+      ) {
+        throw new Error('尚未取得可核对的章位调整回执。')
+      }
+    },
     push: (change) => request('/push', change),
     pull: (after) => request(`/pull?after=${after}&limit=50`),
     receipt: (id) => request('/receipts/' + encodeURIComponent(id), undefined, true),
     resolve: (id, data) => request('/conflicts/' + encodeURIComponent(id) + '/resolve', data),
     async revokeDevice() {
-      const query = new URLSearchParams({ device_id: scope.deviceId })
-      const response = await send(`/device-session?${query}`, 'DELETE').catch(() => undefined)
+      const response = await send(`/device-session?${deviceQuery}`, 'DELETE').catch(() => undefined)
       if (response?.status === 204) return
       if (response?.status === 401) throw new Error('凭据无效或已被更换，请核对设备凭据。')
       if (response?.status === 403) throw new Error('设备编号与凭据不匹配，请核对后重试。')
       throw new Error('尚未取得云端撤销回执，请用同一设备凭据重试。作品与待同步记录已保留。')
     },
-  }
+  } satisfies SyncTransport & Record<string, unknown>
 }
 
 async function pull(scope: SyncScope, transport: SyncTransport) {
@@ -690,6 +769,86 @@ export async function readWebManuscriptSyncState(scope: SyncScope) {
   return { ...state, localPending }
 }
 
+function withWebSyncLock<T>(scope: SyncScope, exchange: () => Promise<T>) {
+  if (typeof navigator !== 'undefined' && navigator.locks) {
+    return navigator.locks.request(`ainovel-sync/${scope.workId}`, { ifAvailable: true }, (lock) => {
+      if (!lock) throw new Error('另一标签页正在同步此作品，请稍后重试。')
+      return exchange()
+    })
+  }
+  return exchange()
+}
+
+type ChapterOrderTransport = Pick<
+  ReturnType<typeof httpSyncTransport>,
+  keyof SyncTransport | 'resolveChapterOrder'
+>
+
+async function locallyScheduledChapters(project: LocalProject) {
+  const { current } = await readLocalOutline(project.novel.id)
+  return new Set(current ? outlineChapterPlans(current.version.plan).map(({ chapter_id }) => chapter_id) : [])
+}
+
+export async function readWebChapterOrderConflicts(
+  project: LocalProject,
+  transport: Pick<ReturnType<typeof httpSyncTransport>, 'chapterOrderConflicts'>,
+) {
+  const conflicts = await transport.chapterOrderConflicts()
+  if (conflicts.length === 0) return conflicts
+  const scheduled = await locallyScheduledChapters(project)
+  return conflicts.map((conflict) => ({
+    ...conflict,
+    chapters: conflict.chapters.map((chapter) => ({
+      ...chapter,
+      scheduled: chapter.scheduled || scheduled.has(chapter.chapter_id),
+    })),
+  }))
+}
+
+export async function resolveWebChapterOrder(
+  project: LocalProject,
+  scope: SyncScope,
+  transport: ChapterOrderTransport,
+  selection: ChapterOrderResolution,
+  ledgerId: string,
+) {
+  if (scope.workId !== project.branch.id) throw new Error('同步范围与当前工作版本不一致。')
+  return withWebSyncLock(scope, async () => {
+    const state = await readSyncState(scope)
+    if (!state.enabled) throw new Error('请先为当前作品启用同步。')
+    if (state.ledgerId !== ledgerId) throw new SyncLedgerChanged()
+    await transport.verifyLedger()
+    await transport.resolveChapterOrder(selection, ledgerId, async () => {
+      const [scheduled, publications, latest] = await Promise.all([
+        locallyScheduledChapters(project),
+        readLocalPublications(scope.workId),
+        readSyncState(scope),
+      ])
+      if (scheduled.has(selection.chapter_id))
+        throw new SyncResolutionChanged('该章已编入本机正式大纲，请保留其章位。')
+      const affected = new Set(Object.keys(selection.heads).map((id) => `chapter:${id}`))
+      if (
+        publications.some(({ objectId }) => affected.has(objectId)) ||
+        latest.blockedObjects.some((id) => affected.has(id)) ||
+        latest.pending.some((row) =>
+          affected.has(row.kind === 'push' ? row.request.object_id : row.object_id),
+        )
+      )
+        throw new SyncResolutionChanged('这些章节有待同步的本机修改或分歧，请先核对正文与目录。')
+    })
+    await pull(scope, transport)
+    await acknowledgePublications(scope)
+    let deferred = await reconcile(project, scope)
+    // Another received chapter may have been held at the position just freed by this receipt.
+    if ([...deferred.keys()].some((id) => id.startsWith('chapter:')))
+      deferred = await reconcile(project, scope)
+    return {
+      ...(await readWebManuscriptSyncState(scope)),
+      deferred: [...deferred].map(([object_id, reason]) => ({ object_id, reason })),
+    }
+  })
+}
+
 export async function syncWebManuscript(project: LocalProject, scope: SyncScope, transport: SyncTransport) {
   if (scope.workId !== project.branch.id) throw new Error('同步范围与当前工作版本不一致。')
   async function exchange() {
@@ -750,13 +909,7 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
       })),
     }
   }
-  if (typeof navigator !== 'undefined' && navigator.locks) {
-    return navigator.locks.request(`ainovel-sync/${scope.workId}`, { ifAvailable: true }, (lock) => {
-      if (!lock) throw new Error('另一标签页正在同步此作品，请稍后重试。')
-      return exchange()
-    })
-  }
-  return exchange()
+  return withWebSyncLock(scope, exchange)
 }
 
 export async function prepareWebResolution(project: LocalProject, scope: SyncScope, id: string) {

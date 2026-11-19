@@ -1,11 +1,146 @@
 from fastapi.testclient import TestClient
 import pytest
 
-from ainovel.cloud_sync import create_sync_app
+from ainovel.cloud_sync import ChapterOrderResolution, create_sync_app
 from ainovel.db import Database, DomainError
 from ainovel.desktop_sync import DesktopSync, Resolve, _headers
 from ainovel.domain import Domain
 from ainovel.manuscript_exchange import export_manuscript, import_manuscript
+
+
+@pytest.mark.parametrize("replacement", [False, True], ids=["original-device", "replacement-device"])
+def test_desktop_resolves_a_chapter_order_collision_and_recovers_a_lost_receipt(
+    domain, story, tmp_path, replacement
+):
+    branch = story["branch_id"]
+    remote = Domain(Database(tmp_path / "chapter-order-peer.sqlite"))
+    import_manuscript(remote, export_manuscript(domain, branch))
+    origin = "http://127.0.0.1:8888"
+    work = f"/api/sync/works/{branch}"
+    secret = "provision-for-tests-only-abcdefgh"
+    attempts = []
+    lost = False
+    observation = "available"
+    with TestClient(create_sync_app(tmp_path / "chapter-order-cloud.sqlite", secret)) as service:
+
+        def grant(device):
+            response = service.post(work + "/devices", json={"device_id": device}, headers=_headers(secret))
+            assert response.status_code == 201, response.text
+            return response.json()["token"]
+
+        def transport(origin, token, method, target, payload, *, ledger_id=None):
+            nonlocal lost
+            if "chapter-order-conflicts" in target or "/receipts/" in target or "/changes/" in target:
+                assert ledger_id
+            if target.endswith("/chapter-order-conflicts/resolve"):
+                attempts.append(payload["change_id"])
+            response = service.request(method, target, headers=_headers(token, ledger_id), json=payload)
+            if not response.is_success:
+                raise DomainError(response.json()["code"], response.json()["message"], response.status_code)
+            if target.endswith("/chapter-order-conflicts/resolve") and lost:
+                lost = False
+                raise DomainError("sync_transport", "回执响应丢失。", 502)
+            result = response.json()
+            if target.endswith("/changes/stored-order-comparison"):
+                if observation == "unavailable":
+                    raise DomainError("sync_change", "查不到变更。", 404)
+                if observation == "different-chapter-content":
+                    result["payload"]["chapter"]["title"] = "与原章标题不一致"
+            return result
+
+        left, right = DesktopSync(domain, transport), DesktopSync(remote, transport)
+        left_key, right_key = grant("order-left"), grant("order-right")
+        left.enable(branch, origin, left_key)
+        right.enable(branch, origin, right_key)
+        left.run(branch, origin, left_key)
+        right.run(branch, origin, right_key)
+        first = domain.create_chapter(branch, "并发添章 · 拾铃")
+        second = remote.create_chapter(branch, "并发添章 · 还铃")
+        domain.save(first["id"], 0, "拾到带断痕的铜铃。")
+        remote.save(second["id"], 0, "记录原有还铃稿。")
+        left.run(branch, origin, left_key)
+        right.run(branch, origin, right_key)
+
+        def compared(change_id):
+            [conflict] = right.chapter_order_conflicts(branch, origin, right_key).conflicts
+            assert conflict.position == 2
+            assert {row.chapter_id for row in conflict.chapters} == {first["id"], second["id"]}
+            return ChapterOrderResolution(
+                change_id=change_id,
+                chapter_id=second["id"],
+                position=conflict.position,
+                heads={row.chapter_id: row.head_revision for row in conflict.chapters},
+            )
+
+        outdated = compared("outdated-order-comparison")
+        remote.save(second["id"], 1, "保留尚未同步的还铃正文。")
+        with pytest.raises(DomainError, match="待同步的本机修改") as dirty:
+            right.resolve_chapter_order(branch, origin, right_key, outdated)
+        assert dirty.value.code == "sync_pending"
+        assert attempts == []
+        assert right._state(branch)["chapter_order_pending"] is None
+        right.run(branch, origin, right_key)
+        with pytest.raises(DomainError, match="章位比较后已变化") as advanced:
+            right.resolve_chapter_order(branch, origin, right_key, outdated)
+        assert advanced.value.code == "sync_chapter_order_changed"
+        assert right._state(branch)["chapter_order_pending"] is None
+
+        request = compared("stored-order-comparison")
+        lost = True
+        original = remote.chapter(second["id"])
+        with pytest.raises(DomainError, match="响应丢失"):
+            right.resolve_chapter_order(branch, origin, right_key, request)
+        assert remote.chapter(second["id"]) == original
+        right = DesktopSync(remote, transport)
+        assert right._state(branch)["chapter_order_pending"] == request.model_dump()
+        with pytest.raises(DomainError, match="等待回执"):
+            right.resolve_chapter_order(
+                branch, origin, right_key, request.model_copy(update={"change_id": "another-chapter-order"})
+            )
+        with pytest.raises(DomainError, match="提交本次章位调整的设备凭据"):
+            right.resolve_chapter_order(branch, origin, left_key, request)
+        if replacement:
+            assert service.delete(work + "/devices/order-right", headers=_headers(secret)).status_code == 204
+            assert service.get(work + "/checkpoint", headers=_headers(right_key)).status_code == 401
+            right_key = grant("order-replacement")
+            for observation in ("unavailable", "different-chapter-content"):
+                observer_state = right.run(branch, origin, right_key)
+                assert observer_state["chapter_order_pending"] == request.model_dump()
+                assert remote.chapter(second["id"])["position"] == 3
+            observation = "available"
+            status = right.run(branch, origin, right_key)
+            assert status["cursor"] == observer_state["cursor"]
+        else:
+            result = right.resolve_chapter_order(branch, origin, right_key, request)
+            status = result["status"]
+            assert result["receipt"].change_id == request.change_id and result["receipt"].status == "applied"
+        assert status["chapter_order_pending"] is None
+        assert not status["deferred"]
+        assert attempts == [outdated.change_id, request.change_id]
+        assert right.chapter_order_conflicts(branch, origin, right_key).conflicts == []
+        assert remote.chapter(second["id"]) == {**original, "position": 3}
+        assert remote.chapter(first["id"])["position"] == 2
+        state = left.run(branch, origin, left_key)
+        assert state["cursor"] == status["cursor"] and not state["deferred"]
+        assert domain.chapter(second["id"])["content"] == original["content"]
+        assert domain.chapter(second["id"])["position"] == 3
+
+        if replacement:
+            domain.create_chapter(branch, "再次并发添章 · 甲")
+            later = remote.create_chapter(branch, "再次并发添章 · 乙")
+            left.run(branch, origin, left_key)
+            right.run(branch, origin, right_key)
+            [conflict] = right.chapter_order_conflicts(branch, origin, right_key).conflicts
+            later_request = ChapterOrderResolution(
+                change_id="order-after-device-recovery",
+                chapter_id=later["id"],
+                position=conflict.position,
+                heads={row.chapter_id: row.head_revision for row in conflict.chapters},
+            )
+            result = right.resolve_chapter_order(branch, origin, right_key, later_request)
+            assert result["status"]["chapter_order_pending"] is None
+            assert remote.chapter(later["id"])["position"] == conflict.position + 1
+            assert attempts == [outdated.change_id, request.change_id, later_request.change_id]
 
 
 def test_two_independent_sqlite_workspaces_sync_and_keep_competing_revisions(client, domain, story, tmp_path):

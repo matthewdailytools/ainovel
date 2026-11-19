@@ -716,6 +716,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/desktop-sync/chapter-order-conflicts': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Read Chapter Order */
+    post: operations['read_chapter_order_api_branches__branch_id__desktop_sync_chapter_order_conflicts_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/desktop-sync/chapter-order-conflicts/resolve': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Resolve Chapter Order */
+    post: operations['resolve_chapter_order_api_branches__branch_id__desktop_sync_chapter_order_conflicts_resolve_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/desktop-sync/conflicts/{conflict_id}/compare': {
     parameters: {
       query?: never
@@ -3512,6 +3546,29 @@ export interface components {
       revision: number
       /** Sha256 */
       sha256: string
+    }
+    /** ChapterOrderConflict */
+    ChapterOrderConflict: {
+      /** Position */
+      position: number
+      /** Chapters */
+      chapters: components['schemas']['ChapterOrderEntry'][]
+    }
+    /** ChapterOrderConflicts */
+    ChapterOrderConflicts: {
+      /** Conflicts */
+      conflicts: components['schemas']['ChapterOrderConflict'][]
+    }
+    /** ChapterOrderEntry */
+    ChapterOrderEntry: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Title */
+      title: string
+      /** Head Revision */
+      head_revision: string
+      /** Scheduled */
+      scheduled: boolean
     }
     /** ChapterPlan */
     ChapterPlan: {
@@ -8461,6 +8518,80 @@ export interface operations {
     }
   }
   run_sync_api_branches__branch_id__desktop_sync_run_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': {
+          [key: string]: unknown
+        }
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_chapter_order_api_branches__branch_id__desktop_sync_chapter_order_conflicts_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': {
+          [key: string]: unknown
+        }
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ChapterOrderConflicts']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  resolve_chapter_order_api_branches__branch_id__desktop_sync_chapter_order_conflicts_resolve_post: {
     parameters: {
       query?: never
       header?: never

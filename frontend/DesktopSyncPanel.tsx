@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import type { components } from './api-schema'
 import type { Notify } from './App'
+import {
+  ChapterOrderConflicts,
+  type ChapterOrderConflict,
+  type ChapterOrderResolution,
+} from './ChapterOrderConflicts'
 import { CloudAttachments } from './CloudAttachments'
 import { SyncScopePreview } from './SyncScopePreview'
 import { describeProjectVersion, type ProjectVersion } from './projectSyncModel'
@@ -12,6 +17,7 @@ import type { RestoreStateVersion } from './restoreStateSyncModel'
 import { describeSettingsVersion, type SettingsVersion } from './settingsSyncModel'
 
 type Conflict = { id: string; object_id: string }
+type OrderRequest = ChapterOrderResolution & { change_id: string }
 type FormalSource = { id: string; device_id: string; change_id: string; sequence: number }
 type SyncStatus = {
   bound: boolean
@@ -20,6 +26,7 @@ type SyncStatus = {
   cursor: number
   ledger_id?: string | null
   pending: number
+  chapter_order_pending?: OrderRequest | null
   project_source?: FormalSource | null
   settings_source?: FormalSource | null
   outline_source?: FormalSource | null
@@ -331,12 +338,19 @@ export function DesktopSyncPanel({
   const [token, setToken] = useState('')
   const [status, setStatus] = useState<SyncStatus>()
   const [comparison, setComparison] = useState<{ id: string; value: Comparison; key: string }>()
+  const [orderConflicts, setOrderConflicts] = useState<ChapterOrderConflict[]>()
+  const [orderMessage, setOrderMessage] = useState('')
+  const [orderError, setOrderError] = useState('')
   const [mergeNotice, setMergeNotice] = useState('')
   const [deviceRevoked, setDeviceRevoked] = useState(false)
   const [busy, setBusy] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
+  const checkOrderButton = useRef<HTMLButtonElement>(null)
+  const retryOrderButton = useRef<HTMLButtonElement>(null)
+  const restoreOrderFocus = useRef<Element | null>(null)
   const credential = { origin: origin.trim(), token: token.trim() }
   const ready = !!credential.origin && !!credential.token
+  const pendingOrder = status?.chapter_order_pending
   useEffect(() => {
     let active = true
     api<SyncStatus>(path)
@@ -350,6 +364,19 @@ export function DesktopSyncPanel({
       active = false
     }
   }, [path, notify])
+  useEffect(() => {
+    const previous = restoreOrderFocus.current
+    if (!previous || busy || attachmentBusy) return
+    const target = (pendingOrder ? retryOrderButton : checkOrderButton).current
+    if (!target || target.disabled) return
+    restoreOrderFocus.current = null
+    if (document.activeElement === previous || document.activeElement === document.body) target.focus()
+  }, [busy, attachmentBusy, pendingOrder, ready])
+  function resetOrderList() {
+    setOrderConflicts(undefined)
+    setOrderError('')
+    setOrderMessage('')
+  }
   async function run(operation: () => Promise<void>) {
     if (busy) return
     setBusy(true)
@@ -363,19 +390,55 @@ export function DesktopSyncPanel({
       setBusy(false)
     }
   }
+  async function readOrderConflicts() {
+    setOrderConflicts(undefined)
+    setOrderError('')
+    try {
+      const value = await api<{ conflicts: ChapterOrderConflict[] }>(
+        `${path}/chapter-order-conflicts`,
+        'POST',
+        credential,
+      )
+      setOrderConflicts(value.conflicts)
+    } catch (failure) {
+      setOrderError(failure instanceof Error ? failure.message : '章位冲突暂时无法读取。')
+    }
+  }
   async function synchronize(action: 'enable' | 'disable' | 'run') {
     setComparison(undefined)
     setStatus(
       await api<SyncStatus>(path + '/' + action, 'POST', action === 'disable' ? undefined : credential),
     )
     if (action === 'enable') setDeviceRevoked(false)
-    if (action === 'run') await refresh()
+    if (action === 'run') {
+      await refresh()
+      await readOrderConflicts()
+    } else {
+      resetOrderList()
+    }
+  }
+  async function resolveOrder(request: OrderRequest) {
+    restoreOrderFocus.current = document.activeElement
+    setOrderMessage('')
+    let result: { status: SyncStatus; receipt: { object_id: string } }
+    try {
+      result = await api(`${path}/chapter-order-conflicts/resolve`, 'POST', { ...credential, ...request })
+    } catch (failure) {
+      await readOrderConflicts()
+      throw failure
+    }
+    setStatus(result.status)
+    const deferred = result.status.deferred.some(({ object_id }) => object_id === result.receipt.object_id)
+    setOrderMessage(deferred ? '云端已调整章位。本机有待处理的同步记录。' : '章位已调整并同步。')
+    await refresh()
+    await readOrderConflicts()
   }
   async function revokeDevice() {
     if (!window.confirm('撤销当前填写的设备凭据？重新同步需要签发新凭据。本机稿件和待同步记录会保留。'))
       return
     setStatus(await api<SyncStatus>(path + '/revoke-device', 'POST', credential))
     setToken('')
+    resetOrderList()
     setDeviceRevoked(true)
   }
   return (
@@ -389,7 +452,13 @@ export function DesktopSyncPanel({
         <legend>设备连接</legend>
         <label>
           同步服务地址
-          <input value={origin} onChange={(event) => setOrigin(event.target.value)} />
+          <input
+            value={origin}
+            onChange={(event) => {
+              setOrigin(event.target.value)
+              resetOrderList()
+            }}
+          />
         </label>
         <label>
           设备凭据
@@ -397,7 +466,10 @@ export function DesktopSyncPanel({
             type="password"
             autoComplete="off"
             value={token}
-            onChange={(event) => setToken(event.target.value)}
+            onChange={(event) => {
+              setToken(event.target.value)
+              resetOrderList()
+            }}
           />
         </label>
         <button
@@ -433,6 +505,42 @@ export function DesktopSyncPanel({
       )}
       {deviceRevoked && <p role="status">设备凭据已撤销。本机稿件和待同步记录已保留。</p>}
       {mergeNotice && <p role="status">{mergeNotice}</p>}
+      {status?.enabled && (
+        <>
+          <button
+            ref={checkOrderButton}
+            type="button"
+            disabled={busy || attachmentBusy || !ready}
+            onClick={() => void run(readOrderConflicts)}
+          >
+            核对章位冲突
+          </button>
+          {orderError && <p role="alert">{orderError}</p>}
+          {orderMessage && <p role="status">{orderMessage}</p>}
+          {orderConflicts?.length === 0 && <p>云端暂无章位冲突。</p>}
+          {pendingOrder && (
+            <section aria-label="待确认的章位调整">
+              <p>有一项章位调整等待回执。请用原设备凭据重试。</p>
+              <button
+                ref={retryOrderButton}
+                type="button"
+                disabled={busy || attachmentBusy || !ready}
+                onClick={() => void run(() => resolveOrder(pendingOrder))}
+              >
+                重试本次章位调整
+              </button>
+            </section>
+          )}
+          <ChapterOrderConflicts
+            conflicts={orderConflicts ?? []}
+            busy={busy || attachmentBusy}
+            blocked={!ready || !!pendingOrder}
+            onResolve={(selection) =>
+              run(() => resolveOrder({ ...selection, change_id: crypto.randomUUID() }))
+            }
+          />
+        </>
+      )}
       {[
         { label: '立项', source: status?.project_source },
         { label: '设定', source: status?.settings_source },

@@ -1559,6 +1559,76 @@
         }
       }
     },
+    "/api/branches/{branch_id}/desktop-sync/chapter-order-conflicts": {
+      "post": {
+        "summary": "Read Chapter Order",
+        "operationId": "read_chapter_order_api_branches__branch_id__desktop_sync_chapter_order_conflicts_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "additionalProperties": true, "title": "Data" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ChapterOrderConflicts" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/desktop-sync/chapter-order-conflicts/resolve": {
+      "post": {
+        "summary": "Resolve Chapter Order",
+        "operationId": "resolve_chapter_order_api_branches__branch_id__desktop_sync_chapter_order_conflicts_resolve_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "additionalProperties": true, "title": "Data" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/desktop-sync/conflicts/{conflict_id}/compare": {
       "post": {
         "summary": "Compare Sync",
@@ -7047,6 +7117,57 @@
         "type": "object",
         "required": ["id", "title", "position", "revision", "sha256"],
         "title": "ChapterManifest"
+      },
+      "ChapterOrderConflict": {
+        "properties": {
+          "position": { "type": "integer", "maximum": 9007199254740991, "minimum": 1, "title": "Position" },
+          "chapters": {
+            "items": { "$ref": "#/components/schemas/ChapterOrderEntry" },
+            "type": "array",
+            "title": "Chapters"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["position", "chapters"],
+        "title": "ChapterOrderConflict"
+      },
+      "ChapterOrderConflicts": {
+        "properties": {
+          "conflicts": {
+            "items": { "$ref": "#/components/schemas/ChapterOrderConflict" },
+            "type": "array",
+            "title": "Conflicts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["conflicts"],
+        "title": "ChapterOrderConflicts"
+      },
+      "ChapterOrderEntry": {
+        "properties": {
+          "chapter_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Chapter Id"
+          },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "head_revision": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Head Revision"
+          },
+          "scheduled": { "type": "boolean", "title": "Scheduled" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "title", "head_revision", "scheduled"],
+        "title": "ChapterOrderEntry"
       },
       "ChapterPlan": {
         "properties": {

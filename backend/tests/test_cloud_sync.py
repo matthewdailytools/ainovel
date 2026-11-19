@@ -382,6 +382,307 @@ def test_two_devices_same_parent_preserve_conflict_and_resolve_with_compare_and_
     assert historical["incoming"] == incoming and historical["current"] == merged.json()
 
 
+def chapter_at(identifier, title, position):
+    return {
+        "format": "ainovel-manuscript-sync/1",
+        "kind": "chapter",
+        "chapter": {
+            "id": identifier,
+            "branch_id": "bell",
+            "position": position,
+            "title": title,
+            "revision": 1,
+            "archived": 0,
+            "stale": 0,
+        },
+        "head": {
+            "id": f"{identifier}-manuscript",
+            "chapter_id": identifier,
+            "revision": 1,
+            "parent_id": f"{identifier}-initial",
+            "cause": "作者编辑",
+            "created": 123.5,
+            "content": f"😀{title}。\r\n余音尚未停止。",
+            "sha256": sha256(f"😀{title}。\r\n余音尚未停止。".encode()).hexdigest(),
+        },
+    }
+
+
+def test_chapter_order_moves_only_selected_unscheduled_chapter_and_replays(service):
+    client, _ = service
+    desktop, web = grant(client, "desktop"), grant(client, "web")
+    ledger = client.get(WORK + "/checkpoint", headers=desktop).json()["ledger_id"]
+    desktop, web = ({**headers, cloud_ledger.LEDGER_HEADER: ledger} for headers in (desktop, web))
+    left = chapter_at("left", "桌面新章", 2)
+    right = chapter_at("right", "Web 新章", 2)
+    left_source = push(client, desktop, parent("left-head", object_id="chapter:left", payload=left))
+    push(client, web, parent("right-head", object_id="chapter:right", payload=right))
+    tail = chapter_at("tail", "目录末章", 6)
+    tail_source = push(client, web, parent("longer-tail", object_id="chapter:tail", payload=tail))
+    far = chapter_at("archived", "最后归档", 12)
+    push(client, desktop, parent("before-archive", object_id="chapter:archived", payload=far))
+    archived = push(
+        client, desktop, parent("archive", "before-archive", object_id="chapter:archived", tombstone=True)
+    )
+
+    path = WORK + "/chapter-order-conflicts"
+    mismatch_preview = client.get(path, headers=web, params={"device_id": "desktop"})
+    assert mismatch_preview.status_code == 403 and mismatch_preview.json()["code"] == "sync_device_mismatch"
+    before = client.get(path, headers=web, params={"device_id": "web"})
+    assert before.json() == {
+        "conflicts": [
+            {
+                "position": 2,
+                "chapters": [
+                    {
+                        "chapter_id": "left",
+                        "title": "桌面新章",
+                        "head_revision": "left-head",
+                        "scheduled": False,
+                    },
+                    {
+                        "chapter_id": "right",
+                        "title": "Web 新章",
+                        "head_revision": "right-head",
+                        "scheduled": False,
+                    },
+                ],
+            }
+        ]
+    }
+    command = {
+        "change_id": "user-moves-web-chapter",
+        "chapter_id": "right",
+        "position": 2,
+        "heads": {"left": "left-head", "right": "right-head"},
+    }
+    mismatch = client.post(path + "/resolve", headers=desktop, params={"device_id": "web"}, json=command)
+    assert mismatch.status_code == 403 and mismatch.json()["code"] == "sync_device_mismatch"
+    assert client.get(WORK + "/checkpoint", headers=web).json()["cursor"] == archived["sequence"]
+    # The desktop may choose the Web chapter even though it is pending adoption there.
+    result = client.post(path + "/resolve", headers=desktop, params={"device_id": "desktop"}, json=command)
+    assert result.status_code == 200, result.text
+    receipt = result.json()
+    assert receipt == {
+        "change_id": command["change_id"],
+        "sequence": archived["sequence"] + 1,
+        "status": "applied",
+        "object_id": "chapter:right",
+        "device_id": "desktop",
+        "parent_revision": "right-head",
+        "head_revision": command["change_id"],
+        "conflict_id": None,
+        "payload": {**right, "chapter": {**right["chapter"], "position": 7}},
+        "tombstone": False,
+    }
+    assert client.get(path, headers=web).json() == {"conflicts": []}
+    retry = {**command, "heads": {"right": "right-head", "left": "left-head"}}
+    mismatch_retry = client.post(path + "/resolve", headers=desktop, params={"device_id": "web"}, json=retry)
+    assert mismatch_retry.status_code == 403 and mismatch_retry.json()["code"] == "sync_device_mismatch"
+    assert (
+        client.post(path + "/resolve", headers=desktop, params={"device_id": "desktop"}, json=retry).json()
+        == receipt
+    )
+    assert client.get(WORK + "/receipts/" + command["change_id"], headers=desktop).json() == receipt
+    assert client.get(WORK + "/changes/left-head", headers=web).json() == left_source
+    assert client.get(WORK + "/changes/longer-tail", headers=web).json() == tail_source
+    assert client.get(WORK + "/pull", headers=web, params={"after": archived["sequence"]}).json()[
+        "changes"
+    ] == [receipt]
+    assert client.get(WORK + "/checkpoint", headers=web).json()["cursor"] == receipt["sequence"]
+    wrong_replay = client.post(path + "/resolve", headers=desktop, json={**command, "chapter_id": "left"})
+    assert wrong_replay.status_code == 409 and wrong_replay.json()["code"] == "sync_replay"
+
+
+def test_chapter_order_checks_ledger_and_full_collision_heads_under_concurrency(service):
+    client, _ = service
+    desktop, web = grant(client, "desktop"), grant(client, "web")
+    unrelated = grant(client, "other", "/api/sync/works/other")
+    checkpoint = client.get(WORK + "/checkpoint", headers=desktop).json()
+    bound = {cloud_ledger.LEDGER_HEADER: checkpoint["ledger_id"]}
+    path = WORK + "/chapter-order-conflicts"
+    for headers in (desktop, {**desktop, cloud_ledger.LEDGER_HEADER: "0" * 32}):
+        wrong_ledger = client.get(path, headers=headers)
+        assert wrong_ledger.status_code == 409 and wrong_ledger.json()["code"] == "sync_ledger_replaced"
+    assert client.get(path, headers={**unrelated, **bound}).status_code == 401
+    desktop, web = ({**headers, **bound} for headers in (desktop, web))
+    for identifier in ("left", "right", "third"):
+        push(
+            client,
+            desktop,
+            parent(
+                f"{identifier}-head",
+                object_id=f"chapter:{identifier}",
+                payload=chapter_at(identifier, identifier, 2),
+            ),
+        )
+    command = {
+        "change_id": "move-left",
+        "chapter_id": "left",
+        "position": 2,
+        "heads": {"left": "left-head", "right": "right-head"},
+    }
+    unbound = client.post(
+        path + "/resolve", headers={**desktop, cloud_ledger.LEDGER_HEADER: "0" * 32}, json=command
+    )
+    assert unbound.status_code == 409 and unbound.json()["code"] == "sync_ledger_replaced"
+    assert client.post(path + "/resolve", headers={**unrelated, **bound}, json=command).status_code == 401
+    assert (
+        client.post(path + "/resolve", headers=desktop, json={**command, "position": "2"}).status_code == 422
+    )
+    changed = client.post(path + "/resolve", headers=desktop, json=command)
+    assert changed.status_code == 409 and changed.json()["code"] == "sync_chapter_order_changed"
+    snapshot = client.get(path, headers=desktop).json()["conflicts"][0]
+    assert [row["chapter_id"] for row in snapshot["chapters"]] == ["left", "right", "third"]
+    push(client, desktop, parent("archive-third", "third-head", object_id="chapter:third", tombstone=True))
+    out_of_scope = client.post(path + "/resolve", headers=desktop, json={**command, "chapter_id": "third"})
+    assert out_of_scope.status_code == 409 and out_of_scope.json()["code"] == "sync_chapter_order_changed"
+    archive_stale = client.post(
+        path + "/resolve",
+        headers=desktop,
+        json={**command, "heads": {**command["heads"], "third": "third-head"}},
+    )
+    assert archive_stale.status_code == 409 and archive_stale.json()["code"] == "sync_chapter_order_changed"
+
+    rewritten = chapter_at("right", "新标题", 2)
+    latest = push(
+        client, web, parent("right-new-head", "right-head", object_id="chapter:right", payload=rewritten)
+    )
+    stale_head = client.post(path + "/resolve", headers=desktop, json=command)
+    assert stale_head.status_code == 409 and stale_head.json()["code"] == "sync_chapter_order_changed"
+    command["heads"]["right"] = latest["change_id"]
+    assert client.get(WORK + "/checkpoint", headers=desktop).json()["cursor"] == latest["sequence"]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        left = pool.submit(client.post, path + "/resolve", headers=desktop, json=command)
+        right = pool.submit(
+            client.post,
+            path + "/resolve",
+            headers=web,
+            json={**command, "change_id": "move-right", "chapter_id": "right"},
+        )
+        results = [left.result(), right.result()]
+    success = next(response for response in results if response.status_code == 200).json()
+    failure = next(response for response in results if response.status_code == 409).json()
+    assert failure["code"] == "sync_chapter_order_changed"
+    assert success["payload"]["chapter"]["position"] == 3
+    assert success["sequence"] == latest["sequence"] + 1
+    assert client.get(WORK + "/checkpoint", headers=desktop).json()["cursor"] == success["sequence"]
+
+
+def test_chapter_order_preserves_chapters_added_to_current_formal_outline(service):
+    client, _ = service
+    desktop = grant(client, "desktop")
+    ledger = client.get(WORK + "/checkpoint", headers=desktop).json()["ledger_id"]
+    desktop[cloud_ledger.LEDGER_HEADER] = ledger
+    for identifier in ("planned", "free"):
+        push(
+            client,
+            desktop,
+            parent(
+                f"{identifier}-head",
+                object_id=f"chapter:{identifier}",
+                payload=chapter_at(identifier, identifier, 2),
+            ),
+        )
+    path = WORK + "/chapter-order-conflicts"
+    before = client.get(path, headers=desktop).json()["conflicts"][0]["chapters"]
+    assert {item["chapter_id"]: item["scheduled"] for item in before} == {"free": False, "planned": False}
+    plan = {
+        "summary": "追查铜铃的来历。",
+        "volumes": [
+            {
+                "id": "volume",
+                "title": "拾铃卷",
+                "summary": "归还铜铃。",
+                "units": [
+                    {
+                        "id": "unit",
+                        "title": "找主人",
+                        "summary": "追踪刻记。",
+                        "chapters": [
+                            {
+                                "chapter_id": "planned",
+                                "goal": "拾铃",
+                                "obstacle": "旧门",
+                                "turn": "提示",
+                                "result": "过门",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+        "promises": [],
+    }
+    outline = {
+        "format": "ainovel-manuscript-sync/1",
+        "kind": "outline-version",
+        "branch_id": "bell",
+        "version": {
+            "id": "new-plan",
+            "parent_id": None,
+            "project_version_id": None,
+            "settings_version_id": None,
+            "plan": plan,
+        },
+    }
+    push(client, desktop, parent("outline-version", object_id="outline-version:new-plan", payload=outline))
+    head = {
+        "format": outline["format"],
+        "kind": "outline-head",
+        "branch_id": "bell",
+        "revision_id": "new-plan",
+    }
+    adopted = push(client, desktop, parent("outline-adopted", object_id="outline:bell", payload=head))
+    after = client.get(path, headers=desktop).json()["conflicts"][0]["chapters"]
+    assert {item["chapter_id"]: item["scheduled"] for item in after} == {"free": False, "planned": True}
+    command = {
+        "change_id": "move-not-allowed",
+        "chapter_id": "planned",
+        "position": 2,
+        "heads": {"planned": "planned-head", "free": "free-head"},
+    }
+    rejected = client.post(path + "/resolve", headers=desktop, json=command)
+    assert rejected.status_code == 409 and rejected.json()["code"] == "sync_chapter_order_scheduled"
+    assert client.get(WORK + "/checkpoint", headers=desktop).json()["cursor"] == adopted["sequence"]
+    allowed = client.post(path + "/resolve", headers=desktop, json={**command, "chapter_id": "free"})
+    assert allowed.status_code == 200 and allowed.json()["payload"]["chapter"]["position"] == 3
+    assert client.get(WORK + "/changes/outline-adopted", headers=desktop).json() == adopted
+
+
+@pytest.mark.parametrize("tail", [cloud_sync.MAX_CURSOR, cloud_sync.MAX_CURSOR + 1])
+def test_chapter_order_cannot_move_past_supported_positions(service, tail):
+    client, _ = service
+    desktop = grant(client, "desktop")
+    ledger = client.get(WORK + "/checkpoint", headers=desktop).json()["ledger_id"]
+    desktop[cloud_ledger.LEDGER_HEADER] = ledger
+    for identifier, position in (("first", 1), ("second", 1), ("tail", tail)):
+        push(
+            client,
+            desktop,
+            parent(
+                f"{identifier}-head",
+                object_id=f"chapter:{identifier}",
+                payload=chapter_at(identifier, identifier, position),
+            ),
+        )
+    path = WORK + "/chapter-order-conflicts"
+    snapshot = client.get(path, headers=desktop)
+    assert snapshot.status_code == (200 if tail == cloud_sync.MAX_CURSOR else 409)
+    refused = client.post(
+        path + "/resolve",
+        headers=desktop,
+        json={
+            "change_id": "move",
+            "chapter_id": "first",
+            "position": 1,
+            "heads": {"first": "first-head", "second": "second-head"},
+        },
+    )
+    assert refused.status_code == 409 and refused.json()["code"] == "sync_chapter_order_limit"
+    assert client.get(WORK + "/checkpoint", headers=desktop).json()["cursor"] == 3
+
+
 def test_stale_edit_cannot_resurrect_tombstone(service):
     client, _ = service
     desktop = grant(client, "desktop")

@@ -53,6 +53,7 @@ MAX_OBJECT_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = MAX_OBJECT_BYTES * 2
 MAX_PULL_BYTES = MAX_OBJECT_BYTES * 4
 MAX_CURSOR = (1 << 53) - 1
+MAX_DIRECTORY_CHAPTERS = 5000
 APP_ID = 0x414E5359
 STORAGE_ERROR = "同步存储暂不可读。"
 SQLITE_STORAGE_ERRORS = {
@@ -70,6 +71,7 @@ WITHHELD_PREFIX = "withheld:"
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")]
 Authorization = Annotated[str, Header(max_length=512)]
 Payload = dict[str, JsonValue]
+ChapterPosition = Annotated[int, Field(ge=1, le=MAX_CURSOR, strict=True)]
 
 SCHEMA = (
     cloud_ledger.SCHEMA
@@ -231,6 +233,29 @@ class ComparedConflict(Conflict):
     incoming: Receipt
     current: Receipt
     base: Receipt | None
+
+
+class ChapterOrderEntry(Input):
+    chapter_id: Identifier
+    title: str = Field(min_length=1, max_length=200)
+    head_revision: Identifier
+    scheduled: bool
+
+
+class ChapterOrderConflict(Input):
+    position: ChapterPosition
+    chapters: list[ChapterOrderEntry]
+
+
+class ChapterOrderConflicts(Input):
+    conflicts: list[ChapterOrderConflict]
+
+
+class ChapterOrderResolution(Input):
+    change_id: Identifier
+    chapter_id: Identifier
+    position: ChapterPosition
+    heads: dict[Identifier, Identifier] = Field(min_length=2, max_length=MAX_DIRECTORY_CHAPTERS)
 
 
 def _encoded(value):
@@ -447,18 +472,18 @@ class SyncStore:
     def revoke_current(self, work, digest, expected_device):
         with self.transaction(write=True) as tx:
             # Keep a revoked digest usable for replay of this operation until the device is reprovisioned.
-            device = self._authorize(tx, work, digest, allow_inactive=True)
-            if expected_device is not None and expected_device != device:
-                raise DomainError("sync_device_mismatch", "设备编号与提供的同步凭据不匹配。", 403)
+            device = self._authorize(tx, work, digest, allow_inactive=True, expected_device=expected_device)
             tx.execute("UPDATE sync_devices SET active=0 WHERE work_id=? AND id=?", (work, device))
 
     @staticmethod
-    def _authorize(tx, work, digest, *, allow_inactive=False):
+    def _authorize(tx, work, digest, *, allow_inactive=False, expected_device=None):
         row = tx.execute(
             "SELECT id,active FROM sync_devices WHERE work_id=? AND token_sha256=?", (work, digest)
         ).fetchone()
         if not row or (not row["active"] and not allow_inactive):
             raise DomainError("sync_auth", "同步凭据无效。", 401)
+        if expected_device is not None and expected_device != row["id"]:
+            raise DomainError("sync_device_mismatch", "设备编号与提供的同步凭据不匹配。", 403)
         return row["id"]
 
     @staticmethod
@@ -969,6 +994,109 @@ class SyncStore:
                 base=self._public_receipt(tx, work, base) if base else None,
             )
 
+    def _chapter_positions(self, tx, work):
+        rows = tx.execute(
+            "SELECT SUBSTR(h.object_id,9) AS chapter_id,h.revision AS head_revision, "
+            "json_extract(c.payload,'$.chapter.title') AS title, "
+            "json_extract(c.payload,'$.chapter.position') AS position "
+            "FROM sync_heads h JOIN sync_changes c ON c.work_id=h.work_id AND c.change_id=h.revision "
+            "WHERE h.work_id=? AND h.object_id GLOB 'chapter:*' AND c.tombstone=0 "
+            "AND json_extract(c.payload,'$.format')='ainovel-manuscript-sync/1' "
+            "AND json_extract(c.payload,'$.kind')='chapter' "
+            "AND json_extract(c.payload,'$.chapter.id')=SUBSTR(h.object_id,9) "
+            "AND json_extract(c.payload,'$.chapter.branch_id')=h.work_id "
+            "AND json_type(c.payload,'$.chapter.archived')='integer' "
+            "AND json_extract(c.payload,'$.chapter.archived')=0 "
+            "AND json_type(c.payload,'$.chapter.position')='integer' AND position>=1 "
+            "AND json_type(c.payload,'$.chapter.title')='text' AND length(title) BETWEEN 1 AND 200 "
+            "ORDER BY position,h.object_id LIMIT ?",
+            (work, MAX_DIRECTORY_CHAPTERS + 1),
+        ).fetchall()
+        if len(rows) > MAX_DIRECTORY_CHAPTERS or (rows and rows[-1]["position"] > MAX_CURSOR):
+            raise DomainError("sync_chapter_order_limit", "当前章节目录超过可核对章位的范围。", 409)
+        positions = {}
+        for row in rows:
+            positions.setdefault(row["position"], []).append(row)
+        return positions
+
+    def _scheduled_chapters(self, tx, work):
+        head = self._formal_payload(tx, work, f"outline:{work}")
+        if head is None:
+            return set()
+        try:
+            revision = OutlineHeadObject.model_validate_json(head).revision_id
+            source = self._formal_payload(tx, work, f"outline-version:{revision}")
+            plan = OutlineVersionObject.model_validate_json(source).version.plan if source else None
+        except ValidationError as error:
+            raise DomainError("sync_storage", "当前大纲的正式版本暂不可核验。", 503) from error
+        if plan is None:
+            raise DomainError("sync_storage", "当前大纲的正式版本暂不可核验。", 503)
+        return {
+            chapter.chapter_id
+            for volume in plan.volumes
+            for unit in volume.units
+            for chapter in unit.chapters
+        }
+
+    def chapter_order_conflicts(self, work, digest, *, ledger_id=None, device_id=None):
+        with self.transaction(snapshot=True) as tx:
+            self._authorize(tx, work, digest, expected_device=device_id)
+            # This new operation always belongs to a specific ledger, including first-generation ledgers.
+            cloud_ledger.verify_header(tx, ledger_id or "")
+            positions = self._chapter_positions(tx, work)
+            conflicting = [(position, rows) for position, rows in positions.items() if len(rows) > 1]
+            scheduled = self._scheduled_chapters(tx, work) if conflicting else set()
+            return ChapterOrderConflicts(
+                conflicts=[
+                    ChapterOrderConflict(
+                        position=position,
+                        chapters=[
+                            ChapterOrderEntry(
+                                chapter_id=row["chapter_id"],
+                                title=row["title"],
+                                head_revision=row["head_revision"],
+                                scheduled=row["chapter_id"] in scheduled,
+                            )
+                            for row in rows
+                        ],
+                    )
+                    for position, rows in conflicting
+                ]
+            )
+
+    def resolve_chapter_order(self, work, digest, data, *, ledger_id=None, device_id=None):
+        with self.transaction(write=True) as tx:
+            device = self._authorize(tx, work, digest, expected_device=device_id)
+            cloud_ledger.verify_header(tx, ledger_id or "")
+            _check_reserved(data.change_id)
+            fingerprint = _digest(_encoded(["chapter-order", device, data.model_dump()]))
+            if replay := self._replay(tx, work, data.change_id, fingerprint):
+                return replay
+            positions = self._chapter_positions(tx, work)
+            heads = {row["chapter_id"]: row["head_revision"] for row in positions.get(data.position, ())}
+            if len(heads) < 2 or heads != data.heads or data.chapter_id not in heads:
+                raise DomainError("sync_chapter_order_changed", "章位比较后已变化，请重新核对目录。", 409)
+            if data.chapter_id in self._scheduled_chapters(tx, work):
+                raise DomainError("sync_chapter_order_scheduled", "该章已编入正式大纲，请保留其章位。", 409)
+            position = max(positions) + 1
+            if position > MAX_CURSOR:
+                raise DomainError("sync_chapter_order_limit", "当前目录没有可分配的末尾章位。", 409)
+            parent = heads[data.chapter_id]
+            object_id = f"chapter:{data.chapter_id}"
+            payload = json.loads(self._change(tx, work, parent)["payload"])
+            verified_chapter(work, object_id, payload)
+            payload["chapter"]["position"] = position
+            change = Push(
+                change_id=data.change_id,
+                object_id=object_id,
+                parent_revision=parent,
+                tombstone=False,
+                payload=payload,
+            )
+            return self._append(
+                tx, work, device, change, fingerprint, _payload(payload), data.change_id, "applied"
+            )
+
     def resolve(self, work, digest, identifier, data, *, ledger_id=None):
         with self.transaction(write=True) as tx:
             device = self._authorize(tx, work, digest)
@@ -1189,6 +1317,29 @@ def create_sync_app(database_path: Path, provisioning_token: str, browser_origin
         ledger_id: cloud_ledger.LedgerHeader = None,
     ) -> Receipt:
         return store.change(work_id, _credential(authorization), change_id, ledger_id=ledger_id)
+
+    @app.get(prefix + "/chapter-order-conflicts")
+    def chapter_order_conflicts(
+        work_id: Identifier,
+        device_id: Identifier | None = None,
+        authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
+    ) -> ChapterOrderConflicts:
+        return store.chapter_order_conflicts(
+            work_id, _credential(authorization), ledger_id=ledger_id, device_id=device_id
+        )
+
+    @app.post(prefix + "/chapter-order-conflicts/resolve")
+    def resolve_chapter_order(
+        work_id: Identifier,
+        data: ChapterOrderResolution,
+        device_id: Identifier | None = None,
+        authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
+    ) -> Receipt:
+        return store.resolve_chapter_order(
+            work_id, _credential(authorization), data, ledger_id=ledger_id, device_id=device_id
+        )
 
     @app.get(prefix + "/conflicts")
     def conflicts(

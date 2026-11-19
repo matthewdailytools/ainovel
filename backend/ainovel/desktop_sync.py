@@ -32,7 +32,16 @@ from .chapter_conflicts import (
     verified_chapter,
 )
 from .cloud_ledger import LEDGER_HEADER
-from .cloud_sync import Checkpoint, ComparedConflict, MAX_CURSOR, MAX_OBJECT_BYTES, Pulled, Receipt
+from .cloud_sync import (
+    ChapterOrderConflicts,
+    ChapterOrderResolution,
+    Checkpoint,
+    ComparedConflict,
+    MAX_CURSOR,
+    MAX_OBJECT_BYTES,
+    Pulled,
+    Receipt,
+)
 from .db import DomainError, dumps, uid
 from .manuscript_exchange import (
     PortableBranch,
@@ -70,6 +79,12 @@ FORMAT = "ainovel-manuscript-sync/1"
 RESPONSE_LIMIT = 8 * 1024 * 1024
 LEDGER_REPLACED = "无法确认此同步记录属于当前云账本。原工作版本可继续编辑和备份，请从独立副本连接当前云端。"
 CONFLICT_REJECTIONS = {"sync_head_changed": 409, "sync_conflict_resolved": 409}
+ORDER_REJECTIONS = {
+    "sync_chapter_order_changed": "章位比较后已变化，请重新核对目录。",
+    "sync_chapter_order_scheduled": "该章已编入正式大纲，请保留其章位。",
+    "sync_chapter_order_limit": "当前目录无法分配新章位，请先核对目录。",
+    "sync_reserved": "请重新提交章位调整。",
+}
 PROSE_MERGE_REJECTIONS = {
     **CONFLICT_REJECTIONS,
     "sync_chapter": 409,
@@ -109,6 +124,9 @@ CREATE TABLE IF NOT EXISTS desktop_sync_outbox(
 CREATE TABLE IF NOT EXISTS desktop_sync_conflicts(
  branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), id TEXT NOT NULL,
  object_id TEXT NOT NULL, receipt TEXT NOT NULL, PRIMARY KEY(branch_id,id));
+CREATE TABLE IF NOT EXISTS desktop_sync_chapter_order(
+ branch_id TEXT PRIMARY KEY REFERENCES desktop_sync(branch_id), request TEXT NOT NULL,
+ token_sha256 TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS desktop_sync_deferred(
  branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
  receipt TEXT NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(branch_id,object_id));
@@ -205,6 +223,10 @@ CREATE TRIGGER IF NOT EXISTS desktop_sync_setting_use_adopted AFTER UPDATE OF ba
 class Connection(Input):
     origin: str = Field(min_length=1, max_length=512)
     token: SecretStr
+
+
+class ResolveChapterOrder(Connection, ChapterOrderResolution):
+    pass
 
 
 class ComparedAction(Connection):
@@ -308,6 +330,15 @@ def _network(origin, token, method, path, payload=None, *, ledger_id=None):
                     code = result.get("code") if isinstance(result, dict) else None
                     if code == "sync_ledger_replaced" and response.status_code == 409:
                         raise DomainError(code, LEDGER_REPLACED, 409)
+                    if code == "sync_receipt" and response.status_code == 404:
+                        raise DomainError(code, "该设备没有对应回执。", 404)
+                    if (
+                        "/chapter-order-conflicts" in path
+                        and isinstance(code, str)
+                        and code in ORDER_REJECTIONS
+                        and response.status_code == 409
+                    ):
+                        raise DomainError(code, ORDER_REJECTIONS[code], 409)
                     if (
                         isinstance(code, str)
                         and code in SETTING_USE_REJECTIONS
@@ -791,13 +822,17 @@ class DesktopSync:
                 "UNION SELECT object_id FROM desktop_sync_dirty WHERE branch_id=?)",
                 (branch_id, branch_id),
             ).fetchone()[0]
+            order = tx.execute(
+                "SELECT request FROM desktop_sync_chapter_order WHERE branch_id=?", (branch_id,)
+            ).fetchone()
             return {
                 "bound": row is not None,
                 "enabled": bool(row and row["enabled"]),
                 "work_id": branch_id,
                 "cursor": row["cursor"] if row else 0,
                 "ledger_id": row["ledger_id"] if row else None,
-                "pending": pending,
+                "pending": pending + bool(order),
+                "chapter_order_pending": json.loads(order["request"]) if order else None,
                 "project_source": current_project_source(tx, branch_id),
                 "settings_source": settings_sync.current_settings_source(tx, branch_id),
                 "outline_source": outline_sync.current_outline_source(tx, branch_id),
@@ -1424,7 +1459,167 @@ class DesktopSync:
             self._prepare(branch_id)
             self._push(branch_id, origin, token, ledger_id)
             self._pull(branch_id, origin, token, ledger_id)
+            self._observe_chapter_order(branch_id, origin, token, ledger_id)
             return self._state(branch_id)
+
+    def chapter_order_conflicts(self, branch_id, origin, token):
+        ledger_id = self._verified_ledger(branch_id, origin, token)
+        return self._call(
+            branch_id, origin, token, "/chapter-order-conflicts", ChapterOrderConflicts, ledger_id=ledger_id
+        )
+
+    @staticmethod
+    def _check_order_sources(tx, branch_id, data):
+        from .outline_workspace import _chapter_plans, _decode, _latest
+
+        outline = _decode(_latest(tx, branch_id, confirmed=True))
+        if outline and any(
+            row["chapter_id"] == data.chapter_id for _, _, row in _chapter_plans(outline["plan"])
+        ):
+            raise DomainError(
+                "sync_chapter_order_scheduled", ORDER_REJECTIONS["sync_chapter_order_scheduled"], 409
+            )
+        for chapter_id in data.heads:
+            object_id = f"chapter:{chapter_id}"
+            local = _local(tx, branch_id, object_id)
+            known = _shadow(tx, branch_id, object_id)
+            clean = known["local_sha256"] == _digest(local) if known else local is None
+            unsettled = tx.execute(
+                "SELECT 1 FROM desktop_sync_outbox WHERE branch_id=? AND object_id=? "
+                "UNION SELECT 1 FROM desktop_sync_conflicts WHERE branch_id=? AND object_id=? LIMIT 1",
+                (branch_id, object_id, branch_id, object_id),
+            ).fetchone()
+            if not clean or unsettled:
+                raise DomainError(
+                    "sync_pending", "这些章节有待同步的本机修改或分歧，请先核对正文与目录。", 409
+                )
+
+    @staticmethod
+    def _verify_order_receipt(branch_id, data, receipt):
+        parent = data.heads.get(data.chapter_id)
+        if (
+            parent is None
+            or receipt.change_id != data.change_id
+            or receipt.head_revision != data.change_id
+            or receipt.parent_revision != parent
+            or receipt.object_id != f"chapter:{data.chapter_id}"
+            or receipt.status != "applied"
+            or receipt.conflict_id is not None
+            or receipt.tombstone
+        ):
+            raise DomainError("sync_response", "章位调整回执与所选章节及原章位不符。", 502)
+        chapter = verified_chapter(branch_id, receipt.object_id, receipt.payload)
+        if not data.position < chapter.chapter.position <= MAX_CURSOR:
+            raise DomainError("sync_response", "章位调整回执与所选章节及原章位不符。", 502)
+        return chapter
+
+    def _observe_chapter_order(self, branch_id, origin, token, ledger_id):
+        with self.domain.db.connect() as tx:
+            row = tx.execute(
+                "SELECT request FROM desktop_sync_chapter_order WHERE branch_id=?", (branch_id,)
+            ).fetchone()
+        if not row:
+            return
+        encoded = row["request"]
+        cursor = self._bound(branch_id, origin)["cursor"]
+        try:
+            request = ChapterOrderResolution.model_validate_json(encoded)
+            observed = self._call(
+                branch_id, origin, token, f"/changes/{request.change_id}", Receipt, ledger_id=ledger_id
+            )
+            after = self._verify_order_receipt(branch_id, request, observed)
+            if not 0 < observed.sequence <= cursor:
+                return
+            parent_id = request.heads[request.chapter_id]
+            parent = self._call(
+                branch_id, origin, token, f"/changes/{parent_id}", Receipt, ledger_id=ledger_id
+            )
+            if (
+                parent.change_id != parent_id
+                or parent.head_revision != parent_id
+                or parent.object_id != observed.object_id
+                or parent.status not in {"applied", "resolved"}
+                or parent.tombstone
+                or not 0 < parent.sequence < observed.sequence
+            ):
+                return
+            before = verified_chapter(branch_id, parent.object_id, parent.payload)
+        except DomainError, ValidationError, UnicodeError:
+            # These optional reads cannot establish the outcome. Keep the original request for later.
+            return
+        moved = before.chapter.model_copy(update={"position": after.chapter.position})
+        if before.chapter.position != request.position or moved != after.chapter or before.head != after.head:
+            return
+        with self.domain.db.connect(True) as tx:
+            tx.execute(
+                "DELETE FROM desktop_sync_chapter_order WHERE branch_id=? AND request=?",
+                (branch_id, encoded),
+            )
+
+    def resolve_chapter_order(self, branch_id, origin, token, data):
+        with self._operation():
+            ledger_id = self._verified_ledger(branch_id, origin, token)
+            request = data.model_dump(include=set(ChapterOrderResolution.model_fields))
+            if data.chapter_id not in data.heads:
+                raise DomainError("sync_input", "请选择刚核对的冲突章节。", 422)
+            encoded = json.dumps(request, sort_keys=True)
+            try:
+                receipt = self._call(
+                    branch_id, origin, token, f"/receipts/{data.change_id}", Receipt, ledger_id=ledger_id
+                )
+            except DomainError as error:
+                if error.code != "sync_receipt" or error.status != 404:
+                    raise
+                receipt = None
+            with self.domain.db.connect(True) as tx:
+                pending = tx.execute(
+                    "SELECT request,token_sha256 FROM desktop_sync_chapter_order WHERE branch_id=?",
+                    (branch_id,),
+                ).fetchone()
+                if pending and pending["request"] != encoded:
+                    raise DomainError("sync_pending", "有一项章位调整等待回执，请先重试原提交。", 409)
+                if not receipt:
+                    if pending and pending["token_sha256"] != _sha(token):
+                        raise DomainError("sync_pending", "请使用提交本次章位调整的设备凭据重试。", 409)
+                    self._check_order_sources(tx, branch_id, data)
+                if not pending:
+                    tx.execute(
+                        "INSERT INTO desktop_sync_chapter_order VALUES(?,?,?)",
+                        (branch_id, encoded, _sha(token)),
+                    )
+
+            if not receipt or not pending:
+                # With no matching local request, let the ledger also verify the replay fingerprint.
+                try:
+                    receipt = self._call(
+                        branch_id,
+                        origin,
+                        token,
+                        "/chapter-order-conflicts/resolve",
+                        Receipt,
+                        method="POST",
+                        data=request,
+                        ledger_id=ledger_id,
+                    )
+                except DomainError as error:
+                    rejected = error.code in {"sync_replay", "sync_chapter", *ORDER_REJECTIONS}
+                    too_large = error.code in {"sync_object_size", "sync_request_size"}
+                    if (rejected and error.status == 409) or (too_large and error.status == 413):
+                        with self.domain.db.connect(True) as tx:
+                            tx.execute(
+                                "DELETE FROM desktop_sync_chapter_order WHERE branch_id=? AND request=?",
+                                (branch_id, encoded),
+                            )
+                    raise
+            self._verify_order_receipt(branch_id, data, receipt)
+
+            self._pull(branch_id, origin, token, ledger_id)
+            with self.domain.db.connect(True) as tx:
+                tx.execute(
+                    "DELETE FROM desktop_sync_chapter_order WHERE branch_id=? AND request=?",
+                    (branch_id, encoded),
+                )
+            return {"status": self._state(branch_id), "receipt": receipt}
 
     def compare(self, branch_id, origin, token, identifier):
         ledger_id = self._verified_ledger(branch_id, origin, token)
@@ -1676,6 +1871,16 @@ def register_routes(app, domain):
     def run_sync(branch_id: str, data: dict = Body()):
         _, origin, token = _parse(Connection, data)
         return client.run(branch_id, origin, token)
+
+    @app.post(prefix + "/chapter-order-conflicts")
+    def read_chapter_order(branch_id: str, data: dict = Body()) -> ChapterOrderConflicts:
+        _, origin, token = _parse(Connection, data)
+        return client.chapter_order_conflicts(branch_id, origin, token)
+
+    @app.post(prefix + "/chapter-order-conflicts/resolve")
+    def resolve_chapter_order(branch_id: str, data: dict = Body()):
+        request, origin, token = _parse(ResolveChapterOrder, data)
+        return client.resolve_chapter_order(branch_id, origin, token, request)
 
     @app.post(prefix + "/conflicts/{conflict_id}/compare")
     def compare_sync(branch_id: str, conflict_id: str, data: dict = Body()):

@@ -1,4 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  ChapterOrderConflicts,
+  type ChapterOrderConflict,
+  type ChapterOrderResolution,
+} from './ChapterOrderConflicts'
 import { CloudAttachments } from './CloudAttachments'
 import { SyncScopePreview } from './SyncScopePreview'
 import { useLeaveGuard } from './leaveGuard'
@@ -9,14 +14,16 @@ import { describeSettingsVersion, type SettingsConflictMerge } from './settingsS
 import { describeStoryVersion } from './storySyncModel'
 import { describeReferenceVersion } from './referenceArchive'
 import { describeFactSet, describeLengthTarget } from './restoreStateConflictText'
-import { setSyncEnabled, type SyncPayload } from './syncClient'
+import { setSyncEnabled, SyncLedgerChanged, SyncResolutionChanged, type SyncPayload } from './syncClient'
 import {
   cloudScope,
   forkWebConflict,
   httpSyncTransport,
   prepareWebResolution,
   prepareWebSettingsMerge,
+  readWebChapterOrderConflicts,
   readWebManuscriptSyncState,
+  resolveWebChapterOrder,
   resolveWebManuscript,
   syncWebManuscript,
   webForkChoices,
@@ -102,6 +109,15 @@ export function WebSyncPanel({
   const [device, setDevice] = useState('')
   const [token, setToken] = useState('')
   const [status, setStatus] = useState<State>()
+  const [orderConflicts, setOrderConflicts] = useState<ChapterOrderConflict[]>()
+  const [orderPending, setOrderPending] = useState<{
+    connection: string
+    ledgerId: string
+    selection: ChapterOrderResolution
+  }>()
+  const orderRefreshButton = useRef<HTMLButtonElement>(null)
+  const orderRetryButton = useRef<HTMLButtonElement>(null)
+  const restoreOrderFocus = useRef<Element | null>(null)
   const [compared, setCompared] = useState<Comparison>()
   const [mergeText, setMergeText] = useState<string>()
   const [fork, setFork] = useState<{ choice: WebForkChoice; name: string }>()
@@ -110,6 +126,11 @@ export function WebSyncPanel({
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [message, setMessage] = useState('')
   const ready = !!service.trim() && !!device.trim()
+  const connection = JSON.stringify([service.trim(), device.trim(), project.branch.id])
+  const pendingOrder =
+    orderPending?.connection === connection && orderPending.ledgerId === status?.ledgerId
+      ? orderPending
+      : undefined
   const hasConflictDraft = mergeText !== undefined || fork !== undefined
   useLeaveGuard(hasConflictDraft, '云同步冲突编辑')
   useEffect(() => {
@@ -120,6 +141,7 @@ export function WebSyncPanel({
     let active = true
     setStatus(undefined)
     setCompared(undefined)
+    setOrderConflicts(undefined)
     if (ready) {
       try {
         void readWebManuscriptSyncState(cloudScope(service, project.branch.id, device.trim()))
@@ -138,8 +160,88 @@ export function WebSyncPanel({
     }
   }, [project.branch.id, service, device, ready])
 
+  useEffect(() => {
+    const previous = restoreOrderFocus.current
+    if (!previous || busy || attachmentBusy) return
+    const target = (pendingOrder ? orderRetryButton : orderRefreshButton).current
+    if (!target || target.disabled) return
+    restoreOrderFocus.current = null
+    if (document.activeElement === previous || document.activeElement === document.body) target.focus()
+  }, [busy, attachmentBusy, pendingOrder, hasConflictDraft, unsaved])
+
+  async function refreshChapterOrder(transport: ReturnType<typeof httpSyncTransport>, verifyLedger = false) {
+    try {
+      if (verifyLedger) await transport.verifyLedger()
+      setOrderConflicts(await readWebChapterOrderConflicts(project, transport))
+    } catch (error) {
+      setOrderConflicts(undefined)
+      setMessage(
+        error instanceof Error && !(error instanceof TypeError || error instanceof DOMException)
+          ? error.message
+          : '尚未取得云端章位冲突，请刷新后重试。',
+      )
+    }
+  }
+
+  async function resolveChapterOrder(selection: ChapterOrderResolution) {
+    if (
+      busy ||
+      unsaved ||
+      attachmentBusy ||
+      hasConflictDraft ||
+      !status?.enabled ||
+      !status.ledgerId ||
+      !token
+    )
+      return
+    const ledgerId = status.ledgerId
+    restoreOrderFocus.current = document.activeElement
+    setBusy(true)
+    onBusy(true)
+    setMessage('')
+    setNotice('')
+    setOrderPending({ connection, ledgerId, selection })
+    try {
+      const scope = cloudScope(service, project.branch.id, device.trim())
+      const transport = httpSyncTransport(scope, token.trim())
+      const next = await resolveWebChapterOrder(project, scope, transport, selection, ledgerId)
+      setStatus(next)
+      setOrderPending(undefined)
+      setNotice(
+        next.receivedUnapplied
+          ? '云端章位已调整。请查看本机待应用项目。'
+          : '云端章位已调整，本机目录已更新。',
+      )
+      await onApplied().catch(() => setMessage('本机目录暂未刷新，请再次同步。'))
+      await refreshChapterOrder(transport)
+    } catch (error) {
+      if (error instanceof SyncResolutionChanged || error instanceof SyncLedgerChanged) {
+        setOrderPending(undefined)
+        setOrderConflicts(undefined)
+      }
+      setMessage(
+        error instanceof TypeError || error instanceof DOMException || !(error instanceof Error)
+          ? '尚未取得章位调整回执，请重试同一请求。'
+          : error.message,
+      )
+    } finally {
+      setBusy(false)
+      onBusy(false)
+    }
+  }
+
   async function run(
-    action: 'enable' | 'disable' | 'revoke' | 'sync' | 'compare' | 'choose' | 'merge' | 'fork' | 'settings',
+    action:
+      | 'enable'
+      | 'disable'
+      | 'revoke'
+      | 'sync'
+      | 'order-refresh'
+      | 'compare'
+      | 'choose'
+      | 'merge'
+      | 'fork'
+      | 'settings',
     value?: string,
   ) {
     if (busy || !ready) return
@@ -152,6 +254,7 @@ export function WebSyncPanel({
       if (action === 'disable') {
         await setSyncEnabled(scope, false)
         setCompared(undefined)
+        setOrderConflicts(undefined)
         setStatus(await readWebManuscriptSyncState(scope))
         return
       }
@@ -173,11 +276,16 @@ export function WebSyncPanel({
         return
       }
       const transport = httpSyncTransport(scope, token.trim())
+      if (action === 'order-refresh') {
+        await refreshChapterOrder(transport, true)
+        return
+      }
       if (action === 'revoke') {
         await transport.revokeDevice()
         await setSyncEnabled(scope, false)
         setToken('')
         setCompared(undefined)
+        setOrderConflicts(undefined)
         setStatus(await readWebManuscriptSyncState(scope))
         setNotice('已撤销此设备在云端的凭据。本机作品与待同步记录仍可使用。')
         return
@@ -211,6 +319,7 @@ export function WebSyncPanel({
       setCompared(undefined)
       setMergeText(undefined)
       await onApplied()
+      await refreshChapterOrder(transport)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '同步未完成。')
       if (ready) {
@@ -308,6 +417,40 @@ export function WebSyncPanel({
             </li>
           ))}
         </ul>
+      )}
+      {status?.enabled && token && (
+        <>
+          <button
+            type="button"
+            ref={orderRefreshButton}
+            disabled={busy || attachmentBusy || hasConflictDraft}
+            onClick={() => void run('order-refresh')}
+          >
+            刷新章位冲突
+          </button>
+          {pendingOrder && (
+            <section aria-label="待确认的章位调整">
+              <button
+                type="button"
+                ref={orderRetryButton}
+                disabled={busy || attachmentBusy || hasConflictDraft || unsaved}
+                onClick={() => void resolveChapterOrder(pendingOrder.selection)}
+              >
+                重试章位调整
+              </button>
+            </section>
+          )}
+          {!!orderConflicts?.length && unsaved && <p>请先保存或清理正在编辑的内容，再调整章位。</p>}
+          {orderConflicts?.length === 0 && <p>云端暂无章位冲突。</p>}
+          {orderConflicts && (
+            <ChapterOrderConflicts
+              conflicts={orderConflicts}
+              busy={busy || attachmentBusy}
+              blocked={unsaved || hasConflictDraft || !!pendingOrder}
+              onResolve={resolveChapterOrder}
+            />
+          )}
+        </>
       )}
       {status?.conflicts.map((id) => (
         <button
