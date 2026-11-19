@@ -2570,6 +2570,120 @@ export async function validateSyncedObject(
   }
 }
 
+type SyncedChapter = Extract<SyncedObject, { kind: 'chapter' }>
+
+function projectChapterBaseline(
+  signature: string | undefined,
+  branchId: string,
+  id: string,
+  position: number,
+  nextPosition: number,
+) {
+  if (!signature) return undefined
+  let basis: unknown
+  try {
+    basis = JSON.parse(signature)
+  } catch {
+    return undefined
+  }
+  if (
+    !Array.isArray(basis) ||
+    basis.length !== 6 ||
+    basis[0] !== 'chapter' ||
+    basis[1] !== id ||
+    basis[2] !== branchId ||
+    basis[3] !== position ||
+    typeof basis[4] !== 'string' ||
+    typeof basis[5] !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(basis[5])
+  )
+    return undefined
+  return JSON.stringify(['chapter', id, branchId, nextPosition, basis[4], basis[5]])
+}
+
+export function applySyncedChapterDirectory(
+  projectId: string,
+  moves: {
+    before: SyncedChapter
+    after: SyncedChapter
+    previousSignature?: string
+    parentWasAdopted: boolean
+  }[],
+) {
+  return transact(['projects', 'chapters', 'revisions', 'storyChapterAliases'], 'readwrite', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const branchId = project.branch.id
+    const rows = await listChaptersTx(tx, branchId)
+    const byChapter = new Map(rows.map((chapter) => [chapter.id, chapter]))
+    const nextPositions = new Map<string, number>()
+    const adopted = new Map<string, { matchesRemote: boolean; projectedBaseline?: string }>()
+    let groupPosition: 'before' | 'after' | undefined
+    for (const { before, after, previousSignature, parentWasAdopted } of moves) {
+      const { id } = before.chapter
+      if (
+        before.chapter.branch_id !== branchId ||
+        after.chapter.branch_id !== branchId ||
+        after.chapter.id !== id
+      )
+        invalid('目录批次属于其他工作版本。')
+      const chapter = byChapter.get(id)
+      if (!chapter) continue
+      if (chapter.archived) return null
+      const position =
+        chapter.position === before.chapter.position
+          ? 'before'
+          : chapter.position === after.chapter.position
+            ? 'after'
+            : undefined
+      if (!position || (groupPosition && position !== groupPosition)) return null
+      groupPosition = position
+      const head = await chapterHead(tx, chapter)
+      if (!head) invalid('本机稿件缺少当前修订。')
+      const local = { format: SYNC_FORMAT, kind: 'chapter', chapter, head } as const
+      const oldSignature = syncObjectSignature({
+        ...local,
+        chapter: { ...chapter, position: before.chapter.position },
+      })
+      const alias =
+        head.id === before.head.id
+          ? undefined
+          : await result<{ chapterAdopted?: true } | undefined>(
+              tx.objectStore('storyChapterAliases').get([branchId, before.head.id, head.id]),
+            )
+      const exact =
+        oldSignature === syncObjectSignature(before) &&
+        (JSON.stringify(revisionSignature(head)) === JSON.stringify(revisionSignature(before.head)) ||
+          alias?.chapterAdopted === true)
+      const projectedBaseline = projectChapterBaseline(
+        previousSignature,
+        branchId,
+        id,
+        before.chapter.position,
+        after.chapter.position,
+      )
+      if (!exact && !parentWasAdopted && !projectedBaseline) return null
+      nextPositions.set(id, after.chapter.position)
+      adopted.set(id, {
+        matchesRemote: exact || parentWasAdopted,
+        projectedBaseline,
+      })
+    }
+    const active = rows.filter(({ archived }) => !archived)
+    if (new Set(active.map(({ id, position }) => nextPositions.get(id) ?? position)).size !== active.length)
+      return null
+    // A prior attempt may have written the complete directory before acknowledging its receipts.
+    if (groupPosition === 'before') {
+      const chapters = tx.objectStore('chapters')
+      for (const [id, position] of nextPositions) {
+        await result(chapters.put({ ...byChapter.get(id)!, position } satisfies LocalChapter))
+      }
+      project.branch.story_revision++
+      await result(tx.objectStore('projects').put(project))
+    }
+    return adopted
+  })
+}
+
 export function applySyncedObject(
   projectId: string,
   objectId: string,

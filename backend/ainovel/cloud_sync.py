@@ -68,6 +68,8 @@ SQLITE_STORAGE_ERRORS = {
     sqlite3.SQLITE_SCHEMA,
 }
 WITHHELD_PREFIX = "withheld:"
+CHAPTER_DIRECTORY_PREFIX = "chapter-directory:"
+CHAPTER_ORDER_PART_PREFIX = "chapter-order-part-"
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")]
 Authorization = Annotated[str, Header(max_length=512)]
 Payload = dict[str, JsonValue]
@@ -258,6 +260,28 @@ class ChapterOrderResolution(Input):
     heads: dict[Identifier, Identifier] = Field(min_length=2, max_length=MAX_DIRECTORY_CHAPTERS)
 
 
+class ChapterOrderMove(Input):
+    chapter_id: Identifier
+    position: ChapterPosition
+    next_position: ChapterPosition
+    head_revision: Identifier
+
+
+class ChapterOrderBatch(Input):
+    change_id: Annotated[Identifier, Field(max_length=128 - len(CHAPTER_DIRECTORY_PREFIX))]
+    moves: list[ChapterOrderMove] = Field(min_length=2, max_length=MAX_DIRECTORY_CHAPTERS)
+
+    @model_validator(mode="after")
+    def check_moves(self):
+        if len({move.chapter_id for move in self.moves}) != len(self.moves):
+            raise ValueError("同一章节在目录批次中只能移动一次。")
+        if len({move.position for move in self.moves}) != len(self.moves):
+            raise ValueError("原章位存在冲突，请先核对同位章节。")
+        if any(move.position == move.next_position for move in self.moves):
+            raise ValueError("目录批次只提交章位实际发生变化的章节。")
+        return self
+
+
 def _encoded(value):
     try:
         result = json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
@@ -307,6 +331,15 @@ def _check_reserved(*identifiers, payload=None):
         payload and payload.get("kind") == "withheld"
     ):
         raise DomainError("sync_reserved", "同步保留标记不能作为业务提交。", 409)
+
+
+def _check_public_change(*identifiers, payload=None):
+    _check_reserved(*identifiers, payload=payload)
+    if any(
+        identifier.startswith((CHAPTER_DIRECTORY_PREFIX, CHAPTER_ORDER_PART_PREFIX))
+        for identifier in identifiers
+    ) or (payload and payload.get("kind") == "chapter-directory"):
+        raise DomainError("sync_reserved", "目录批次保留标记不能作为普通同步提交。", 409)
 
 
 def _inspection_dependency(payload):
@@ -570,7 +603,7 @@ class SyncStore:
         with self.transaction(write=True) as tx:
             device = self._authorize(tx, work, digest)
             cloud_ledger.verify_header(tx, ledger_id)
-            _check_reserved(data.object_id, data.change_id, payload=data.payload)
+            _check_public_change(data.object_id, data.change_id, payload=data.payload)
             if self._private_payload(tx, work, data.payload, {}):
                 raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
             payload = _payload(data.payload)
@@ -1068,7 +1101,7 @@ class SyncStore:
         with self.transaction(write=True) as tx:
             device = self._authorize(tx, work, digest, expected_device=device_id)
             cloud_ledger.verify_header(tx, ledger_id or "")
-            _check_reserved(data.change_id)
+            _check_public_change(data.change_id)
             fingerprint = _digest(_encoded(["chapter-order", device, data.model_dump()]))
             if replay := self._replay(tx, work, data.change_id, fingerprint):
                 return replay
@@ -1097,18 +1130,92 @@ class SyncStore:
                 tx, work, device, change, fingerprint, _payload(payload), data.change_id, "applied"
             )
 
+    def apply_chapter_order_batch(self, work, digest, data, *, ledger_id=None, device_id=None):
+        with self.transaction(write=True) as tx:
+            device = self._authorize(tx, work, digest, expected_device=device_id)
+            cloud_ledger.verify_header(tx, ledger_id or "")
+            _check_public_change(data.change_id)
+            fingerprint = _digest(_encoded(["chapter-order-batch", device, data.model_dump()]))
+            if replay := self._replay(tx, work, data.change_id, fingerprint):
+                return replay
+
+            rows = self._chapter_positions(tx, work)
+            current = {row["chapter_id"]: row for group in rows.values() for row in group}
+            for move in data.moves:
+                row = current.get(move.chapter_id)
+                if (
+                    row is None
+                    or row["position"] != move.position
+                    or row["head_revision"] != move.head_revision
+                ):
+                    raise DomainError(
+                        "sync_chapter_order_changed", "目录批次的章位或采用头已变化，请重新核对。", 409
+                    )
+            desired = {chapter_id: row["position"] for chapter_id, row in current.items()}
+            desired.update((move.chapter_id, move.next_position) for move in data.moves)
+            if len(set(desired.values())) != len(desired):
+                raise DomainError(
+                    "sync_chapter_order_changed", "本次重排仍有章节占用同一章位，请重新核对。", 409
+                )
+
+            manifest = {
+                "format": "ainovel-manuscript-sync/1",
+                "kind": "chapter-directory",
+                "branch_id": work,
+                "moves": [
+                    {
+                        **move.model_dump(),
+                        "receipt_id": CHAPTER_ORDER_PART_PREFIX
+                        + _digest(_encoded([work, data.change_id, move.chapter_id])),
+                    }
+                    for move in data.moves
+                ],
+            }
+            encoded_manifest = _encoded(manifest)
+            # Larger directories contain bounded metadata only. The manifest must fit in a pull page.
+            if len(encoded_manifest.encode("utf-8")) > MAX_PULL_BYTES:
+                raise DomainError("sync_object_size", "目录批次清单超过同步体积限制。", 413)
+            for move in manifest["moves"]:
+                receipt_id = move["receipt_id"]
+                if self._change(tx, work, receipt_id):
+                    raise DomainError("sync_replay", "目录批次的子回执编号已使用。", 409)
+                object_id = f"chapter:{move['chapter_id']}"
+                parent = move["head_revision"]
+                payload = json.loads(self._change(tx, work, parent)["payload"])
+                verified_chapter(work, object_id, payload)
+                payload["chapter"]["position"] = move["next_position"]
+                change = Push(
+                    change_id=receipt_id,
+                    object_id=object_id,
+                    parent_revision=parent,
+                    tombstone=False,
+                    payload=payload,
+                )
+                self._append(tx, work, device, change, fingerprint, _payload(payload), receipt_id, "applied")
+
+            change = Push(
+                change_id=data.change_id,
+                object_id=CHAPTER_DIRECTORY_PREFIX + data.change_id,
+                parent_revision=None,
+                tombstone=False,
+                payload=manifest,
+            )
+            return self._append(
+                tx, work, device, change, fingerprint, encoded_manifest, data.change_id, "applied"
+            )
+
     def resolve(self, work, digest, identifier, data, *, ledger_id=None):
         with self.transaction(write=True) as tx:
             device = self._authorize(tx, work, digest)
             cloud_ledger.verify_header(tx, ledger_id)
-            _check_reserved(data.change_id, payload=data.payload)
+            _check_public_change(data.change_id, payload=data.payload)
             request = data.model_dump(exclude={"content"} if data.choice != "merge_prose" else None)
             fingerprint = _digest(_encoded(["resolve", device, identifier, request]))
             if replay := self._replay(tx, work, data.change_id, fingerprint):
                 return replay
             incoming = self._change(tx, work, identifier)
             conflict = self._conflict(tx, work, incoming)
-            _check_reserved(conflict.object_id)
+            _check_public_change(conflict.object_id)
             if conflict.object_id.startswith(WORKFLOW_PREFIXES):
                 raise DomainError("sync_workflow", "体检或交付历史记录不能通过冲突合并修改。", 409)
             if conflict.resolved_by:
@@ -1127,7 +1234,7 @@ class SyncStore:
                     incoming if data.choice == "incoming" else self._change(tx, work, conflict.head_revision)
                 )
                 payload, tombstone = _receipt(chosen).payload, bool(chosen["tombstone"])
-            _check_reserved(payload=payload)
+            _check_public_change(payload=payload)
             if self._private_payload(tx, work, payload, {}):
                 raise DomainError("sync_workflow_reference_scope", REFERENCE_SCOPE, 409)
             change = Push(
@@ -1338,6 +1445,18 @@ def create_sync_app(database_path: Path, provisioning_token: str, browser_origin
         ledger_id: cloud_ledger.LedgerHeader = None,
     ) -> Receipt:
         return store.resolve_chapter_order(
+            work_id, _credential(authorization), data, ledger_id=ledger_id, device_id=device_id
+        )
+
+    @app.post(prefix + "/chapter-order-batches")
+    def apply_chapter_order_batch(
+        work_id: Identifier,
+        data: ChapterOrderBatch,
+        device_id: Identifier | None = None,
+        authorization: Authorization = "",
+        ledger_id: cloud_ledger.LedgerHeader = None,
+    ) -> Receipt:
+        return store.apply_chapter_order_batch(
             work_id, _credential(authorization), data, ledger_id=ledger_id, device_id=device_id
         )
 

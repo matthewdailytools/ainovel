@@ -1,4 +1,5 @@
 import {
+  applySyncedChapterDirectory,
   applySyncedObject,
   acknowledgeLocalPublications,
   checkLocalStorySelection,
@@ -46,14 +47,17 @@ import {
 } from './restoreStateSyncModel'
 import {
   approveSyncResolution,
+  CHAPTER_DIRECTORY_PREFIX,
   enableSyncLedger,
   listSyncHeads,
+  markChapterDirectory,
   markSyncBaseline,
   pendingPayloads,
   pullSyncPage,
   pushSyncPending,
   queueSyncChange,
   queueSyncResolution,
+  readChapterDirectory,
   readChapterBeforeArchive,
   readPublicationReceipts,
   readSyncConflict,
@@ -65,6 +69,7 @@ import {
   SyncRestoreStateRejected,
   type SyncPayload,
   type SyncScope,
+  type SyncBaseline,
   type SyncTransport,
 } from './syncClient'
 
@@ -373,10 +378,109 @@ async function acknowledgePublications(scope: SyncScope) {
   )
 }
 
+type SyncHead = Awaited<ReturnType<typeof listSyncHeads>>[number]
+
+async function reconcileChapterDirectories(
+  project: LocalProject,
+  scope: SyncScope,
+  heads: SyncHead[],
+  deferred: Map<string, string>,
+) {
+  const chapters = new Map(
+    heads.filter(({ directoryParts }) => directoryParts?.length).map((head) => [head.id, head]),
+  )
+  const directories = heads
+    .filter(
+      (head) =>
+        head.id.startsWith(CHAPTER_DIRECTORY_PREFIX) &&
+        head.receipt &&
+        head.baseline?.revision !== head.revision,
+    )
+    .sort((left, right) => left.sequence - right.sequence)
+  for (const directory of directories) {
+    const manifest = directory.receipt!
+    try {
+      const moves = await readChapterDirectory(scope, manifest)
+      const checked = await Promise.all(
+        moves.map(async ({ chapterId, from, to, parent, child }) => {
+          const id = child.object_id
+          const head = chapters.get(id)
+          if (head?.directoryParts?.[0] !== child.change_id) throw new Error('此章还有较早的目录批次待采用。')
+          const [before, after, sourceDigest] = await Promise.all([
+            validateSyncedObject(project, id, parent.payload),
+            validateSyncedObject(project, id, child.payload),
+            manuscriptHash(JSON.stringify([scope.workId, manifest.change_id, chapterId])),
+          ])
+          if (
+            child.change_id !== `chapter-order-part-${sourceDigest}` ||
+            before?.kind !== 'chapter' ||
+            after?.kind !== 'chapter' ||
+            before.chapter.position !== from ||
+            after.chapter.position !== to ||
+            JSON.stringify(before) !==
+              JSON.stringify({ ...after, chapter: { ...after.chapter, position: from } })
+          )
+            throw new Error('目录批次的子回执必须保留原章稿和章节信息。')
+          const savedBasis = head.baseline
+          const base =
+            savedBasis &&
+            (savedBasis.revision === parent.change_id ||
+              (savedBasis.sequence !== undefined && savedBasis.sequence < parent.sequence))
+              ? savedBasis
+              : undefined
+          return {
+            before,
+            after,
+            child,
+            head,
+            base,
+            previousSignature: base?.signature,
+            parentWasAdopted:
+              base?.revision === parent.change_id && base.signature === syncObjectSignature(before),
+          }
+        }),
+      )
+      const adopted = await applySyncedChapterDirectory(project.novel.id, checked)
+      if (!adopted) throw new Error('目录批次与本机章位或稿件依据不一致，已保留本机目录。')
+      const members = checked.map(({ after, base, child }) => {
+        const result = adopted.get(after.chapter.id)
+        let baseline: SyncBaseline | undefined
+        if (result?.matchesRemote) {
+          baseline = {
+            revision: child.change_id,
+            signature: syncObjectSignature(after),
+            sequence: child.sequence,
+          }
+        } else if (result?.projectedBaseline && base) {
+          // Position changed. Competing prose still compares against the accepted older head.
+          baseline = { ...base, signature: result.projectedBaseline }
+        }
+        return { objectId: child.object_id, receiptId: child.change_id, baseline }
+      })
+      await markChapterDirectory(scope, manifest, members)
+      for (const { objectId, receiptId, baseline } of members) {
+        const head = chapters.get(objectId)!
+        head.directoryParts = head.directoryParts!.filter((id) => id !== receiptId)
+        if (baseline) {
+          head.baseline = baseline
+          head.approval = undefined
+        }
+      }
+    } catch (error) {
+      deferred.set(directory.id, error instanceof Error ? error.message : '目录批次待核对。')
+    }
+  }
+  for (const head of chapters.values()) {
+    if (head.directoryParts?.length) deferred.set(head.id, '等待整组云端目录调整。')
+  }
+}
+
 async function reconcile(project: LocalProject, scope: SyncScope) {
   const { blockedObjects } = await readSyncState(scope)
-  const { objects: local, publications } = await localObjects(project)
+  const heads = await listSyncHeads(scope)
   const deferred = new Map<string, string>()
+  await reconcileChapterDirectories(project, scope, heads, deferred)
+  const { objects: local, publications } = await localObjects(project)
   const priority = (id: string) => {
     if (id.startsWith('revision:') || id.startsWith('project-version:')) return 0
     if (id.startsWith('settings-version:')) return 2
@@ -405,7 +509,7 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
       ? revision.revision
       : 0
   }
-  const heads = (await listSyncHeads(scope)).sort(
+  heads.sort(
     (left, right) =>
       priority(left.id) - priority(right.id) ||
       depth(left.receipt?.payload) - depth(right.receipt?.payload) ||
@@ -413,6 +517,7 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         (right.source?.sequence ?? right.receipt?.sequence ?? 0),
   )
   for (const head of heads) {
+    if (head.id.startsWith(CHAPTER_DIRECTORY_PREFIX) || head.directoryParts?.length) continue
     const missingArchive = head.receipt?.tombstone && head.id.startsWith('chapter:') && !local.has(head.id)
     const current = local.get(head.id)
     const raw = head.receipt?.payload?.head
@@ -661,6 +766,11 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
   const storyHeads = new Map(story.records.map(({ version }) => [version.record_id, version]))
   for (const [id, object] of objects) {
     if (privacy.deferred.has(id)) continue
+    if (
+      object?.kind === 'revision' &&
+      heads.get(`chapter:${object.revision.chapter_id}`)?.directoryParts?.length
+    )
+      continue
     if (object && new TextEncoder().encode(JSON.stringify(object)).length > 1024 * 1024 - 4096) {
       unsent.set(id, '本机对象超过单项同步限制，可导出稿件包供独立工作区检查。')
       continue

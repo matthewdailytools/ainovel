@@ -101,6 +101,34 @@ async function pullAll(scope: SyncScope, transport: SyncTransport) {
   }
 }
 
+test('a reserved directory part keeps prepared chapter and source sends until its manifest is adopted', async () => {
+  const cloud = isolatedCloud()
+  const sender = cloud.transport(first)
+  const receiver = cloud.transport(second)
+  await setSyncEnabled(second, true)
+  await sender.push({ ...write('旧正文'), change_id: 'old-head' })
+  await pullAll(second, receiver)
+  const revision = { id: 'draft-source', chapter_id: 'one', revision: 1 }
+  await queueSyncChange(second, {
+    object_id: `revision:${revision.id}`,
+    parent_revision: null,
+    payload: { kind: 'revision', revision },
+    tombstone: false,
+  })
+  await queueSyncChange(second, write('待发送的新稿', 'old-head'))
+  const part = 'chapter-order-part-' + 'a'.repeat(64)
+  await sender.push({ ...write('旧正文', 'old-head'), change_id: part })
+  await pullAll(second, receiver)
+  expect(await pushSyncPending(second, receiver)).toBe(0)
+  expect((await readSyncState(second)).pending).toHaveLength(2)
+  await sender.push({ ...write('较晚的正式稿', part), change_id: 'later-head' })
+  await pullAll(second, receiver)
+  expect((await readSyncHead(second, chapter))?.change_id).toBe('later-head')
+  expect(await pushSyncPending(second, receiver)).toBe(0)
+  expect((await readSyncState(second)).pending).toHaveLength(2)
+  expect(cloud.submissions).toEqual(['old-head', part, 'later-head'])
+})
+
 test('ledger identity is bound to the work across devices, pauses and new tabs', async () => {
   await enableSyncLedger(first, originalLedger)
   await setSyncEnabled(first, false)

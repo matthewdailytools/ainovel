@@ -23,7 +23,7 @@ from . import (
     story_sync,
     workflow_archive,
 )
-from .chapter_adoption import remember_chapter_adoption
+from .chapter_adoption import adopted_chapter_revision, remember_chapter_adoption
 from .chapter_conflicts import (
     ChapterObject,
     fork_chapter_tx,
@@ -33,11 +33,17 @@ from .chapter_conflicts import (
 )
 from .cloud_ledger import LEDGER_HEADER
 from .cloud_sync import (
+    CHAPTER_DIRECTORY_PREFIX,
+    CHAPTER_ORDER_PART_PREFIX,
+    ChapterOrderBatch,
     ChapterOrderConflicts,
+    ChapterOrderMove,
     ChapterOrderResolution,
     Checkpoint,
     ComparedConflict,
+    Identifier,
     MAX_CURSOR,
+    MAX_DIRECTORY_CHAPTERS,
     MAX_OBJECT_BYTES,
     Pulled,
     Receipt,
@@ -49,6 +55,7 @@ from .manuscript_exchange import (
     PortableWork,
     RevisionObject,
     _evidence,
+    native_revision,
     source_revision,
     source_revisions,
     store_portable_evidence,
@@ -127,6 +134,19 @@ CREATE TABLE IF NOT EXISTS desktop_sync_conflicts(
 CREATE TABLE IF NOT EXISTS desktop_sync_chapter_order(
  branch_id TEXT PRIMARY KEY REFERENCES desktop_sync(branch_id), request TEXT NOT NULL,
  token_sha256 TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS desktop_sync_chapter_bases(
+ branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
+ remote_revision TEXT NOT NULL, chapter TEXT, native_revision TEXT, remote_sha256 TEXT,
+ order_revision TEXT NOT NULL, order_sequence INTEGER NOT NULL,
+ PRIMARY KEY(branch_id,object_id));
+CREATE TABLE IF NOT EXISTS desktop_sync_directory_outbox(
+ branch_id TEXT PRIMARY KEY REFERENCES desktop_sync(branch_id), request TEXT NOT NULL,
+ error TEXT);
+CREATE TABLE IF NOT EXISTS desktop_sync_directory_parts(
+ branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), change_id TEXT NOT NULL,
+ object_id TEXT NOT NULL, receipt TEXT NOT NULL, parent_receipt TEXT, PRIMARY KEY(branch_id,change_id));
+CREATE INDEX IF NOT EXISTS desktop_sync_directory_part_objects
+ ON desktop_sync_directory_parts(branch_id,object_id);
 CREATE TABLE IF NOT EXISTS desktop_sync_deferred(
  branch_id TEXT NOT NULL REFERENCES desktop_sync(branch_id), object_id TEXT NOT NULL,
  receipt TEXT NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(branch_id,object_id));
@@ -264,6 +284,17 @@ class EvidenceObject(Input):
     document: PortableEvidence
 
 
+class ChapterDirectoryMove(ChapterOrderMove):
+    receipt_id: Identifier
+
+
+class ChapterDirectory(Input):
+    format: Literal["ainovel-manuscript-sync/1"]
+    kind: Literal["chapter-directory"]
+    branch_id: Identifier
+    moves: list[ChapterDirectoryMove] = Field(min_length=2, max_length=MAX_DIRECTORY_CHAPTERS)
+
+
 def _sha(text):
     return sha256(text.encode("utf-8")).hexdigest()
 
@@ -333,7 +364,7 @@ def _network(origin, token, method, path, payload=None, *, ledger_id=None):
                     if code == "sync_receipt" and response.status_code == 404:
                         raise DomainError(code, "该设备没有对应回执。", 404)
                     if (
-                        "/chapter-order-conflicts" in path
+                        ("/chapter-order-conflicts" in path or "/chapter-order-batches" in path)
                         and isinstance(code, str)
                         and code in ORDER_REJECTIONS
                         and response.status_code == 409
@@ -480,13 +511,52 @@ def _shadow(tx, branch_id, object_id):
     ).fetchone()
 
 
-def _remember(tx, branch_id, event, local_digest):
+def _chapter_base(tx, branch_id, object_id, revision):
+    return tx.execute(
+        "SELECT * FROM desktop_sync_chapter_bases WHERE branch_id=? AND object_id=? AND remote_revision=?",
+        (branch_id, object_id, revision),
+    ).fetchone()
+
+
+def _chapter_at(payload, position):
+    return {**payload, "chapter": {**payload["chapter"], "position": position}}
+
+
+def _order_content_sha(payload):
+    return _sha(
+        json.dumps(_chapter_at(payload, 1), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
+
+
+def _write_chapter_base(tx, branch_id, event, local_chapter):
+    if event.tombstone:
+        values = (None, None, None)
+    else:
+        if local_chapter is None:
+            return
+        values = (
+            dumps(local_chapter["chapter"]),
+            local_chapter["head"]["id"],
+            _order_content_sha(event.payload),
+        )
     tx.execute(
+        "INSERT INTO desktop_sync_chapter_bases VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(branch_id,object_id) "
+        "DO UPDATE SET remote_revision=excluded.remote_revision,chapter=excluded.chapter,"
+        "native_revision=excluded.native_revision,remote_sha256=excluded.remote_sha256,"
+        "order_revision=excluded.order_revision,order_sequence=excluded.order_sequence",
+        (branch_id, event.object_id, event.head_revision, *values, event.head_revision, event.sequence),
+    )
+
+
+def _remember(tx, branch_id, event, local_digest, *, chapter_base=None):
+    stored = tx.execute(
         "INSERT INTO desktop_sync_objects VALUES(?,?,?,?,?) ON CONFLICT(branch_id,object_id) DO UPDATE SET "
         "remote_revision=excluded.remote_revision,sequence=excluded.sequence,local_sha256=excluded.local_sha256 "
         "WHERE excluded.sequence>=desktop_sync_objects.sequence",
         (branch_id, event.object_id, event.head_revision, event.sequence, local_digest),
     )
+    if stored.rowcount and event.object_id.startswith("chapter:"):
+        _write_chapter_base(tx, branch_id, event, chapter_base)
     if event.object_id.startswith((SETTING_USE_HEAD, SETTING_USE_VERSION, *restore_state_desktop.PREFIXES)):
         tx.execute(
             "DELETE FROM desktop_sync_workflow_pending WHERE branch_id=? AND object_id=?",
@@ -825,13 +895,16 @@ class DesktopSync:
             order = tx.execute(
                 "SELECT request FROM desktop_sync_chapter_order WHERE branch_id=?", (branch_id,)
             ).fetchone()
+            directory = tx.execute(
+                "SELECT request,error FROM desktop_sync_directory_outbox WHERE branch_id=?", (branch_id,)
+            ).fetchone()
             return {
                 "bound": row is not None,
                 "enabled": bool(row and row["enabled"]),
                 "work_id": branch_id,
                 "cursor": row["cursor"] if row else 0,
                 "ledger_id": row["ledger_id"] if row else None,
-                "pending": pending + bool(order),
+                "pending": pending + bool(order) + bool(directory),
                 "chapter_order_pending": json.loads(order["request"]) if order else None,
                 "project_source": current_project_source(tx, branch_id),
                 "settings_source": settings_sync.current_settings_source(tx, branch_id),
@@ -854,7 +927,18 @@ class DesktopSync:
                         "WHERE d.branch_id=p.branch_id AND d.object_id=p.object_id)",
                         (branch_id, branch_id, branch_id),
                     )
-                ],
+                ]
+                + (
+                    [
+                        {
+                            "object_id": CHAPTER_DIRECTORY_PREFIX
+                            + json.loads(directory["request"])["change_id"],
+                            "reason": directory["error"],
+                        }
+                    ]
+                    if directory and directory["error"]
+                    else []
+                ),
             }
 
     @staticmethod
@@ -998,8 +1082,215 @@ class DesktopSync:
             (branch_id, event.object_id),
         )
 
+    @staticmethod
+    def _awaiting_directory(tx, branch_id, object_id, sequence):
+        return (
+            object_id.startswith("chapter:")
+            and tx.execute(
+                "SELECT 1 FROM desktop_sync_directory_parts WHERE branch_id=? AND object_id=? "
+                "AND json_extract(receipt,'$.sequence')<?",
+                (branch_id, object_id, sequence),
+            ).fetchone()
+        )
+
+    @staticmethod
+    def _read_directory(branch_id, event):
+        manifest = ChapterDirectory.model_validate(event.payload)
+        batch = ChapterOrderBatch(
+            change_id=event.change_id,
+            moves=[move.model_dump(exclude={"receipt_id"}) for move in manifest.moves],
+        )
+        if (
+            manifest.branch_id != branch_id
+            or event.object_id != CHAPTER_DIRECTORY_PREFIX + batch.change_id
+            or event.head_revision != batch.change_id
+            or event.status != "applied"
+            or event.tombstone
+            or event.parent_revision is not None
+            or event.conflict_id is not None
+            or len({move.position for move in batch.moves}) != len(batch.moves)
+            or len({move.next_position for move in batch.moves}) != len(batch.moves)
+        ):
+            raise DomainError("sync_order", "目录批次清单与采用回执不一致。", 409)
+        return manifest, batch
+
+    def _directory_sources(self, tx, branch_id, event, manifest):
+        sources = []
+        for index, move in enumerate(manifest.moves):
+            expected_id = CHAPTER_ORDER_PART_PREFIX + _sha(
+                dumps([branch_id, event.change_id, move.chapter_id])
+            )
+            object_id = f"chapter:{move.chapter_id}"
+            row = tx.execute(
+                "SELECT receipt,parent_receipt FROM desktop_sync_directory_parts WHERE branch_id=? AND change_id=?",
+                (branch_id, move.receipt_id),
+            ).fetchone()
+            if row is None:
+                raise DomainError("sync_order", "目录批次正在等待完整章节回执。", 409)
+            part = Receipt.model_validate_json(row["receipt"])
+            after = verified_chapter(branch_id, part.object_id, part.payload)
+            if (
+                move.receipt_id != expected_id
+                or part.change_id != expected_id
+                or part.head_revision != expected_id
+                or part.parent_revision != move.head_revision
+                or part.object_id != object_id
+                or part.status != "applied"
+                or part.tombstone
+                or part.conflict_id is not None
+                or part.device_id != event.device_id
+                or part.sequence != event.sequence - len(manifest.moves) + index
+                or after.chapter.position != move.next_position
+            ):
+                raise DomainError("sync_order", "目录批次的章节回执与清单不符。", 409)
+            shadow = _shadow(tx, branch_id, object_id)
+            if not shadow or shadow["sequence"] >= part.sequence:
+                raise DomainError("sync_order", "目录批次正在等待原章位及章节采用依据。", 409)
+            base = _chapter_base(tx, branch_id, object_id, shadow["remote_revision"])
+            if not base or not base["chapter"] or base["order_sequence"] >= part.sequence:
+                raise DomainError("sync_order", "目录批次正在等待原章位及章节采用依据。", 409)
+            chapter = json.loads(base["chapter"])
+            native = native_revision(tx, branch_id, base["native_revision"])
+            if not native:
+                raise DomainError("sync_order", "无法读取目录批次的本机原稿。", 409)
+            projection = {
+                "format": FORMAT,
+                "kind": "chapter",
+                "chapter": chapter,
+                "head": native.model_dump(),
+            }
+            if chapter["position"] != move.position or shadow["local_sha256"] != _digest(projection):
+                raise DomainError("sync_order", "目录批次不能改动原章稿或原章位。", 409)
+            adopts_prose = shadow["remote_revision"] == move.head_revision
+            remote_sha = (
+                base["remote_sha256"]
+                if base["order_revision"] == move.head_revision
+                else self._deferred_directory_parent_sha(
+                    tx, branch_id, object_id, move, part, base["order_sequence"], row["parent_receipt"]
+                )
+            )
+            if remote_sha != _order_content_sha(part.payload):
+                raise DomainError("sync_order", "目录批次不能改动原章稿或原章位。", 409)
+            sources.append((part, _chapter_at(projection, move.next_position), adopts_prose))
+        return sources
+
+    @staticmethod
+    def _deferred_directory_parent(tx, branch_id, object_id, revision):
+        return tx.execute(
+            "SELECT receipt FROM desktop_sync_deferred WHERE branch_id=? AND object_id=? "
+            "AND json_extract(receipt,'$.change_id')=? UNION ALL "
+            "SELECT receipt FROM desktop_sync_directory_parts WHERE branch_id=? AND object_id=? "
+            "AND change_id=? LIMIT 1",
+            (branch_id, object_id, revision, branch_id, object_id, revision),
+        ).fetchone()
+
+    @classmethod
+    def _deferred_directory_parent_sha(cls, tx, branch_id, object_id, move, part, order_sequence, retained):
+        if retained is None:
+            row = cls._deferred_directory_parent(tx, branch_id, object_id, move.head_revision)
+            retained = row["receipt"] if row else None
+        if retained is None:
+            raise DomainError("sync_order", "目录批次正在等待尚未采用的原章稿回执。", 409)
+        parent = Receipt.model_validate_json(retained)
+        original = verified_chapter(branch_id, parent.object_id, parent.payload)
+        if (
+            parent.object_id != object_id
+            or parent.change_id != move.head_revision
+            or parent.head_revision != move.head_revision
+            or parent.status not in {"applied", "resolved"}
+            or parent.tombstone
+            or not order_sequence < parent.sequence < part.sequence
+            or original.chapter.position != move.position
+        ):
+            raise DomainError("sync_order", "目录批次的原章稿回执或原章位不符。", 409)
+        return _order_content_sha(parent.payload)
+
+    def _consume_directory(self, tx, branch_id, event):
+        if _shadow(tx, branch_id, event.object_id):
+            return
+        try:
+            manifest, batch = self._read_directory(branch_id, event)
+            sources = self._directory_sources(tx, branch_id, event, manifest)
+            pending = tx.execute(
+                "SELECT request FROM desktop_sync_directory_outbox WHERE branch_id=?", (branch_id,)
+            ).fetchone()
+            own = pending and ChapterOrderBatch.model_validate_json(pending["request"]) == batch
+            active = {
+                row["id"]: row["position"]
+                for row in tx.execute(
+                    "SELECT id,position FROM chapters WHERE branch_id=? AND archived=0", (branch_id,)
+                )
+            }
+            positions = {move.chapter_id: move.position for move in manifest.moves}
+            desired = {move.chapter_id: move.next_position for move in manifest.moves}
+            current = {chapter_id: active.get(chapter_id) for chapter_id in positions}
+            if not own and current not in (positions, desired):
+                raise DomainError("sync_order", "本机相关章位已变化，整组云端目录待核对。", 409)
+            apply = not own and current != desired
+            if apply and len(set((active | desired).values())) != len(active):
+                raise DomainError("sync_order", "本机其他章节占用目标章位，整组云端目录待核对。", 409)
+        except (DomainError, ValidationError, UnicodeError) as error:
+            reason = error.message if isinstance(error, DomainError) else "目录批次格式无法核对。"
+            self._defer(tx, branch_id, event, reason)
+            return
+        if apply:
+            tx.executemany(
+                "UPDATE chapters SET position=? WHERE branch_id=? AND id=? AND archived=0",
+                [(position, branch_id, chapter_id) for chapter_id, position in desired.items()],
+            )
+            tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
+        for part, projection, adopts_prose in sources:
+            digest = _digest(projection)
+            if adopts_prose:
+                _remember(tx, branch_id, part, digest, chapter_base=projection)
+            else:
+                # Advance only the directory. The older prose CAS base exposes the competing draft for comparison.
+                tx.execute(
+                    "UPDATE desktop_sync_objects SET local_sha256=? WHERE branch_id=? AND object_id=?",
+                    (digest, branch_id, part.object_id),
+                )
+                tx.execute(
+                    "UPDATE desktop_sync_chapter_bases SET chapter=?,order_revision=?,order_sequence=?,remote_sha256=? "
+                    "WHERE branch_id=? AND object_id=?",
+                    (
+                        dumps(projection["chapter"]),
+                        part.change_id,
+                        part.sequence,
+                        _order_content_sha(part.payload),
+                        branch_id,
+                        part.object_id,
+                    ),
+                )
+            tx.execute(
+                "DELETE FROM desktop_sync_directory_parts WHERE branch_id=? AND change_id=?",
+                (branch_id, part.change_id),
+            )
+        if own:
+            tx.execute("DELETE FROM desktop_sync_directory_outbox WHERE branch_id=?", (branch_id,))
+        tx.execute(
+            "DELETE FROM desktop_sync_deferred WHERE branch_id=? AND object_id=?",
+            (branch_id, event.object_id),
+        )
+        _remember(tx, branch_id, event, _digest(event.payload))
+
     def _consume(self, tx, branch_id, incoming, queued=None):
         object_id = incoming.object_id
+        if incoming.change_id.startswith(CHAPTER_ORDER_PART_PREFIX):
+            parent = self._deferred_directory_parent(tx, branch_id, object_id, incoming.parent_revision)
+            tx.execute(
+                "INSERT OR IGNORE INTO desktop_sync_directory_parts VALUES(?,?,?,?,?)",
+                (
+                    branch_id,
+                    incoming.change_id,
+                    object_id,
+                    incoming.model_dump_json(),
+                    parent["receipt"] if parent else None,
+                ),
+            )
+            return
+        if object_id.startswith(CHAPTER_DIRECTORY_PREFIX):
+            self._consume_directory(tx, branch_id, incoming)
+            return
         if incoming.status == "conflict":
             tx.execute(
                 "INSERT OR IGNORE INTO desktop_sync_conflicts VALUES(?,?,?,?)",
@@ -1012,11 +1303,22 @@ class DesktopSync:
                 (branch_id, incoming.conflict_id),
             )
         known = _shadow(tx, branch_id, object_id)
+        directory_base = (
+            _chapter_base(tx, branch_id, object_id, known["remote_revision"])
+            if known and object_id.startswith("chapter:")
+            else None
+        )
+        if directory_base and directory_base["order_sequence"] > incoming.sequence:
+            # A source receipt may remain pending for prose comparison after its directory has advanced.
+            return
         if tx.execute(
             "SELECT 1 FROM desktop_sync_deferred WHERE branch_id=? AND object_id=? "
             "AND json_extract(receipt,'$.sequence')>?",
             (branch_id, object_id, incoming.sequence),
         ).fetchone():
+            return
+        if self._awaiting_directory(tx, branch_id, object_id, incoming.sequence):
+            self._defer(tx, branch_id, incoming, "章节正在等待完整章序批次。")
             return
         tx.execute(
             "DELETE FROM desktop_sync_deferred WHERE branch_id=? AND object_id=?", (branch_id, object_id)
@@ -1083,7 +1385,8 @@ class DesktopSync:
                     branch_id, object_id, incoming.payload, incoming.tombstone
                 )
                 restore_state_desktop.acknowledge_head(tx, branch_id, value)
-            _remember(tx, branch_id, incoming, queued["local_sha256"])
+            chapter = json.loads(queued["request"])["payload"] if object_id.startswith("chapter:") else None
+            _remember(tx, branch_id, incoming, queued["local_sha256"], chapter_base=chapter)
             return
         restore_head = object_id.startswith(restore_state_desktop.HEAD_PREFIXES)
         try:
@@ -1096,6 +1399,31 @@ class DesktopSync:
         clean = local is None if known is None else known["local_sha256"] == local_digest
         if queued is not None and queued["conflict_id"] is not None:
             clean = queued["local_sha256"] == local_digest
+        adopted = incoming
+        directory_base_position = None
+        if (
+            not identical
+            and not clean
+            and queued is None
+            and local is not None
+            and known
+            and object_id.startswith("chapter:")
+            and not incoming.tombstone
+            and incoming.parent_revision == known["remote_revision"]
+        ):
+            if directory_base and directory_base["chapter"]:
+                position = json.loads(directory_base["chapter"])["position"]
+                if (
+                    local["chapter"]["position"] != position
+                    and incoming.payload["chapter"]["position"] == position
+                    and _digest(_chapter_at(local, position)) == known["local_sha256"]
+                ):
+                    # Take the later prose against the exact known base while retaining the author's local order.
+                    clean = True
+                    directory_base_position = position
+                    adopted = incoming.model_copy(
+                        update={"payload": _chapter_at(incoming.payload, local["chapter"]["position"])}
+                    )
         if restore_head and not identical and not clean and queued is None:
             try:
                 value = restore_state_sync.parse_restore_state_object(
@@ -1111,14 +1439,17 @@ class DesktopSync:
         if not identical or restore_head:
             tx.execute("SAVEPOINT apply_sync_object")
             try:
-                _apply(tx, self.domain, branch_id, incoming, prose_merge=_is_prose_merge(queued))
+                _apply(tx, self.domain, branch_id, adopted, prose_merge=_is_prose_merge(queued))
             except DomainError as error:
                 tx.execute("ROLLBACK TO apply_sync_object")
                 self._defer(tx, branch_id, incoming, error.message)
                 return
             finally:
                 tx.execute("RELEASE apply_sync_object")
-        _remember(tx, branch_id, incoming, _digest(_local(tx, branch_id, object_id)))
+        applied = _local(tx, branch_id, object_id)
+        if directory_base_position is not None:
+            applied = _chapter_at(applied, directory_base_position)
+        _remember(tx, branch_id, incoming, _digest(applied), chapter_base=applied)
 
     def _pull(self, branch_id, origin, token, ledger_id):
         for _ in range(8):
@@ -1169,6 +1500,133 @@ class DesktopSync:
                 return
         raise DomainError("sync_pages", "尚有云端历史待读取，已保留游标，请再次同步。", 409)
 
+    def _hydrate_chapter_bases(self, branch_id, origin, token, ledger_id):
+        with self.domain.db.connect() as tx:
+            known = list(
+                tx.execute(
+                    "SELECT s.* FROM desktop_sync_objects s LEFT JOIN desktop_sync_chapter_bases b "
+                    "ON b.branch_id=s.branch_id AND b.object_id=s.object_id AND b.remote_revision=s.remote_revision "
+                    "WHERE s.branch_id=? AND s.object_id LIKE 'chapter:%' AND b.object_id IS NULL LIMIT 100",
+                    (branch_id,),
+                )
+            )
+        for shadow in known:
+            object_id, revision = shadow["object_id"], shadow["remote_revision"]
+            try:
+                event = self._call(
+                    branch_id, origin, token, f"/changes/{revision}", Receipt, ledger_id=ledger_id
+                )
+                if (
+                    event.object_id != object_id
+                    or event.change_id != revision
+                    or event.head_revision != revision
+                ):
+                    continue
+                chapter = None if event.tombstone else verified_chapter(branch_id, object_id, event.payload)
+            except DomainError as error:
+                if error.status >= 500:
+                    break
+                continue
+            with self.domain.db.connect(True) as tx:
+                live = _shadow(tx, branch_id, object_id)
+                if not live or dict(live) != dict(shadow):
+                    continue
+                projection = chapter.model_dump() if chapter else None
+                if projection and shadow["local_sha256"] != _digest(projection):
+                    adopted = adopted_chapter_revision(tx, branch_id, chapter.head.id)
+                    if adopted:
+                        projection["chapter"]["revision"] = adopted.revision
+                        projection["head"] = adopted.model_dump()
+                if shadow["local_sha256"] == _digest(projection):
+                    _write_chapter_base(tx, branch_id, event, projection)
+
+    @staticmethod
+    def _closed_directory_moves(moves):
+        remaining = {move.position: move for move in moves}
+        closed = []
+        while remaining:
+            path = {}
+            position = next(iter(remaining))
+            while move := remaining.pop(position, None):
+                path[position] = move
+                position = move.next_position
+            if position in path:
+                while position in path:
+                    move = path.pop(position)
+                    closed.append(move)
+                    position = move.next_position
+        return closed
+
+    def _stage_directory(self, tx, branch_id):
+        active = {
+            row["id"]: row["position"]
+            for row in tx.execute(
+                "SELECT id,position FROM chapters WHERE branch_id=? AND archived=0", (branch_id,)
+            )
+        }
+        old = {}
+        unknown = set()
+        for row in tx.execute(
+            "SELECT s.object_id,s.remote_revision,b.object_id AS based,b.chapter "
+            "FROM desktop_sync_objects s LEFT JOIN desktop_sync_chapter_bases b ON b.branch_id=s.branch_id "
+            "AND b.object_id=s.object_id AND b.remote_revision=s.remote_revision "
+            "WHERE s.branch_id=? AND s.object_id LIKE 'chapter:%'",
+            (branch_id,),
+        ):
+            identifier = row["object_id"].removeprefix("chapter:")
+            if not row["based"]:
+                unknown.add(identifier)
+            elif row["chapter"]:
+                old[identifier] = (json.loads(row["chapter"])["position"], row["remote_revision"])
+        held = {
+            row["object_id"]
+            for row in tx.execute(
+                "SELECT object_id FROM desktop_sync_directory_parts WHERE branch_id=?", (branch_id,)
+            )
+        }
+        pending = tx.execute(
+            "SELECT request,error FROM desktop_sync_directory_outbox WHERE branch_id=?", (branch_id,)
+        ).fetchone()
+        if pending:
+            batch = ChapterOrderBatch.model_validate_json(pending["request"])
+            if pending["error"] and all(
+                active.get(move.chapter_id) == old.get(move.chapter_id, (None,))[0] for move in batch.moves
+            ):
+                tx.execute("DELETE FROM desktop_sync_directory_outbox WHERE branch_id=?", (branch_id,))
+                pending = None
+            else:
+                held.update(f"chapter:{move.chapter_id}" for move in batch.moves)
+        moves = [
+            ChapterOrderMove(
+                chapter_id=identifier, position=before, next_position=active[identifier], head_revision=head
+            )
+            for identifier, (before, head) in old.items()
+            if identifier in active and active[identifier] != before
+        ]
+        if unknown or active.keys() != old.keys():
+            moves = self._closed_directory_moves(moves)
+        if len(moves) < 2:
+            return held | {f"chapter:{identifier}" for identifier in unknown}
+        participants = {f"chapter:{move.chapter_id}" for move in moves}
+        if (
+            not pending
+            and not participants & held
+            and all(
+                not tx.execute(
+                    "SELECT 1 FROM desktop_sync_outbox WHERE branch_id=? AND object_id=? UNION ALL "
+                    "SELECT 1 FROM desktop_sync_conflicts WHERE branch_id=? AND object_id=? LIMIT 1",
+                    (branch_id, object_id, branch_id, object_id),
+                ).fetchone()
+                for object_id in participants
+            )
+        ):
+            batch = ChapterOrderBatch(change_id=uid(), moves=sorted(moves, key=lambda move: move.position))
+            tx.execute(
+                "INSERT INTO desktop_sync_directory_outbox(branch_id,request) VALUES(?,?)",
+                (branch_id, batch.model_dump_json()),
+            )
+        return held | participants | {f"chapter:{identifier}" for identifier in unknown}
+
     def _prepare(self, branch_id):
         with self.domain.db.connect(True) as tx:
             if not tx.execute(
@@ -1177,6 +1635,7 @@ class DesktopSync:
                 (branch_id, branch_id),
             ).fetchone():
                 return
+            directory_members = self._stage_directory(tx, branch_id)
             object_ids = [
                 f"chapter:{row['id']}"
                 for row in tx.execute(
@@ -1294,6 +1753,9 @@ class DesktopSync:
             }
             blocked = False
             for object_id in [f"branch:{branch_id}", *histories, *object_ids, *formal, *documents]:
+                if object_id in directory_members:
+                    blocked = True
+                    continue
                 if tx.execute(
                     "SELECT 1 FROM desktop_sync_outbox WHERE branch_id=? AND object_id=? UNION ALL "
                     "SELECT 1 FROM desktop_sync_conflicts WHERE branch_id=? AND object_id=? LIMIT 1",
@@ -1351,6 +1813,48 @@ class DesktopSync:
                 continue
             objects[object_id] = value
         return objects
+
+    def _push_directory(self, branch_id, origin, token, ledger_id):
+        with self.domain.db.connect() as tx:
+            row = tx.execute(
+                "SELECT request,error FROM desktop_sync_directory_outbox WHERE branch_id=?", (branch_id,)
+            ).fetchone()
+        if not row or row["error"]:
+            return False
+        # run has verified the current ledger and pulled existing receipts before retrying this immutable request.
+        batch = ChapterOrderBatch.model_validate_json(row["request"])
+        try:
+            result = self._call(
+                branch_id,
+                origin,
+                token,
+                "/chapter-order-batches",
+                Receipt,
+                method="POST",
+                data=batch.model_dump(),
+                ledger_id=ledger_id,
+            )
+        except DomainError as error:
+            if error.code not in {
+                "sync_chapter_order_changed",
+                "sync_chapter_order_limit",
+                "sync_object_size",
+                "sync_request_size",
+                "sync_replay",
+                "sync_reserved",
+            } or error.status not in {409, 413}:
+                raise
+            with self.domain.db.connect(True) as tx:
+                tx.execute(
+                    "UPDATE desktop_sync_directory_outbox SET error=? WHERE branch_id=? AND request=?",
+                    (error.message, branch_id, row["request"]),
+                )
+            return False
+        _, confirmed = self._read_directory(branch_id, result)
+        if confirmed != batch:
+            raise DomainError("sync_response", "目录批次回执与本机提交不一致。", 502)
+        # The pull is the only write path; it verifies and adopts every child before clearing the request.
+        return True
 
     def _push(self, branch_id, origin, token, ledger_id):
         with self.domain.db.connect() as tx:
@@ -1455,10 +1959,16 @@ class DesktopSync:
     def run(self, branch_id, origin, token):
         with self._operation():
             ledger_id = self._verified_ledger(branch_id, origin, token)
+            self._hydrate_chapter_bases(branch_id, origin, token, ledger_id)
             self._pull(branch_id, origin, token, ledger_id)
             self._prepare(branch_id)
+            sent_directory = self._push_directory(branch_id, origin, token, ledger_id)
             self._push(branch_id, origin, token, ledger_id)
             self._pull(branch_id, origin, token, ledger_id)
+            if sent_directory:
+                self._prepare(branch_id)
+                self._push(branch_id, origin, token, ledger_id)
+                self._pull(branch_id, origin, token, ledger_id)
             self._observe_chapter_order(branch_id, origin, token, ledger_id)
             return self._state(branch_id)
 

@@ -1,4 +1,5 @@
 import { expect, test, type APIResponse, type Page } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 
 const cloud = 'http://127.0.0.1:8888'
@@ -126,6 +127,7 @@ async function prepareDesktop(page: Page, title: string) {
       .then(checked<{ cursor: number; ledger_id: string }>)
   return {
     novel,
+    branch,
     common,
     endpoint,
     baseline,
@@ -135,6 +137,7 @@ async function prepareDesktop(page: Page, title: string) {
     desktopToken,
     webToken,
     coldToken,
+    request,
   }
 }
 
@@ -145,18 +148,132 @@ async function openWeb(web: Page, title: string, pack: object, token: string, de
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(pack)),
   })
+  const sync = await connectWeb(web, title, token, device)
+  await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
+  return sync
+}
+
+async function connectWeb(web: Page, title: string, token: string, device: string) {
   await web.getByRole('combobox', { name: '离线作品', exact: true }).selectOption({ label: title })
   await web.getByText('作品云同步', { exact: true }).click()
   await web.getByLabel('同步服务地址').fill(cloud)
   await web.getByLabel('设备编号').fill(device)
   await web.getByLabel('设备凭据').fill(token)
-  await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
   const sync = web.getByRole('button', { name: '同步当前工作版本', exact: true })
   return async () => {
     await sync.click()
     await expect(sync).toBeEnabled()
   }
 }
+
+test('桌面重排分页中断后，原 Web 只取回完整目录和原章稿', async ({ page, browser }) => {
+  const title = '整组目录同步验收'
+  const f = await prepareDesktop(page, title)
+  const [first, second] = f.common
+  const context = await browser.newContext()
+  try {
+    const web = await context.newPage()
+    await (
+      await openWeb(web, title, f.baseline, f.webToken, 'web')
+    )()
+    const confirmed = await f.checkpoint()
+    const positions = (pack: Package) =>
+      pack.chapters.filter(({ archived }) => !archived).map(({ id, position }) => [id, position])
+    const original = [
+      [first.id, 1],
+      [second.id, 2],
+    ]
+    const reordered = [
+      [second.id, 1],
+      [first.id, 2],
+    ]
+    expect(positions(await exportWeb(web))).toEqual(original)
+
+    const snapshot = await f.request<{ id: string }>(`${f.branch}/work-snapshots`, 'POST', {
+      scope: 'book',
+      scope_id: null,
+      label: '换序前目录',
+    })
+
+    await page.reload()
+    await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(f.novel.id)
+    await page.getByText('章节整理与归档', { exact: true }).click()
+    const move = page.getByRole('button', { name: '下移一章', exact: true })
+    await expect(move).toBeEnabled()
+    page.once('dialog', (dialog) => void dialog.accept())
+    await move.click()
+    await expect.poll(async () => positions(await f.desktopPack())).toEqual(reordered)
+    expect((await f.desktopSync()).conflicts).toHaveLength(0)
+
+    const afterMove = await f.checkpoint()
+    const { changes } = await checked<{ changes: { object_id: string; change_id: string }[] }>(
+      await page.request.get(`${f.endpoint}/pull?after=${confirmed.cursor}&limit=50`, {
+        headers: { Authorization: `Bearer ${f.desktopToken}`, 'X-Ainovel-Ledger': afterMove.ledger_id },
+      }),
+    )
+    expect(changes.filter(({ change_id }) => change_id.startsWith('chapter-order-part-'))).toHaveLength(2)
+    expect(changes.filter(({ object_id }) => object_id.startsWith('chapter-directory:'))).toHaveLength(1)
+
+    const afterRequest: number[] = []
+    let stoppedAt = 0
+    await web.route(`${f.endpoint}/pull?*`, async (route) => {
+      const url = new URL(route.request().url())
+      afterRequest.push(Number(url.searchParams.get('after')))
+      if (afterRequest.length === 1) {
+        url.searchParams.set('limit', '1')
+        const response = await route.fetch({ url: url.toString() })
+        const part = await response.json()
+        expect(part.has_more).toBe(true)
+        expect(part.changes[0].change_id).toMatch(/^chapter-order-part-/)
+        stoppedAt = part.cursor
+        await route.fulfill({ response })
+      } else {
+        await route.abort('connectionreset')
+      }
+    })
+    await web.getByRole('button', { name: '同步当前工作版本', exact: true }).click()
+    await expect(web.getByRole('alert')).toBeVisible()
+    expect(afterRequest).toEqual([confirmed.cursor, stoppedAt])
+    expect(positions(await exportWeb(web))).toEqual(original)
+    await web.close()
+
+    const reopened = await context.newPage()
+    await reopened.goto('/offline/')
+    const sync = await connectWeb(reopened, title, f.webToken, 'web')
+    expect(positions(await exportWeb(reopened))).toEqual(original)
+    const resumed = reopened.waitForRequest((request) => request.url().startsWith(`${f.endpoint}/pull?`))
+    await sync()
+    expect(new URL((await resumed).url()).searchParams.get('after')).toBe(String(stoppedAt))
+    await expect(reopened.getByRole('button', { name: `1. ${second.title}`, exact: true })).toBeVisible()
+    const final = await exportWeb(reopened)
+    expect(positions(final)).toEqual(reordered)
+    expect(activeOutline(final)).toEqual(activeOutline(f.baseline))
+    for (const chapter of f.common) expect(chain(final, chapter)).toEqual(chain(f.baseline, chapter))
+    await sync()
+    expect((await f.checkpoint()).cursor).toBe(afterMove.cursor)
+
+    const path = `${f.branch}/work-snapshots/${snapshot.id}`
+    const preview = await f.request<{ basis_sha256: string; in_place_blockers: string[] }>(`${path}/preview`)
+    expect(preview.in_place_blockers).toEqual([])
+    const restored = await f.request<{ recovery_snapshot_id: string }>(`${path}/restore`, 'POST', {
+      mode: 'in_place',
+      basis_sha256: preview.basis_sha256,
+      idempotency_key: randomUUID(),
+    })
+    expect(restored.recovery_snapshot_id).toBeTruthy()
+    const nativeRestored = await f.desktopPack()
+    expect(positions(nativeRestored)).toEqual(original)
+    await f.desktopSync()
+    await sync()
+    await expect(reopened.getByRole('button', { name: `1. ${first.title}`, exact: true })).toBeVisible()
+    const webRestored = await exportWeb(reopened)
+    expect(positions(webRestored)).toEqual(original)
+    for (const chapter of f.common)
+      expect(chain(webRestored, chapter)).toEqual(chain(nativeRestored, chapter))
+  } finally {
+    await context.close()
+  }
+})
 
 async function orderConflictRow(surface: Page) {
   const conflict = surface.getByRole('region', { name: '章位冲突', exact: true })

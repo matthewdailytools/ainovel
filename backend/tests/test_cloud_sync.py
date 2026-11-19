@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from hashlib import sha256
 import sqlite3
+from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
@@ -647,6 +648,23 @@ def test_chapter_order_preserves_chapters_added_to_current_formal_outline(servic
     assert client.get(WORK + "/checkpoint", headers=desktop).json()["cursor"] == adopted["sequence"]
     allowed = client.post(path + "/resolve", headers=desktop, json={**command, "chapter_id": "free"})
     assert allowed.status_code == 200 and allowed.json()["payload"]["chapter"]["position"] == 3
+    rearranged = client.post(
+        WORK + "/chapter-order-batches",
+        headers=desktop,
+        json={
+            "change_id": "author-reorders-planned-chapter",
+            "moves": [
+                {"chapter_id": "planned", "position": 2, "next_position": 3, "head_revision": "planned-head"},
+                {
+                    "chapter_id": "free",
+                    "position": 3,
+                    "next_position": 2,
+                    "head_revision": "move-not-allowed",
+                },
+            ],
+        },
+    )
+    assert rearranged.status_code == 200, rearranged.text
     assert client.get(WORK + "/changes/outline-adopted", headers=desktop).json() == adopted
 
 
@@ -681,6 +699,187 @@ def test_chapter_order_cannot_move_past_supported_positions(service, tail):
     )
     assert refused.status_code == 409 and refused.json()["code"] == "sync_chapter_order_limit"
     assert client.get(WORK + "/checkpoint", headers=desktop).json()["cursor"] == 3
+
+
+def prepare_chapter_batch(client):
+    desktop, web = grant(client, "desktop"), grant(client, "web")
+    ledger = client.get(WORK + "/checkpoint", headers=desktop).json()["ledger_id"]
+    for headers in (desktop, web):
+        headers[cloud_ledger.LEDGER_HEADER] = ledger
+    chapters = [
+        chapter_at(identifier, identifier, index) for index, identifier in enumerate(("a", "b", "c"), 1)
+    ]
+    sources = [
+        push(
+            client,
+            desktop,
+            parent(f"authored-{identifier}", object_id=f"chapter:{identifier}", payload=chapter),
+        )
+        for identifier, chapter in zip(("a", "b", "c"), chapters, strict=True)
+    ]
+    return (
+        desktop,
+        web,
+        sources,
+        {
+            "change_id": "author-swaps-chapters",
+            "moves": [
+                {"chapter_id": "b", "position": 2, "next_position": 1, "head_revision": "authored-b"},
+                {"chapter_id": "a", "position": 1, "next_position": 2, "head_revision": "authored-a"},
+            ],
+        },
+    )
+
+
+def test_chapter_batch_is_atomic_to_other_devices_and_has_pageable_exact_receipts(service, monkeypatch):
+    client, _ = service
+    desktop, web, sources, command = prepare_chapter_batch(client)
+    remote = WORK + "/chapter-order-batches"
+    base_cursor = sources[-1]["sequence"]
+    first_written, finish = Event(), Event()
+    append = cloud_sync.SyncStore._append
+
+    def pause_after_first_child(store, tx, work, device, data, *args, **kwargs):
+        event = append(store, tx, work, device, data, *args, **kwargs)
+        if data.change_id.startswith(cloud_sync.CHAPTER_ORDER_PART_PREFIX) and not first_written.is_set():
+            first_written.set()
+            assert finish.wait(5)
+        return event
+
+    with monkeypatch.context() as controls:
+        controls.setattr(cloud_sync.SyncStore, "_append", pause_after_first_child)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(
+                client.post, remote, headers=desktop, json=command, params={"device_id": "desktop"}
+            )
+            try:
+                assert first_written.wait(5)
+                assert client.get(WORK + "/checkpoint", headers=web).json()["cursor"] == base_cursor
+                assert client.get(WORK + "/pull", headers=web, params={"after": base_cursor}).json() == {
+                    "cursor": base_cursor,
+                    "has_more": False,
+                    "changes": [],
+                }
+                assert client.get(WORK + "/chapter-order-conflicts", headers=web).json() == {"conflicts": []}
+            finally:
+                finish.set()
+            result = pending.result()
+    assert result.status_code == 200, result.text
+    batch = result.json()
+    assert batch["object_id"] == "chapter-directory:" + command["change_id"]
+    assert batch["change_id"] == batch["head_revision"] == command["change_id"]
+    assert batch["parent_revision"] is None and batch["status"] == "applied"
+    assert batch["sequence"] == base_cursor + 3
+    assert batch["payload"]["format"] == "ainovel-manuscript-sync/1"
+    assert batch["payload"]["branch_id"] == "bell" and batch["payload"]["kind"] == "chapter-directory"
+    cursor = base_cursor
+    moved = []
+    for index, (previous, expected, entry) in enumerate(
+        zip(reversed(sources[:2]), command["moves"], batch["payload"]["moves"], strict=True)
+    ):
+        part = entry["receipt_id"]
+        assert part.startswith(cloud_sync.CHAPTER_ORDER_PART_PREFIX)
+        assert entry == {**expected, "receipt_id": part}
+        page = client.get(WORK + "/pull", headers=web, params={"after": cursor, "limit": 1}).json()
+        assert page["has_more"] and page["cursor"] == base_cursor + index + 1
+        (receipt,) = page["changes"]
+        assert receipt["change_id"] == receipt["head_revision"] == part
+        assert receipt["status"] == "applied" and receipt["parent_revision"] == previous["change_id"]
+        assert receipt["object_id"] == previous["object_id"]
+        original = previous["payload"]
+        assert receipt["payload"] == {
+            **original,
+            "chapter": {**original["chapter"], "position": entry["next_position"]},
+        }
+        assert client.get(WORK + "/changes/" + part, headers=web).json() == receipt
+        moved.append(receipt)
+        cursor = page["cursor"]
+    assert client.get(WORK + "/pull", headers=web, params={"after": cursor, "limit": 1}).json() == {
+        "cursor": batch["sequence"],
+        "has_more": False,
+        "changes": [batch],
+    }
+    assert client.post(remote, headers=desktop, json=command).json() == batch
+    assert client.get(WORK + "/receipts/" + command["change_id"], headers=desktop).json() == batch
+    assert client.get(WORK + "/checkpoint", headers=web).json()["cursor"] == batch["sequence"]
+    assert client.get(WORK + "/chapter-order-conflicts", headers=web).json() == {"conflicts": []}
+    previous = moved[0]
+    edited = push(
+        client,
+        web,
+        parent(
+            "later-edit", previous["change_id"], payload=previous["payload"], object_id=previous["object_id"]
+        ),
+    )
+    assert edited["status"] == "applied"
+
+
+def test_chapter_batch_refuses_stale_invalid_and_forged_writes_and_rolls_back(service, monkeypatch):
+    client, _ = service
+    desktop, web, sources, command = prepare_chapter_batch(client)
+    base = sources[-1]["sequence"]
+    route = WORK + "/chapter-order-batches"
+    for values, status, code in (
+        ({"change_id": "x" * 111}, 422, "sync_input"),
+        ({"moves": command["moves"][:1]}, 422, "sync_input"),
+        ({"moves": [command["moves"][0], command["moves"][0]]}, 422, "sync_input"),
+        (
+            {"moves": [command["moves"][0], {**command["moves"][1], "position": 2, "next_position": 3}]},
+            422,
+            "sync_input",
+        ),
+        (
+            {"moves": [command["moves"][0], {**command["moves"][1], "next_position": 3}]},
+            409,
+            "sync_chapter_order_changed",
+        ),
+        (
+            {"moves": [command["moves"][0], {**command["moves"][1], "head_revision": "other-head"}]},
+            409,
+            "sync_chapter_order_changed",
+        ),
+        (
+            {"moves": [command["moves"][0], {**command["moves"][1], "position": 3}]},
+            409,
+            "sync_chapter_order_changed",
+        ),
+    ):
+        refused = client.post(route, headers=desktop, json={**command, **values})
+        assert refused.status_code == status and refused.json()["code"] == code
+    mismatched = client.post(route, headers=desktop, json=command, params={"device_id": "web"})
+    assert mismatched.status_code == 403 and mismatched.json()["code"] == "sync_device_mismatch"
+    unbound = client.post(route, headers=bearer(desktop["Authorization"].split(" ", 1)[1]), json=command)
+    assert unbound.status_code == 409 and unbound.json()["code"] == "sync_ledger_replaced"
+    for invalid in (
+        parent("forged-manifest", object_id="chapter-directory:forged"),
+        parent("forged-child", object_id="chapter:a", payload={"kind": "chapter-directory"}),
+        parent("chapter-order-part-forged", object_id="chapter:b"),
+    ):
+        rejected = client.post(WORK + "/push", headers=desktop, json=invalid)
+        assert rejected.status_code == 409 and rejected.json()["code"] == "sync_reserved"
+
+    append = cloud_sync.SyncStore._append
+    created_parts = []
+
+    def fail_at_manifest(store, tx, work, device, data, *args, **kwargs):
+        if data.object_id.startswith(cloud_sync.CHAPTER_DIRECTORY_PREFIX):
+            raise DomainError("sync_test_interrupt", "中断整组提交。", 409)
+        receipt = append(store, tx, work, device, data, *args, **kwargs)
+        created_parts.append(receipt.change_id)
+        return receipt
+
+    with monkeypatch.context() as controls:
+        controls.setattr(cloud_sync.SyncStore, "_append", fail_at_manifest)
+        interrupted = client.post(route, headers=desktop, json=command)
+    assert interrupted.status_code == 409 and interrupted.json()["code"] == "sync_test_interrupt"
+    assert len(created_parts) == 2
+    for identifier in [*created_parts, command["change_id"]]:
+        assert client.get(WORK + "/changes/" + identifier, headers=web).status_code == 404
+    assert client.get(WORK + "/checkpoint", headers=desktop).json()["cursor"] == base
+    assert client.get(WORK + "/pull", headers=web).json()["changes"] == sources
+    retry = client.post(route, headers=desktop, json=command)
+    assert retry.status_code == 200, retry.text
+    assert [row["receipt_id"] for row in retry.json()["payload"]["moves"]] == created_parts
 
 
 def test_stale_edit_cannot_resurrect_tombstone(service):

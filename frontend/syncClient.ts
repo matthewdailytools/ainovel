@@ -25,6 +25,10 @@ export type SyncReceipt = PushChange & {
   conflict_id: string | null
 }
 
+export const CHAPTER_DIRECTORY_PREFIX = 'chapter-directory:'
+const CHAPTER_ORDER_PART = /^chapter-order-part-[a-f0-9]{64}$/
+const MAX_DIRECTORY_CHAPTERS = 5000
+
 export type Resolution =
   | { choice: 'current' | 'incoming'; parent_revision: string }
   | { choice: 'merge'; parent_revision: string; payload: SyncPayload | null; tombstone: boolean }
@@ -65,7 +69,7 @@ type LedgerBinding = { workId: string; service: string; ledgerId: string }
 type LedgerCheckpoint = { ledger_id: string; cursor: number }
 type Queued = { key: string; id: string; position: number; pending: Pending }
 type Log = { key: string; id: string; receipt: SyncReceipt; pending?: Pending }
-type Baseline = { revision: string; signature: string; sequence?: number }
+export type SyncBaseline = { revision: string; signature: string; sequence?: number }
 type Approval = { changeId: string; signature: string; publicationId?: string | null }
 type Head = {
   key: string
@@ -74,8 +78,9 @@ type Head = {
   sequence: number
   firstRevision?: { id: string; sequence: number }
   lastPublication?: { id: string; sequence: number }
-  baseline?: Baseline
+  baseline?: SyncBaseline
   approval?: Approval
+  directoryParts?: string[]
 }
 type Conflict = { key: string; id: string; objectId: string; opened?: boolean; resolvedBy?: string }
 
@@ -135,14 +140,14 @@ function canonicalValue(value: unknown, depth: number): JSONValue {
   )
 }
 
-function body(value: unknown, tombstone: boolean): SyncPayload | null {
+function body(value: unknown, tombstone: boolean, limit = BODY_LIMIT): SyncPayload | null {
   if (tombstone) {
     if (value !== null) invalid('删除变更的正文须为空。')
     return null
   }
   const payload = canonicalValue(plain(value), 0) as SyncPayload
-  if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > BODY_LIMIT)
-    invalid('同步对象超过 1 MiB。')
+  if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > limit)
+    invalid(limit === BODY_LIMIT ? '同步对象超过 1 MiB。' : '目录批次清单超过体积限制。')
   return payload
 }
 
@@ -154,16 +159,18 @@ function readReceipt(value: unknown): SyncReceipt {
   if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence) || sequence < 1) invalid()
   const tombstone = item.tombstone
   if (typeof tombstone !== 'boolean') invalid()
+  const id = identifier(item.object_id)
+  const directory = id.startsWith(CHAPTER_DIRECTORY_PREFIX)
   const receipt = {
     sequence,
     status,
     change_id: identifier(item.change_id),
-    object_id: identifier(item.object_id),
+    object_id: id,
     device_id: identifier(item.device_id),
     head_revision: identifier(item.head_revision),
     parent_revision: item.parent_revision === null ? null : identifier(item.parent_revision),
     conflict_id: item.conflict_id === null ? null : identifier(item.conflict_id),
-    payload: body(item.payload, tombstone),
+    payload: body(item.payload, tombstone, directory ? BODY_LIMIT * 4 : BODY_LIMIT),
     tombstone,
   } satisfies SyncReceipt
   if (
@@ -174,6 +181,20 @@ function readReceipt(value: unknown): SyncReceipt {
     (status === 'applied' && receipt.conflict_id !== null)
   )
     invalid()
+  if (
+    (directory &&
+      (status !== 'applied' ||
+        tombstone ||
+        receipt.parent_revision !== null ||
+        id !== CHAPTER_DIRECTORY_PREFIX + receipt.change_id)) ||
+    (receipt.change_id.startsWith('chapter-order-part-') &&
+      (!CHAPTER_ORDER_PART.test(receipt.change_id) ||
+        !id.startsWith('chapter:') ||
+        status !== 'applied' ||
+        tombstone ||
+        !receipt.parent_revision))
+  )
+    invalid('目录批次回执的编号或类型无效。')
   return receipt
 }
 
@@ -434,7 +455,16 @@ async function record(tx: IDBTransaction, key: string, receipt: SyncReceipt, pen
       pending?.kind === 'push' && (!head?.lastPublication || head.lastPublication.sequence < receipt.sequence)
         ? { id: receipt.change_id, sequence: receipt.sequence }
         : head?.lastPublication
-    if (latest || firstRevision !== head?.firstRevision || lastPublication !== head?.lastPublication) {
+    const directoryParts =
+      !previous && CHAPTER_ORDER_PART.test(receipt.change_id)
+        ? [...(head?.directoryParts ?? []), receipt.change_id]
+        : head?.directoryParts
+    if (
+      latest ||
+      firstRevision !== head?.firstRevision ||
+      lastPublication !== head?.lastPublication ||
+      directoryParts !== head?.directoryParts
+    ) {
       await wait(
         store.put({
           ...head,
@@ -444,6 +474,7 @@ async function record(tx: IDBTransaction, key: string, receipt: SyncReceipt, pen
           sequence: latest ? receipt.sequence : head.sequence,
           ...(firstRevision ? { firstRevision } : {}),
           ...(lastPublication ? { lastPublication } : {}),
+          ...(directoryParts ? { directoryParts } : {}),
         } satisfies Head),
       )
     }
@@ -554,6 +585,111 @@ export async function listSyncHeads(scope: SyncScope) {
   })
 }
 
+export function readChapterDirectory(scope: SyncScope, manifest: SyncReceipt) {
+  const value = manifest.payload
+  if (
+    manifest.object_id !== CHAPTER_DIRECTORY_PREFIX + manifest.change_id ||
+    value?.format !== 'ainovel-manuscript-sync/1' ||
+    value.kind !== 'chapter-directory' ||
+    value.branch_id !== scope.workId ||
+    Object.keys(value).length !== 4 ||
+    !Array.isArray(value.moves) ||
+    value.moves.length < 2 ||
+    value.moves.length > MAX_DIRECTORY_CHAPTERS
+  )
+    invalid('目录批次清单与工作版本不符。')
+  const chapters = new Set<string>()
+  const previousPositions = new Set<number>()
+  const positions = new Set<number>()
+  const moves = value.moves.map((entry) => {
+    const move = plain(entry)
+    const { chapter_id, position, next_position, head_revision, receipt_id } = move
+    if (
+      Object.keys(move).length !== 5 ||
+      typeof position !== 'number' ||
+      typeof next_position !== 'number' ||
+      !Number.isSafeInteger(position) ||
+      !Number.isSafeInteger(next_position) ||
+      position < 1 ||
+      next_position < 1 ||
+      position === next_position ||
+      previousPositions.has(position) ||
+      positions.has(next_position)
+    )
+      invalid('目录批次的章位分配无效。')
+    const chapterId = identifier(chapter_id)
+    if (chapters.has(chapterId)) invalid('同一章节在目录批次中出现多次。')
+    chapters.add(chapterId)
+    previousPositions.add(position)
+    positions.add(next_position)
+    return {
+      chapterId,
+      from: position,
+      to: next_position,
+      parentId: identifier(head_revision),
+      childId: identifier(receipt_id),
+    }
+  })
+  const key = scopeKey(scope)
+  return transact('readonly', async (tx) =>
+    Promise.all(
+      moves.map(async ({ chapterId, from, to, parentId, childId }, index) => {
+        const id = `chapter:${chapterId}`
+        const [parent, child] = await Promise.all([receiptOf(tx, key, parentId), receiptOf(tx, key, childId)])
+        if (
+          !parent ||
+          parent.status === 'conflict' ||
+          parent.tombstone ||
+          parent.object_id !== id ||
+          !child ||
+          !CHAPTER_ORDER_PART.test(childId) ||
+          child.object_id !== id ||
+          child.device_id !== manifest.device_id ||
+          child.parent_revision !== parentId ||
+          child.sequence !== manifest.sequence - moves.length + index ||
+          parent.sequence >= manifest.sequence - moves.length
+        )
+          invalid('目录批次缺少准确且连续的章稿回执。')
+        return { chapterId, from, to, parent, child }
+      }),
+    ),
+  )
+}
+
+export function markChapterDirectory(
+  scope: SyncScope,
+  manifest: SyncReceipt,
+  members: { objectId: string; receiptId: string; baseline?: SyncBaseline }[],
+) {
+  const key = scopeKey(scope)
+  return transact('readwrite', async (tx) => {
+    const store = tx.objectStore('heads')
+    const directory = await wait<Head | undefined>(store.get([key, manifest.object_id]))
+    if (!directory || directory.revision !== manifest.change_id) invalid('目录批次的同步状态已变化，请重试。')
+    if (directory.baseline?.revision === manifest.change_id) return
+    const chapters = await Promise.all(
+      members.map(({ objectId }) => wait<Head | undefined>(store.get([key, objectId]))),
+    )
+    for (const [index, entry] of members.entries()) {
+      const chapter = chapters[index]
+      if (!chapter?.directoryParts?.includes(entry.receiptId)) invalid('目录批次成员尚未全部接收。')
+      await wait(
+        store.put({
+          ...chapter,
+          directoryParts: chapter.directoryParts.filter((id) => id !== entry.receiptId),
+          ...(entry.baseline ? { baseline: entry.baseline, approval: undefined } : {}),
+        } satisfies Head),
+      )
+    }
+    await wait(
+      store.put({
+        ...directory,
+        baseline: { revision: directory.revision, signature: 'null', sequence: directory.sequence },
+      } satisfies Head),
+    )
+  })
+}
+
 export function readPublicationReceipts(scope: SyncScope, changeIds: string[]) {
   const key = scopeKey(scope)
   return transact('readonly', async (tx) => {
@@ -563,7 +699,7 @@ export function readPublicationReceipts(scope: SyncScope, changeIds: string[]) {
   })
 }
 
-export async function markSyncBaseline(scope: SyncScope, objectId: string, baseline: Baseline) {
+export async function markSyncBaseline(scope: SyncScope, objectId: string, baseline: SyncBaseline) {
   const key = scopeKey(scope)
   await transact('readwrite', async (tx) => {
     const store = tx.objectStore('heads')
@@ -636,6 +772,15 @@ export async function pushSyncPending(
   ) => Promise<'retain' | 'discard' | false>,
 ) {
   const key = scopeKey(scope)
+  const directoryBlocked = await transact(
+    'readonly',
+    async (tx) =>
+      new Set(
+        (await wait<Head[]>(tx.objectStore('heads').index('byReplica').getAll(key)))
+          .filter((head) => head.directoryParts?.length)
+          .map(({ id }) => id),
+      ),
+  )
   const held = new Set<string>()
   let count = 0
   while (count < limit) {
@@ -643,9 +788,19 @@ export async function pushSyncPending(
     const { deferred } = workflowTransferRestrictions(pendingPayloads(state.pending), privateInspections)
     const pending = state.pending.find((entry) => {
       const id = entry.kind === 'push' ? entry.request.object_id : entry.object_id
+      const revision = entry.kind === 'push' ? entry.request.payload?.revision : undefined
+      const sourceChapter =
+        id.startsWith('revision:') &&
+        revision &&
+        typeof revision === 'object' &&
+        !Array.isArray(revision) &&
+        typeof revision.chapter_id === 'string'
+          ? `chapter:${revision.chapter_id}`
+          : id
       return (
         !held.has(entry.request.change_id) &&
         !deferred.has(id) &&
+        !directoryBlocked.has(sourceChapter) &&
         (entry.kind === 'resolve' || !state.blockedObjects.includes(id))
       )
     })

@@ -6,6 +6,263 @@ from ainovel.db import Database, DomainError
 from ainovel.desktop_sync import DesktopSync, Resolve, _headers
 from ainovel.domain import Domain
 from ainovel.manuscript_exchange import export_manuscript, import_manuscript
+from ainovel.api import create_app
+from ainovel.settings import Settings
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "adjacent-move",
+        "checkpoint-restore",
+        "newer-move",
+        "cas-rejected",
+        "competing-prose",
+        "competing-prose-repeat",
+        "competing-prose-delayed",
+        "rotated-before-send",
+    ],
+)
+def test_desktop_sync_adopts_the_complete_directory_and_keeps_newer_prose(
+    client, domain, story, tmp_path, scenario
+):
+    branch = story["branch_id"]
+    first = story["chapter_id"]
+    second = domain.create_chapter(branch, "第二章")["id"]
+    delayed = scenario == "competing-prose-delayed"
+    third = domain.create_chapter(branch, "第三章")["id"] if delayed else None
+    domain.save(first, 0, "第一章原稿。")
+    domain.save(second, 0, "第二章原稿。")
+    archive = f"/api/branches/{branch}/work-snapshots"
+    saved = client.post(archive, json={"label": "章位原样"})
+    assert saved.status_code == 201, saved.text
+    snapshot = f"{archive}/{saved.json()['id']}"
+
+    def swap(direction="up"):
+        result = client.post(
+            f"/api/chapters/{second}/move",
+            json={"direction": direction, "base_story_revision": domain.branch(branch)["story_revision"]},
+        )
+        assert result.status_code == 200, result.text
+
+    if scenario == "checkpoint-restore":
+        swap()
+    peer_path = tmp_path / "atomic-directory-peer"
+    peer = Domain(Database(peer_path / "manuscripts.sqlite"))
+    import_manuscript(peer, export_manuscript(domain, branch))
+
+    def peer_swap(direction):
+        with TestClient(create_app(Settings(peer_path, {}, {}, test_mode=True))) as app:
+            app.headers["X-Ainovel-CSRF"] = app.get("/api/session").json()["csrf"]
+            result = app.post(
+                f"/api/chapters/{second}/move",
+                json={"direction": direction, "base_story_revision": peer.branch(branch)["story_revision"]},
+            )
+            assert result.status_code == 200, result.text
+
+    origin = "http://127.0.0.1:8888"
+    work = f"/api/sync/works/{branch}"
+    secret = "provision-for-tests-only-abcdefgh"
+    losing = False
+    receiving = False
+    interrupt = False
+    interrupted = False
+    competing = scenario == "cas-rejected"
+    before_send = scenario == "rotated-before-send"
+    batches = []
+    attempts = []
+
+    with TestClient(create_sync_app(tmp_path / "atomic-directory-cloud.sqlite", secret)) as cloud:
+
+        def grant(device, *, rotate=False):
+            response = cloud.post(
+                work + "/devices",
+                json={"device_id": device, "rotate": rotate},
+                headers=_headers(secret),
+            )
+            assert response.status_code == 201, response.text
+            return response.json()["token"]
+
+        def transport(origin, token, method, target, payload, *, ledger_id=None):
+            nonlocal before_send, competing, interrupt, losing
+            if receiving and "/pull?" in target:
+                if interrupt:
+                    interrupt = False
+                    raise DomainError("sync_transport", "目录只收到一部分。", 502)
+                target = target.replace("limit=50", "limit=1")
+            if target.endswith("/chapter-order-batches"):
+                attempts.append(payload["change_id"])
+                if before_send:
+                    before_send = False
+                    raise DomainError("sync_transport", "发送目录前连接中断。", 502)
+                if competing:
+                    competing = False
+                    peer.save(second, 1, "云端更早提交的正文。")
+                    right.run(branch, origin, right_key)
+            response = cloud.request(method, target, headers=_headers(token, ledger_id), json=payload)
+            if not response.is_success:
+                raise DomainError(response.json()["code"], response.json()["message"], response.status_code)
+            data = response.json()
+            if target.endswith("/chapter-order-batches"):
+                batches.append(data)
+                if losing:
+                    losing = False
+                    domain.save(first, 1, "批次送达以后编辑的正文。")
+                    raise DomainError("sync_transport", "已提交但未取得目录回执。", 502)
+            if receiving and "/pull?" in target and data["has_more"] and not interrupted:
+                interrupt = True
+            return data
+
+        left, right = DesktopSync(domain, transport), DesktopSync(peer, transport)
+        left_key, right_key = grant("atomic-left"), grant("atomic-right")
+        left.enable(branch, origin, left_key)
+        right.enable(branch, origin, right_key)
+        initial = left.run(branch, origin, left_key)
+        assert right.run(branch, origin, right_key)["cursor"] == initial["cursor"]
+        old = {chapter: peer.chapter(chapter)["position"] for chapter in (first, second)}
+        if scenario.startswith("competing-prose"):
+            domain.save(first, 1, "发布方的第二稿。")
+            peer.save(first, 1, "接收方的第二稿。")
+            left.run(branch, origin, left_key)
+        if scenario == "checkpoint-restore":
+            preview = client.get(snapshot + "/preview")
+            restored = client.post(
+                snapshot + "/restore",
+                json={
+                    "basis_sha256": preview.json()["basis_sha256"],
+                    "mode": "in_place",
+                    "idempotency_key": "restore-dir",
+                },
+            )
+            assert restored.status_code == 201, restored.text
+        else:
+            swap()
+
+        if scenario.startswith("competing-prose"):
+            assert not left.run(branch, origin, left_key)["deferred"]
+            repeated = scenario == "competing-prose-repeat"
+            if repeated:
+                swap("down")
+                assert not left.run(branch, origin, left_key)["deferred"]
+            published = "发布方的第二稿。"
+            if delayed:
+                peer_swap("down")
+                published = "发布方后续保存的第三稿。"
+                domain.save(first, 2, published)
+                left.run(branch, origin, left_key)
+                blocked = right.run(branch, origin, right_key)
+                assert any(row["object_id"].startswith("chapter-directory:") for row in blocked["deferred"])
+                assert peer.chapter(second)["position"] == 3 and peer.chapter(third)["position"] == 2
+                peer_swap("up")
+            state = right.run(branch, origin, right_key)
+            first_position = old[first] if repeated else old[second]
+            second_position = old[second] if repeated else old[first]
+            assert len(batches) == (2 if repeated else 1)
+            assert peer.chapter(first)["position"] == first_position
+            assert peer.chapter(second)["position"] == second_position
+            assert peer.chapter(first)["content"] == "接收方的第二稿。"
+            assert peer.chapter(first)["revision"] == 2
+            assert domain.chapter(first)["content"] == published
+            assert all(not row["object_id"].startswith("chapter-directory:") for row in state["deferred"])
+            [conflict] = state["conflicts"]
+            result = right.compare(branch, origin, right_key, conflict["id"])
+            assert result["local"]["head"]["content"] == "接收方的第二稿。"
+            assert result["remote"]["incoming"]["payload"]["head"]["content"] == "接收方的第二稿。"
+            assert result["remote"]["current"]["payload"]["head"]["content"] == published
+            assert result["remote"]["base"]["payload"]["head"]["content"] == "第一章原稿。"
+            assert result["remote"]["current"]["payload"]["chapter"]["position"] == first_position
+            assert result["remote"]["incoming"]["payload"]["chapter"]["position"] == first_position
+            resolved = right.resolve(
+                branch,
+                origin,
+                right_key,
+                conflict["id"],
+                Resolve(
+                    origin=origin,
+                    token=right_key,
+                    choice="current",
+                    parent_revision=result["remote"]["head_revision"],
+                    local_sha256=result["local_sha256"],
+                    idempotency_key="keep-published-prose",
+                ),
+            )
+            assert not resolved["conflicts"] and not resolved["deferred"]
+            assert peer.chapter(first)["content"] == published
+            assert peer.chapter(first)["position"] == first_position
+            assert peer.chapter(second)["position"] == second_position
+            assert [
+                row["content"]
+                for row in peer.db.all(
+                    "SELECT content FROM revisions WHERE chapter_id=? AND revision=2", (first,)
+                )
+            ] == ["接收方的第二稿。"]
+            return
+
+        if scenario == "rotated-before-send":
+            with pytest.raises(DomainError, match="发送目录前连接中断"):
+                left.run(branch, origin, left_key)
+            assert len(attempts) == 1 and not batches
+            original_key = left_key
+            left_key = grant("atomic-left", rotate=True)
+            assert cloud.get(work + "/checkpoint", headers=_headers(original_key)).status_code == 401
+            left = DesktopSync(domain, transport)
+            assert left.run(branch, origin, left_key)["pending"] == 0
+            assert attempts == [batches[0]["change_id"]] * 2
+            assert batches[0]["sequence"] == initial["cursor"] + 3
+            assert not right.run(branch, origin, right_key)["deferred"]
+            assert peer.chapter(first)["position"] == old[second]
+            assert peer.chapter(second)["position"] == old[first]
+            return
+
+        if scenario == "cas-rejected":
+            result = left.run(branch, origin, left_key)
+            assert any(row["object_id"].startswith("chapter-directory:") for row in result["deferred"])
+            assert {chapter: peer.chapter(chapter)["position"] for chapter in old} == old
+            assert domain.chapter(first)["position"] == old[second]
+            assert domain.chapter(second)["position"] == old[first]
+            left.run(branch, origin, left_key)
+            assert len(attempts) == 1 and not batches
+            assert right.run(branch, origin, right_key)["cursor"] == initial["cursor"] + 2
+            swap("down")
+            recovered = left.run(branch, origin, left_key)
+            assert not recovered["deferred"] and recovered["pending"] == 0
+            assert domain.chapter(second)["content"] == "云端更早提交的正文。"
+            return
+
+        losing = True
+        with pytest.raises(DomainError, match="已提交但未取得目录回执"):
+            left.run(branch, origin, left_key)
+        assert len(batches) == 1 and batches[0]["sequence"] == initial["cursor"] + 3
+        receiving = True
+        with pytest.raises(DomainError, match="只收到一部分"):
+            right.run(branch, origin, right_key)
+        interrupted = True
+        assert {chapter: peer.chapter(chapter)["position"] for chapter in old} == old
+        assert right._state(branch)["cursor"] == initial["cursor"] + 1
+        peer.save(second, 1, "接收半组时保留的正文。")
+        right = DesktopSync(peer, transport)
+        assert not right.run(branch, origin, right_key)["deferred"]
+        assert peer.chapter(first)["position"] == old[second]
+        assert peer.chapter(second)["position"] == old[first]
+        assert peer.chapter(first)["revision"] == 1
+        assert peer.chapter(second)["revision"] == 2
+        assert peer.chapter(first)["content"] == "第一章原稿。"
+        assert peer.chapter(second)["content"] == "接收半组时保留的正文。"
+
+        receiving = False
+        if scenario == "newer-move":
+            swap("down")
+        left = DesktopSync(domain, transport)
+        assert not left.run(branch, origin, left_key)["deferred"]
+        assert len(batches) == (2 if scenario == "newer-move" else 1)
+        assert len({batch["change_id"] for batch in batches}) == len(batches)
+        assert not right.run(branch, origin, right_key)["deferred"]
+        assert peer.chapter(first)["content"] == "批次送达以后编辑的正文。"
+        assert peer.chapter(first)["revision"] == 2
+        assert domain.chapter(second)["content"] == "接收半组时保留的正文。"
+        assert peer.chapter(second)["revision"] == 2
+        if scenario == "newer-move":
+            assert {chapter: peer.chapter(chapter)["position"] for chapter in old} == old
 
 
 @pytest.mark.parametrize("replacement", [False, True], ids=["original-device", "replacement-device"])

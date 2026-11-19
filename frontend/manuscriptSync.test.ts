@@ -28,11 +28,13 @@ import {
   syncWebManuscript,
 } from './manuscriptSync'
 import {
+  listSyncHeads,
   markSyncBaseline,
   pullSyncPage,
   pushSyncPending,
   queueSyncChange,
   queueSyncResolution,
+  readSyncConflict,
   readSyncState,
   setSyncEnabled,
   SyncRestoreStateRejected,
@@ -99,29 +101,30 @@ function service(device: string, objectId: string, acceptedBeforeDisconnect: boo
   const log: SyncReceipt[] = []
   const latest = new Map<string, SyncReceipt>()
   let disconnect = true
+  async function commit(request: PushChange, actor = device) {
+    submitted.push(request)
+    const lost = disconnect && request.object_id === objectId
+    if (lost) {
+      disconnect = false
+      if (!acceptedBeforeDisconnect) throw new Error('请求发送中断')
+    }
+    const old = latest.get(request.object_id)
+    const conflict = (old?.change_id ?? null) !== request.parent_revision
+    const receipt: SyncReceipt = {
+      ...request,
+      sequence: log.length + 1,
+      status: conflict ? 'conflict' : 'applied',
+      device_id: actor,
+      head_revision: conflict ? old!.change_id : request.change_id,
+      conflict_id: conflict ? request.change_id : null,
+    }
+    log.push(receipt)
+    if (!conflict) latest.set(receipt.object_id, receipt)
+    if (lost) throw new Error('响应丢失')
+    return receipt
+  }
   const transport: SyncTransport = {
-    async push(request) {
-      submitted.push(request)
-      const lost = disconnect && request.object_id === objectId
-      if (lost) {
-        disconnect = false
-        if (!acceptedBeforeDisconnect) throw new Error('请求发送中断')
-      }
-      const old = latest.get(request.object_id)
-      const conflict = (old?.change_id ?? null) !== request.parent_revision
-      const receipt: SyncReceipt = {
-        ...request,
-        sequence: log.length + 1,
-        status: conflict ? 'conflict' : 'applied',
-        device_id: device,
-        head_revision: conflict ? old!.change_id : request.change_id,
-        conflict_id: conflict ? request.change_id : null,
-      }
-      log.push(receipt)
-      if (!conflict) latest.set(receipt.object_id, receipt)
-      if (lost) throw new Error('响应丢失')
-      return receipt
-    },
+    push: commit,
     async receipt() {
       return null
     },
@@ -132,8 +135,359 @@ function service(device: string, objectId: string, acceptedBeforeDisconnect: boo
       throw new Error('没有请求决议')
     },
   }
-  return { transport, latest, submitted, log }
+  return { transport, commit, latest, submitted, log }
 }
+
+async function pushDirectoryFixture(
+  cloud: ReturnType<typeof service>,
+  workId: string,
+  ordered: { id: string; position: number }[],
+  changeId = 'swapped-directory',
+  invalidChild = false,
+) {
+  const moves = []
+  for (const [index, chapter] of ordered.entries()) {
+    const objectId = `chapter:${chapter.id}`
+    const parent = cloud.latest.get(objectId)!
+    const payload = JSON.parse(JSON.stringify(parent.payload))
+    const position = payload.chapter.position as number
+    const receiptId = `chapter-order-part-${await manuscriptHash(JSON.stringify([workId, changeId, chapter.id]))}`
+    payload.chapter.position = chapter.position
+    if (index === 0 && invalidChild) payload.chapter.title = '不是单纯换序'
+    await cloud.commit(
+      {
+        object_id: objectId,
+        change_id: receiptId,
+        parent_revision: parent.change_id,
+        payload,
+        tombstone: false,
+      },
+      'desktop',
+    )
+    moves.push({
+      chapter_id: chapter.id,
+      position,
+      next_position: chapter.position,
+      head_revision: parent.change_id,
+      receipt_id: receiptId,
+    })
+  }
+  await cloud.commit(
+    {
+      object_id: `chapter-directory:${changeId}`,
+      change_id: changeId,
+      parent_revision: null,
+      payload: {
+        format: 'ainovel-manuscript-sync/1',
+        kind: 'chapter-directory',
+        branch_id: workId,
+        moves,
+      },
+      tombstone: false,
+    },
+    'desktop',
+  )
+}
+
+test('directory adoption waits for the whole group and a later ordinary head stays applicable', async () => {
+  const project = await createLocalProject('换序后接续正文')
+  const key = project.novel.id
+  const first = await createLocalChapter(key, '初章')
+  const second = await createLocalChapter(key, '次章')
+  const final = await createLocalChapter(key, '末章')
+  const [initial] = await readLocalHistory(key, first.id)
+  const prior = await saveLocalChapter(key, first.id, initial.id, '正式第一稿。')
+  const original = await exportLocalManuscript(key)
+  const scope = { service: 'http://127.0.0.1:8888', workId: project.branch.id, deviceId: 'receiver' }
+  const cloud = service('desktop', 'unused', false)
+  for (const [object_id, payload] of syncManuscriptObjects(original)) {
+    await cloud.transport.push({
+      object_id,
+      change_id: object_id,
+      parent_revision: null,
+      payload,
+      tombstone: false,
+    })
+  }
+  await acknowledgeLocalPublications(await readLocalPublications(scope.workId))
+  await setSyncEnabled(scope, true)
+  await syncWebManuscript(project, scope, cloud.transport)
+  const base = cloud.log.length
+  await pushDirectoryFixture(cloud, scope.workId, [
+    { id: first.id, position: 2 },
+    { id: second.id, position: 1 },
+  ])
+  const moved = cloud.latest.get(`chapter:${first.id}`)!
+  const head = {
+    ...prior,
+    id: 'later-remote-body',
+    revision: prior.revision + 1,
+    parent_id: prior.id,
+    content: '换序后保存的正文。',
+    sha256: await manuscriptHash('换序后保存的正文。'),
+  }
+  await cloud.transport.push({
+    object_id: `revision:${head.id}`,
+    change_id: 'later-source',
+    parent_revision: null,
+    payload: {
+      format: 'ainovel-manuscript-sync/1',
+      kind: 'revision',
+      branch_id: scope.workId,
+      revision: head,
+    },
+    tombstone: false,
+  })
+  const newest = JSON.parse(JSON.stringify(moved.payload))
+  newest.head = head
+  newest.chapter.revision = head.revision
+  await cloud.transport.push({
+    object_id: `chapter:${first.id}`,
+    change_id: 'later-chapter-head',
+    parent_revision: moved.change_id,
+    payload: newest,
+    tombstone: false,
+  })
+  const submitted = cloud.submitted.length
+  const cut = {
+    ...cloud.transport,
+    async pull(after: number) {
+      return { changes: cloud.log.slice(after, base + 1), cursor: base + 1, has_more: false }
+    },
+  }
+  const partiallyReceived = await syncWebManuscript(project, scope, cut)
+  expect(partiallyReceived.cursor).toBe(base + 1)
+  expect(partiallyReceived.deferred.map(({ object_id }) => object_id)).toContain(`chapter:${first.id}`)
+  expect((await exportLocalManuscript(key)).chapters).toEqual(original.chapters)
+  expect(cloud.submitted).toHaveLength(submitted)
+
+  const put = IDBObjectStore.prototype.put
+  const failSecondWrite = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    value,
+    id,
+  ) {
+    if (this.name === 'chapters' && value?.id === second.id && value?.position === 1)
+      throw new DOMException('synthetic disk exhaustion', 'QuotaExceededError')
+    return put.call(this, value, id)
+  })
+  const rejected = await syncWebManuscript(project, scope, cloud.transport)
+  expect(rejected.deferred.map(({ object_id }) => object_id)).toContain('chapter-directory:swapped-directory')
+  expect((await exportLocalManuscript(key)).chapters).toEqual(original.chapters)
+  expect(cloud.submitted).toHaveLength(submitted)
+  failSecondWrite.mockRestore()
+
+  const failBaselineWrite = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    value,
+    id,
+  ) {
+    if (this.name === 'heads' && value?.id === 'chapter-directory:swapped-directory' && value?.baseline)
+      throw new DOMException('synthetic ledger exhaustion', 'QuotaExceededError')
+    return put.call(this, value, id)
+  })
+  const unacknowledged = await syncWebManuscript(project, scope, cloud.transport)
+  expect(unacknowledged.deferred.map(({ object_id }) => object_id)).toContain(
+    'chapter-directory:swapped-directory',
+  )
+  expect((await exportLocalManuscript(key)).chapters.map(({ id }) => id)).toEqual([
+    second.id,
+    first.id,
+    final.id,
+  ])
+  const waiting = await listSyncHeads(scope)
+  expect(waiting.find((entry) => entry.id === `chapter:${first.id}`)?.directoryParts).toHaveLength(1)
+  expect(waiting.find((entry) => entry.id === `chapter:${second.id}`)?.directoryParts).toHaveLength(1)
+  expect(await readLocalHistory(key, first.id)).toEqual([initial, prior])
+  expect(cloud.submitted).toHaveLength(submitted)
+  failBaselineWrite.mockRestore()
+
+  const complete = await syncWebManuscript(project, scope, cloud.transport)
+  expect(complete.deferred).toEqual([])
+  expect(complete.receivedUnapplied).toBe(0)
+  expect((await exportLocalManuscript(key)).chapters.map(({ id }) => id)).toEqual([
+    second.id,
+    first.id,
+    final.id,
+  ])
+  expect(await readLocalHistory(key, first.id)).toEqual([initial, prior, head])
+  expect(await readLocalHistory(key, second.id)).toEqual(
+    original.revisions.filter(({ chapter_id }) => chapter_id === second.id),
+  )
+  await syncWebManuscript(project, scope, cloud.transport)
+  expect(cloud.submitted).toHaveLength(submitted)
+
+  globalThis.indexedDB = new IDBFactory()
+  const { format, novel, branch } = original
+  const fresh = await importLocalManuscript(
+    new Blob([JSON.stringify({ format, novel, branch, chapters: [], revisions: [] })]),
+  )
+  await setSyncEnabled({ ...scope, deviceId: 'fresh' }, true)
+  const cold = await syncWebManuscript(fresh, { ...scope, deviceId: 'fresh' }, cloud.transport)
+  expect(cold.deferred).toEqual([])
+  expect((await exportLocalManuscript(key)).chapters.map(({ id }) => id)).toEqual([
+    second.id,
+    first.id,
+    final.id,
+  ])
+  expect(await readLocalHistory(key, first.id)).toEqual([initial, prior, head])
+})
+
+test('an author save awaiting upload keeps its revision and follows the newly adopted directory position', async () => {
+  const project = await createLocalProject('换序时另保存正文')
+  const key = project.novel.id
+  const first = await createLocalChapter(key, '初章')
+  const second = await createLocalChapter(key, '次章')
+  const [initial] = await readLocalHistory(key, first.id)
+  const prior = await saveLocalChapter(key, first.id, initial.id, '旧正文。')
+  const original = await exportLocalManuscript(key)
+  const scope = { service: 'http://127.0.0.1:8888', workId: project.branch.id, deviceId: 'receiver' }
+  const cloud = service(scope.deviceId, 'unused', false)
+  await setSyncEnabled(scope, true)
+  await syncWebManuscript(project, scope, cloud.transport)
+  const savedMeanwhile = await saveLocalChapter(key, first.id, prior.id, '应保留的新正文。')
+  await pushDirectoryFixture(cloud, scope.workId, [
+    { id: first.id, position: 2 },
+    { id: second.id, position: 1 },
+  ])
+  const directoryReceipt = cloud.latest.get(`chapter:${first.id}`)?.change_id
+  const result = await syncWebManuscript(project, scope, cloud.transport)
+  expect(result.deferred).toEqual([])
+  expect(result.conflicts).toEqual([])
+  const savedRemotely = cloud.latest.get(`chapter:${first.id}`)
+  expect(savedRemotely?.parent_revision).toBe(directoryReceipt)
+  expect(savedRemotely?.payload).toMatchObject({
+    chapter: { position: 2 },
+    head: { id: savedMeanwhile.id, content: savedMeanwhile.content },
+  })
+  expect(await readLocalHistory(key, first.id)).toEqual([initial, prior, savedMeanwhile])
+  expect(await readLocalHistory(key, second.id)).toEqual(
+    original.revisions.filter((row) => row.chapter_id === second.id),
+  )
+})
+
+test('competing remote and local prose keep the new positions and become a normal chapter conflict', async () => {
+  const project = await createLocalProject('换序夹着两端不同正文')
+  const key = project.novel.id
+  const first = await createLocalChapter(key, '初章')
+  const second = await createLocalChapter(key, '次章')
+  const [initial] = await readLocalHistory(key, first.id)
+  const prior = await saveLocalChapter(key, first.id, initial.id, '共同原稿。')
+  const scope = { service: 'http://127.0.0.1:8888', workId: project.branch.id, deviceId: 'receiver' }
+  const cloud = service(scope.deviceId, 'unused', false)
+  await setSyncEnabled(scope, true)
+  await syncWebManuscript(project, scope, cloud.transport)
+  const id = `chapter:${first.id}`
+  const priorReceipt = cloud.latest.get(id)!
+  const previous = (await listSyncHeads(scope)).find((entry) => entry.id === id)!.baseline!
+  const local = await saveLocalChapter(key, first.id, prior.id, '本机继续写的稿。')
+  const remoteHead = {
+    ...prior,
+    id: 'desktop-body-before-directory',
+    revision: prior.revision + 1,
+    parent_id: prior.id,
+    content: '桌面继续写的稿。',
+    sha256: await manuscriptHash('桌面继续写的稿。'),
+  }
+  await cloud.commit(
+    {
+      object_id: `revision:${remoteHead.id}`,
+      change_id: 'desktop-body-source',
+      parent_revision: null,
+      payload: {
+        format: 'ainovel-manuscript-sync/1',
+        kind: 'revision',
+        branch_id: scope.workId,
+        revision: remoteHead,
+      },
+      tombstone: false,
+    },
+    'desktop',
+  )
+  const payload = JSON.parse(JSON.stringify(priorReceipt.payload))
+  payload.head = remoteHead
+  payload.chapter.revision = remoteHead.revision
+  await cloud.commit(
+    {
+      object_id: id,
+      change_id: 'desktop-revised-chapter',
+      parent_revision: priorReceipt.change_id,
+      payload,
+      tombstone: false,
+    },
+    'desktop',
+  )
+  await pushDirectoryFixture(cloud, scope.workId, [
+    { id: first.id, position: 2 },
+    { id: second.id, position: 1 },
+  ])
+  const result = await syncWebManuscript(project, scope, cloud.transport)
+  expect(result.deferred).toEqual([])
+  expect(result.conflicts).toHaveLength(1)
+  const compared = await readSyncConflict(scope, result.conflicts[0])
+  expect(compared?.incoming.payload).toMatchObject({
+    chapter: { position: 2 },
+    head: { id: local.id, content: local.content },
+  })
+  expect(compared?.current?.payload).toMatchObject({
+    chapter: { position: 2 },
+    head: { id: remoteHead.id, content: remoteHead.content },
+  })
+  expect(compared?.base?.payload?.head).toMatchObject({ id: prior.id, content: prior.content })
+  expect((await exportLocalManuscript(key)).chapters.map(({ id }) => id)).toEqual([second.id, first.id])
+  expect(await readLocalHistory(key, first.id)).toEqual([initial, prior, local])
+  const baseline = (await listSyncHeads(scope)).find((entry) => entry.id === id)!.baseline!
+  expect(baseline.revision).toBe(previous.revision)
+  expect(baseline.sequence).toBe(previous.sequence)
+  expect(JSON.parse(baseline.signature)).toEqual([
+    'chapter',
+    first.id,
+    scope.workId,
+    2,
+    first.title,
+    prior.sha256,
+  ])
+})
+
+test('directory child with rewritten chapter metadata remains blocked even with another child present', async () => {
+  const project = await createLocalProject('拒绝目录改稿')
+  const key = project.novel.id
+  const first = await createLocalChapter(key, '初章')
+  const second = await createLocalChapter(key, '次章')
+  const original = await exportLocalManuscript(key)
+  const scope = { service: 'http://127.0.0.1:8888', workId: project.branch.id, deviceId: 'receiver' }
+  const cloud = service('desktop', 'unused', false)
+  await acknowledgeLocalPublications(await readLocalPublications(scope.workId))
+  for (const [object_id, payload] of syncManuscriptObjects(original)) {
+    await cloud.transport.push({
+      object_id,
+      change_id: object_id,
+      parent_revision: null,
+      payload,
+      tombstone: false,
+    })
+  }
+  await setSyncEnabled(scope, true)
+  await syncWebManuscript(project, scope, cloud.transport)
+  await pushDirectoryFixture(
+    cloud,
+    scope.workId,
+    [
+      { id: first.id, position: 2 },
+      { id: second.id, position: 1 },
+    ],
+    'invalid-directory',
+    true,
+  )
+  const sent = cloud.submitted.length
+  const result = await syncWebManuscript(project, scope, cloud.transport)
+  expect(result.deferred).toContainEqual({
+    object_id: 'chapter-directory:invalid-directory',
+    reason: '目录批次的子回执必须保留原章稿和章节信息。',
+  })
+  expect((await exportLocalManuscript(key)).chapters).toEqual(original.chapters)
+  expect(cloud.submitted).toHaveLength(sent)
+})
 
 test.each([false, true])(
   'a lost chapter-order receipt is replayed and does not send or replace a newer local save=%s',
