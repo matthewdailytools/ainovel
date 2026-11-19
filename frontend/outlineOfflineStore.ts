@@ -349,6 +349,16 @@ export function createOutlineOfflineStore({
     })
   }
 
+  async function adoptCheckpointOutlineTx(tx: Tx, project: LocalProject, version: OutlineVersion) {
+    const branchId = project.branch.id
+    const previous = await getHead(tx, branchId)
+    await assertCurrentBasis(tx, branchId, version)
+    await validateSources(tx, branchId, version, true)
+    await result(tx.objectStore('outlineVersions').add({ branchId, version } satisfies StoredOutline))
+    await moveHead(tx, project, version, previous, false)
+    await markPublication(tx, branchId, `outline-version:${version.id}`, `outline:${branchId}`)
+  }
+
   function applyOutlineObject(
     projectId: string,
     object: OutlineHeadObject | OutlineVersionObject,
@@ -407,5 +417,6 @@ export function createOutlineOfflineStore({
     applyOutlineObject,
     readOutlineHistoryTx,
     restoreOutlineHistoryTx,
+    adoptCheckpointOutlineTx,
   }
 }

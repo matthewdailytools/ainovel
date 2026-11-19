@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { ApiError, api } from './api'
 import type { PortableCheckpoint } from './portableCheckpoint'
 import { PortableCheckpointFork } from './PortableCheckpointFork'
+import { CheckpointRestoreAction } from './CheckpointRestoreAction'
+import { snapshotSharedChanges, type WorkSnapshotPreview } from './workSnapshotView'
 
 type ArchivedChapterDiff = {
   title: string
@@ -43,6 +45,7 @@ export function PortableCheckpointPanel({
   const [listRetry, setListRetry] = useState(0)
   const [diffRetry, setDiffRetry] = useState(0)
   const snapshot = checkpoints?.find(({ id }) => id === snapshotId)
+  const checkpointUrl = `${route}/${encodeURIComponent(snapshotId)}`
   const scopedIds = new Set(snapshot?.scoped_chapter_ids)
   const chapters = snapshot?.chapters.filter(({ id }) => scopedIds.has(id)) ?? []
   const selectedChapter = chapters.find(({ id }) => id === chapterId)
@@ -91,6 +94,7 @@ export function PortableCheckpointPanel({
   return (
     <details
       onToggle={(event) => {
+        if (event.target !== event.currentTarget) return
         setOpen(event.currentTarget.open)
         setSnapshotId('')
         setChapterId('')
@@ -101,7 +105,7 @@ export function PortableCheckpointPanel({
       <summary>跨端检查点归档</summary>
       {open && (
         <section aria-label="跨端检查点归档详情">
-          <p>核对作品备份保留的章稿。来源齐全的检查点可另存工作分支。</p>
+          <p>核对作品备份保留的章稿。来源齐全的检查点可预览原位恢复或另存工作分支。</p>
           {listError ? (
             <>
               <p role="alert">{listError}</p>
@@ -138,12 +142,50 @@ export function PortableCheckpointPanel({
             <>
               <h3>{snapshot.label}</h3>
               {snapshot.restore_sources && (
-                <PortableCheckpointFork
-                  key={snapshot.id}
-                  checkpointUrl={`${route}/${encodeURIComponent(snapshot.id)}`}
-                  label={snapshot.label}
-                  onRestored={onRestored}
-                />
+                <div key={snapshot.id}>
+                  <PortableCheckpointFork
+                    checkpointUrl={checkpointUrl}
+                    label={snapshot.label}
+                    onRestored={onRestored}
+                  />
+                  <CheckpointRestoreAction
+                    label={snapshot.label}
+                    previewRestore={async () => {
+                      const preview = await api<WorkSnapshotPreview>(`${checkpointUrl}/restore-preview`)
+                      return {
+                        basis: preview.basis_sha256,
+                        changes: preview.changes.map((change) => ({
+                          id: change.chapter_id,
+                          title: change.title,
+                          action: change.action,
+                          currentRevision: change.current_revision,
+                          targetRevision: change.snapshot_revision,
+                        })),
+                        blockers: preview.in_place_blockers,
+                        shared: snapshotSharedChanges(preview.shared_changes),
+                        affectedReports: preview.affected_reports,
+                        affectedSettingUses: preview.affected_setting_uses.map((proof) => ({
+                          chapterTitle: proof.chapter_title,
+                          title: proof.title,
+                          versionId: proof.version_id,
+                        })),
+                        notes: preview.notes,
+                      }
+                    }}
+                    submitRestore={async (basis, requestId) => {
+                      const receipt = await api<{ recovery_snapshot_id: string }>(
+                        `${checkpointUrl}/restore`,
+                        'POST',
+                        {
+                          basis_sha256: basis,
+                          idempotency_key: requestId,
+                        },
+                      )
+                      return { recoveryId: receipt.recovery_snapshot_id }
+                    }}
+                    onRestored={() => onRestored?.(branchId)}
+                  />
+                </div>
               )}
               <p>
                 原范围 {scopeLabels[snapshot.scope]}

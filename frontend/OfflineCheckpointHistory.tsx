@@ -2,21 +2,34 @@ import { useEffect, useRef, useState } from 'react'
 import {
   hasLocalSnapshotHistory,
   manuscriptHash,
+  readLocalCheckpointRestore,
   readLocalSnapshotHistory,
   readLocalSourceRevision,
   type LocalRevision,
 } from './offlineStore'
 import type { PortableCheckpoint } from './portableCheckpoint'
+import { CheckpointRestoreAction } from './CheckpointRestoreAction'
+import { snapshotSharedChanges } from './workSnapshotView'
 
 type CheckpointChapter = PortableCheckpoint['chapters'][number]
+type RestoreControls = {
+  disabled: boolean
+  writeBlocked?: string
+  submitRestore: (
+    checkpointId: string,
+    basis: string,
+    requestId: string,
+  ) => Promise<{ recoveryCheckpointId: string }>
+}
 
 export function OfflineCheckpointHistory({
   projectId,
   refreshToken,
+  ...restore
 }: {
   projectId: string
   refreshToken: number
-}) {
+} & RestoreControls) {
   const [available, setAvailable] = useState(false)
   const [open, setOpen] = useState(false)
 
@@ -43,18 +56,24 @@ export function OfflineCheckpointHistory({
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>已导入的卷书恢复点</summary>
-      {open && <CheckpointContents projectId={projectId} />}
+      {open && <CheckpointContents projectId={projectId} {...restore} />}
     </details>
   )
 }
 
-function CheckpointContents({ projectId }: { projectId: string }) {
+function CheckpointContents({
+  projectId,
+  disabled,
+  writeBlocked,
+  submitRestore,
+}: { projectId: string } & RestoreControls) {
   const [checkpoints, setCheckpoints] = useState<PortableCheckpoint[]>()
   const [selected, setSelected] = useState('')
   const [failure, setFailure] = useState('')
   const [chapter, setChapter] = useState<{ binding: CheckpointChapter; version: LocalRevision }>()
   const [reading, setReading] = useState(false)
   const [readError, setReadError] = useState('')
+  const [archiveRevision, setArchiveRevision] = useState(0)
   const latestRequest = useRef(0)
 
   useEffect(() => {
@@ -74,7 +93,7 @@ function CheckpointContents({ projectId }: { projectId: string }) {
       active = false
       latestRequest.current++
     }
-  }, [projectId])
+  }, [projectId, archiveRevision])
 
   async function openChapter(binding: CheckpointChapter) {
     const request = ++latestRequest.current
@@ -112,6 +131,7 @@ function CheckpointContents({ projectId }: { projectId: string }) {
         选择已归档恢复点
         <select
           value={checkpoint.id}
+          disabled={disabled}
           onChange={(event) => {
             latestRequest.current++
             setSelected(event.target.value)
@@ -132,6 +152,43 @@ function CheckpointContents({ projectId }: { projectId: string }) {
         {checkpoint.scope === 'book' ? '整书范围' : `分卷编号 ${checkpoint.scope_id}`} ·{' '}
         {checkpoint.scoped_chapter_ids.length} 章
       </p>
+      {checkpoint.restore_sources && (
+        <CheckpointRestoreAction
+          key={checkpoint.id}
+          label={checkpoint.label}
+          disabled={disabled}
+          writeBlocked={writeBlocked}
+          previewRestore={async () => {
+            const preview = await readLocalCheckpointRestore(projectId, checkpoint.id)
+            return {
+              basis: preview.basis,
+              changes: preview.changes,
+              blockers: preview.blockers,
+              shared: snapshotSharedChanges({
+                definitions: preview.projectChanged ? ['project_brief'] : [],
+                conception: preview.settingsChanged,
+                outline: preview.outlineChanged,
+              }),
+              affectedReports: preview.affectedReports,
+              affectedSettingUses: preview.affectedSettingUses,
+              notes: [
+                ...(preview.sceneSpansForReview
+                  ? [`${preview.sceneSpansForReview} 处场景绑定需重新核对。`]
+                  : []),
+                '正式体检、完本结果和原文证明可从历史查阅。',
+              ],
+            }
+          }}
+          submitRestore={async (basis, requestId) => {
+            const receipt = await submitRestore(checkpoint.id, basis, requestId)
+            return { recoveryId: receipt.recoveryCheckpointId }
+          }}
+          onRestored={() => {
+            setReading(false)
+            setArchiveRevision((revision) => revision + 1)
+          }}
+        />
+      )}
       <ul aria-label="恢复点章节">
         {checkpoint.scoped_chapter_ids.map((id) => {
           const binding = byId.get(id)

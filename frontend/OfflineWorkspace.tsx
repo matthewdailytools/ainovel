@@ -20,6 +20,7 @@ import {
   readLocalSourceRevision,
   readLocalSettings,
   readLocalStory,
+  restoreLocalCheckpoint,
   restoreLocalChapter,
   saveLocalChapter,
   type LocalChapter,
@@ -107,6 +108,18 @@ export function OfflineWorkspace() {
   const locked = useRef(false)
   const settingsEditor = useRef<OfflineSettingsHandle>(null)
   const dirty = !!editor && editor.text !== editor.base.content
+  const checkpointWriteBlocked =
+    dirty ||
+    recovery ||
+    conflict ||
+    projectDirty ||
+    settingsDirty ||
+    outlineDirty ||
+    storyDirty ||
+    referenceDirty ||
+    syncConflictDirty
+      ? '请保存或处理当前草稿与分歧，再提交整组恢复。'
+      : undefined
   const draftId = selected && editor ? `offline/${selected.branch.id}/${editor.chapter.id}` : undefined
   const projectId = selected?.novel.id
   const loadSettings = useCallback(() => {
@@ -229,6 +242,52 @@ export function OfflineWorkspace() {
     setHistoryTarget('')
     setPreview(undefined)
     setIncludedExcerpts([])
+  }
+
+  async function reloadCurrentWork() {
+    if (!selected) return
+    const works = await listLocalProjects()
+    const saved = works.find((work) => work.branch.id === selected.branch.id)
+    if (!saved) return
+    const latest = await listLocalChapters(saved.novel.id)
+    setProjects(works)
+    setSelected(saved)
+    setChapters(latest)
+    setSelection(undefined)
+    refreshWorkbench()
+    const chapter = latest.find((entry) => entry.id === editor?.chapter.id)
+    if (chapter) await openChapter(chapter)
+    else {
+      setEditor(undefined)
+      setPreview(undefined)
+      setConflict(undefined)
+      setRecovery(undefined)
+    }
+  }
+
+  async function submitCheckpointRestore(checkpointId: string, basis: string, requestId: string) {
+    if (!selected || locked.current || syncBusy) throw new Error('请等待当前存储或同步操作完成。')
+    if (checkpointWriteBlocked) throw new Error(checkpointWriteBlocked)
+    locked.current = true
+    setBusy(true)
+    setError('')
+    setStatus('')
+    try {
+      const result = await restoreLocalCheckpoint(selected.novel.id, checkpointId, basis, requestId)
+      try {
+        await reloadCurrentWork()
+      } catch (error) {
+        setError(
+          error instanceof Error
+            ? `恢复已提交，刷新失败。${error.message}`
+            : '恢复已提交，请重新打开工作版本。',
+        )
+      }
+      return result
+    } finally {
+      locked.current = false
+      setBusy(false)
+    }
   }
 
   function restoreFile(
@@ -468,6 +527,9 @@ export function OfflineWorkspace() {
                 key={`checkpoints-${selected.branch.id}`}
                 projectId={selected.novel.id}
                 refreshToken={workbenchRefresh}
+                disabled={busy}
+                writeBlocked={checkpointWriteBlocked}
+                submitRestore={submitCheckpointRestore}
               />
               <WebSyncPanel
                 key={selected.branch.id}
@@ -488,20 +550,7 @@ export function OfflineWorkspace() {
                   if (!settingsEditor.current) throw new Error('设定台正在加载，请稍候再试。')
                   settingsEditor.current.beginConflictMerge(context)
                 }}
-                onApplied={async () => {
-                  const saved = (await listLocalProjects()).find(
-                    (work) => work.branch.id === selected.branch.id,
-                  )
-                  if (!saved) return
-                  refreshWorkbench()
-                  setProjects(await listLocalProjects())
-                  const latest = await listLocalChapters(saved.novel.id)
-                  setSelected(saved)
-                  setChapters(latest)
-                  const chapter = latest.find((entry) => entry.id === editor?.chapter.id)
-                  if (chapter) await openChapter(chapter)
-                  else setEditor(undefined)
-                }}
+                onApplied={reloadCurrentWork}
               />
               <form
                 onSubmit={(event) => {

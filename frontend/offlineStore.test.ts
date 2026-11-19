@@ -5,6 +5,9 @@ import {
   createLocalProject,
   confirmLocalProjectBrief,
   confirmLocalOutline,
+  confirmLocalSettings,
+  confirmLocalSettingUse,
+  confirmLocalStory,
   applySyncedObject,
   exportLocalBackup,
   exportLocalManuscript,
@@ -14,23 +17,30 @@ import {
   listLocalProjects,
   manuscriptHash,
   readLocalChapterRestore,
+  readLocalCheckpointRestore,
   readLocalPublications,
   readLocalHistory,
+  readLocalOutline,
   readLocalProjectBrief,
   readLocalSnapshotHistory,
   readLocalSourceRevision,
+  readLocalStory,
   restoreLocalChapter,
+  restoreLocalCheckpoint,
   saveLocalChapter,
   validateManuscript,
   validateSyncedObject,
 } from './offlineStore'
+import { captureRecoveryCheckpoint, checkpointRestoreFingerprint } from './offlineCheckpointRestore'
+import { outlinePromiseSeed } from './outlineSyncModel'
 import { encodeWebManuscriptBackup } from './webManuscriptBackup'
 import {
   decodePortableCheckpointHistory,
   verifyPortableCheckpoints,
   type PortableCheckpoint,
 } from './portableCheckpoint'
-import type { SettingsVersion } from './settingsSyncModel'
+import { createSettingsDraft, type SettingsVersion } from './settingsSyncModel'
+import { captureStoryEvidence, parseStoryRecord } from './storySyncModel'
 
 beforeEach(() => vi.stubGlobal('indexedDB', new IDBFactory()))
 
@@ -160,6 +170,28 @@ async function checkpointFixture() {
                   obstacle: '铃声失真',
                   turn: '看清刻痕',
                   result: '找到铸造者',
+                  setting_ids: [],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: 'new-city',
+          title: '新城',
+          summary: '新的铸造册',
+          units: [
+            {
+              id: 'new-bell',
+              title: '铸册',
+              summary: '调查铸册',
+              chapters: [
+                {
+                  chapter_id: second.id,
+                  goal: '找到铸册',
+                  obstacle: '账目残缺',
+                  turn: '取得副册',
+                  result: '说明新城线索',
                   setting_ids: [],
                 },
               ],
@@ -384,6 +416,439 @@ test('executable checkpoints bind setting proof to a native revision at or befor
     if (revision === original) await expect(validation).resolves.toBeUndefined()
     else await expect(validation).rejects.toThrow('检查点')
   }
+})
+
+test('whole-book checkpoint restores atomically, rejects stale previews and supports returning to its recovery point', async () => {
+  const { pack, book, volume, original } = await checkpointFixture()
+  const source = { ...book, restore_sources: { ...volume.restore_sources!, facts: [], length_targets: [] } }
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  await importLocalManuscript(
+    bundle({ ...pack, snapshot_history: { entries: [await sealCheckpoint(source)] } }),
+  )
+  const id = pack.novel.id
+  const chapterId = original.chapter_id
+  const added = await createLocalChapter(id, '归档之…新章')
+  const before = await readLocalCheckpointRestore(id, book.id)
+  expect(before.blockers).toEqual([])
+  expect(before.changes).toMatchObject([
+    { id: chapterId, action: 'restore', currentRevision: 2, targetRevision: 1 },
+    { id: added.id, action: 'archive', targetRevision: null },
+  ])
+  const current = (await readLocalHistory(id, chapterId)).at(-1)!
+  const late = await saveLocalChapter(id, chapterId, current.id, '第二窗口新改，不可覆盖。')
+  await expect(restoreLocalCheckpoint(id, book.id, before.basis, 'pending-request')).rejects.toMatchObject({
+    code: 'conflict',
+  })
+  const fresh = await readLocalCheckpointRestore(id, book.id)
+  const prior = await exportLocalManuscript(id)
+  const publications = await readLocalPublications(pack.branch.id)
+  const add = IDBObjectStore.prototype.add
+  const failure = vi.spyOn(IDBObjectStore.prototype, 'add').mockImplementation(function (
+    this: IDBObjectStore,
+    value,
+    key,
+  ) {
+    if (this.name === 'snapshotArchives') throw new DOMException('Storage full', 'QuotaExceededError')
+    return add.call(this, value, key)
+  })
+  try {
+    await expect(
+      restoreLocalCheckpoint(id, book.id, fresh.basis, 'whole-book-request'),
+    ).rejects.toMatchObject({ code: 'quota' })
+    expect(await exportLocalManuscript(id)).toEqual(prior)
+    expect(await readLocalPublications(pack.branch.id)).toEqual(publications)
+  } finally {
+    failure.mockRestore()
+  }
+  const result = await restoreLocalCheckpoint(id, book.id, fresh.basis, 'whole-book-request')
+  expect(result.recoveryCheckpointId).toBe('whole-book-request')
+  expect(result.chapters.find((chapter) => chapter.id === added.id)?.archived).toBe(1)
+  expect(await restoreLocalCheckpoint(id, book.id, fresh.basis, 'whole-book-request')).toEqual(result)
+  const restored = (await readLocalHistory(id, chapterId)).at(-1)!
+  expect(restored).toMatchObject({
+    parent_id: late.id,
+    content: original.content,
+    revision: late.revision + 1,
+  })
+  expect((await readLocalPublications(pack.branch.id)).map(({ objectId }) => objectId)).toContain(
+    `revision:${restored.id}`,
+  )
+  const returning = await readLocalCheckpointRestore(id, result.recoveryCheckpointId)
+  expect(returning.blockers).toEqual([])
+  await restoreLocalCheckpoint(id, result.recoveryCheckpointId, returning.basis, 'return-request')
+  expect((await readLocalHistory(id, chapterId)).at(-1)).toMatchObject({
+    parent_id: restored.id,
+    content: late.content,
+  })
+  expect(
+    (await exportLocalManuscript(id)).chapters.find((chapter) => chapter.id === added.id)?.archived,
+  ).toBe(0)
+})
+
+test('volume checkpoint preserves text and revision identity outside its volume and refuses unsupported targets', async () => {
+  const { pack, volume, original, secondRoot } = await checkpointFixture()
+  const supported = {
+    ...volume,
+    id: 'supported-volume',
+    restore_sources: { ...volume.restore_sources!, facts: [], length_targets: [] },
+  }
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  await importLocalManuscript(
+    bundle({
+      ...pack,
+      snapshot_history: { entries: [await sealCheckpoint(volume), await sealCheckpoint(supported)] },
+    }),
+  )
+  const id = pack.novel.id
+  const second = await saveLocalChapter(id, secondRoot.chapter_id, secondRoot.id, '第二卷后来的正文。')
+  const currentOutline = (await readLocalOutline(id)).current!.version
+  await confirmLocalOutline(id, currentOutline.id, {
+    ...currentOutline,
+    id: 'current-two-volumes',
+    parent_id: currentOutline.id,
+    plan: {
+      ...currentOutline.plan,
+      volumes: currentOutline.plan.volumes.map((row) => ({
+        ...row,
+        summary: row.id === 'old-city' ? '第一卷新改纲' : '第二卷新改纲',
+      })),
+    },
+  })
+  const unsupported = await readLocalCheckpointRestore(id, volume.id)
+  expect(unsupported.blockers).toEqual([expect.stringContaining('篇幅目标')])
+  await expect(
+    restoreLocalCheckpoint(id, volume.id, unsupported.basis, 'unsupported-request'),
+  ).rejects.toMatchObject({ code: 'conflict' })
+  const preview = await readLocalCheckpointRestore(id, supported.id)
+  expect(preview.blockers).toEqual([])
+  expect(preview.outlineChanged).toBe(true)
+  expect(preview.changes.map(({ id }) => id)).toEqual([original.chapter_id])
+  const currentPublications = await readLocalPublications(pack.branch.id)
+  await restoreLocalCheckpoint(id, supported.id, preview.basis, 'volume-request')
+  expect((await readLocalHistory(id, original.chapter_id)).at(-1)?.content).toBe(original.content)
+  expect((await readLocalHistory(id, second.chapter_id)).at(-1)).toEqual(second)
+  expect((await readLocalOutline(id)).current?.version.plan.volumes.map(({ summary }) => summary)).toEqual([
+    '回查原始铸记',
+    '第二卷新改纲',
+  ])
+  expect(
+    (await readLocalPublications(pack.branch.id)).find(
+      ({ objectId }) => objectId === `chapter:${second.chapter_id}`,
+    ),
+  ).toEqual(currentPublications.find(({ objectId }) => objectId === `chapter:${second.chapter_id}`))
+
+  const crossing = outlinePromiseSeed('必须在第二卷找到主人', '第一卷埋下铜铃线索。')
+  await confirmLocalStory(id, {
+    record_id: 'crossing',
+    record: crossing,
+    archived: false,
+    baseVersionId: null,
+    baseStoryRevision: (await readLocalStory(id)).storyRevision,
+    evidence: { record: [], stages: [[]] },
+  })
+  const rolledOutline = (await readLocalOutline(id)).current!.version
+  await confirmLocalOutline(id, rolledOutline.id, {
+    ...rolledOutline,
+    id: 'cross-volume-planning',
+    parent_id: rolledOutline.id,
+    plan: {
+      ...rolledOutline.plan,
+      promises: [
+        {
+          promise_id: 'crossing',
+          plant_chapter_id: original.chapter_id,
+          opens_chapter_id: second.chapter_id,
+          closes_chapter_id: second.chapter_id,
+          fulfillment: 'author_required',
+        },
+      ],
+    },
+    promise_sources: { crossing },
+  })
+  const blocked = await readLocalCheckpointRestore(id, supported.id)
+  expect(blocked.blockers).toEqual([expect.stringContaining('伏笔窗口跨越本卷')])
+  await expect(
+    restoreLocalCheckpoint(id, supported.id, blocked.basis, 'cross-volume-request'),
+  ).rejects.toMatchObject({ code: 'conflict' })
+})
+
+test('restoring a volume from an unbound outline retains adopted setting references outside it', async () => {
+  const { pack, volume, original, secondRoot } = await checkpointFixture()
+  const id = pack.novel.id
+  const oldOutline = (await readLocalOutline(id)).current!.version
+  expect(oldOutline.settings_version_id).toBeNull()
+
+  const settings = createSettingsDraft('registered-between-outlines', null, null)
+  settings.categories
+    .find(({ id }) => id === 'characters')!
+    .items.push({
+      id: 'outside-keeper',
+      title: '守簿人',
+      detail: '由守簿人交还新城的铸册。',
+      links: [],
+    })
+  settings.origins['outside-keeper'] = {
+    origin: 'author',
+    edited: false,
+    artifact_id: null,
+    device_id: null,
+    project_version_id: null,
+    evidence: null,
+  }
+  await confirmLocalSettings(id, null, settings)
+  const afterSettings = await exportLocalManuscript(id)
+  const point = {
+    ...volume,
+    story_revision: afterSettings.branch.story_revision,
+    shared: { ...volume.shared, settings_id: settings.id },
+    restore_sources: { ...volume.restore_sources!, facts: [], length_targets: [] },
+  }
+
+  const boundOutside = oldOutline.plan.volumes[1]
+  const afterOutsideChange = {
+    ...boundOutside,
+    summary: '新城的铸册只由守簿人携带。',
+    units: boundOutside.units.map((unit) => ({
+      ...unit,
+      chapters: unit.chapters.map((chapter) => ({ ...chapter, setting_ids: ['outside-keeper'] })),
+    })),
+  }
+  await confirmLocalOutline(id, oldOutline.id, {
+    ...oldOutline,
+    id: 'bound-current-outline',
+    parent_id: oldOutline.id,
+    settings_version_id: settings.id,
+    plan: { ...oldOutline.plan, volumes: [oldOutline.plan.volumes[0], afterOutsideChange] },
+  })
+  const current = await exportLocalManuscript(id)
+  const activeVersion = current.outline_history!.versions.find(({ id }) => id === 'bound-current-outline')!
+  const waitingPromise = 'unfinished-outside-promise'
+  const pendingOutline = {
+    ...oldOutline,
+    id: 'pending-incoming-outline',
+    parent_id: oldOutline.id,
+    plan: {
+      ...oldOutline.plan,
+      promises: [
+        {
+          promise_id: waitingPromise,
+          plant_chapter_id: secondRoot.chapter_id,
+          opens_chapter_id: secondRoot.chapter_id,
+          closes_chapter_id: secondRoot.chapter_id,
+        },
+      ],
+    },
+    promise_sources: { [waitingPromise]: outlinePromiseSeed('等待守簿人的回收记录', '') },
+  }
+  const sourceEntry = await sealCheckpoint(point)
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  await importLocalManuscript(
+    bundle({
+      ...current,
+      outline_history: {
+        adopted_revision_id: pendingOutline.id,
+        versions: [...current.outline_history!.versions, pendingOutline],
+        required_story_records: [waitingPromise],
+      },
+      snapshot_history: { entries: [sourceEntry] },
+    }),
+  )
+  const incoming = await readLocalOutline(id)
+  expect(incoming.current).toBeUndefined()
+  expect(incoming.restorePending).toMatchObject({
+    revisionId: pendingOutline.id,
+    requiredStoryRecords: [waitingPromise],
+  })
+  await confirmLocalOutline(id, null, { ...activeVersion, id: 'active-after-pending', parent_id: null })
+  const pending = (await readLocalOutline(id)).restorePending!
+  expect(pending).toEqual(incoming.restorePending)
+
+  const fingerprintInput = { pack: await exportLocalManuscript(id), adoptedOutlineId: 'active-after-pending' }
+  expect(
+    checkpointRestoreFingerprint({ ...fingerprintInput, deferredOutline: pending }, sourceEntry),
+  ).not.toBe(
+    checkpointRestoreFingerprint(
+      { ...fingerprintInput, deferredOutline: { ...pending, requiredStoryRecords: [] } },
+      sourceEntry,
+    ),
+  )
+
+  const preview = await readLocalCheckpointRestore(id, point.id)
+  expect(preview.blockers).toEqual([])
+  expect(preview.settingsChanged).toBe(false)
+  expect(preview.outlineChanged).toBe(true)
+  await restoreLocalCheckpoint(id, point.id, preview.basis, 'restore-unbound-volume')
+  const restoredState = await readLocalOutline(id)
+  const restored = restoredState.current!.version
+  expect(restored).toMatchObject({ parent_id: 'active-after-pending', settings_version_id: settings.id })
+  expect(restoredState.restorePending).toEqual(pending)
+  expect(restored.plan.volumes).toEqual([oldOutline.plan.volumes[0], afterOutsideChange])
+  expect((await readLocalHistory(id, original.chapter_id)).at(-1)?.content).toBe(original.content)
+  expect((await readLocalHistory(id, secondRoot.chapter_id)).at(-1)).toEqual(secondRoot)
+})
+
+test('whole-book checkpoint applies project, setting, outline and story revisions without overwriting original confirmation', async () => {
+  const work = await createLocalProject('两个版本的铃')
+  const id = work.novel.id
+  const branchId = work.branch.id
+  const chapter = await createLocalChapter(id, '归还铃')
+  const [root] = await readLocalHistory(id, chapter.id)
+  const briefing = {
+    position: '层层解开旧案',
+    track: '线索式悬疑',
+    genre_ids: ['xianxia'],
+    audience: '偏好悬疑的读者',
+    distinction: '证物都在首章出现',
+    length: '十万字',
+    cadence: '',
+    ending: '解开铜铃旧案',
+    final_image: '',
+  }
+  async function confirm(
+    seed: string,
+    prior: { project: string; settings: string; outline: string; story: string } | null,
+    head: typeof root,
+  ) {
+    const text = seed === 'old' ? '门内归铃' : '改到门外'
+    const project = await confirmLocalProjectBrief(id, prior?.project ?? null, {
+      idea: text,
+      brief: briefing,
+    })
+    const evidence = await captureStoryEvidence(head, 1, 3)
+    const settings = createSettingsDraft(`settings-${seed}`, prior?.settings ?? null, project.id)
+    settings.categories
+      .find(({ id }) => id === 'characters')!
+      .items.push(
+        { id: 'bell', title: '旧铃线索', detail: text, links: [] },
+        { id: 'witness', title: '现场片段', detail: text, links: [] },
+      )
+    settings.origins.bell = {
+      origin: 'author',
+      edited: false,
+      artifact_id: null,
+      device_id: null,
+      project_version_id: project.id,
+      evidence: null,
+    }
+    settings.origins.witness = { ...settings.origins.bell, evidence }
+    await confirmLocalSettings(id, prior?.settings ?? null, settings)
+    const outline = `outline-${seed}`
+    await confirmLocalOutline(id, prior?.outline ?? null, {
+      id: outline,
+      parent_id: prior?.outline ?? null,
+      project_version_id: project.id,
+      settings_version_id: settings.id,
+      plan: {
+        summary: text,
+        promises: [],
+        volumes: [
+          {
+            id: 'v1',
+            title: '第一卷',
+            summary: text,
+            units: [
+              {
+                id: 'u1',
+                title: '一场',
+                summary: text,
+                chapters: [
+                  {
+                    chapter_id: chapter.id,
+                    goal: text,
+                    obstacle: '有人阻拦',
+                    turn: '辨出铃声',
+                    result: '确定归处',
+                    setting_ids: ['bell'],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      reference_cards: [],
+      promise_sources: {},
+    })
+    const story = await confirmLocalStory(id, {
+      record: parseStoryRecord({ kind: 'event', title: text, status: 'actual' }),
+      record_id: 'bell-event',
+      archived: false,
+      baseStoryRevision: (await readLocalStory(id)).storyRevision,
+      baseVersionId: prior?.story ?? null,
+      evidence: { record: [evidence], stages: [] },
+    })
+    return { project: project.id, settings: settings.id, outline, story: story.id, evidence }
+  }
+  const oldRevision = await saveLocalChapter(id, chapter.id, root.id, '铃📯在屋内。')
+  const earlier = await confirm('old', null, oldRevision)
+  const old = await exportLocalManuscript(id)
+  const oldCheckpoint = captureRecoveryCheckpoint(
+    { pack: old, adoptedOutlineId: earlier.outline },
+    'formal-checkpoint',
+    await manuscriptHash('fixture'),
+    1,
+  )
+  const latest = await saveLocalChapter(id, chapter.id, oldRevision.id, '铃📯在屋外。')
+  const current = await confirm('new', earlier, latest)
+  await confirmLocalSettingUse(id, chapter.id, {
+    parent_id: null,
+    outline_version_id: current.outline,
+    settings_version_id: current.settings,
+    item_id: 'bell',
+    evidence: current.evidence,
+    chapter_sha256: latest.sha256,
+  })
+  const pack = await exportLocalManuscript(id)
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  await importLocalManuscript(
+    bundle({ ...pack, snapshot_history: { entries: [await sealCheckpoint(oldCheckpoint)] } }),
+  )
+  const preview = await readLocalCheckpointRestore(id, oldCheckpoint.id)
+  expect(preview).toMatchObject({
+    blockers: [],
+    projectChanged: true,
+    settingsChanged: true,
+    outlineChanged: true,
+    storyRecordCount: 1,
+    affectedSettingUses: [{ chapterTitle: chapter.title, title: '旧铃线索' }],
+  })
+  const result = await restoreLocalCheckpoint(id, oldCheckpoint.id, preview.basis, 'formal-restore')
+  const written = (await readLocalHistory(id, chapter.id)).at(-1)!
+  expect(written).toMatchObject({ content: oldRevision.content, parent_id: latest.id })
+  const adoptedProject = (await readLocalProjectBrief(id)).current!.version
+  expect(adoptedProject).toMatchObject({ idea: '门内归铃', parent_id: current.project })
+  const adoptedOutline = await readLocalOutline(id)
+  expect(adoptedOutline.settings).toMatchObject({
+    parent_id: current.settings,
+    project_version_id: adoptedProject.id,
+    origins: { witness: { evidence: { revision_id: written.id } } },
+  })
+  expect(adoptedOutline.current?.version).toMatchObject({
+    parent_id: current.outline,
+    project_version_id: adoptedProject.id,
+    settings_version_id: adoptedOutline.settings?.id,
+    plan: { summary: '门内归铃' },
+  })
+  expect((await readLocalStory(id)).records[0]).toMatchObject({
+    version: { parent_id: current.story, record: { title: '门内归铃' } },
+    native: { evidence: { record: [written.id] } },
+    invalidReasons: [],
+  })
+  expect((await readLocalPublications(branchId)).map(({ objectId }) => objectId)).toEqual(
+    expect.arrayContaining([
+      `project:${branchId}`,
+      `settings:${branchId}`,
+      `outline:${branchId}`,
+      'story:bell-event',
+    ]),
+  )
+  const rebuilt = await exportLocalManuscript(id)
+  expect(rebuilt.story_history?.versions.some(({ id }) => id === current.story)).toBe(true)
+  expect(rebuilt.setting_use_history).toEqual(pack.setting_use_history)
+  const recovery = await readLocalCheckpointRestore(id, result.recoveryCheckpointId)
+  expect(recovery.blockers).toEqual([])
+  await restoreLocalCheckpoint(id, result.recoveryCheckpointId, recovery.basis, 'formal-undo')
+  expect((await readLocalHistory(id, chapter.id)).at(-1)?.content).toBe(latest.content)
 })
 
 test('quota failure aborts the whole browser write and preserves existing formal versions', async () => {

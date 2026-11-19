@@ -101,6 +101,18 @@ class PortableForkReceipt(Input):
     snapshot_id: str
 
 
+class PortableRestoreInput(Input):
+    basis_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class PortableRestoreReceipt(Input):
+    id: str
+    branch_id: str
+    snapshot_id: str
+    recovery_snapshot_id: str
+
+
 class SnapshotSettingUseImpact(Input):
     chapter_id: str
     chapter_title: str
@@ -414,7 +426,7 @@ def _restore_plan(snapshot, current):
     wanted = snapshot["scoped_chapter_ids"]
     before = [row["id"] for row in current["chapters"] if not row["archived"]]
     currently_scoped = before
-    blockers = []
+    blockers = list(snapshot.get("in_place_blockers", ()))
     if scope == "chapter":
         currently_scoped = [identifier for identifier in before if identifier in wanted]
     elif scope == "volume":
@@ -503,7 +515,10 @@ def _live_setting_uses(tx, branch_id, state):
 
 
 def _restore_basis(snapshot, current, reports, setting_uses):
-    return _hash(dumps([snapshot["id"], current, reports, setting_uses]))
+    basis = [snapshot["id"], current, reports, setting_uses]
+    if "portable_basis_sha256" in snapshot:
+        basis.append(snapshot["portable_basis_sha256"])
+    return _hash(dumps(basis))
 
 
 def _preview(snapshot, current, reports, setting_uses):
@@ -904,7 +919,7 @@ def _restore_outline(
         _rebase_outline(plan, chapters, records)
         adopted = (
             basis
-            if saved["setting_basis"]["confirmation_id"]
+            if any(setting_basis.get("confirmation_id") for setting_basis in sources)
             else {**basis, "confirmation_id": None, "items": []}
         )
         cards = _restored_cards(plan, sources, reference_ids)
@@ -1001,7 +1016,7 @@ def _restore_length_targets(tx, snapshot, current, target, chapters, chapter_ids
             _save_length_target(tx, target["id"], kind, identifier, active, targets)
 
 
-def _execute_restore(tx, domain, origin, snapshot, current, data):
+def _execute_restore(tx, domain, origin, snapshot, current, data, *, setup=_restore_setup):
     is_new = data.mode == "new_branch"
     wanted, scoped, _, shared, blockers = _restore_plan(snapshot, current)
     if not is_new and blockers:
@@ -1028,7 +1043,7 @@ def _execute_restore(tx, domain, origin, snapshot, current, data):
     records = _graph_restore(tx, source, target, chapters, is_new, selected_records)
     _restore_facts(tx, source, target, chapters)
     if is_new or shared:
-        setting_id, project_id = _restore_setup(tx, source, target, chapters, snapshot["id"])
+        setting_id, project_id = setup(tx, source, target, chapters, snapshot["id"])
     else:
         project = confirmed_project_tx(tx, target["id"])
         setting_id = current["confirmed_setting_id"]
@@ -1065,8 +1080,21 @@ def _execute_restore(tx, domain, origin, snapshot, current, data):
     }
 
 
-def restore(domain, branch_id, snapshot_id, data):
-    fingerprint = _hash(dumps([branch_id, snapshot_id, data.model_dump(exclude={"idempotency_key"})]))
+def _prepare_restore(tx, domain, branch_id, snapshot_id, *, portable):
+    branch = _branch(tx, branch_id)
+    if not portable:
+        snapshot = _read_snapshot(tx, branch_id, snapshot_id)
+        return branch, snapshot, _capture(tx, branch_id), _restore_setup
+    current = _capture(tx, branch_id)
+    snapshot, setup = _portable_restore_state(tx, domain, branch_id, snapshot_id, current)
+    return branch, snapshot, current, setup
+
+
+def restore(domain, branch_id, snapshot_id, data, *, portable=False):
+    operation = [branch_id, snapshot_id, data.model_dump(exclude={"idempotency_key"})]
+    if portable:
+        operation.append("portable_in_place")
+    fingerprint = _hash(dumps(operation))
     with domain.db.connect(True) as tx:
         prior = tx.execute("SELECT result FROM receipts WHERE key=?", (data.idempotency_key,)).fetchone()
         if prior:
@@ -1074,15 +1102,15 @@ def restore(domain, branch_id, snapshot_id, data):
             if result.get("work_restore_sha256") != fingerprint:
                 raise DomainError("idempotency", "恢复提交标识已用于其他操作。", 409)
             return result
-        branch = _branch(tx, branch_id)
-        snapshot = _read_snapshot(tx, branch_id, snapshot_id)
-        current = _capture(tx, branch_id)
+        branch, snapshot, current, setup = _prepare_restore(
+            tx, domain, branch_id, snapshot_id, portable=portable
+        )
         reports = report_basis(tx, branch_id)
         setting_uses = _live_setting_uses(tx, branch_id, current)
         if _restore_basis(snapshot, current, reports, setting_uses) != data.basis_sha256:
             raise DomainError("snapshot_changed", "工作版本已有变化，请重新预览影响后恢复。", 409)
         recovery = _save_snapshot(tx, branch, "恢复前检查点", "book", None, current, "pre_restore")
-        result = _execute_restore(tx, domain, branch, snapshot, current, data)
+        result = _execute_restore(tx, domain, branch, snapshot, current, data, setup=setup)
         result.update(snapshot_id=snapshot_id, recovery_snapshot_id=recovery, work_restore_sha256=fingerprint)
         receipt = _artifact(tx, branch, RESTORE_KIND, result, {"snapshot_id": snapshot_id})
         result["id"] = receipt
@@ -1090,13 +1118,13 @@ def restore(domain, branch_id, snapshot_id, data):
         return result
 
 
-def _portable_fork_sources(tx, domain, branch_id, snapshot_id):
+def _read_portable_restore_sources(tx, domain, branch_id, snapshot_id):
     from .manuscript_exchange import export_manuscript
     from .portable_restore_sources import RestoreSourceCatalog
 
     checkpoint = read_archived_checkpoint(tx, branch_id, snapshot_id)
     if not checkpoint.restore_sources:
-        raise checkpoint_error("该归档仅保存原稿及版本地址，不能据此另存工作分支。", 409)
+        raise checkpoint_error("该归档仅保存原稿及版本地址，缺少执行恢复所需的正式来源。", 409)
     package = export_manuscript(domain, branch_id, transaction=tx, checkpoint_sources_only=True)
     catalog = RestoreSourceCatalog(package)
     dependencies = catalog.resolve(checkpoint, checkpoint.restore_sources)
@@ -1172,6 +1200,31 @@ def _portable_setting_bindings(settings, checkpoint, catalog):
     }
 
 
+def _rebound_portable_settings(tx, checkpoint, catalog, settings, chapters):
+    revisions = _portable_setting_bindings(settings, checkpoint, catalog)
+    rebound = {}
+    for item_id, origin in settings.origins.items():
+        if evidence := origin.evidence:
+            initial = revisions[evidence.revision_id]
+            chapter = chapters.get(initial.chapter_id)
+            if chapter:
+                revision = (
+                    chapter["revision"] if initial.revision == chapter["old_revision"] else initial.revision
+                )
+                saved = tx.execute(
+                    "SELECT id FROM revisions WHERE chapter_id=? AND revision=?", (chapter["id"], revision)
+                ).fetchone()
+                if not saved:
+                    raise checkpoint_error("无法核验设定引用对应的恢复章稿修订。", 409)
+                evidence = evidence.model_copy(
+                    update={"chapter_id": chapter["id"], "revision_id": saved["id"]}
+                )
+            else:
+                evidence = evidence.model_copy(update={"revision_id": initial.id})
+        rebound[item_id] = origin.model_copy(update={"evidence": evidence})
+    return settings.model_copy(update={"origins": rebound})
+
+
 def _portable_fork_setup(tx, checkpoint, catalog, dependencies, target, chapters):
     from .project_portability import ProjectHistory
     from .project_sync import restore_project_history
@@ -1198,25 +1251,158 @@ def _portable_fork_setup(tx, checkpoint, catalog, dependencies, target, chapters
             ),
         )
     if settings:
-        revisions = _portable_setting_bindings(settings, checkpoint, catalog)
-        rebound = {}
-        for item_id, origin in origins.items():
-            if evidence := origin.evidence:
-                initial = revisions[evidence.revision_id]
-                chapter_id = chapters[initial.chapter_id]["id"]
-                saved = tx.execute(
-                    "SELECT id FROM revisions WHERE chapter_id=? AND revision=?",
-                    (chapter_id, initial.revision),
-                ).fetchone()
-                evidence = evidence.model_copy(update={"chapter_id": chapter_id, "revision_id": saved["id"]})
-            rebound[item_id] = origin.model_copy(update={"evidence": evidence})
-        version = settings.model_copy(update={"id": uid(), "parent_id": None, "origins": rebound})
+        version = _rebound_portable_settings(tx, checkpoint, catalog, settings, chapters).model_copy(
+            update={"id": uid(), "parent_id": None}
+        )
         import_settings_history(
             tx, target["id"], SettingsHistory(adopted_revision_id=version.id, versions=[version])
         )
     adopted = confirmed_project_tx(tx, target["id"])
     confirmation = _latest(tx, target["id"], CONFIRMATION)
     return adopted["id"] if adopted else None, confirmation["id"] if confirmation else None
+
+
+def _restore_portable_setup(tx, target, chapters, checkpoint, catalog, dependencies):
+    from .conception import ConfirmConception, _persist, _workspace, confirm_tx
+    from .settings_sync import _categories, _local_origins, project_source_id
+
+    project, settings = dependencies.project, dependencies.settings
+    current = confirmed_project_tx(tx, target["id"])
+    if project and project.id != project_source_id(tx, target["id"], current["id"] if current else None):
+        _artifact(
+            tx,
+            target,
+            PROJECT,
+            {
+                "revision": (current["revision"] if current else 0) + 1,
+                "idea": project.idea,
+                "brief": project.brief.model_dump(),
+                "candidate_id": None,
+            },
+            {
+                "previous_project_id": current["id"] if current else None,
+                "source_artifact_id": project.id,
+                "snapshot_id": checkpoint.id,
+                "story_revision": target["story_revision"],
+            },
+        )
+        current = confirmed_project_tx(tx, target["id"])
+    confirmation_id = None
+    if settings:
+        version = _rebound_portable_settings(tx, checkpoint, catalog, settings, chapters)
+        workspace = _workspace(tx, target["id"])
+        origins = _local_origins(tx, target["id"], version, current, None, from_package=True)
+        _persist(tx, target, workspace, _categories(version), origins)
+        confirmed = confirm_tx(
+            tx,
+            target["id"],
+            ConfirmConception(
+                base_revision=workspace["revision"] + 1,
+                base_story_revision=target["story_revision"],
+                idempotency_key=f"restore-setting-{uid()}",
+                note=version.note,
+                reconciled_project_items=version.reconciled_project_items,
+                reviewed_setting_findings=version.reviewed_setting_findings,
+            ),
+        )
+        confirmation_id = confirmed["confirmation"]["id"]
+    return confirmation_id, current["id"] if current else None
+
+
+def _portable_restore_state(tx, domain, branch_id, snapshot_id, current):
+    from .outline_sync import read_outline_head
+    from .settings_sync import project_source_id, settings_source_id
+    from .story_archive import validate_effective_cycles
+
+    checkpoint, catalog, dependencies = _read_portable_restore_sources(tx, domain, branch_id, snapshot_id)
+    historical = checkpoint.model_dump(exclude={"restore_sources", "shared", "branch_id"})
+    restoration = checkpoint.restore_sources
+    project, settings, outline = dependencies.project, dependencies.settings, dependencies.outline
+    definitions = dict.fromkeys(DEFINITIONS)
+    project_id = (current["definitions"][PROJECT] or {}).get("id")
+    if project:
+        definitions[PROJECT] = (
+            current["definitions"][PROJECT]
+            if project.id == project_source_id(tx, branch_id, project_id)
+            else {"id": project.id}
+        )
+    settings_id = current["confirmed_setting_id"]
+    same_settings = checkpoint.shared.settings_id == settings_source_id(tx, branch_id, settings_id) and (
+        settings is not None or not current["confirmation"]
+    )
+    confirmation = current["confirmation"] if same_settings else {"id": settings.id} if settings else None
+    workspace = current["workspace"] if same_settings else confirmation
+    confirmed_outline = None
+    if outline:
+        outline_id = (
+            current["confirmed_outline"]["id"]
+            if current["confirmed_outline"] and outline.id == read_outline_head(tx, branch_id)
+            else outline.id
+        )
+        confirmed_outline = {
+            "id": outline_id,
+            "plan": outline.plan.model_dump(),
+            "setting_basis": {
+                "confirmation_id": outline.settings_version_id,
+                "reference_cards": [card.model_dump(exclude_none=True) for card in outline.reference_cards],
+            },
+        }
+    heads = {record_id: rows[-1] for record_id, rows in dependencies.stories.items()}
+    manifest = {
+        **historical,
+        "definitions": definitions,
+        "workspace": workspace,
+        "confirmation": confirmation,
+        "confirmed_setting_id": (confirmation or {}).get("id"),
+        "confirmed_outline": confirmed_outline,
+        "outline": confirmed_outline,
+        "outline_live": restoration.outline_live,
+        "records": [
+            {
+                "id": record_id,
+                "kind": row.version.record.kind,
+                "revision": row.native.revision,
+                "payload": row.payload,
+                "archived": int(row.version.archived),
+            }
+            for record_id, row in heads.items()
+        ],
+        "dependencies": [
+            {"record_id": record_id, "parent_id": parent, "parent_revision": revision}
+            for record_id, row in heads.items()
+            for parent, revision in row.native.dependencies.items()
+        ],
+        "facts": dependencies.facts,
+        "scene_spans": bool(restoration.scene_spans_for_review),
+        "length_targets": [row.model_dump() for row in restoration.length_targets],
+    }
+    snapshot = {
+        **historical,
+        "manifest_sha256": checkpoint.source_manifest_sha256,
+        "manifest": manifest,
+        "portable_basis_sha256": _portable_fork_basis(checkpoint),
+        "in_place_blockers": [],
+    }
+    wanted, scoped, _, shared, blockers = _restore_plan(snapshot, current)
+    if shared and not settings and current["confirmation"]:
+        snapshot["in_place_blockers"].append("归档缺少当前已采用设定的旧正式版本，请另存工作分支。")
+    if not shared and not blockers:
+        selected = _record_scope(manifest, current, set(wanted) | set(scoped))
+        merged_heads = {
+            record_id: heads[record_id].version.id
+            if record_id in selected and record_id in heads
+            else rows[-1].version_id
+            for record_id, rows in catalog.story_history.items()
+        }
+        try:
+            validate_effective_cycles(merged_heads, catalog.stories)
+        except DomainError:
+            snapshot["in_place_blockers"].append("恢复本卷会与卷外故事记录形成循环，请另存工作分支。")
+
+    def setup(tx, _, target, chapters, __):
+        return _restore_portable_setup(tx, target, chapters, checkpoint, catalog, dependencies)
+
+    return snapshot, setup
 
 
 def _portable_fork_outline(
@@ -1257,7 +1443,7 @@ def fork_portable_checkpoint(domain, branch_id, snapshot_id, data):
                 raise DomainError("idempotency", "恢复提交标识已用于其他操作。", 409)
             return {"branch_id": result["branch_id"], "snapshot_id": snapshot_id}
         origin = _branch(tx, branch_id)
-        checkpoint, catalog, dependencies = _portable_fork_sources(tx, domain, branch_id, snapshot_id)
+        checkpoint, catalog, dependencies = _read_portable_restore_sources(tx, domain, branch_id, snapshot_id)
         if _portable_fork_basis(checkpoint) != data.basis_sha256:
             raise DomainError("snapshot_changed", "恢复归档已有变化，请重新预览。", 409)
         if tx.execute(
@@ -1296,6 +1482,40 @@ def fork_portable_checkpoint(domain, branch_id, snapshot_id, data):
         return {"branch_id": target_id, "snapshot_id": snapshot_id}
 
 
+def _preview_restore(tx, domain, branch_id, snapshot_id, *, portable):
+    branch, snapshot, current, setup = _prepare_restore(tx, domain, branch_id, snapshot_id, portable=portable)
+    checked = report_basis(tx, branch_id)
+    setting_uses = _live_setting_uses(tx, branch_id, current)
+    preview = _preview(snapshot, current, checked, setting_uses)
+    if portable:
+        preview["notes"].append("导入检查点恢复正式版本，本机未确认编辑可从恢复前检查点另存核对。")
+    if (portable or checked or setting_uses) and not preview["in_place_blockers"]:
+        simulated = RestoreInput(
+            basis_sha256=preview["basis_sha256"], mode="in_place", idempotency_key="forecast-only"
+        )
+        try:
+            with forecast(tx):
+                _execute_restore(tx, domain, branch, snapshot, current, simulated, setup=setup)
+                if checked:
+                    preview["affected_reports"] = invalidated_reports(checked, report_basis(tx, branch_id))
+                if setting_uses:
+                    live_ids = set()
+                    head = latest_outline(tx, branch_id, True)
+                    # A restored confirmation gets a new outline ID. The existing
+                    # proofs stay bound to the confirmation they were made against.
+                    if head and head["id"] == current["confirmed_outline"]["id"]:
+                        live_ids = {
+                            proof["version_id"]
+                            for proof in _live_setting_uses(tx, branch_id, _capture(tx, branch_id))
+                        }
+                    preview["affected_setting_uses"] = [
+                        proof for proof in setting_uses if proof["version_id"] not in live_ids
+                    ]
+        except DomainError as error:
+            preview["in_place_blockers"].append(error.message)
+    return preview
+
+
 def register_routes(app, domain):
     endpoint = "/api/branches/{branch_id}/work-snapshots"
     archive_endpoint = "/api/branches/{branch_id}/portable-checkpoints"
@@ -1319,7 +1539,7 @@ def register_routes(app, domain):
     def preview_portable_fork(branch_id: str, snapshot_id: str) -> PortableForkPreview:
         with domain.db.connect() as tx:
             tx.execute("BEGIN")
-            checkpoint, _, dependencies = _portable_fork_sources(tx, domain, branch_id, snapshot_id)
+            checkpoint, _, dependencies = _read_portable_restore_sources(tx, domain, branch_id, snapshot_id)
             restore_sources = checkpoint.restore_sources
             return PortableForkPreview(
                 basis_sha256=_portable_fork_basis(checkpoint),
@@ -1336,6 +1556,19 @@ def register_routes(app, domain):
     @app.post(archive_endpoint + "/{snapshot_id}/fork", status_code=201)
     def apply_portable_fork(branch_id: str, snapshot_id: str, data: PortableForkInput) -> PortableForkReceipt:
         return fork_portable_checkpoint(domain, branch_id, snapshot_id, data)
+
+    @app.get(archive_endpoint + "/{snapshot_id}/restore-preview")
+    def preview_portable_restore(branch_id: str, snapshot_id: str) -> SnapshotRestorePreview:
+        with domain.db.connect(True) as tx:
+            return _preview_restore(tx, domain, branch_id, snapshot_id, portable=True)
+
+    @app.post(archive_endpoint + "/{snapshot_id}/restore", status_code=201)
+    def apply_portable_restore(
+        branch_id: str, snapshot_id: str, data: PortableRestoreInput
+    ) -> PortableRestoreReceipt:
+        request = RestoreInput(**data.model_dump(), mode="in_place")
+        result = restore(domain, branch_id, snapshot_id, request, portable=True)
+        return PortableRestoreReceipt(**{key: result[key] for key in PortableRestoreReceipt.model_fields})
 
     @app.get(archive_endpoint + "/{snapshot_id}/chapters/{chapter_id}")
     def diff_portable_checkpoint_chapter(branch_id: str, snapshot_id: str, chapter_id: str):
@@ -1390,39 +1623,7 @@ def register_routes(app, domain):
     @app.get(endpoint + "/{snapshot_id}/preview")
     def preview_work_snapshot(branch_id: str, snapshot_id: str) -> SnapshotRestorePreview:
         with domain.db.connect(True) as tx:
-            branch = _branch(tx, branch_id)
-            snapshot = _read_snapshot(tx, branch_id, snapshot_id)
-            current = _capture(tx, branch_id)
-            checked = report_basis(tx, branch_id)
-            setting_uses = _live_setting_uses(tx, branch_id, current)
-            preview = _preview(snapshot, current, checked, setting_uses)
-            if (checked or setting_uses) and not preview["in_place_blockers"]:
-                simulated = RestoreInput(
-                    basis_sha256=preview["basis_sha256"], mode="in_place", idempotency_key="forecast-only"
-                )
-                try:
-                    with forecast(tx):
-                        _execute_restore(tx, domain, branch, snapshot, current, simulated)
-                        if checked:
-                            preview["affected_reports"] = invalidated_reports(
-                                checked, report_basis(tx, branch_id)
-                            )
-                        if setting_uses:
-                            live_ids = set()
-                            head = latest_outline(tx, branch_id, True)
-                            # A restored confirmation gets a new outline ID. The existing
-                            # proofs stay bound to the confirmation they were made against.
-                            if head and head["id"] == current["confirmed_outline"]["id"]:
-                                live_ids = {
-                                    proof["version_id"]
-                                    for proof in _live_setting_uses(tx, branch_id, _capture(tx, branch_id))
-                                }
-                            preview["affected_setting_uses"] = [
-                                proof for proof in setting_uses if proof["version_id"] not in live_ids
-                            ]
-                except DomainError as error:
-                    preview["in_place_blockers"].append(error.message)
-            return preview
+            return _preview_restore(tx, domain, branch_id, snapshot_id, portable=False)
 
     @app.post(endpoint + "/{snapshot_id}/restore", status_code=201)
     def restore_work_snapshot(branch_id: str, snapshot_id: str, data: RestoreInput):

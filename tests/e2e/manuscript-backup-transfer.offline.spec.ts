@@ -97,6 +97,128 @@ async function checked<T>(response: APIResponse): Promise<T> {
   }
 }
 
+test('独立 Web 在断网双标签下核对旧预览，整组恢复并从恢复前检查点撤回', async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  await page.goto('/')
+  const { csrf } = await checked<{ csrf: string }>(await page.request.get('/api/session'))
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const title = '离线回滚 · 渡口与门内'
+  const source = await checked<Novel>(await page.request.post('/api/novels', { headers, data: { title } }))
+  const branch = `/api/branches/${source.branch_id}`
+  const names = ['渡口见铃', '门内交铃']
+  const chapters: Chapter[] = []
+  for (const title of names) {
+    chapters.push(
+      await checked<Chapter>(await page.request.post(`${branch}/chapters`, { headers, data: { title } })),
+    )
+  }
+  const original = ['学徒📯在渡口拾起铜铃。', '门内响过两声。\r\n守铃人接过信物。']
+  const rewritten = ['学徒把铜铃留在桥下。', '门内等待第三声。']
+  for (const [index, chapter] of chapters.entries()) {
+    await checked<Chapter>(
+      await page.request.put(`/api/chapters/${chapter.id}`, {
+        headers,
+        data: { base_revision: 0, content: original[index] },
+      }),
+    )
+  }
+  const old = await checked<{ id: string }>(
+    await page.request.post(`${branch}/work-snapshots`, {
+      headers,
+      data: { label: '旧整书恢复点', scope: 'book' },
+    }),
+  )
+  for (const [index, chapter] of chapters.entries()) {
+    await checked<Chapter>(
+      await page.request.put(`/api/chapters/${chapter.id}`, {
+        headers,
+        data: { base_revision: 1, content: rewritten[index] },
+      }),
+    )
+  }
+  const exported = await page.request.get(`${branch}/manuscript-backup`)
+  expect(exported.ok()).toBe(true)
+  const bytes = await exported.body()
+  await exported.dispose()
+
+  const context = await browser.newContext({ baseURL, viewport: { width: 320, height: 900 } })
+  try {
+    const writer = await context.newPage()
+    await writer.goto('/offline/')
+    await expect(writer.getByText('离线页面就绪', { exact: true })).toBeVisible()
+    await expect.poll(() => writer.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true)
+    await context.setOffline(true)
+    await writer.reload()
+    await writer.getByLabel('从独立备份恢复作品', { exact: true }).setInputFiles({
+      name: 'offline-checkpoint-source.ainovel-backup',
+      mimeType: 'application/octet-stream',
+      buffer: bytes,
+    })
+    await expect(writer.getByText('已校验并恢复独立作品备份。')).toBeVisible()
+    const peer = await context.newPage()
+    await peer.goto('/offline/')
+    await peer.getByRole('combobox', { name: '离线作品', exact: true }).selectOption({ label: title })
+
+    const archive = writer.getByLabel('已导入的卷书恢复点', { exact: true })
+    await archive.getByText('已导入的卷书恢复点', { exact: true }).press('Enter')
+    const picker = archive.getByRole('combobox', { name: '选择已归档恢复点', exact: true })
+    await picker.selectOption(old.id)
+    const load = archive.getByRole('button', { name: '预览归档原位恢复', exact: true })
+    const impact = archive.getByRole('region', { name: '归档原位恢复预览', exact: true })
+    await load.press('Enter')
+    await expect(impact.getByRole('heading', { name: '原位恢复「旧整书恢复点」' })).toBeFocused()
+    await expect(impact.getByRole('list', { name: '目录与章稿变化' }).getByRole('listitem')).toHaveCount(2)
+    const peerChapter = peer
+      .getByRole('navigation', { name: '离线章节目录' })
+      .getByRole('button', { name: new RegExp(names[1]) })
+    await peerChapter.press('Enter')
+    const latest = '第二标签先保存了更晚的交铃稿。'
+    const edit = peer.getByRole('textbox', { name: '章节正文', exact: true })
+    await expect(edit).toHaveValue(rewritten[1])
+    await edit.fill(latest)
+    const save = peer.getByRole('button', { name: '保存正文到浏览器' })
+    await expect(save).toBeEnabled()
+    await save.press('Enter')
+    await expect(peer.getByText('本地已保存 · 修订 3', { exact: true })).toBeVisible()
+
+    async function confirm() {
+      await impact.getByRole('checkbox', { name: '我已核对恢复影响' }).check()
+      const apply = impact.getByRole('button', { name: '原位恢复为新修订' })
+      await expect(apply).toBeEnabled()
+      await apply.press('Enter')
+    }
+    await confirm()
+    await expect(archive.getByRole('alert')).toContainText(/变化|重新预览|过期/)
+    expect((await webRevision(writer, chapters[1].id, 3)).sha256).toBe(digest(latest))
+    await load.press('Enter')
+    await expect(impact).toContainText('当前修订 3')
+    expect(await writer.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
+    await confirm()
+    const saved = archive.getByRole('status').filter({ hasText: '恢复前检查点' })
+    await expect(saved).toContainText('已恢复为新的当前修订。')
+    const recovery = await saved.locator('code').textContent()
+    expect(recovery).toBeTruthy()
+    for (const [index, chapter] of chapters.entries()) {
+      expect((await webRevision(writer, chapter.id, 3 + index)).sha256).toBe(digest(original[index]))
+    }
+    await writer.reload()
+    await writer.getByRole('combobox', { name: '离线作品', exact: true }).selectOption({ label: title })
+    await archive.getByText('已导入的卷书恢复点', { exact: true }).press('Enter')
+    await picker.selectOption(recovery!)
+    await load.press('Enter')
+    await expect(impact.getByRole('heading', { name: '原位恢复「恢复前检查点」', exact: true })).toBeFocused()
+    await confirm()
+    await expect(saved).toContainText('已恢复为新的当前修订。')
+    expect((await webRevision(writer, chapters[0].id, 4)).sha256).toBe(digest(rewritten[0]))
+    expect((await webRevision(writer, chapters[1].id, 5)).sha256).toBe(digest(latest))
+  } finally {
+    await context.close()
+  }
+})
+
 type Novel = { id: string; branch_id: string }
 type Chapter = { id: string; revision: number; content: string }
 type Fingerprint = Pick<LocalRevision, 'id' | 'parent_id' | 'revision' | 'sha256'>

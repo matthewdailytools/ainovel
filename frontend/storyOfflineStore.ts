@@ -1,4 +1,5 @@
 import type { LocalChapter, LocalProject, LocalPublication, LocalRevision } from './offlineStore'
+import type { StoryCheckpointWrite } from './offlineCheckpointRestore'
 import type { OutlineExistingPromise, OutlinePromiseSeed } from './outlineSyncModel'
 import type { ProjectSource } from './projectSyncModel'
 import {
@@ -646,6 +647,27 @@ export function createStoryOfflineStore({
     }
   }
 
+  async function appendCheckpointStoryTx(tx: Tx, branchId: string, rows: StoryCheckpointWrite[]) {
+    const publications: string[] = []
+    for (const { version, history } of rows) {
+      const recordId = version.record_id
+      const stored = await getSource(tx, branchId, version.id)
+      if (!stored)
+        await result(tx.objectStore('storyVersions').add({ branchId, version } satisfies StoredVersion))
+      if (!stored?.source) publications.push(`story-version:${version.id}`)
+      await result(
+        tx.objectStore('storyHistory').add({ branchId, recordId, ...history } satisfies StoredHistory),
+      )
+      await result(
+        tx
+          .objectStore('storyHeads')
+          .put({ branchId, recordId, versionId: version.id, revision: history.revision } satisfies Head),
+      )
+      publications.push(`story:${recordId}`)
+    }
+    await markPublication(tx, branchId, ...publications)
+  }
+
   return {
     readLocalStory,
     readStoryTx,
@@ -656,6 +678,7 @@ export function createStoryOfflineStore({
     readStoryOutlinePromisesTx,
     readStoryHistoryTx,
     restoreStoryHistoryTx,
+    appendCheckpointStoryTx,
     checkLocalStorySelection,
   }
 }

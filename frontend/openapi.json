@@ -1055,6 +1055,80 @@
         }
       }
     },
+    "/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/restore-preview": {
+      "get": {
+        "summary": "Preview Portable Restore",
+        "operationId": "preview_portable_restore_api_branches__branch_id__portable_checkpoints__snapshot_id__restore_preview_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Snapshot Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SnapshotRestorePreview" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/restore": {
+      "post": {
+        "summary": "Apply Portable Restore",
+        "operationId": "apply_portable_restore_api_branches__branch_id__portable_checkpoints__snapshot_id__restore_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Snapshot Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PortableRestoreInput" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/PortableRestoreReceipt" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/chapters/{chapter_id}": {
       "get": {
         "summary": "Diff Portable Checkpoint Chapter",
@@ -9655,6 +9729,33 @@
         "type": "object",
         "required": ["branch_id", "snapshot_id"],
         "title": "PortableForkReceipt"
+      },
+      "PortableRestoreInput": {
+        "properties": {
+          "basis_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Basis Sha256" },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["basis_sha256", "idempotency_key"],
+        "title": "PortableRestoreInput"
+      },
+      "PortableRestoreReceipt": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "branch_id": { "type": "string", "title": "Branch Id" },
+          "snapshot_id": { "type": "string", "title": "Snapshot Id" },
+          "recovery_snapshot_id": { "type": "string", "title": "Recovery Snapshot Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "branch_id", "snapshot_id", "recovery_snapshot_id"],
+        "title": "PortableRestoreReceipt"
       },
       "PortableRestoreSources": {
         "properties": {

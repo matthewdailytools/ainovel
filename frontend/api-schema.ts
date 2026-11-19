@@ -477,6 +477,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/restore-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Preview Portable Restore */
+    get: operations['preview_portable_restore_api_branches__branch_id__portable_checkpoints__snapshot_id__restore_preview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/restore': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Apply Portable Restore */
+    post: operations['apply_portable_restore_api_branches__branch_id__portable_checkpoints__snapshot_id__restore_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/chapters/{chapter_id}': {
     parameters: {
       query?: never
@@ -5185,6 +5219,24 @@ export interface components {
       /** Snapshot Id */
       snapshot_id: string
     }
+    /** PortableRestoreInput */
+    PortableRestoreInput: {
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Idempotency Key */
+      idempotency_key: string
+    }
+    /** PortableRestoreReceipt */
+    PortableRestoreReceipt: {
+      /** Id */
+      id: string
+      /** Branch Id */
+      branch_id: string
+      /** Snapshot Id */
+      snapshot_id: string
+      /** Recovery Snapshot Id */
+      recovery_snapshot_id: string
+    }
     /** PortableRestoreSources */
     PortableRestoreSources: {
       /**
@@ -7911,6 +7963,74 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['PortableForkReceipt']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_portable_restore_api_branches__branch_id__portable_checkpoints__snapshot_id__restore_preview_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        snapshot_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SnapshotRestorePreview']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  apply_portable_restore_api_branches__branch_id__portable_checkpoints__snapshot_id__restore_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        snapshot_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PortableRestoreInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PortableRestoreReceipt']
         }
       }
       /** @description Validation Error */

@@ -1,37 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError, type Chapter } from './api'
-import type { components } from './api-schema'
-import { RestoreReportList, type RestoreAffectedReport } from './ChapterRestorePreview'
+import { RestoreReportList } from './ChapterRestorePreview'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { PortableCheckpointPanel } from './PortableCheckpointPanel'
+import {
+  snapshotSharedChanges,
+  type WorkSnapshot as Snapshot,
+  type WorkSnapshotPreview as Preview,
+  type WorkSnapshotScope as Scope,
+} from './workSnapshotView'
 
-type Scope = 'book' | 'volume' | 'chapter'
 type Mode = 'in_place' | 'new_branch'
-type Snapshot = {
-  id: string
-  label: string
-  scope: Scope
-  scope_id: string | null
-  purpose: string
-  created: number
-  story_revision: number
-}
-type Preview = {
-  snapshot: Snapshot
-  basis_sha256: string
-  changes: {
-    chapter_id: string
-    title: string
-    action: 'restore' | 'archive' | 'keep'
-    snapshot_revision: number | null
-    current_revision: number | null
-  }[]
-  in_place_blockers: string[]
-  shared_changes: { definitions: string[]; conception: boolean; outline: boolean }
-  affected_reports: RestoreAffectedReport[]
-  affected_setting_uses: components['schemas']['SnapshotSettingUseImpact'][]
-  notes: string[]
-}
 type ChapterDiff = {
   title: string
   snapshot: { revision: number; content: string }
@@ -42,14 +21,6 @@ type Outline = { confirmed: { plan: { volumes: { id: string; title: string }[] }
 
 const scopes = { book: '全书', volume: '卷', chapter: '章' }
 const chapterActions = { restore: '恢复快照稿', archive: '移到归档', keep: '保留' }
-const objectNames: Record<string, string> = {
-  intent: '作者约定',
-  reader: '题材设定',
-  world: '世界规则',
-  characters: '人物设定',
-  outline: '旧版规划',
-  project_brief: '立项',
-}
 
 export function WorkSnapshotPanel({
   branchId,
@@ -190,7 +161,7 @@ export function WorkSnapshotPanel({
 
   const choices = scope === 'volume' ? volumes : chapters
   const scopeNames = new Map([...chapters, ...volumes].map(({ id, title }) => [id, title]))
-  const definitionChanges = preview?.shared_changes.definitions.map((kind) => objectNames[kind] || kind) ?? []
+  const sharedChanges = preview ? snapshotSharedChanges(preview.shared_changes) : []
   return (
     <section className="card" aria-label="作品快照与回滚" style={{ overflowWrap: 'anywhere' }}>
       <h2>作品快照与回滚</h2>
@@ -306,18 +277,7 @@ export function WorkSnapshotPanel({
               <pre className="report">{diff.snapshot.content}</pre>
             </section>
           )}
-          {(definitionChanges.length > 0 ||
-            preview.shared_changes.conception ||
-            preview.shared_changes.outline) && (
-            <p>
-              共用依据有变化 ·{' '}
-              {[
-                ...definitionChanges,
-                ...(preview.shared_changes.conception ? ['分类构思与设定'] : []),
-                ...(preview.shared_changes.outline ? ['四级大纲'] : []),
-              ].join('、')}
-            </p>
-          )}
+          {sharedChanges.length > 0 && <p>共用依据有变化 · {sharedChanges.join('、')}</p>}
           {mode === 'in_place' ? (
             <>
               <RestoreReportList reports={preview.affected_reports} scopeNames={scopeNames} />
@@ -409,7 +369,14 @@ export function WorkSnapshotPanel({
           </form>
         </section>
       )}
-      <PortableCheckpointPanel key={branchId} branchId={branchId} onRestored={onRestored} />
+      <PortableCheckpointPanel
+        key={branchId}
+        branchId={branchId}
+        onRestored={async (id) => {
+          if (id === branchId) setSnapshots(await api<Snapshot[]>(route))
+          await onRestored?.(id)
+        }}
+      />
     </section>
   )
 }

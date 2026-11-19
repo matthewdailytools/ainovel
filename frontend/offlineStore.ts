@@ -48,6 +48,14 @@ import {
 } from './workflowPrivacy'
 import { createStoryOfflineStore, storyReadStores, storyWriteStores } from './storyOfflineStore'
 import { buildOfflineFork, type OfflineForkSelection } from './offlineForkModel'
+import {
+  captureRecoveryCheckpoint,
+  checkpointRestoreFingerprint,
+  planCheckpointRestore,
+  prepareCheckpointWrites,
+  type LocalCheckpointPreview,
+  type LocalCheckpointReceipt,
+} from './offlineCheckpointRestore'
 import { calculateOfflineRules } from './offlineRules'
 import type { ChapterRestorePreviewProps, RestoreAffectedReport } from './ChapterRestorePreview'
 import { settingIsAdopted } from './conception'
@@ -284,7 +292,12 @@ type LocalWorkflowEntry<Entry extends ArchivedInspection | ArchivedCompletion> =
   entryJson?: string
   source?: ProjectSource
 }
-type LocalSnapshotEntry = { branchId: string; sequence: number; entry: PortableCheckpointEntry }
+type LocalSnapshotEntry = {
+  branchId: string
+  sequence: number
+  entry: PortableCheckpointEntry
+  restoreReceipt?: { checkpointId: string; basis: string; result: LocalCheckpointReceipt }
+}
 export type LocalPublication = { branchId: string; objectId: string; id: string }
 type ApplyOptions = { source?: ProjectSource; publicationId?: string | null; consumePublication?: boolean }
 const projectStores = ['projects', 'projectHeads', 'projectVersions'] satisfies Store[]
@@ -1149,97 +1162,335 @@ export async function readLocalSnapshotHistory(projectId: string): Promise<Porta
     .sort((left, right) => right.created - left.created)
 }
 
-function readManuscriptPackage(
-  projectId: string,
+const manuscriptPackageStores = [
+  ...new Set([
+    ...settingsDependencyStores,
+    ...outlineReadStores,
+    ...workflowStores,
+    ...storyReadStores,
+    ...settingUseStores,
+    'referenceArchives' as const,
+    'snapshotArchives' as const,
+  ]),
+]
+
+function readManuscriptPackage(projectId: string, includeReferenceEvidenceFor: readonly string[] = []) {
+  return transact(manuscriptPackageStores, 'readonly', async (tx) =>
+    readManuscriptPackageTx(tx, await readProject(tx, projectId), includeReferenceEvidenceFor),
+  )
+}
+
+async function readManuscriptPackageTx(
+  tx: IDBTransaction,
+  project: LocalProject,
   includeReferenceEvidenceFor: readonly string[] = [],
 ): Promise<ManuscriptPack> {
-  const stores = [
-    ...new Set([
-      ...settingsDependencyStores,
-      ...outlineReadStores,
-      ...workflowStores,
-      ...storyReadStores,
-      ...settingUseStores,
-      'referenceArchives' as const,
-      'snapshotArchives' as const,
-    ]),
-  ]
-  return transact(stores, 'readonly', async (tx) => {
-    const project = await readProject(tx, projectId)
-    const [
-      manuscript,
-      brief,
-      settings,
-      outlineHistory,
-      workflowHistory,
-      storyHistory,
-      referenceHistory,
-      settingUseHistory,
-      snapshotHistory,
-    ] = await Promise.all([
-      readManuscript(tx, project),
-      readProjectBrief(tx, project.branch.id),
-      readSettings(tx, project.branch.id),
-      outlineStore.readOutlineHistoryTx(tx, project),
-      readWorkflowHistory(tx, project.branch.id),
-      storyStore.readStoryHistoryTx(tx, project),
-      readReferenceHistory(tx, project.branch.id),
-      settingUseStore.readSettingUseHistoryTx(tx, project.branch.id),
-      readSnapshotHistoryTx(tx, project.branch.id),
-    ])
-    const sourceDevices = settings.versions.flatMap(({ version, source, recordedDevice }) => {
-      const device = source?.device_id ?? recordedDevice
-      return device ? [[version.id, device] as const] : []
-    })
-    const selectedExcerpts = Object.fromEntries(
-      [...new Set(includeReferenceEvidenceFor)].map((id) => {
-        const excerpts = referenceHistory?.excerpts
-        if (!excerpts || !Object.hasOwn(excerpts, id)) invalid('选带的手法卡原文不属于当前作品。')
-        return [id, excerpts[id]]
-      }),
-    )
-    return {
-      ...manuscript,
-      ...(brief.versions.length
-        ? {
-            project_history: {
-              adopted_revision_id: brief.current?.version.id ?? null,
-              versions: brief.versions.map(({ version }) => version),
-            },
-          }
-        : {}),
-      ...(settings.versions.length
-        ? {
-            settings_history: {
-              adopted_revision_id: settings.current?.version.id ?? null,
-              versions: settings.versions.map(({ version }) => version),
-              ...(sourceDevices.length ? { source_devices: Object.fromEntries(sourceDevices) } : {}),
-            },
-          }
-        : {}),
-      ...(outlineHistory ? { outline_history: outlineHistory } : {}),
-      ...(workflowHistory.inspections.length || workflowHistory.completions.length
-        ? {
-            workflow_history: {
-              inspections: workflowHistory.inspections,
-              completions: workflowHistory.completions,
-            },
-          }
-        : {}),
-      ...(storyHistory ? { story_history: storyHistory } : {}),
-      ...(settingUseHistory ? { setting_use_history: settingUseHistory } : {}),
-      ...(snapshotHistory.entries.length ? { snapshot_history: snapshotHistory } : {}),
-      ...(referenceHistory
-        ? {
-            reference_history: {
-              adopted_heads: referenceHistory.adopted_heads,
-              versions: referenceHistory.versions,
-              source_devices: referenceHistory.source_devices,
-              ...(Object.keys(selectedExcerpts).length ? { excerpts: selectedExcerpts } : {}),
-            },
-          }
-        : {}),
+  const [
+    manuscript,
+    brief,
+    settings,
+    outlineHistory,
+    workflowHistory,
+    storyHistory,
+    referenceHistory,
+    settingUseHistory,
+    snapshotHistory,
+  ] = await Promise.all([
+    readManuscript(tx, project),
+    readProjectBrief(tx, project.branch.id),
+    readSettings(tx, project.branch.id),
+    outlineStore.readOutlineHistoryTx(tx, project),
+    readWorkflowHistory(tx, project.branch.id),
+    storyStore.readStoryHistoryTx(tx, project),
+    readReferenceHistory(tx, project.branch.id),
+    settingUseStore.readSettingUseHistoryTx(tx, project.branch.id),
+    readSnapshotHistoryTx(tx, project.branch.id),
+  ])
+  const sourceDevices = settings.versions.flatMap(({ version, source, recordedDevice }) => {
+    const device = source?.device_id ?? recordedDevice
+    return device ? [[version.id, device] as const] : []
+  })
+  const selectedExcerpts = Object.fromEntries(
+    [...new Set(includeReferenceEvidenceFor)].map((id) => {
+      const excerpts = referenceHistory?.excerpts
+      if (!excerpts || !Object.hasOwn(excerpts, id)) invalid('选带的手法卡原文不属于当前作品。')
+      return [id, excerpts[id]]
+    }),
+  )
+  return {
+    ...manuscript,
+    ...(brief.versions.length
+      ? {
+          project_history: {
+            adopted_revision_id: brief.current?.version.id ?? null,
+            versions: brief.versions.map(({ version }) => version),
+          },
+        }
+      : {}),
+    ...(settings.versions.length
+      ? {
+          settings_history: {
+            adopted_revision_id: settings.current?.version.id ?? null,
+            versions: settings.versions.map(({ version }) => version),
+            ...(sourceDevices.length ? { source_devices: Object.fromEntries(sourceDevices) } : {}),
+          },
+        }
+      : {}),
+    ...(outlineHistory ? { outline_history: outlineHistory } : {}),
+    ...(workflowHistory.inspections.length || workflowHistory.completions.length
+      ? {
+          workflow_history: {
+            inspections: workflowHistory.inspections,
+            completions: workflowHistory.completions,
+          },
+        }
+      : {}),
+    ...(storyHistory ? { story_history: storyHistory } : {}),
+    ...(settingUseHistory ? { setting_use_history: settingUseHistory } : {}),
+    ...(snapshotHistory.entries.length ? { snapshot_history: snapshotHistory } : {}),
+    ...(referenceHistory
+      ? {
+          reference_history: {
+            adopted_heads: referenceHistory.adopted_heads,
+            versions: referenceHistory.versions,
+            source_devices: referenceHistory.source_devices,
+            ...(Object.keys(selectedExcerpts).length ? { excerpts: selectedExcerpts } : {}),
+          },
+        }
+      : {}),
+  }
+}
+
+async function currentCheckpointRestoreTx(tx: IDBTransaction, projectId: string, checkpointId: string) {
+  const project = await readProject(tx, projectId)
+  const branchId = project.branch.id
+  const [pack, outline, archived] = await Promise.all([
+    readManuscriptPackageTx(tx, project),
+    outlineStore.readOutlineHead(tx, branchId),
+    result<LocalSnapshotEntry | undefined>(tx.objectStore('snapshotArchives').get([branchId, checkpointId])),
+  ])
+  if (!archived) throw new OfflineStoreError('missing', '找不到这个归档恢复点。')
+  const reportAliases = new Set<string>()
+  const lookedUp = new Set<string>()
+  const active = new Map(
+    pack.chapters
+      .filter(({ archived, stale }) => !archived && !stale)
+      .map(({ id, revision }) => [id, revision]),
+  )
+  const heads = new Map(
+    pack.revisions
+      .filter((row) => active.get(row.chapter_id) === row.revision)
+      .map((row) => [row.chapter_id, row]),
+  )
+  for (const report of [
+    ...(pack.workflow_history?.inspections ?? []),
+    ...(pack.workflow_history?.completions ?? []),
+  ]) {
+    for (const binding of report.chapter_bindings) {
+      const head = heads.get(binding.id)
+      if (!head || head.id === binding.revision_id || head.sha256 !== binding.sha256) continue
+      const key = `${binding.revision_id}:${head.id}`
+      if (lookedUp.has(key)) continue
+      lookedUp.add(key)
+      if (
+        await result(tx.objectStore('storyChapterAliases').getKey([branchId, binding.revision_id, head.id]))
+      )
+        reportAliases.add(key)
     }
+  }
+  return {
+    pack,
+    adoptedOutlineId: outline?.versionId ?? null,
+    deferredOutline: outline?.deferred,
+    archived: archived.entry,
+    reportAliases,
+  }
+}
+
+async function buildCheckpointRestore(projectId: string, checkpointId: string) {
+  const captured = await transact(manuscriptPackageStores, 'readonly', (tx) =>
+    currentCheckpointRestoreTx(tx, projectId, checkpointId),
+  )
+  const { pack, archived } = captured
+  const sealed = decodeSnapshotHistory({ entries: [archived] })
+  await verifySnapshotHistory(sealed, checkpointArtifactBases(pack))
+  const source = sealed[0].checkpoint
+  const fingerprint = checkpointRestoreFingerprint(captured, archived)
+  const basis = await manuscriptHash(fingerprint)
+  const plan = planCheckpointRestore(captured, source)
+  return { captured, source, fingerprint, basis, plan }
+}
+
+function checkpointArtifactBases(pack: ManuscriptPack) {
+  return {
+    branch: pack.branch,
+    chapterIds: new Set(pack.chapters.map(({ id }) => id)),
+    revisions: new Map(pack.revisions.map((row) => [row.id, row])),
+    sourceRevisions: new Map(pack.source_revisions?.map((row) => [row.id, row])),
+    ...checkpointArtifactSources(pack),
+  }
+}
+
+export async function readLocalCheckpointRestore(
+  projectId: string,
+  checkpointId: string,
+): Promise<LocalCheckpointPreview> {
+  const { basis, plan } = await buildCheckpointRestore(projectId, checkpointId)
+  return { ...plan.preview, basis }
+}
+
+function checkpointReceipt(entry: LocalSnapshotEntry | undefined, checkpointId: string, basis: string) {
+  if (!entry) return undefined
+  if (entry.restoreReceipt?.checkpointId === checkpointId && entry.restoreReceipt.basis === basis)
+    return entry.restoreReceipt.result
+  throw new OfflineStoreError('conflict', '此恢复提交编号已用于其他内容，请重新预览。')
+}
+
+async function verifyPreparedCheckpointWrites(
+  pack: ManuscriptPack,
+  prepared: Awaited<ReturnType<typeof prepareCheckpointWrites>>,
+) {
+  const revised = new Map(pack.revisions.map((revision) => [revision.id, revision]))
+  for (const { revision } of prepared.writes) if (revision) revised.set(revision.id, revision)
+  const sources = new Map([
+    ...(pack.source_revisions ?? []).map((revision) => [revision.id, revision] as const),
+    ...revised,
+  ])
+  if (prepared.settings) {
+    const projectIds = new Set(pack.project_history?.versions.map(({ id }) => id))
+    if (prepared.project) projectIds.add(prepared.project.id)
+    const settingIds = new Set(pack.settings_history?.versions.map(({ id }) => id))
+    await validateSettingsVersionSources(prepared.settings, {
+      project: (id) => projectIds.has(id),
+      settings: (id) => settingIds.has(id),
+      revision: (id) => sources.get(id),
+    })
+  }
+  if (prepared.story.length) {
+    const adopted_heads = { ...pack.story_history?.adopted_heads }
+    const native_history = { ...pack.story_history?.native_history }
+    for (const { version, history } of prepared.story) {
+      adopted_heads[version.record_id] = version.id
+      native_history[version.record_id] = [...(native_history[version.record_id] ?? []), history]
+    }
+    const versions = new Map(pack.story_history?.versions.map((row) => [row.id, row]))
+    for (const { version } of prepared.story) versions.set(version.id, version)
+    await validateStoryHistory(
+      pack.branch.id,
+      {
+        adopted_heads,
+        native_history,
+        versions: [...versions.values()],
+        source_devices: pack.story_history?.source_devices ?? {},
+      },
+      { original: sources, native: revised },
+    )
+  }
+}
+
+export async function restoreLocalCheckpoint(
+  projectId: string,
+  checkpointId: string,
+  requestedBasis: string,
+  requestId: string,
+): Promise<LocalCheckpointReceipt> {
+  try {
+    validateProjectId(requestId)
+  } catch {
+    invalid('恢复提交编号无效。')
+  }
+  const replay = await transact(['projects', 'snapshotArchives'], 'readonly', async (tx) => {
+    const { branch } = await readProject(tx, projectId)
+    return checkpointReceipt(
+      await result<LocalSnapshotEntry | undefined>(
+        tx.objectStore('snapshotArchives').get([branch.id, requestId]),
+      ),
+      checkpointId,
+      requestedBasis,
+    )
+  })
+  if (replay) return replay
+  const { captured, source, fingerprint, basis, plan } = await buildCheckpointRestore(projectId, checkpointId)
+  if (basis !== requestedBasis)
+    throw new OfflineStoreError('conflict', '当前稿件或依赖已有变化，请重新打开恢复预览。')
+  if (plan.preview.blockers.length) throw new OfflineStoreError('conflict', plan.preview.blockers.join(' '))
+  const created = now()
+  let prepared: Awaited<ReturnType<typeof prepareCheckpointWrites>>
+  try {
+    prepared = await prepareCheckpointWrites(captured, source, plan, { id: newId, created })
+    await verifyPreparedCheckpointWrites(captured.pack, prepared)
+  } catch (error) {
+    if (error instanceof OfflineStoreError) throw error
+    invalid(error instanceof Error ? error.message : '恢复结果的正式设定或故事依据无效。')
+  }
+  const recovery = captureRecoveryCheckpoint(captured, requestId, basis, created)
+  const body = JSON.stringify(recovery)
+  const entry = { id: requestId, body, sha256: await manuscriptHash(body) }
+  await verifySnapshotHistory(
+    decodeSnapshotHistory({ entries: [entry] }),
+    checkpointArtifactBases(captured.pack),
+  )
+  const stores = [...new Set([...manuscriptPackageStores, ...outlineWriteStores, ...storyWriteStores])]
+  return transact(stores, 'readwrite', async (tx) => {
+    const project = await readProject(tx, projectId)
+    const branchId = project.branch.id
+    const snapshotStore = tx.objectStore('snapshotArchives')
+    const replay = checkpointReceipt(
+      await result<LocalSnapshotEntry | undefined>(snapshotStore.get([branchId, requestId])),
+      checkpointId,
+      requestedBasis,
+    )
+    if (replay) return replay
+    const current = await currentCheckpointRestoreTx(tx, projectId, checkpointId)
+    if (checkpointRestoreFingerprint(current, current.archived) !== fingerprint)
+      throw new OfflineStoreError('conflict', '当前稿件或依赖已有变化，请重新打开恢复预览。')
+    const publications: string[] = []
+    for (const { chapter, revision } of prepared.writes) {
+      if (revision) {
+        await result(tx.objectStore('revisions').add(revision))
+        publications.push(`revision:${revision.id}`)
+      }
+      await result(tx.objectStore('chapters').put(chapter))
+      publications.push(`chapter:${chapter.id}`)
+    }
+    if (prepared.project) {
+      const version = prepared.project
+      await result(tx.objectStore('projectVersions').add({ branchId, version } satisfies LocalProjectVersion))
+      await result(
+        tx.objectStore('projectHeads').put({ branchId, versionId: version.id } satisfies LocalProjectHead),
+      )
+      publications.push(`project-version:${version.id}`, `project:${branchId}`)
+    }
+    if (prepared.settings) {
+      const version = prepared.settings
+      await result(
+        tx.objectStore('settingsVersions').add({ branchId, version } satisfies LocalSettingsVersion),
+      )
+      await result(
+        tx.objectStore('settingsHeads').put({ branchId, versionId: version.id } satisfies LocalProjectHead),
+      )
+      publications.push(`settings-version:${version.id}`, `settings:${branchId}`)
+    }
+    await storyStore.appendCheckpointStoryTx(tx, branchId, prepared.story)
+    if (prepared.outline) await outlineStore.adoptCheckpointOutlineTx(tx, project, prepared.outline)
+    await markPublication(tx, branchId, ...publications)
+    project.branch.story_revision++
+    await result(tx.objectStore('projects').put(project))
+    const outcome = {
+      recoveryCheckpointId: recovery.id,
+      chapters: await listChaptersTx(tx, branchId),
+      storyRevision: project.branch.story_revision,
+    }
+    const rows = await result<LocalSnapshotEntry[]>(snapshotStore.index('byBranch').getAll(branchId))
+    await result(
+      snapshotStore.add({
+        branchId,
+        sequence: Math.max(-1, ...rows.map(({ sequence }) => sequence)) + 1,
+        entry,
+        restoreReceipt: { checkpointId, basis, result: outcome },
+      } satisfies LocalSnapshotEntry),
+    )
+    return outcome
   })
 }
 
