@@ -3,7 +3,12 @@ import { api, ApiError, type Chapter } from './api'
 import type { components } from './api-schema'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { InspectionSemanticPanel, type InspectionSuggestion } from './InspectionSemanticPanel'
-import { InspectionPacingEvidence, InspectionSources, InspectionStateConflicts } from './InspectionSources'
+import {
+  InspectionNarrativeEvidence,
+  InspectionPacingEvidence,
+  InspectionSources,
+  InspectionStateConflicts,
+} from './InspectionSources'
 import {
   coversInspectionExcerpt,
   maxAuthorEvidence,
@@ -123,6 +128,10 @@ function knownStateConflict(item: Item | undefined) {
     Array.isArray(item.basis.state_conflicts) &&
     !!item.basis.state_conflicts.length
   )
+}
+
+function hasOutdatedNarrativeEvidence(item: Item | undefined) {
+  return item?.status === 'outdated' && (item.check_id === '04' || item.check_id === '06')
 }
 
 function ScopedInspectionSources({
@@ -345,6 +354,13 @@ function CheckList({
             <CheckCardReferences basis={item.basis} chapters={chapters} branchId={branchId} />
           )}
           {item.check_id === '03' && <InspectionStateConflicts basis={item.basis} />}
+          {(item.check_id === '04' || item.check_id === '06') && (
+            <InspectionNarrativeEvidence
+              basis={item.basis}
+              chapters={chapters}
+              kind={item.check_id === '04' ? 'time' : 'viewpoint'}
+            />
+          )}
           {item.check_id === '10' && <InspectionPacingEvidence basis={item.basis} />}
           {reportId && canOpenSources(item) && (
             <InspectionSources
@@ -825,6 +841,9 @@ export function InspectionPanel({
                       {decisions
                         .filter((status) => !knownStateConflict(selectedCheck) || status === 'red')
                         .filter(
+                          (status) => !hasOutdatedNarrativeEvidence(selectedCheck) || status !== 'green',
+                        )
+                        .filter(
                           (status) => status !== 'not_applicable' || selectedCheck?.can_mark_not_applicable,
                         )
                         .map((status) => (
@@ -836,6 +855,9 @@ export function InspectionPanel({
                   </label>
                   {knownStateConflict(selectedCheck) && (
                     <p>两条正式记录互相矛盾。请在故事记录中修正，再复检当前稿件。</p>
+                  )}
+                  {hasOutdatedNarrativeEvidence(selectedCheck) && (
+                    <p>事件、场景或知情依据已过期，请先核对后再确认通过。</p>
                   )}
                   {review.status === 'green' && deviations.length > 0 && (
                     <fieldset>

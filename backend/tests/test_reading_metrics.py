@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from ainovel.api import create_app
 from ainovel.db import DomainError
-from ainovel.reading_metrics import calculate_report, parse_import
+from ainovel.reading_metrics import CALCULATION_VERSION, calculate_report, parse_import
 
 
 def source(mode, chapters=("one", "two", "three")):
@@ -304,14 +304,19 @@ def test_saved_diagnosis_can_distinguish_preexisting_reports_without_channel_bre
     assert item["channel_breakdown"][0]["denominator"] == 2 and "anonymous-" not in response.text
     del item["channel_breakdown"]
     del document["report"]["access_mode"]
+    basis = domain.artifact(document["id"])["basis"]
+    del basis["calculation_version"]
     with domain.db.connect(True) as tx:
         tx.execute(
-            "UPDATE artifacts SET payload=? WHERE id=?", (json.dumps(document["report"]), document["id"])
+            "UPDATE artifacts SET payload=?,basis=? WHERE id=?",
+            (json.dumps(document["report"]), json.dumps(basis), document["id"]),
         )
     historical = client.get(f"{base}/history/{document['id']}")
     assert historical.status_code == 200
     assert historical.json()["report"]["diagnostics"] == [{**item, "channel_breakdown": None}]
     assert "access_mode" not in historical.json()["report"]
+    assert historical.json()["source_sha256"] == document["source_sha256"]
+    assert "calculation_version" not in historical.json()
 
 
 def test_dedup_prior_reader_late_release_and_incomplete_window():
@@ -517,9 +522,12 @@ def test_file_route_saves_only_summary_and_checks_publication_scope(domain, sett
         session = client.get("/api/session").json()
         client.headers["X-Ainovel-CSRF"] = session["csrf"]
         assert client.get(route).json() == {"latest": None}
-        response = client.post(f"{route}/import", files={"file": ("reading.json", json.dumps(data))})
+        original_file = b"\xef\xbb\xbf" + json.dumps(data, ensure_ascii=False).encode()
+        response = client.post(f"{route}/import", files={"file": ("reading.json", original_file)})
         assert response.status_code == 201, response.text
         imported = response.json()
+        assert imported["source_sha256"] == sha256(original_file).hexdigest()
+        assert imported["calculation_version"] == CALCULATION_VERSION
         assert "pseudonym-test-only" not in response.text and "events" not in imported["report"]
         assert "eligibility-key-only" not in response.text and "reader_access" not in imported["report"]
         assert client.get(route).json() == {"latest": imported}
@@ -529,7 +537,8 @@ def test_file_route_saves_only_summary_and_checks_publication_scope(domain, sett
         assert artifact["status"] == "accepted"
         assert "pseudonym-test-only" not in json.dumps(artifact)
         assert "eligibility-key-only" not in json.dumps(artifact)
-        assert len(artifact["basis"]["source_sha256"]) == 64
+        assert artifact["basis"]["source_sha256"] == imported["source_sha256"]
+        assert artifact["basis"]["calculation_version"] == imported["calculation_version"]
         other = domain.create_novel("另一部测试作品")
         foreign_route = f"/api/branches/{other['branch_id']}/reading-metrics"
         assert client.get(foreign_route + "/history/" + imported["id"]).status_code == 404
@@ -626,6 +635,9 @@ def test_published_diagnosis_freezes_both_revisions_and_release_catalog(client, 
     predecessor, second_proof = bind(original_route, second, saved_second, "ending", ending)
     successor, third_proof = bind(f"{history}/{predecessor['id']}", third, saved_third, "opening", opening)
     assert len({original["id"], predecessor["id"], successor["id"]}) == 3
+    for report in (predecessor, successor):
+        assert report["source_sha256"] == original["source_sha256"]
+        assert report["calculation_version"] == original["calculation_version"] == CALCULATION_VERSION
     final = successor["report"]
     assert {key: final[key] for key in final if key != "chapters"} == {
         key: report_before[key] for key in report_before if key != "chapters"

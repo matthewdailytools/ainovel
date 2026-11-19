@@ -8,6 +8,121 @@ type EvidencePage = components['schemas']['InspectionEvidencePage']
 type EvidenceContext = components['schemas']['InspectionEvidenceContext']
 
 const stateAudience = { author: '作者所知', character: '人物所知', reader: '读者所知' }
+const storyTruth = { actual: '已记录', planned: '计划', unknown: '待核实', conflict: '有冲突' }
+
+function fields(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function storyRows(value: unknown) {
+  return Array.isArray(value) ? value.map(fields).filter((row) => row !== undefined) : []
+}
+
+function storyTime(row: Record<string, unknown>) {
+  const order = typeof row.story_order === 'number' ? `故事顺序 ${row.story_order}` : '故事顺序未定'
+  return typeof row.story_time === 'string' && row.story_time.trim() && row.story_time !== '未知'
+    ? `${order} · ${row.story_time}`
+    : order
+}
+
+function storyLabel(labels: Record<string, string>, value: unknown, fallback: string) {
+  return typeof value === 'string' && Object.hasOwn(labels, value) ? labels[value] : fallback
+}
+
+export function InspectionNarrativeEvidence({
+  basis,
+  chapters,
+  kind,
+}: {
+  basis: Record<string, unknown>
+  chapters: { id: string; title: string }[]
+  kind: 'time' | 'viewpoint'
+}) {
+  const isTime = kind === 'time'
+  const records = storyRows(isTime ? basis.events : basis.knowledge)
+  const scenes = storyRows(basis.scenes)
+  if (!records.length && !scenes.length) return null
+  const names = fields(basis.viewpoint_names)
+  const anchors = new Map(storyRows(basis.knowledge_events).map((row) => [row.id, row]))
+  const chapterNames = new Map(chapters.map(({ id, title }) => [id, title]))
+  const name = (id: unknown) => {
+    if (typeof id !== 'string' || !id) return undefined
+    const title = names?.[id]
+    return typeof title === 'string' ? title : id
+  }
+  return (
+    <details style={{ overflowWrap: 'anywhere' }}>
+      <summary>{isTime ? '事件顺序与场景时点' : '场景视角与知情依据'}</summary>
+      {!!records.length && (
+        <ul aria-label={isTime ? '冻结事件' : '冻结知情记录'}>
+          {records.map((record, index) => {
+            const anchor = anchors.get(record.event_id)
+            const until = anchors.get(record.until_event_id)
+            const subject = name(record.character_id)
+            return (
+              <li key={String(record.id ?? index)}>
+                <strong>{String(record.title ?? '未注明名称')}</strong>
+                {isTime ? (
+                  <p>
+                    {storyTime(record)} · {storyLabel(storyTruth, record.status, '待核实')}
+                  </p>
+                ) : (
+                  <>
+                    <p>
+                      {storyLabel(stateAudience, record.audience, '视域未定')}
+                      {subject && ` · ${subject}`} · {storyLabel(storyTruth, record.truth, '待核实')}
+                    </p>
+                    {typeof record.value === 'string' && record.value && <p>{record.value}</p>}
+                    <p>
+                      获知依据{' '}
+                      {anchor
+                        ? `${String(anchor.title)} · ${storyTime(anchor)}${anchor.stale ? ' · 依据待复检' : ''}`
+                        : '待核对'}
+                    </p>
+                    {until && (
+                      <p>
+                        失效依据 {String(until.title)} · {storyTime(until)}
+                        {until.stale === true && ' · 依据待复检'}
+                      </p>
+                    )}
+                  </>
+                )}
+                {Array.isArray(record.invalid_reasons) && !!record.invalid_reasons.length && (
+                  <p>记录依据待复检。</p>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {!!scenes.length && (
+        <ul aria-label="冻结场景范围">
+          {scenes.map((scene, index) => {
+            const payload = fields(scene.payload)
+            if (!payload || typeof scene.chapter_id !== 'string') return null
+            const subject = name(payload.character_id)
+            return (
+              <li key={String(scene.id ?? index)}>
+                <strong>{String(payload.title ?? '未命名场景')}</strong>
+                <p>
+                  {storyTime(payload)} · {storyLabel(stateAudience, payload.audience, '视域未定')}
+                  {subject && ` · ${subject}`}
+                </p>
+                <p>
+                  {chapterNames.get(scene.chapter_id) ?? '来源章节'} · 章稿修订{' '}
+                  {String(payload.source_revision)} · 位置 {String(payload.start)}–{String(payload.end)}
+                  {scene.stale === true && ' · 依据待复检'}
+                </p>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </details>
+  )
+}
 
 function pacingEntry(value: unknown) {
   if (!value || typeof value !== 'object') return

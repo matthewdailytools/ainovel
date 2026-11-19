@@ -4413,6 +4413,10 @@ export interface components {
       /** Id */
       id: string
       report: components['schemas']['ReadingReport']
+      /** Source Sha256 */
+      source_sha256?: string | null
+      /** Calculation Version */
+      calculation_version?: string | null
     }
     /** InitializeOutlineDirectory */
     InitializeOutlineDirectory: {

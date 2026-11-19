@@ -503,6 +503,34 @@ def _scene_rows(tx, branch_id, chapters, graph):
     return result
 
 
+def _viewpoint_basis(knowledge, scenes, graph):
+    anchors = {row[key] for row in knowledge for key in ("event_id", "until_event_id")} - {None}
+    people = {row["character_id"] for row in knowledge} | {
+        row["payload"]["character_id"] for row in scenes if row["payload"]["character_id"]
+    }
+    events = []
+    names = {}
+    for row in graph["records"]:
+        payload = row["payload"]
+        if row["id"] in anchors and row["kind"] == "event":
+            events.append(
+                {
+                    "id": row["id"],
+                    "revision": row["revision"],
+                    **{key: payload[key] for key in ("title", "status", "story_time", "story_order")},
+                    "stale": bool(row["archived"] or row["invalid_reasons"]),
+                }
+            )
+        if row["id"] in people and row["kind"] == "character":
+            names[row["id"]] = payload["title"]
+    return {
+        "knowledge": knowledge,
+        "scenes": scenes,
+        **({"knowledge_events": events} if events else {}),
+        **({"viewpoint_names": names} if names else {}),
+    }
+
+
 def _evaluate(tx, branch_id, scope, scope_id, *, roll_up=True):
     outline = _view(tx, branch_id)
     chapters = _scope(tx, branch_id, outline, scope, scope_id)
@@ -669,7 +697,7 @@ def _evaluate(tx, branch_id, scope, scope_id, *, roll_up=True):
         item(
             "06",
             "结合叙述视角、获知时点与读者披露计划定位证据。",
-            {"knowledge": knowledge, "scenes": scenes},
+            _viewpoint_basis(knowledge, scenes, graph),
             "outdated" if scenes_stale else _record_status(knowledge),
         ),
         item(
@@ -799,6 +827,10 @@ def _apply_author_reviews(tx, branch_id, report, reviews, chapters):
         if review.check_id == "03" and item["basis"].get("state_conflicts") and review.status != "red":
             raise DomainError(
                 "inspection_state_conflict", "同一故事时点仍有相互矛盾的人物状态，请先更正记录再签认。", 409
+            )
+        if review.check_id in {"04", "06"} and item["status"] == "outdated" and review.status == "green":
+            raise DomainError(
+                "inspection_story_outdated", "事件、场景或知情依据已过期，请先核对后再确认通过。", 409
             )
         if review.status == "not_applicable" and not item["can_mark_not_applicable"]:
             raise DomainError("inspection_required", f"{item['title']}须核对，不能标为不适用。")

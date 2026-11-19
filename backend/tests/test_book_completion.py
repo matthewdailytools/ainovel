@@ -49,6 +49,17 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
     blocked = client.post(endpoint + "/confirm", json=data)
     assert blocked.status_code == 409
     assert blocked.json()["code"] == "completion_blocked"
+    configured = client.put(
+        inspection + "/length-targets", json={"targets": {"min_chars": 1, "expected_chapters": 1}}
+    )
+    assert configured.status_code == 200, configured.text
+    data["basis_sha256"] = client.get(endpoint).json()["basis_sha256"]
+    missing_inspection = client.post(endpoint + "/preview", json=data)
+    assert missing_inspection.status_code == 200, missing_inspection.text
+    assert [row["id"] for row in missing_inspection.json()["checks"] if row["status"] != "green"] == [
+        "inspection"
+    ]
+    assert client.post(endpoint + "/confirm", json=data).json()["code"] == "completion_blocked"
     preview = client.get(inspection).json()["preview"]
     created = client.post(
         inspection,

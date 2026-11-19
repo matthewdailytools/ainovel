@@ -110,11 +110,12 @@ class SemanticModel:
         if self.changed:
             self.changed()
         basis = instruction["对照依据"]
+        ending = next(row for row in basis["01"] if row["label"].endswith(" · 终局"))
         pacing_refs = [
             row["id"] for row in basis["10"] if row["text"] in {"沿着门痕寻人。", "第一次进门时听见响铃。"}
         ]
         results = (
-            ("01", "pass", "本次仅给出证据位置。", [basis["01"][0]["id"]]),
+            ("01", "pass", "本次仅给出证据位置。", [basis["01"][0]["id"], ending["id"]]),
             ("02", "fail", "入门后正文明确写出铃声仍未出现。", [basis["02"][0]["id"]]),
             ("10", "fail", "单元安排要求入门时听见铃声，正文却说明铃声仍未响起。", pacing_refs),
         )
@@ -192,6 +193,11 @@ def test_frozen_candidate_keeps_proof_separate_from_author_signature(client, dom
     signed02 = next(row for row in red.json()["items"] if row["check_id"] == "02")
     assert signed02["current_status"] == "red"
     assert signed02["author_review"]["source_candidate_id"] == candidate["id"]
+    assert all(
+        row["current_status"] == "pending" and not row.get("author_review")
+        for row in red.json()["items"]
+        if row["check_id"] in {"01", "10"}
+    )
 
     green = client.post(
         route,
@@ -226,17 +232,34 @@ def test_frozen_candidate_keeps_proof_separate_from_author_signature(client, dom
     assert rejected.json()["code"] == "inspection_candidate_stale"
 
 
-@pytest.mark.parametrize("changed", ["manuscript", "pacing"])
+@pytest.mark.parametrize("changed", ["manuscript", "pacing", "project"])
 def test_candidate_preserves_in_flight_changed_scope_without_auto_signing(
     client, domain, settings, story, changed
 ):
     route, scope, request, chapter = setup_scope(client, domain, story)
     task = client.post(route + "/semantic", json=request)
     assert task.status_code == 202, task.text
+    project_route = f"/api/branches/{story['branch_id']}/conception/project-brief"
+    old_project = read(client, project_route)
+    new_ending = "学徒将铜铃交给渡口守灯人，独自离开。"
 
     def edit():
         if changed == "pacing":
             confirm_unit_summary(client, story, "保留悬念，到第二次进门才响铃。")
+        elif changed == "project":
+            revision = old_project["revision"]
+            impact = read(client, project_route + "/impact", base_revision=revision)
+            updated = client.put(
+                project_route,
+                json={
+                    "base_revision": revision,
+                    "idempotency_key": uuid4().hex,
+                    "idea": old_project["idea"],
+                    "brief": {**old_project["brief"], "ending": new_ending},
+                    "impact_sha256": impact["basis_sha256"],
+                },
+            )
+            assert updated.status_code == 200, updated.text
         else:
             domain.save(chapter["id"], chapter["revision"], "最新章稿。")
 
@@ -248,6 +271,9 @@ def test_candidate_preserves_in_flight_changed_scope_without_auto_signing(
     assert not candidate["current"]
     assert candidate["items"][1]["evidence"][0]["quote"] == chapter["content"]
     assert candidate["items"][2]["basis_excerpts"][1]["text"] == "第一次进门时听见响铃。"
+    assert candidate["items"][0]["basis_excerpts"][1]["text"] == old_project["brief"]["ending"]
+    if changed == "project":
+        assert read(client, project_route)["brief"]["ending"] == new_ending
     assert read(client, route, **scope)["latest"] is None
 
 

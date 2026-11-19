@@ -33,6 +33,163 @@ async function createWork(page: Page, title: string) {
   return { id, branch_id, headers, branch, chapter, save, openInspection }
 }
 
+test('时点与披露证据不足保留未核查，改稿后旧场景和双侧原文仍可定位', async ({ page }) => {
+  const work = await createWork(page, '河岸纸条 · 时点与视角复验')
+  const early = '清晨，阿陶在河岸只见泥印。'
+  const late = '夜里，来人说纸条藏在船舱。'
+  const chapter = await work.chapter('晨间等候', `😀${early}\r\n${late}`)
+  const graph = `${work.branch}/story-graph`
+  async function addRecord(record: Record<string, unknown>) {
+    const { story_revision } = await checked(await page.request.get(graph))
+    const saved = await checked(
+      await page.request.post(`${work.branch}/story-records`, {
+        headers: work.headers,
+        data: { base_story_revision: story_revision, record },
+      }),
+    )
+    return saved.records.find(({ payload }: { payload: { title: string } }) => payload.title === record.title)
+      .id as string
+  }
+  const sight = {
+    chapter_id: chapter.id,
+    revision: chapter.revision,
+    start: 2,
+    end: early.length + 2,
+    quote: early,
+  }
+  const received = {
+    ...sight,
+    start: chapter.content.indexOf(late),
+    end: chapter.content.length,
+    quote: late,
+  }
+  const actor = await addRecord({ kind: 'character', title: '阿陶' })
+  const anchor = await addRecord({
+    kind: 'event',
+    title: '夜里问到纸条',
+    status: 'actual',
+    story_time: '夜里',
+    sources: [received],
+  })
+  await addRecord({
+    kind: 'state',
+    title: '纸条位置对阿陶公开',
+    character_id: actor,
+    event_id: anchor,
+    category: 'knowledge',
+    key: '纸条位置',
+    value: '夜里听人说纸条藏在船舱。',
+    audience: 'character',
+    truth: 'actual',
+    sources: [received],
+  })
+  await addRecord({
+    kind: 'state',
+    title: '披露计划尚待明确',
+    character_id: actor,
+    event_id: anchor,
+    category: 'knowledge',
+    key: '读者披露',
+    value: '读者何时看到纸条尚待核定。',
+    audience: 'reader',
+    truth: 'unknown',
+  })
+  const { story_revision } = await checked(await page.request.get(graph))
+  const scenes = await checked(
+    await page.request.post(`${work.branch}/chapters/${chapter.id}/scene-times`, {
+      headers: work.headers,
+      data: {
+        base_story_revision: story_revision,
+        scene: {
+          title: '晨间守候',
+          source_revision: chapter.revision,
+          start: sight.start,
+          end: sight.end,
+          story_time: '清晨',
+          audience: 'character',
+          character_id: actor,
+        },
+      },
+    }),
+  )
+  expect(scenes.scenes[0].stale).toBe(false)
+  const route = `${work.branch}/workflow-inspections`
+  const panel = await work.openInspection()
+  const previewLink = panel.getByText('本次依据与未核查项', { exact: true })
+  await previewLink.press('Enter')
+  const preview = previewLink.locator('..')
+  const time = preview.getByRole('listitem').filter({ hasText: '04 故事时间、地点与事件因果' }).first()
+  const viewpoint = preview.getByRole('listitem').filter({ hasText: '06 视角、人物所知与读者披露' }).first()
+  await expect(time.getByText('未核查', { exact: true })).toBeVisible()
+  await expect(viewpoint.getByText('未核查', { exact: true })).toBeVisible()
+  await page.setViewportSize({ width: 320, height: 900 })
+  await time.getByText('事件顺序与场景时点', { exact: true }).press('Enter')
+  await expect(time.getByRole('list', { name: '冻结事件' })).toContainText('故事顺序未定 · 夜里')
+  await expect(time.getByRole('list', { name: '冻结场景范围' })).toContainText('故事顺序未定 · 清晨')
+  await viewpoint.getByText('场景视角与知情依据', { exact: true }).press('Enter')
+  await expect(viewpoint.getByRole('list', { name: '冻结知情记录' })).toContainText(
+    '读者所知 · 阿陶 · 待核实',
+  )
+  await expect(viewpoint.getByRole('list', { name: '冻结知情记录' })).toContainText(
+    '获知依据 夜里问到纸条 · 故事顺序未定 · 夜里',
+  )
+  await expect(viewpoint.getByRole('list', { name: '冻结场景范围' })).toContainText('人物所知 · 阿陶')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+  const generated = page.waitForResponse(
+    (reply) => reply.request().method() === 'POST' && reply.url().endsWith(route),
+  )
+  await panel.getByRole('button', { name: '生成体检单' }).press('Enter')
+  const previous = await checked(await generated)
+
+  const revised = await work.save(chapter.id, chapter.revision, '😀阿陶在白天重新询问纸条去向。')
+  await panel.getByRole('button', { name: '重新读取依据' }).press('Enter')
+  await expect(panel.getByText('部分依据已更新，过期项待复检', { exact: true })).toBeVisible()
+  if (!(await preview.evaluate((element: HTMLDetailsElement) => element.open)))
+    await previewLink.press('Enter')
+  await expect(time.getByText('过期', { exact: true })).toBeVisible()
+  await expect(viewpoint.getByText('过期', { exact: true })).toBeVisible()
+  await viewpoint.getByRole('button', { name: '核对 06', exact: true }).press('Enter')
+  const verdicts = panel.getByRole('combobox', { name: '作者判定', exact: true })
+  await expect(verdicts.getByRole('option', { name: '通过', exact: true })).toHaveCount(0)
+  await expect(verdicts.getByRole('option', { name: '不适用', exact: true })).toHaveCount(0)
+  const now = await checked(await page.request.get(route))
+  expect(now.latest.id).toBe(previous.id)
+  for (const check_id of ['04', '06']) {
+    const refused = await page.request.post(route, {
+      headers: work.headers,
+      data: {
+        basis_sha256: now.preview.basis_sha256,
+        author_reviews: [
+          {
+            check_id,
+            status: 'green',
+            basis_note: '依据已经换稿。',
+            reason: '试用当前正文绕过场景复核。',
+            evidence: [
+              {
+                chapter_id: revised.id,
+                revision: revised.revision,
+                start: 0,
+                end: revised.content.length,
+                quote: revised.content,
+              },
+            ],
+          },
+        ],
+      },
+    })
+    expect(refused.status()).toBe(409)
+    expect((await refused.json()).code).toBe('inspection_story_outdated')
+  }
+  const results = panel.getByRole('region', { name: '体检单结果', exact: true })
+  const history = results.getByRole('listitem').filter({ hasText: '06 视角、人物所知与读者披露' }).first()
+  await expect(history.getByText('原判定 未核查', { exact: true })).toBeVisible()
+  await history.getByText('查看体检原文', { exact: true }).press('Enter')
+  await history.getByText(/^打开晨间等候原文 · 修订 1 · 位置 2–/).press('Enter')
+  await history.getByText(new RegExp(`^打开晨间等候原文 · 修订 1 · 位置 ${received.start}–`)).press('Enter')
+  await expect(history.locator('mark')).toHaveText([late, early])
+})
+
 test('跨章体检同时打开冲突双方的固定选区，改稿后历史与新单各读自己的原文', async ({ page }) => {
   const work = await createWork(page, '渡口 · 对账回源')
   const first = await work.chapter('东岸记时', '🐚日落时，学徒已从东岸登船。')

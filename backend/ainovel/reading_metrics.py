@@ -18,6 +18,7 @@ from .domain import utf16_slice
 from .models import Input
 
 FORMAT = "ainovel-reading/1"
+CALCULATION_VERSION = "ainovel-reading-calculation/1"
 REPORT = "reading_metrics"
 MAX_BYTES = 8 * 1024 * 1024
 Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
@@ -323,6 +324,12 @@ class ReadingReport(Input):
 class ImportedReport(Input):
     id: str
     report: ReadingReport
+    source_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$", exclude_if=lambda value: value is None
+    )
+    calculation_version: str | None = Field(
+        default=None, max_length=80, exclude_if=lambda value: value is None
+    )
 
 
 class ReadingMetricsState(Input):
@@ -656,6 +663,11 @@ def store_import(domain, branch_id, blob):
     domain.branch(branch_id)
     data = parse_import(blob)
     report = calculate_report(data)
+    basis = {
+        "format": FORMAT,
+        "source_sha256": sha256(blob).hexdigest(),
+        "calculation_version": CALCULATION_VERSION,
+    }
     with domain.db.connect(True) as tx:
         titles = {
             row["id"]: row["title"]
@@ -666,10 +678,8 @@ def store_import(domain, branch_id, blob):
         for position, chapter in enumerate(report.chapters, 1):
             chapter.title_at_import = titles[chapter.chapter_id]
             chapter.release_position = position
-        identifier = _insert_report(
-            tx, branch_id, report, {"format": FORMAT, "source_sha256": sha256(blob).hexdigest()}
-        )
-    return ImportedReport(id=identifier, report=report)
+        identifier = _insert_report(tx, branch_id, report, basis)
+    return _report_result(identifier, report, basis)
 
 
 def _stored_report(tx, branch_id, identifier):
@@ -715,12 +725,21 @@ def _matches_selection(content, selection):
     return bool(selected.strip()) and selected == selection.quote
 
 
-def _report_view(tx, branch_id, identifier, report):
+def _report_result(identifier, report, basis):
+    return ImportedReport(
+        id=identifier,
+        report=report,
+        source_sha256=basis.get("source_sha256"),
+        calculation_version=basis.get("calculation_version"),
+    )
+
+
+def _report_view(tx, branch_id, identifier, report, basis):
     bound = {
         chapter.chapter_id: chapter.published_text for chapter in report.chapters if chapter.published_text
     }
     if not bound:
-        return ImportedReport(id=identifier, report=report)
+        return _report_result(identifier, report, basis)
     for source in bound.values():
         source.status = "unavailable"
     for row in tx.execute(
@@ -740,7 +759,7 @@ def _report_view(tx, branch_id, identifier, report):
             )
         ):
             source.status = "verified"
-    return ImportedReport(id=identifier, report=report)
+    return _report_result(identifier, report, basis)
 
 
 def bind_published_text(domain, branch_id, identifier, data):
@@ -749,14 +768,18 @@ def bind_published_text(domain, branch_id, identifier, data):
     with domain.db.connect(True) as tx:
         row, report, chapter = _report_chapter(tx, branch_id, identifier, data.chapter_id)
         repeated = tx.execute(
-            "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+            "SELECT id,payload,basis FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
             "AND json_extract(basis,'$.source_report_id')=? "
             "AND json_extract(basis,'$.publication_binding_sha256')=?",
             (branch_id, REPORT, identifier, fingerprint),
         ).fetchone()
         if repeated:
             return _report_view(
-                tx, branch_id, repeated["id"], ReadingReport.model_validate_json(repeated["payload"])
+                tx,
+                branch_id,
+                repeated["id"],
+                ReadingReport.model_validate_json(repeated["payload"]),
+                json.loads(repeated["basis"]),
             )
         revision = _revision(tx, branch_id, data.chapter_id, data.revision_id)
         content = revision["content"]
@@ -780,16 +803,17 @@ def bind_published_text(domain, branch_id, identifier, data):
             sha256=data.sha256,
             **anchors,
         )
+        original_basis = json.loads(row["basis"])
         if previous == publication:
-            return _report_view(tx, branch_id, identifier, report)
+            return _report_view(tx, branch_id, identifier, report, original_basis)
         chapter.published_text = publication
         basis = {
-            **json.loads(row["basis"]),
+            **original_basis,
             "source_report_id": identifier,
             "publication_binding_sha256": fingerprint,
         }
         derived_id = _insert_report(tx, branch_id, report, basis)
-        return _report_view(tx, branch_id, derived_id, report)
+        return _report_view(tx, branch_id, derived_id, report, basis)
 
 
 def register_routes(app, domain):
@@ -805,12 +829,18 @@ def register_routes(app, domain):
         with domain.db.connect() as tx:
             tx.execute("BEGIN")
             row = tx.execute(
-                "SELECT id,payload FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+                "SELECT id,payload,basis FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
                 "ORDER BY rowid DESC LIMIT 1",
                 (branch_id, REPORT),
             ).fetchone()
             latest = (
-                _report_view(tx, branch_id, row["id"], ReadingReport.model_validate_json(row["payload"]))
+                _report_view(
+                    tx,
+                    branch_id,
+                    row["id"],
+                    ReadingReport.model_validate_json(row["payload"]),
+                    json.loads(row["basis"]),
+                )
                 if row
                 else None
             )
@@ -851,7 +881,13 @@ def register_routes(app, domain):
         with domain.db.connect() as tx:
             tx.execute("BEGIN")
             row = _stored_report(tx, branch_id, identifier)
-            return _report_view(tx, branch_id, identifier, ReadingReport.model_validate_json(row["payload"]))
+            return _report_view(
+                tx,
+                branch_id,
+                identifier,
+                ReadingReport.model_validate_json(row["payload"]),
+                json.loads(row["basis"]),
+            )
 
     @app.post(published_text, status_code=201)
     def save_published_text(branch_id: str, identifier: str, data: BindPublishedText) -> ImportedReport:

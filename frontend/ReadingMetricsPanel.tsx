@@ -59,7 +59,12 @@ type ReadingReport = {
   notes: string[]
   diagnostics?: Diagnosis[]
 }
-type ImportedReport = { id: string; report: ReadingReport }
+type ImportedReport = {
+  id: string
+  report: ReadingReport
+  source_sha256?: string | null
+  calculation_version?: string | null
+}
 type HistoryEntry = Pick<ReadingReport, 'mode' | 'release_version' | 'extracted_at'> & {
   id: string
   source_report_id?: string | null
@@ -173,18 +178,19 @@ function downloadTemplate(mode: ReadingReport['mode'], chapters: ChapterOption[]
 }
 
 function ReportDetails({
-  report,
+  imported,
   chapters,
   publicationRoute,
   binding,
   onBind,
 }: {
-  report: ReadingReport
+  imported: ImportedReport
   chapters: ChapterOption[]
   publicationRoute: string
   binding: boolean
   onBind: (source: ReadingPublicationBinding) => Promise<void>
 }) {
+  const { report, source_sha256, calculation_version } = imported
   const [kind, setKind] = useState<MetricKind>(
     report.mode === 'events' ? 'adjacent_follow' : 'aggregate_ratio',
   )
@@ -233,6 +239,24 @@ function ReportDetails({
           {report.cohort.channel && ` · 渠道 ${report.cohort.channel}`}
         </p>
       )}
+      <details>
+        <summary>复算依据</summary>
+        {source_sha256 ? (
+          <p>
+            源文件 SHA-256 <code>{source_sha256}</code>
+          </p>
+        ) : (
+          <p>此历史报告未记录源文件摘要。</p>
+        )}
+        {calculation_version ? (
+          <p>
+            统计口径版本 <code>{calculation_version}</code>
+          </p>
+        ) : (
+          <p>此历史报告未记录统计口径版本。</p>
+        )}
+        <p>请另行保留原始脱敏文件。复算时核对源文件摘要、发布版本和统计窗口。</p>
+      </details>
       <details>
         <summary>发布时间与事件定义</summary>
         {report.chapters.some((chapter) => !chapter.title_at_import) && (
@@ -668,7 +692,7 @@ export function ReadingMetricsPanel({ branchId, chapters }: { branchId: string; 
       {latest && (
         <ReportDetails
           key={latest.id}
-          report={latest.report}
+          imported={latest}
           chapters={chapters}
           publicationRoute={publicationRoute}
           binding={binding}

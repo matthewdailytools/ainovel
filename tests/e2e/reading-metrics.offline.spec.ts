@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { createHash } from 'node:crypto'
 
 test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范围与发布版本', async ({ page }) => {
   await page.goto('/')
@@ -59,26 +60,31 @@ test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范�
     channel: '测试来源',
     kind: 'read',
   })
+  const eventFile = Buffer.from(
+    JSON.stringify({
+      ...common,
+      mode: 'events',
+      events: [
+        { ...event(0, '甲', '01'), channel: '推荐' },
+        event(0, '甲', '02'),
+        { ...event(0, '乙', '01'), channel: '搜索' },
+        event(1, '甲', '11'),
+      ],
+    }),
+  )
+  const sourceHash = createHash('sha256').update(eventFile).digest('hex')
   await file.setInputFiles({
     name: 'reading-events.json',
     mimeType: 'application/json',
-    buffer: Buffer.from(
-      JSON.stringify({
-        ...common,
-        mode: 'events',
-        events: [
-          { ...event(0, '甲', '01'), channel: '推荐' },
-          event(0, '甲', '02'),
-          { ...event(0, '乙', '01'), channel: '搜索' },
-          event(1, '甲', '11'),
-        ],
-      }),
-    ),
+    buffer: eventFile,
   })
   await importButton.press('Enter')
   await expect(panel.getByRole('heading', { name: '读者事件报告 · 遗铃发布版 1' })).toBeVisible()
   await expect(panel.getByText('按共同开放假设统计，读者资格未观测')).toBeVisible()
   await expect(panel.getByText(/跟踪窗口 168 小时/)).toBeVisible()
+  await panel.getByText('复算依据', { exact: true }).press('Enter')
+  await expect(panel.getByText(sourceHash, { exact: true })).toBeVisible()
+  await expect(panel.getByText('ainovel-reading-calculation/1', { exact: true })).toBeVisible()
   const followTable = panel.getByRole('table', { name: '相邻章追读率' })
   await expect(
     followTable.getByRole('row', { name: /拾铃 → 入门/ }).getByRole('cell', { name: '50%' }),
@@ -145,6 +151,8 @@ test('从故事与审阅导入追读事件和汇总，保留窗口、缺失范�
   await expect(panel.getByRole('heading', { name: '独立读人数汇总 · 遗铃发布版 2' })).toBeVisible()
   await panel.getByRole('combobox', { name: '发布报告', exact: true }).selectOption({ index: 1 })
   await expect(panel.getByRole('heading', { name: '读者事件报告 · 遗铃发布版 1' })).toBeVisible()
+  await panel.getByText('复算依据', { exact: true }).press('Enter')
+  await expect(panel.getByText(sourceHash, { exact: true })).toBeVisible()
 
   await file.setInputFiles({
     name: 'reading-diagnosis.json',

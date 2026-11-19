@@ -8448,7 +8448,15 @@
       "ImportedReport": {
         "properties": {
           "id": { "type": "string", "title": "Id" },
-          "report": { "$ref": "#/components/schemas/ReadingReport" }
+          "report": { "$ref": "#/components/schemas/ReadingReport" },
+          "source_sha256": {
+            "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }],
+            "title": "Source Sha256"
+          },
+          "calculation_version": {
+            "anyOf": [{ "type": "string", "maxLength": 80 }, { "type": "null" }],
+            "title": "Calculation Version"
+          }
         },
         "additionalProperties": false,
         "type": "object",
