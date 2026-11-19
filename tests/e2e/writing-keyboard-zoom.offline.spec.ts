@@ -14,22 +14,25 @@ async function focusWithTab(page: Page, target: Locator, key = 'Tab') {
 }
 
 async function expectVisibleFocus(target: Locator, editor = false) {
-  expect(
-    await target.evaluate((element, codeEditor) => {
-      const outlined = codeEditor ? element.closest('.cm-editor')! : element
-      const outline = getComputedStyle(outlined)
-      const bounds = element.getBoundingClientRect()
-      const visible = document.elementFromPoint(
-        Math.max(0, Math.min(innerWidth - 1, (bounds.left + bounds.right) / 2)),
-        Math.max(0, Math.min(innerHeight - 1, (bounds.top + bounds.bottom) / 2)),
-      )
-      return (
-        element.contains(visible) &&
-        outline.outlineStyle !== 'none' &&
-        Number.parseFloat(outline.outlineWidth) > 0
-      )
-    }, editor),
-  ).toBe(true)
+  // Native focus is synchronous, but CodeMirror updates its focus class on a later timer.
+  await expect
+    .poll(() =>
+      target.evaluate((element, codeEditor) => {
+        const outlined = codeEditor ? element.closest('.cm-editor')! : element
+        const outline = getComputedStyle(outlined)
+        const bounds = element.getBoundingClientRect()
+        const visible = document.elementFromPoint(
+          Math.max(0, Math.min(innerWidth - 1, (bounds.left + bounds.right) / 2)),
+          Math.max(0, Math.min(innerHeight - 1, (bounds.top + bounds.bottom) / 2)),
+        )
+        return {
+          focused: element === document.activeElement,
+          unobscured: element.contains(visible),
+          visibleOutline: outline.outlineStyle !== 'none' && Number.parseFloat(outline.outlineWidth) > 0,
+        }
+      }, editor),
+    )
+    .toEqual({ focused: true, unobscured: true, visibleOutline: true })
 }
 
 test('M5 正常写作可用键盘切章、编辑及保存，浏览器网页缩放 200% 后仍可操作', async ({
