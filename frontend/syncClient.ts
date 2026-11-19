@@ -605,6 +605,33 @@ export function readChapterBeforeArchive(scope: SyncScope, archived: SyncReceipt
   })
 }
 
+export function readChapterReceiptsBefore(
+  scope: SyncScope,
+  chapterHeads: readonly SyncReceipt[],
+  sequence: number,
+) {
+  const key = scopeKey(scope)
+  return transact('readonly', (tx) =>
+    Promise.all(
+      chapterHeads.map(async (head) => {
+        let receipt: SyncReceipt | null = head
+        while (receipt && receipt.sequence >= sequence) {
+          const prior = await receiptOf(tx, key, receipt.parent_revision)
+          if (
+            prior &&
+            (prior.object_id !== head.object_id ||
+              prior.sequence >= receipt.sequence ||
+              prior.status === 'conflict')
+          )
+            return null
+          receipt = prior
+        }
+        return receipt?.tombstone ? null : receipt
+      }),
+    ),
+  )
+}
+
 export async function readSyncHead(scope: SyncScope, objectId: string) {
   const key = scopeKey(scope)
   return transact('readonly', async (tx) =>

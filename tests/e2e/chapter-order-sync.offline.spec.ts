@@ -17,7 +17,7 @@ type Revision = {
 type Package = {
   format: string
   novel: unknown
-  branch: unknown
+  branch: { story_revision: number }
   chapters: Chapter[]
   revisions: Revision[]
   outline_history: { adopted_revision_id: string; versions: { id: string; plan: unknown }[] }
@@ -63,7 +63,7 @@ async function exportWeb(web: Page): Promise<Package> {
   return JSON.parse(await readFile(await (await download).path(), 'utf8')) as Package
 }
 
-async function prepareDesktop(page: Page, title: string) {
+async function prepareDesktop(page: Page, title: string, titles?: string[]) {
   await page.goto('/')
   const { csrf } = await checked<{ csrf: string }>(await page.request.get('/api/session'))
   const headers = { 'X-Ainovel-CSRF': csrf }
@@ -72,46 +72,46 @@ async function prepareDesktop(page: Page, title: string) {
   const novel = await request<{ id: string; branch_id: string }>('/api/novels', 'POST', { title })
   const branch = `/api/branches/${novel.branch_id}`
   const endpoint = `${cloud}/api/sync/works/${novel.branch_id}`
-  const common = await Promise.all(
-    ['桥下', '旧宅'].map((title) => request<Chapter>(`${branch}/chapters`, 'POST', { title })),
-  )
-  // Use the actual directory order when preparing the confirmed outline.
-  common.sort((a, b) => a.position - b.position)
-  for (const chapter of common) {
+  const common: Chapter[] = []
+  for (const title of titles ?? ['桥下', '旧宅']) {
+    const chapter = await request<Chapter>(`${branch}/chapters`, 'POST', { title })
     await request(`/api/chapters/${chapter.id}`, 'PUT', {
       base_revision: 0,
       content: `${chapter.title}有铃声。`,
     })
+    common.push(chapter)
   }
-  const outline = `${branch}/outline-workspace`
-  const { draft } = await request<{ draft: { revision: number } }>(outline, 'PUT', {
-    base_revision: 0,
-    plan: {
-      summary: '从桥下的信物查到旧宅。',
-      volumes: common.map(({ id }, index) => ({
-        id: `confirmed-volume-${index}`,
-        title: `既有卷 ${index + 1}`,
-        summary: '核对信物来历。',
-        units: [
-          {
-            id: `confirmed-unit-${index}`,
-            title: '追踪',
-            summary: '按留下的标记推进。',
-            chapters: [
-              {
-                chapter_id: id,
-                goal: '核对刻痕',
-                obstacle: '痕迹模糊',
-                turn: '发现第二笔',
-                result: '查到信物',
-              },
-            ],
-          },
-        ],
-      })),
-    },
-  })
-  await request(`${outline}/confirm`, 'POST', { base_revision: draft.revision })
+  if (!titles) {
+    const outline = `${branch}/outline-workspace`
+    const { draft } = await request<{ draft: { revision: number } }>(outline, 'PUT', {
+      base_revision: 0,
+      plan: {
+        summary: '从桥下的信物查到旧宅。',
+        volumes: common.map(({ id }, index) => ({
+          id: `confirmed-volume-${index}`,
+          title: `既有卷 ${index + 1}`,
+          summary: '核对信物来历。',
+          units: [
+            {
+              id: `confirmed-unit-${index}`,
+              title: '追踪',
+              summary: '按留下的标记推进。',
+              chapters: [
+                {
+                  chapter_id: id,
+                  goal: '核对刻痕',
+                  obstacle: '痕迹模糊',
+                  turn: '发现第二笔',
+                  result: '查到信物',
+                },
+              ],
+            },
+          ],
+        })),
+      },
+    })
+    await request(`${outline}/confirm`, 'POST', { base_revision: draft.revision })
+  }
   const [desktopToken, webToken, coldToken] = await Promise.all(
     ['desktop', 'web', 'cold'].map(async (device_id) => {
       const { token } = await checked<{ token: string }>(
@@ -153,6 +153,43 @@ async function prepareDesktop(page: Page, title: string) {
     coldToken,
     request,
   }
+}
+
+async function backupDesktop(page: Page, branch: string) {
+  const reply = await page.request.get(`${branch}/manuscript-backup`)
+  try {
+    expect(reply.ok()).toBe(true)
+    return await reply.body()
+  } finally {
+    await reply.dispose()
+  }
+}
+
+async function importWebBackup(web: Page, buffer: Buffer) {
+  await web.goto('/offline/')
+  await expect.poll(() => web.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+  await web.getByLabel('从独立备份恢复作品', { exact: true }).setInputFiles({
+    name: '旧章序.ainovel-backup',
+    mimeType: 'application/octet-stream',
+    buffer,
+  })
+  await expect(web.getByText('已校验并恢复独立作品备份。', { exact: true })).toBeVisible()
+}
+
+async function previewWebCheckpoint(web: Page, snapshotId: string) {
+  const history = web.getByLabel('已导入的卷书恢复点', { exact: true })
+  await history.getByText('已导入的卷书恢复点', { exact: true }).press('Enter')
+  await history.getByRole('combobox', { name: '选择已归档恢复点', exact: true }).selectOption(snapshotId)
+  await history.getByRole('button', { name: '预览归档原位恢复', exact: true }).press('Enter')
+  return history
+}
+
+async function restoreWebCheckpoint(web: Page, snapshotId: string) {
+  const history = await previewWebCheckpoint(web, snapshotId)
+  const preview = history.getByRole('region', { name: '归档原位恢复预览', exact: true })
+  await preview.getByRole('checkbox', { name: '我已核对恢复影响', exact: true }).check()
+  await preview.getByRole('button', { name: '原位恢复为新修订', exact: true }).press('Enter')
+  await expect(history.getByRole('status').filter({ hasText: '已恢复为新的当前修订' })).toBeVisible()
 }
 
 async function openWeb(web: Page, title: string, pack: object, token: string, device: string) {
@@ -310,23 +347,13 @@ test('独立 Web 原位恢复先发布整组旧章序，回执丢失后仍准确
     scope_id: null,
     label: '旧章序和原文选区',
   })
-  const reply = await page.request.get(`${f.branch}/manuscript-backup`)
-  expect(reply.ok()).toBe(true)
-  const backup = await reply.body()
-  await reply.dispose()
+  const backup = await backupDesktop(page, f.branch)
   await f.desktopSync()
 
   const context = await browser.newContext({ viewport: { width: 420, height: 880 } })
   try {
     const web = await context.newPage()
-    await web.goto('/offline/')
-    await expect.poll(() => web.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
-    await web.getByLabel('从独立备份恢复作品', { exact: true }).setInputFiles({
-      name: '旧章序.ainovel-backup',
-      mimeType: 'application/octet-stream',
-      buffer: backup,
-    })
-    await expect(web.getByText('已校验并恢复独立作品备份。', { exact: true })).toBeVisible()
+    await importWebBackup(web, backup)
     const sync = await connectWeb(web, title, f.webToken, 'web')
     await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
     await sync()
@@ -340,14 +367,7 @@ test('独立 Web 原位恢复先发布整组旧章序，回执丢失后仍准确
     const common = await f.checkpoint()
 
     await context.setOffline(true)
-    const history = web.getByLabel('已导入的卷书恢复点', { exact: true })
-    await history.getByText('已导入的卷书恢复点', { exact: true }).press('Enter')
-    await history.getByRole('combobox', { name: '选择已归档恢复点', exact: true }).selectOption(old.id)
-    await history.getByRole('button', { name: '预览归档原位恢复', exact: true }).press('Enter')
-    const preview = history.getByRole('region', { name: '归档原位恢复预览', exact: true })
-    await preview.getByRole('checkbox', { name: '我已核对恢复影响', exact: true }).check()
-    await preview.getByRole('button', { name: '原位恢复为新修订', exact: true }).press('Enter')
-    await expect(history.getByRole('status').filter({ hasText: '已恢复为新的当前修订' })).toBeVisible()
+    await restoreWebCheckpoint(web, old.id)
     const local = await exportWeb(web)
     expect(chapterPositions(local)).toEqual(original)
     const newSource = chain(local, first).at(-1)!
@@ -428,6 +448,167 @@ test('独立 Web 原位恢复先发布整组旧章序，回执丢失后仍准确
     expect(await f.checkpoint()).toEqual(final)
   } finally {
     await context.close()
+  }
+})
+
+test('Web 混合回滚断线重开后用原提交续传被占用的章位', async ({ page, browser }) => {
+  const title = '混合章序续传验收'
+  const f = await prepareDesktop(page, title, ['初始一', '初始二', '初始三', '初始四'])
+  const [first, second, third, fourth] = f.common
+  const original = f.common.map(({ id, position }) => [id, position])
+  const snapshot = await f.request<{ id: string }>(`${f.branch}/work-snapshots`, 'POST', {
+    scope: 'book',
+    label: '旧章序与活动章',
+  })
+  const backup = await backupDesktop(page, f.branch)
+  const context = await browser.newContext()
+  try {
+    const web = await context.newPage()
+    await importWebBackup(web, backup)
+    const sync = await connectWeb(web, title, f.webToken, 'web')
+    await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
+    await sync()
+    expect(chapterPositions(await exportWeb(web))).toEqual(original)
+
+    await f.request(`/api/chapters/${second.id}/archive`, 'POST', { base_revision: 1, archived: true })
+    const added = await f.request<Chapter>(`${f.branch}/chapters`, 'POST', { title: '后加章' })
+    await f.request(`/api/chapters/${added.id}`, 'PUT', { base_revision: 0, content: '额外的独立正文。' })
+    for (const direction of ['up', 'down']) {
+      const { branch } = await f.desktopPack()
+      await f.request(`/api/chapters/${added.id}/move`, 'POST', {
+        direction,
+        base_story_revision: branch.story_revision,
+      })
+    }
+    await f.desktopSync()
+    const latest = [
+      [first.id, 1],
+      [third.id, 2],
+      [fourth.id, 3],
+      [added.id, 4],
+    ]
+    await expect
+      .poll(async () => {
+        await sync()
+        return chapterPositions(await exportWeb(web))
+      })
+      .toEqual(latest)
+    const beforeRestore = await f.checkpoint()
+
+    await context.setOffline(true)
+    await restoreWebCheckpoint(web, snapshot.id)
+    const restored = await exportWeb(web)
+    expect(chapterPositions(restored)).toEqual(original)
+    await context.setOffline(false)
+    const chapterIds = new Set([`chapter:${third.id}`, `chapter:${fourth.id}`])
+    let restoredId = ''
+    let interrupted: { object_id: string; change_id: string } | undefined
+    await web.route(
+      (url) => url.pathname.endsWith('/push'),
+      async (route) => {
+        const change = route.request().postDataJSON() as { object_id: string; change_id: string }
+        if (restoredId && chapterIds.has(change.object_id)) {
+          interrupted = change
+          await route.abort('connectionreset')
+        } else {
+          if (change.object_id === `chapter:${second.id}`) restoredId = change.change_id
+          await route.continue()
+        }
+      },
+    )
+    await sync()
+    await expect(web.getByRole('alert')).toBeVisible()
+    expect(restoredId).toBeTruthy()
+    expect(interrupted?.object_id).toBe(`chapter:${third.id}`)
+    await web.close()
+
+    const reopened = await context.newPage()
+    await reopened.goto('/offline/')
+    const resumed = await connectWeb(reopened, title, f.webToken, 'web')
+    expect(chapterPositions(await exportWeb(reopened))).toEqual(original)
+    await expect
+      .poll(async () => {
+        await resumed()
+        return (await f.desktopSync()).deferred
+      })
+      .toEqual([])
+    const desktop = await f.desktopPack()
+    expect(chapterPositions(desktop)).toEqual(original)
+    expect(desktop.chapters.find(({ id }) => id === added.id)?.archived).toBe(1)
+    for (const chapter of [...f.common, added])
+      expect(chain(desktop, chapter)).toEqual(chain(restored, chapter))
+
+    const checkpoint = await f.checkpoint()
+    const { changes } = await checked<{ changes: { object_id: string; change_id: string }[] }>(
+      await page.request.get(`${f.endpoint}/pull?after=${beforeRestore.cursor}&limit=50`, {
+        headers: { Authorization: `Bearer ${f.desktopToken}`, 'X-Ainovel-Ledger': checkpoint.ledger_id },
+      }),
+    )
+    expect(changes.filter(({ change_id }) => change_id === restoredId)).toHaveLength(1)
+    expect(changes.filter(({ object_id }) => object_id === interrupted?.object_id)).toEqual([
+      expect.objectContaining({ change_id: interrupted?.change_id }),
+    ])
+    await resumed()
+    expect(await f.checkpoint()).toEqual(checkpoint)
+  } finally {
+    await context.close()
+  }
+})
+
+test('正式大纲在合法重排后可由备份和云端冷恢复', async ({ page, browser }) => {
+  const title = '重排后正式大纲冷恢复验收'
+  const f = await prepareDesktop(page, title)
+  const [first, second] = f.common
+  const outline = activeOutline(f.baseline)
+  expect(outline).toBeDefined()
+  const snapshot = await f.request<{ id: string }>(`${f.branch}/work-snapshots`, 'POST', {
+    scope: 'book',
+    label: '旧大纲与章序',
+  })
+  await moveFirstChapterLater(page, f.novel.id)
+  const moved = [
+    [second.id, 1],
+    [first.id, 2],
+  ]
+  await expect.poll(async () => chapterPositions(await f.desktopPack())).toEqual(moved)
+  await f.desktopSync()
+
+  const fromBackup = await browser.newContext()
+  const fromCloud = await browser.newContext()
+  try {
+    const restored = await fromBackup.newPage()
+    await importWebBackup(restored, await backupDesktop(page, f.branch))
+    await restored.getByRole('combobox', { name: '离线作品', exact: true }).selectOption({ label: title })
+    const cold = await fromCloud.newPage()
+    const { format, novel, branch } = f.baseline
+    const sync = await openWeb(
+      cold,
+      title,
+      { format, novel, branch, chapters: [], revisions: [] },
+      f.coldToken,
+      'cold',
+    )
+    await sync()
+    for (const tab of [restored, cold]) {
+      const pack = await exportWeb(tab)
+      expect(chapterPositions(pack)).toEqual(moved)
+      expect(activeOutline(pack)).toEqual(outline)
+      for (const chapter of f.common) expect(chain(pack, chapter)).toEqual(chain(f.baseline, chapter))
+      const workbench = tab.getByLabel('离线大纲台', { exact: true })
+      await workbench.getByText('大纲台', { exact: true }).click()
+      await expect(workbench.getByText(`已确认修订 ${outline!.id}`, { exact: false })).toBeVisible()
+    }
+    await fromBackup.setOffline(true)
+    await restoreWebCheckpoint(restored, snapshot.id)
+    const recovered = await exportWeb(restored)
+    expect(chapterPositions(recovered)).toEqual([
+      [first.id, 1],
+      [second.id, 2],
+    ])
+    expect(activeOutline(recovered)).toEqual(outline)
+  } finally {
+    await fromCloud.close()
+    await fromBackup.close()
   }
 })
 

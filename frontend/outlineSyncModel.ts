@@ -99,6 +99,11 @@ export type OutlineDirectoryChapter = {
   position: number
   archived?: number | boolean
 }
+export type OutlineDirectoryMove = { chapterId: string; from: number; to: number }
+export type OutlineDirectoryHistory = {
+  batches: readonly (readonly OutlineDirectoryMove[])[]
+  positionsAtAdoption: ReadonlyMap<string, number>
+}
 export type OutlineExistingPromise = {
   id: string
   title: string
@@ -109,6 +114,12 @@ export type OutlineExistingPromise = {
 
 const invalid = (message: string): never => {
   throw new Error(message)
+}
+
+export class OutlineDirectoryOrderError extends Error {
+  constructor() {
+    super('章纲顺序须与章节目录一致。')
+  }
 }
 
 function object(value: unknown, keys?: readonly string[]): Record<string, unknown> {
@@ -477,7 +488,11 @@ export type OutlineSourceLookup = {
   reference?: (id: string) => Awaitable<ArchivedReferenceCard | null | undefined>
 }
 
-export async function validateOutlineVersionSources(version: OutlineVersion, lookup: OutlineSourceLookup) {
+export async function validateOutlineVersionSources(
+  version: OutlineVersion,
+  lookup: OutlineSourceLookup,
+  chapterOrder: 'live' | 'frozen' = 'live',
+) {
   if (version.parent_id && !(await lookup.outline(version.parent_id))) invalid('大纲父版本尚未到齐。')
   if (version.project_version_id && !(await lookup.project(version.project_version_id)))
     invalid('大纲引用的立项版本尚未到齐。')
@@ -519,7 +534,7 @@ export async function validateOutlineVersionSources(version: OutlineVersion, loo
         directory.position < 1
       )
         return invalid('大纲引用的有效章节目录尚未到齐。')
-      if (directory.position < position) invalid('章纲顺序须与章节目录一致。')
+      if (chapterOrder === 'live' && directory.position < position) throw new OutlineDirectoryOrderError()
       position = directory.position
     }
   }

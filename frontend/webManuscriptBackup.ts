@@ -7,7 +7,16 @@ const maxFrameCharacters = 128 * 1024 * 1024
 const maxFrames = 250_000
 const digestPattern = /^[a-f0-9]{64}$/
 
-const roots = ['format', 'novel', 'branch', 'chapters', 'revisions', 'source_revisions', 'evidence']
+const roots = [
+  'format',
+  'novel',
+  'branch',
+  'chapters',
+  'revisions',
+  'source_revisions',
+  'evidence',
+  'outline_adoption',
+]
 const histories = {
   project_history: ['adopted_revision_id', 'versions'],
   settings_history: ['adopted_revision_id', 'versions', 'source_devices'],
@@ -40,7 +49,7 @@ function* partition(pack: ManuscriptPack): Iterable<[string, unknown]> {
   }
 }
 
-function* frames(pack: ManuscriptPack): Iterable<Frame> {
+function* frames(pack: ManuscriptPack, outlineAdoption?: string | null): Iterable<Frame> {
   for (const [path, value] of partition(pack)) {
     if (Array.isArray(value)) {
       yield [path, 'list', null]
@@ -49,12 +58,18 @@ function* frames(pack: ManuscriptPack): Iterable<Frame> {
       yield [path, 'value', value]
     }
   }
+  if (outlineAdoption !== undefined && pack.outline_history?.adopted_revision_id)
+    yield ['outline_adoption', 'value', outlineAdoption]
 }
 
-export async function encodeWebManuscriptBackup(pack: ManuscriptPack, digest: Digest) {
+export async function encodeWebManuscriptBackup(
+  pack: ManuscriptPack,
+  digest: Digest,
+  outlineAdoption?: string | null,
+) {
   const records: BlobPart[] = [`${heading}\n`]
   const hashes: string[] = []
-  for (const frame of frames(pack)) {
+  for (const frame of frames(pack, outlineAdoption)) {
     const json = JSON.stringify(frame)
     if (json.length > maxFrameCharacters || hashes.length === maxFrames)
       throw new Error('此作品的单项记录或记录数量超过独立备份上限。已保存的作品和历史仍可使用。')
@@ -130,7 +145,7 @@ function addFrame(pack: Record<string, unknown>, data: unknown) {
   }
 }
 
-export async function decodeWebManuscriptBackup(file: Blob, digest: Digest): Promise<unknown> {
+export async function decodeWebManuscriptBackup(file: Blob, digest: Digest) {
   const pack: Record<string, unknown> = Object.create(null)
   const hashes: string[] = []
   let opened = false
@@ -163,5 +178,8 @@ export async function decodeWebManuscriptBackup(file: Blob, digest: Digest): Pro
     }
   }
   if (!sealed) invalid()
-  return pack
+  const { outline_adoption: outlineAdoption, ...manuscript } = pack
+  if (outlineAdoption !== undefined && outlineAdoption !== null && typeof outlineAdoption !== 'string')
+    invalid()
+  return { manuscript, outlineAdoption }
 }

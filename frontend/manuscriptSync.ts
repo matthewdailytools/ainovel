@@ -7,6 +7,7 @@ import {
   forkLocalManuscript,
   hasLocalChapterAdoption,
   manuscriptHash,
+  OfflineStoreError,
   readLocalOutline,
   readLocalPublications,
   readLocalSyncSnapshot,
@@ -19,10 +20,12 @@ import {
 } from './offlineStore'
 import { settingUseVersionSlot, type SettingUseSyncObject } from './settingUseSyncModel'
 import {
+  OutlineDirectoryOrderError,
   outlineChapterPlans,
   requiredOutlineStoryRecord,
   validateOutlineActiveBasis,
   validateOutlineVersionSources,
+  type OutlineDirectoryHistory,
   type OutlineVersion,
 } from './outlineSyncModel'
 import {
@@ -60,6 +63,7 @@ import {
   queueSyncResolution,
   readChapterDirectory,
   readChapterBeforeArchive,
+  readChapterReceiptsBefore,
   readPublicationReceipts,
   readSyncConflict,
   readSyncProgress,
@@ -482,6 +486,7 @@ async function reconcileChapterDirectories(
         return { objectId: child.object_id, receiptId: child.change_id, baseline }
       })
       await markChapterDirectory(scope, manifest, members, !!own)
+      directory.baseline = { revision: directory.revision, signature: 'null', sequence: directory.sequence }
       for (const { objectId, receiptId, baseline } of members) {
         const head = chapters.get(objectId)!
         head.directoryParts = head.directoryParts!.filter((id) => id !== receiptId)
@@ -497,6 +502,46 @@ async function reconcileChapterDirectories(
   for (const head of chapters.values()) {
     if (head.directoryParts?.length) deferred.set(head.id, '等待整组云端目录调整。')
   }
+}
+
+async function readOutlineDirectoryHistory(
+  scope: SyncScope,
+  heads: SyncHead[],
+  outlineSequence: number,
+): Promise<OutlineDirectoryHistory | undefined> {
+  const laterDirectories = heads
+    .filter(({ id, sequence }) => id.startsWith(CHAPTER_DIRECTORY_PREFIX) && sequence > outlineSequence)
+    .sort((left, right) => right.sequence - left.sequence)
+  if (
+    !laterDirectories.length ||
+    laterDirectories.some(({ baseline, receipt, revision }) => !receipt || baseline?.revision !== revision) ||
+    heads.some(({ directoryParts }) => directoryParts?.length)
+  )
+    return undefined
+  const [batches, chapterReceipts] = await Promise.all([
+    Promise.all(
+      laterDirectories.map(async ({ receipt }) =>
+        (await readChapterDirectory(scope, receipt!)).map(({ chapterId, from, to }) => ({
+          chapterId,
+          from,
+          to,
+        })),
+      ),
+    ),
+    readChapterReceiptsBefore(
+      scope,
+      heads.flatMap(({ id, receipt }) => (id.startsWith('chapter:') && receipt ? [receipt] : [])),
+      outlineSequence,
+    ),
+  ])
+  const positionsAtAdoption = new Map<string, number>()
+  for (const receipt of chapterReceipts) {
+    if (!receipt) continue
+    const id = receipt.object_id.slice('chapter:'.length)
+    const position = knownChapterPosition(receipt.payload, scope.workId, id)
+    if (position !== undefined) positionsAtAdoption.set(id, position)
+  }
+  return { batches, positionsAtAdoption }
 }
 
 async function reconcile(project: LocalProject, scope: SyncScope) {
@@ -640,13 +685,32 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         (signature !== target && signature === safeBase) ||
         (resolution && publicationId)
       ) {
-        if (
-          !(await applySyncedObject(project.novel.id, head.id, object, signature, {
-            publicationId,
-            consumePublication: !!resolution,
-            archiveSource: archiveSource ?? undefined,
-          }))
-        ) {
+        const options = {
+          publicationId,
+          consumePublication: !!resolution,
+          archiveSource: archiveSource ?? undefined,
+        }
+        let saved: boolean
+        try {
+          saved = await applySyncedObject(project.novel.id, head.id, object, signature, options)
+        } catch (error) {
+          if (
+            object?.kind !== 'outline-head' ||
+            !(error instanceof OfflineStoreError && error.cause instanceof OutlineDirectoryOrderError)
+          )
+            throw error
+          const outlineDirectoryHistory = await readOutlineDirectoryHistory(
+            scope,
+            heads,
+            head.receipt.sequence,
+          )
+          if (!outlineDirectoryHistory) throw error
+          saved = await applySyncedObject(project.novel.id, head.id, object, signature, {
+            ...options,
+            outlineDirectoryHistory,
+          })
+        }
+        if (!saved) {
           deferred.set(head.id, '本机内容已变化，下次同步会重新核对。')
           continue
         }
@@ -733,11 +797,11 @@ async function prepareChapterDirectory(
       value?.kind === 'chapter' ? [[value.chapter.id, value.chapter.position] as const] : [],
     ),
   )
+  const liveHeads = heads.filter(({ id, receipt }) => id.startsWith('chapter:') && !receipt?.tombstone)
   const cloud = new Map(
-    heads.flatMap((head) => {
-      if (!head.id.startsWith('chapter:') || !head.receipt || head.receipt.tombstone) return []
+    liveHeads.flatMap((head) => {
       const id = head.id.slice('chapter:'.length)
-      const position = knownChapterPosition(head.receipt.payload, scope.workId, id)
+      const position = knownChapterPosition(head.receipt?.payload, scope.workId, id)
       return position === undefined ? [] : [[id, { head, position }] as const]
     }),
   )
@@ -756,8 +820,9 @@ async function prepareChapterDirectory(
     staged = undefined
   }
   const knownPositions = new Set([...cloud.values()].map(({ position }) => position))
+  const hasCloudDuplicate = knownPositions.size !== cloud.size
   const sameMembership = cloud.size === active.size && [...active.keys()].every((id) => cloud.has(id))
-  const moves = sameMembership || knownPositions.size !== cloud.size ? desired : closedDirectoryMoves(desired)
+  const moves = sameMembership || hasCloudDuplicate ? desired : closedDirectoryMoves(desired)
   moves.sort((left, right) => left.position - right.position)
   const participants = new Set(
     moves.length >= 2 ? moves.map(({ chapter_id }) => `chapter:${chapter_id}`) : [],
@@ -770,7 +835,7 @@ async function prepareChapterDirectory(
     !staged &&
     participants.size >= 2 &&
     moves.length <= MAX_DIRECTORY_CHAPTERS &&
-    knownPositions.size === cloud.size &&
+    !hasCloudDuplicate &&
     !alreadyQueued.length &&
     !state.blockedObjects.some((id) => participants.has(id)) &&
     moves.every((move) => {
@@ -814,9 +879,21 @@ async function prepareChapterDirectory(
     )
     for (const row of alreadyQueued) {
       if (row.kind !== 'push') continue
-      const { object_id, change_id, payload } = row.request
+      const { object_id, change_id, parent_revision, payload } = row.request
       const id = object_id.slice('chapter:'.length)
-      if (knownChapterPosition(payload, scope.workId, id) !== cloud.get(id)?.position) continue
+      const current = cloud.get(id)
+      const target = knownChapterPosition(payload, scope.workId, id)
+      // A partially sent ordinary restore can leave duplicates. Resume only a stored move that frees
+      // its old slot without taking another chapter's place, based on the latest confirmed directory.
+      const canResumeMove =
+        hasCloudDuplicate &&
+        liveHeads.length === cloud.size &&
+        target !== undefined &&
+        current?.head.revision === parent_revision &&
+        active.get(id) === target &&
+        !knownPositions.has(target) &&
+        ![...active].some(([other, position]) => other !== id && position === target)
+      if (target !== current?.position && !canResumeMove) continue
       prepared.add(change_id)
       const source = payload?.head
       let revision = source && typeof source === 'object' && !Array.isArray(source) ? source.id : undefined

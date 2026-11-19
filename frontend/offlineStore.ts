@@ -26,6 +26,7 @@ import {
   outlineObjectSignature,
   validateOutlineHistory,
   validateOutlineSyncObject,
+  type OutlineDirectoryHistory,
   type OutlineHeadObject,
   type OutlineHistory,
   type OutlineVersion,
@@ -333,6 +334,7 @@ type ApplyOptions = {
   publicationId?: string | null
   consumePublication?: boolean
   archiveSource?: Extract<SyncedObject, { kind: 'chapter' }>
+  outlineDirectoryHistory?: OutlineDirectoryHistory
 }
 const projectStores = ['projects', 'projectHeads', 'projectVersions'] satisfies Store[]
 const manuscriptStores = ['projects', 'chapters', 'revisions', 'sourceRevisions'] satisfies Store[]
@@ -352,8 +354,9 @@ export class OfflineStoreError extends Error {
   constructor(
     readonly code: 'format' | 'ownership' | 'conflict' | 'quota' | 'database' | 'missing',
     message: string,
+    options?: ErrorOptions,
   ) {
-    super(message)
+    super(message, options)
   }
 }
 
@@ -1756,6 +1759,11 @@ export async function exportLocalManuscript(
   includeReferenceEvidenceFor: readonly string[] = [],
 ): Promise<ManuscriptPack> {
   const pack = await readManuscriptPackage(projectId, includeReferenceEvidenceFor)
+  await verifyManuscriptExport(pack)
+  return pack
+}
+
+async function verifyManuscriptExport(pack: ManuscriptPack) {
   if (pack.restore_state)
     await validatePortableRestoreState(
       pack.restore_state,
@@ -1778,15 +1786,21 @@ export async function exportLocalManuscript(
   ) {
     invalid(inspectionExcerptTransferReason)
   }
-  return pack
 }
 
 export async function exportLocalBackup(
   projectId: string,
   includeReferenceEvidenceFor: readonly string[] = [],
 ) {
-  const pack = await exportLocalManuscript(projectId, includeReferenceEvidenceFor)
-  return encodeWebManuscriptBackup(pack, manuscriptHash)
+  const [pack, outlineHead] = await transact(manuscriptPackageStores, 'readonly', async (tx) => {
+    const project = await readProject(tx, projectId)
+    return Promise.all([
+      readManuscriptPackageTx(tx, project, includeReferenceEvidenceFor),
+      outlineStore.readOutlineHead(tx, project.branch.id),
+    ])
+  })
+  await verifyManuscriptExport(pack)
+  return encodeWebManuscriptBackup(pack, manuscriptHash, outlineHead?.versionId ?? null)
 }
 
 async function readReferenceHistory(tx: IDBTransaction, branchId: string) {
@@ -2442,8 +2456,8 @@ const outlineStore = createOutlineOfflineStore({
   readPublication,
   markPublication,
   stageOutlineTargets: restoreStateStore.stageOutlineTargets,
-  fail: (code, message) => {
-    throw new OfflineStoreError(code, message)
+  fail: (code, message, cause) => {
+    throw new OfflineStoreError(code, message, { cause })
   },
 })
 export const { readLocalOutline, confirmLocalOutline } = outlineStore
@@ -3298,7 +3312,11 @@ export async function importLocalManuscript(file: Blob): Promise<LocalProject> {
 }
 
 export async function importLocalBackup(file: Blob): Promise<LocalProject> {
-  return writeLocalManuscript(await validateManuscript(await decodeWebManuscriptBackup(file, manuscriptHash)))
+  const { manuscript, outlineAdoption } = await decodeWebManuscriptBackup(file, manuscriptHash)
+  const pack = await validateManuscript(manuscript)
+  if (typeof outlineAdoption === 'string' && outlineAdoption !== pack.outline_history?.adopted_revision_id)
+    invalid('独立备份的大纲采用依据与原修订不符。')
+  return writeLocalManuscript(pack, undefined, outlineAdoption)
 }
 
 export async function forkLocalManuscript(
@@ -3391,6 +3409,7 @@ export async function forkLocalManuscript(
 async function writeLocalManuscript(
   pack: ManuscriptPack,
   verifySource?: (tx: IDBTransaction) => Promise<LocalProject | void>,
+  backupOutlineAdoption?: string | null,
 ): Promise<LocalProject> {
   const {
     novel,
@@ -3481,7 +3500,8 @@ async function writeLocalManuscript(
       await result(
         tx.objectStore('referenceArchives').add({ branchId: branch.id, archive: reference_history }),
       )
-    if (outline_history) await outlineStore.restoreOutlineHistoryTx(tx, project, outline_history)
+    if (outline_history)
+      await outlineStore.restoreOutlineHistoryTx(tx, project, outline_history, backupOutlineAdoption)
     if (setting_use_history)
       await settingUseStore.restoreSettingUseHistoryTx(tx, branch.id, setting_use_history, settingUseSlots)
     if (workflow_history) {

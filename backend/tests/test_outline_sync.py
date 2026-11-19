@@ -9,6 +9,7 @@ from ainovel.cloud_sync import create_sync_app
 from ainovel.db import Database, DomainError
 from ainovel.desktop_sync import DesktopSync, Resolve, _headers
 from ainovel.domain import Domain
+from ainovel.manuscript_backup import BACKUP_IMPORT_PATH
 from ainovel.manuscript_exchange import ManuscriptPackage, export_manuscript, import_manuscript
 from ainovel.outline_workspace import ConfirmOutline, SaveOutline, confirm_outline, read_outline, save_outline
 from ainovel.project_brief import ConfirmProject, confirm
@@ -63,6 +64,79 @@ def record(tx, branch, payload, *, existing=None, identifier=None):
         existing["id"] if existing else None,
         new_identifier=identifier,
     )
+
+
+def test_binary_backup_reinstalls_confirmed_outline_after_chapter_move(client, domain, settings, story):
+    branch = f"/api/branches/{story['branch_id']}"
+    first, second = story["chapter_id"], domain.create_chapter(story["branch_id"], "第二章")["id"]
+    domain.save(first, 0, "开篇原稿。")
+    domain.save(second, 0, "次章原稿。")
+    outline = branch + "/outline-workspace"
+    first_plan = {**chapter_plan(first, "检查门上的痕迹"), "setting_ids": []}
+    second_plan = {**chapter_plan(second, "核对旧记录"), "setting_ids": []}
+    source_plan = plan(first_plan)
+    source_plan["volumes"][0]["units"][0]["chapters"].append(second_plan)
+    put_and_confirm(client, outline, {"base_revision": 0, "plan": source_plan})
+
+    def move(app, chapter_id):
+        response = app.post(
+            f"/api/chapters/{chapter_id}/move",
+            json={"direction": "down", "base_story_revision": app.get(outline).json()["story_revision"]},
+        )
+        assert response.is_success, response.text
+
+    def restore(app, content):
+        response = app.post(
+            BACKUP_IMPORT_PATH, content=content, headers={"Content-Type": "application/octet-stream"}
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["outline_restore"]
+
+    move(client, first)
+    source = client.get(outline).json()
+    assert source["confirmed"] and source["stale"]
+    assert [row["id"] for row in source["chapters"]] == [second, first]
+    package = client.get(branch + "/manuscript-package").json()
+    identifier = package["outline_history"]["adopted_revision_id"]
+    backup = client.get(branch + "/manuscript-backup")
+    assert backup.is_success and f'"outline_adoption","value","{identifier}"'.encode() in backup.content
+
+    with TestClient(create_app(replace(settings, data_dir=settings.data_dir / "preserved-outline"))) as cold:
+        cold.headers["X-Ainovel-CSRF"] = cold.get("/api/session").json()["csrf"]
+        assert restore(cold, backup.content) == {"status": "adopted", "revision_id": identifier}
+        adopted = cold.get(outline).json()
+        assert adopted["confirmed"]["plan"] == source["confirmed"]["plan"]
+        assert adopted["stale"] == source["stale"]
+        assert [row["id"] for row in adopted["chapters"]] == [second, first]
+        exported = cold.get(branch + "/manuscript-package").json()
+        assert exported["outline_history"] == package["outline_history"]
+        fresh = cold.put(outline, json={"base_revision": adopted["draft"]["revision"], "plan": source_plan})
+        assert fresh.status_code == 400 and fresh.json()["code"] == "outline_order"
+
+    with TestClient(create_app(replace(settings, data_dir=settings.data_dir / "strict-outline"))) as strict:
+        strict.headers["X-Ainovel-CSRF"] = strict.get("/api/session").json()["csrf"]
+        generic = strict.post("/api/manuscript-packages/import", json=package)
+        assert generic.status_code == 201 and generic.json()["outline_restore"]["status"] == "deferred"
+        move(strict, second)
+        assert [row["id"] for row in strict.get(outline).json()["chapters"]] == [first, second]
+        pending = strict.get(branch + "/manuscript-backup")
+        assert pending.is_success and b'"outline_adoption","value",null' in pending.content
+
+    with TestClient(create_app(replace(settings, data_dir=settings.data_dir / "pending-outline"))) as cold:
+        cold.headers["X-Ainovel-CSRF"] = cold.get("/api/session").json()["csrf"]
+        pending_result = restore(cold, pending.content)
+        assert pending_result["status"] == "deferred" and pending_result["revision_id"] == identifier
+        assert cold.get(outline).json()["confirmed"] is None
+
+    archived = client.post(f"/api/chapters/{second}/archive", json={"archived": True, "base_revision": 1})
+    assert archived.is_success, archived.text
+    inactive = client.get(branch + "/manuscript-backup")
+    assert inactive.is_success and f'"outline_adoption","value","{identifier}"'.encode() in inactive.content
+    with TestClient(create_app(replace(settings, data_dir=settings.data_dir / "inactive-member"))) as cold:
+        cold.headers["X-Ainovel-CSRF"] = cold.get("/api/session").json()["csrf"]
+        inactive_result = restore(cold, inactive.content)
+        assert inactive_result["status"] == "deferred" and "未归档" in inactive_result["reason"]
+        assert cold.get(outline).json()["confirmed"] is None
 
 
 def test_restored_formal_card_keeps_exact_address_through_outline_package_and_cloud(

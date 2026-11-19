@@ -14,7 +14,7 @@ from pydantic import Field, StringConstraints
 
 from .db import DomainError, dumps, uid
 from .models import Input
-from .outline_portability import OutlineHistory
+from .outline_portability import UNRECORDED_OUTLINE_ADOPTION, OutlineHistory
 from .portable_checkpoint import PortableCheckpointHistory, import_checkpoints, validate_checkpoint_history
 from .portable_restore_sources import (
     PortableRestoreState,
@@ -537,7 +537,7 @@ def export_manuscript(
         return package
 
 
-def import_manuscript(domain, package):
+def import_manuscript(domain, package, *, backup_outline_adoption=UNRECORDED_OUTLINE_ADOPTION):
     histories, restored_facts = _index(package)
     outline = None
     with domain.db.connect(True) as tx:
@@ -612,7 +612,9 @@ def import_manuscript(domain, package):
         if package.outline_history:
             from .outline_archive import import_outline_history
 
-            outline = import_outline_history(tx, branch.id, package.outline_history)
+            outline = import_outline_history(
+                tx, branch.id, package.outline_history, backup_outline_adoption=backup_outline_adoption
+            )
         if package.setting_use_history:
             from .setting_use_archive import import_setting_use_history
 

@@ -543,6 +543,144 @@ test.each([
   expect(await readLocalHistory(key, second.id)).toEqual(otherHistory)
 })
 
+test.each(['vacant-target', 'stale-parent'] as const)(
+  'mixed restore resumes its stored moves after reopening, outcome=%s',
+  async (outcome) => {
+    const seed = await createLocalProject('部分提交后重开混合目录')
+    const key = seed.novel.id
+    for (const title of ['A', 'B', 'C', 'D', 'E']) await createLocalChapter(key, title)
+    const original = await exportLocalManuscript(key)
+    const [a, b, c, d, e] = original.chapters
+    const checkpoint: PortableCheckpoint = {
+      version: 'ainovel-portable-checkpoint/1',
+      id: 'before-mixed-directory',
+      branch_id: seed.branch.id,
+      label: 'A 至 D 的正式目录',
+      scope: 'book',
+      scope_id: null,
+      purpose: 'manual',
+      created: 1,
+      source_manifest_sha256: await manuscriptHash('旧版目录归档'),
+      story_revision: original.branch.story_revision,
+      scoped_chapter_ids: [a.id, b.id, c.id, d.id],
+      chapters: original.chapters.slice(0, 4).map(({ branch_id: _, ...chapter }) => {
+        const head = original.revisions.find(({ chapter_id }) => chapter_id === chapter.id)!
+        return { ...chapter, revision_id: head.id, sha256: head.sha256 }
+      }),
+      shared: { project_id: null, settings_id: null, outline_id: null },
+      reports: {},
+      restore_sources: {
+        version: 'ainovel-portable-restore-sources/1',
+        outline_live: false,
+        facts: [],
+        length_targets: [],
+        story_heads: {},
+        scene_spans_for_review: 0,
+      },
+    }
+    const body = JSON.stringify(checkpoint)
+    const current = {
+      ...original,
+      branch: { ...original.branch, story_revision: original.branch.story_revision + 1 },
+      chapters: original.chapters.map((chapter) =>
+        chapter.id === b.id
+          ? { ...chapter, archived: 1 as const }
+          : { ...chapter, position: chapter.position > 2 ? chapter.position - 1 : chapter.position },
+      ),
+      snapshot_history: { entries: [{ id: checkpoint.id, sha256: await manuscriptHash(body), body }] },
+    }
+    globalThis.indexedDB = new IDBFactory()
+    const project = await importLocalManuscript(new Blob([JSON.stringify(current)]))
+    const scope = { service: 'http://127.0.0.1:8888', workId: project.branch.id, deviceId: 'restoring-web' }
+    const cloud = service(scope.deviceId, 'unused', false)
+    const objectId = (id: string) => `chapter:${id}`
+    for (const [object_id, payload] of syncManuscriptObjects(current)) {
+      await cloud.commit({
+        object_id,
+        change_id: object_id,
+        parent_revision: null,
+        payload,
+        tombstone: !payload,
+      })
+    }
+    await setSyncEnabled(scope, true)
+    await syncWebManuscript(project, scope, cloud.transport)
+
+    const preview = await readLocalCheckpointRestore(key, checkpoint.id)
+    expect(preview.blockers).toEqual([])
+    await restoreLocalCheckpoint(key, checkpoint.id, preview.basis, 'restore-mixed-directory')
+    const afterRestore = await exportLocalManuscript(key)
+    let loseResponse = true
+    const transport: SyncTransport = {
+      ...cloud.transport,
+      async push(request) {
+        const receipt = await cloud.commit(request)
+        if (loseResponse && request.object_id === objectId(b.id)) {
+          loseResponse = false
+          throw new Error('云端已收到 B，浏览器未取得回执')
+        }
+        return receipt
+      },
+    }
+    await expect(syncWebManuscript(project, scope, transport)).rejects.toThrow('浏览器未取得回执')
+    const queued = new Map(
+      (await readSyncState(scope)).pending.flatMap((row) =>
+        row.kind === 'push' ? [[row.request.object_id, row.request]] : [],
+      ),
+    )
+    expect(queued.get(objectId(b.id))?.change_id).toBe(cloud.latest.get(objectId(b.id))?.change_id)
+    expect(queued.get(objectId(c.id))?.payload?.chapter).toMatchObject({ position: 3 })
+    expect(queued.get(objectId(d.id))?.payload?.chapter).toMatchObject({ position: 4 })
+    expect(queued.get(objectId(e.id))?.tombstone).toBe(true)
+    const position = (id: string) => cloud.latest.get(objectId(id))?.payload?.chapter
+    expect(position(b.id)).toMatchObject({ position: 2 })
+    expect(position(c.id)).toMatchObject({ position: 2 })
+
+    vi.resetModules()
+    const reopened = await import('./manuscriptSync')
+    const cutoff = cloud.log.length
+    await reopened.syncWebManuscript(project, scope, transport)
+    expect(cloud.log.slice(cutoff).map(({ change_id }) => change_id)).toEqual([
+      queued.get(objectId(e.id))?.change_id,
+    ])
+    expect(position(d.id)).toMatchObject({ position: 3 })
+    if (outcome === 'stale-parent') {
+      const head = cloud.latest.get(objectId(d.id))!
+      await cloud.commit(
+        {
+          object_id: head.object_id,
+          change_id: 'new-cloud-head-at-position-three',
+          parent_revision: head.change_id,
+          payload: head.payload,
+          tombstone: false,
+        },
+        'desktop',
+      )
+      const unchanged = cloud.log.length
+      await reopened.syncWebManuscript(project, scope, transport)
+      expect(cloud.log).toHaveLength(unchanged)
+      expect((await readSyncState(scope)).pending).toEqual(
+        expect.arrayContaining([
+          { kind: 'push', request: queued.get(objectId(c.id)) },
+          { kind: 'push', request: queued.get(objectId(d.id)) },
+        ]),
+      )
+    } else {
+      await reopened.syncWebManuscript(project, scope, transport)
+      expect(cloud.log.at(-1)?.change_id).toBe(queued.get(objectId(d.id))?.change_id)
+      expect(position(c.id)).toMatchObject({ position: 2 })
+      const settled = await reopened.syncWebManuscript(project, scope, transport)
+      expect(settled).toMatchObject({ deferred: [], conflicts: [] })
+      expect(cloud.log.at(-1)?.change_id).toBe(queued.get(objectId(c.id))?.change_id)
+      expect(position(c.id)).toMatchObject({ position: 3 })
+      expect(position(d.id)).toMatchObject({ position: 4 })
+      expect((await readSyncState(scope)).pending).toEqual([])
+    }
+    expect((await exportLocalManuscript(key)).revisions).toEqual(afterRestore.revisions)
+    expect(cloud.log.some(({ object_id }) => object_id.startsWith('chapter-directory:'))).toBe(false)
+  },
+)
+
 test('directory adoption waits for the whole group and a later ordinary head stays applicable', async () => {
   const project = await createLocalProject('换序后接续正文')
   const key = project.novel.id
@@ -841,6 +979,155 @@ test('directory child with rewritten chapter metadata remains blocked even with 
   })
   expect((await exportLocalManuscript(key)).chapters).toEqual(original.chapters)
   expect(cloud.submitted).toHaveLength(sent)
+})
+
+test.each([
+  'confirmed before both moves',
+  'newer invalid outline',
+  'moved chapter no longer at its target',
+  'ordinary moves changed positions before the later batch',
+])('a cold receiver checks the exact historical directory of an outline: %s', async (scenario) => {
+  const original = await createLocalProject('大纲确认与后续章位')
+  const first = await createLocalChapter(original.novel.id, '初章')
+  const second = await createLocalChapter(original.novel.id, '次章')
+  const third = await createLocalChapter(original.novel.id, '末章')
+  const outline = {
+    id: 'before-directory',
+    parent_id: null,
+    project_version_id: null,
+    settings_version_id: null,
+    plan: {
+      summary: '见到铜铃',
+      promises: [],
+      volumes: [
+        {
+          id: 'first-volume',
+          title: '第一卷',
+          summary: '旧城线索',
+          units: [
+            {
+              id: 'first-unit',
+              title: '寻找铜铃',
+              summary: '比对铸记',
+              chapters: [first, second, third].map(({ id }) => ({
+                chapter_id: id,
+                goal: '拿到铜铃',
+                obstacle: '桥已截断',
+                turn: '发现摆渡人',
+                result: '找到新线索',
+                setting_ids: [],
+              })),
+            },
+          ],
+        },
+      ],
+    },
+    reference_cards: [],
+    promise_sources: {},
+  }
+  await confirmLocalOutline(original.novel.id, null, outline)
+  const sender = { service: 'http://127.0.0.1:8888', workId: original.branch.id, deviceId: 'desktop' }
+  const cloud = service(sender.deviceId, 'unused', false)
+  await setSyncEnabled(sender, true)
+  expect((await syncWebManuscript(original, sender, cloud.transport)).deferred).toEqual([])
+  const outlineKey = `outline:${sender.workId}`
+  const originalHead = cloud.latest.get(outlineKey)!
+  const originalPack = await exportLocalManuscript(original.novel.id)
+  async function publishNewHead() {
+    const newer = { ...outline, id: 'after-directories', parent_id: outline.id }
+    await cloud.commit({
+      object_id: `outline-version:${newer.id}`,
+      change_id: 'newer-outline-source',
+      parent_revision: null,
+      payload: {
+        format: 'ainovel-manuscript-sync/1',
+        kind: 'outline-version',
+        branch_id: sender.workId,
+        version: newer,
+      },
+      tombstone: false,
+    })
+    await cloud.commit({
+      object_id: outlineKey,
+      change_id: 'newer-outline-head',
+      parent_revision: originalHead.change_id,
+      payload: { ...originalHead.payload, revision_id: newer.id },
+      tombstone: false,
+    })
+  }
+  async function setChapterPosition(chapterId: string, position: number, changeId: string) {
+    const chapterKey = `chapter:${chapterId}`
+    const parent = cloud.latest.get(chapterKey)!
+    const payload = JSON.parse(JSON.stringify(parent.payload))
+    payload.chapter.position = position
+    await cloud.commit({
+      object_id: chapterKey,
+      change_id: changeId,
+      parent_revision: parent.change_id,
+      payload,
+      tombstone: false,
+    })
+  }
+  await pushDirectoryFixture(cloud, sender.workId, [
+    { id: first.id, position: 2 },
+    { id: second.id, position: 1 },
+  ])
+  const movedBeforeBatch = scenario === 'ordinary moves changed positions before the later batch'
+  if (movedBeforeBatch) {
+    await publishNewHead()
+    await setChapterPosition(first.id, 4, 'step-to-vacant-fourth')
+    await setChapterPosition(second.id, 2, 'step-to-vacant-second')
+    await setChapterPosition(first.id, 1, 'step-to-vacant-first')
+  }
+  await pushDirectoryFixture(
+    cloud,
+    sender.workId,
+    [
+      { id: first.id, position: 3 },
+      { id: third.id, position: movedBeforeBatch ? 1 : 2 },
+    ],
+    'second-swap',
+  )
+  if (scenario === 'newer invalid outline') await publishNewHead()
+  else if (scenario === 'moved chapter no longer at its target')
+    await setChapterPosition(first.id, 4, 'unexpected-position')
+  globalThis.indexedDB = new IDBFactory()
+  const cold = await importLocalManuscript(
+    new Blob([
+      JSON.stringify({
+        format: originalPack.format,
+        novel: originalPack.novel,
+        branch: originalPack.branch,
+        chapters: [],
+        revisions: [],
+      }),
+    ]),
+  )
+  const receiver = { ...sender, deviceId: 'new-browser' }
+  const transport = {
+    ...cloud.transport,
+    push: (request: PushChange) => cloud.commit(request, receiver.deviceId),
+  }
+  await setSyncEnabled(receiver, true)
+  const synchronized = await syncWebManuscript(cold, receiver, transport)
+  const actual = await exportLocalManuscript(cold.novel.id)
+  expect(actual.chapters.map(({ id }) => id)).toEqual(
+    movedBeforeBatch ? [third.id, second.id, first.id] : [second.id, third.id, first.id],
+  )
+  expect(actual.outline_history?.versions).toContainEqual(originalPack.outline_history?.versions[0])
+  if (scenario === 'confirmed before both moves') {
+    expect(synchronized.deferred).toEqual([])
+    expect(actual.outline_history?.adopted_revision_id).toBe(outline.id)
+    const sent = cloud.submitted.length
+    expect((await syncWebManuscript(cold, receiver, transport)).deferred).toEqual([])
+    expect(cloud.submitted).toHaveLength(sent)
+  } else {
+    expect(synchronized.deferred).toContainEqual({
+      object_id: outlineKey,
+      reason: '章纲顺序须与章节目录一致。',
+    })
+    expect(actual.outline_history?.adopted_revision_id).toBeNull()
+  }
 })
 
 test.each([false, true])(

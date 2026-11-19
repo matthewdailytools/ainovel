@@ -5,7 +5,7 @@ import json
 from pydantic import ValidationError
 
 from .db import DomainError, dumps
-from .outline_portability import OutlineHistory, OutlineVersion
+from .outline_portability import UNRECORDED_OUTLINE_ADOPTION, OutlineHistory, OutlineVersion
 from .outline_sync import (
     _ensure_promises,
     _native_version,
@@ -152,7 +152,7 @@ def _prerequisite(tx, branch_id, version, required):
     return None
 
 
-def restore_outline_archive(tx, branch_id):
+def restore_outline_archive(tx, branch_id, *, backup_outline_adoption=UNRECORDED_OUTLINE_ADOPTION):
     saved = _restore_record(tx, branch_id)
     if not saved:
         return None
@@ -170,7 +170,10 @@ def restore_outline_archive(tx, branch_id):
         raise DomainError("manuscript_outline", "稿件包的采用版记录不存在。", 409)
     version = OutlineVersion.model_validate_json(row["payload"])
     reason = _prerequisite(tx, branch_id, version, json.loads(saved["required_records"]))
+    if not reason and backup_outline_adoption is None:
+        reason = "原工作版本的大纲待复核，请确认后采用。"
     if not reason:
+        preserve_backup_order = backup_outline_adoption == identifier
         tx.execute("SAVEPOINT restore_manuscript_outline")
         try:
             _ensure_promises(tx, branch_id, version)
@@ -191,12 +194,14 @@ def restore_outline_archive(tx, branch_id):
                     "settings_version_id": version.settings_version_id,
                     "recorded_device_id": row["source_device"],
                 },
+                preserve_backup_order=preserve_backup_order,
             )
             confirm_outline_tx(
                 tx,
                 branch_id,
                 ConfirmOutline(base_revision=pending["draft"]["revision"]),
                 source_confirmed=True,
+                preserve_backup_order=preserve_backup_order,
             )
         except DomainError as error:
             tx.execute("ROLLBACK TO restore_manuscript_outline")
@@ -216,7 +221,7 @@ def restore_outline_archive(tx, branch_id):
     )
 
 
-def import_outline_history(tx, branch_id, history):
+def import_outline_history(tx, branch_id, history, *, backup_outline_adoption=UNRECORDED_OUTLINE_ADOPTION):
     tx.executemany(
         "INSERT INTO manuscript_outline_versions VALUES(?,?,?,?)",
         [
@@ -230,4 +235,4 @@ def import_outline_history(tx, branch_id, history):
         "INSERT INTO manuscript_outline_restore VALUES(?,?,?,NULL)",
         (branch_id, history.adopted_revision_id, dumps(history.required_story_records)),
     )
-    return restore_outline_archive(tx, branch_id)
+    return restore_outline_archive(tx, branch_id, backup_outline_adoption=backup_outline_adoption)

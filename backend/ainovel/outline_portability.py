@@ -9,6 +9,9 @@ from .settings_portability import DeviceName
 from .story_graph import Promise
 
 
+UNRECORDED_OUTLINE_ADOPTION = object()
+
+
 class OutlineVersion(Input):
     id: Identifier
     parent_id: Identifier | None

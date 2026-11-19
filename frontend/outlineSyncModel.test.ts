@@ -332,12 +332,26 @@ describe('离线大纲正式版本', () => {
     await expect(
       validateOutlineVersionSources(version, { ...lookup, settings: () => observed }),
     ).rejects.toThrow('在所选正式版本中已采用')
+    const reordered = {
+      ...lookup,
+      chapter: (id: string) => ({ id, title: id, position: 2 - ids.indexOf(id) }),
+    }
+    await expect(validateOutlineVersionSources(version, reordered)).rejects.toThrow('章节目录一致')
+    await expect(validateOutlineVersionSources(version, reordered, 'frozen')).resolves.toBeUndefined()
     await expect(
-      validateOutlineVersionSources(version, {
-        ...lookup,
-        chapter: (id) => ({ id, title: id, position: 2 - ids.indexOf(id) }),
-      }),
-    ).rejects.toThrow('章节目录一致')
+      validateOutlineVersionSources(
+        version,
+        { ...reordered, chapter: (id) => (id === 'second' ? null : reordered.chapter(id)) },
+        'frozen',
+      ),
+    ).rejects.toThrow('有效章节目录尚未到齐')
+    await expect(
+      validateOutlineVersionSources(
+        version,
+        { ...reordered, chapter: (id) => ({ ...reordered.chapter(id), archived: id === 'second' ? 1 : 0 }) },
+        'frozen',
+      ),
+    ).rejects.toThrow('有效章节目录尚未到齐')
     await expect(
       validateOutlineVersionSources(version, {
         ...lookup,

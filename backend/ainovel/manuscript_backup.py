@@ -13,6 +13,8 @@ from starlette.requests import ClientDisconnect
 
 from .db import DomainError
 from .manuscript_exchange import ManuscriptPackage, ReferenceSelection, export_manuscript, import_manuscript
+from .outline_portability import UNRECORDED_OUTLINE_ADOPTION
+from .outline_sync import read_outline_head
 from .workflow_archive import COMPLETION
 
 BACKUP_IMPORT_PATH = "/api/manuscript-backups/import"
@@ -23,8 +25,9 @@ TRANSFER_CHUNK_BYTES = 256 * 1024
 TITLE = b"ainovel-web-backup/1\n"
 SEAL = b"sha256 "
 DIGEST = re.compile(rb"[a-f0-9]{64}")
-
-ROOTS = frozenset(("format", "novel", "branch", "chapters", "revisions", "source_revisions", "evidence"))
+ROOTS = frozenset(
+    ("format", "novel", "branch", "chapters", "revisions", "source_revisions", "evidence", "outline_adoption")
+)
 HISTORIES = {
     "project_history": ("adopted_revision_id", "versions"),
     "settings_history": ("adopted_revision_id", "versions", "source_devices"),
@@ -98,10 +101,17 @@ def _frames(pack):
             yield from ((path, "item", record) for record in item)
 
 
-def _backup_chunks(package):
+def _backup_chunks(package, outline_adoption=UNRECORDED_OUTLINE_ADOPTION):
     yield TITLE
     seal = sha256()
-    for index, frame in enumerate(_frames(package.model_dump(mode="json"))):
+    content = package.model_dump(mode="json")
+    if (
+        outline_adoption is not UNRECORDED_OUTLINE_ADOPTION
+        and package.outline_history
+        and package.outline_history.adopted_revision_id
+    ):
+        content["outline_adoption"] = outline_adoption
+    for index, frame in enumerate(_frames(content)):
         if index >= MAX_FRAMES:
             raise _frame_limit()
         raw = json.dumps(frame, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -205,7 +215,16 @@ class BackupReader:
         if not self.sealed or self.pending:
             raise _invalid()
         try:
-            return ManuscriptPackage.model_validate(self.pack)
+            content = dict(self.pack)
+            outline_adoption = content.pop("outline_adoption", None)
+            package = ManuscriptPackage.model_validate(content)
+            if outline_adoption is not None and (
+                not isinstance(outline_adoption, str)
+                or not package.outline_history
+                or outline_adoption != package.outline_history.adopted_revision_id
+            ):
+                raise _invalid()
+            return package
         except ValidationError:
             raise _invalid() from None
 
@@ -229,11 +248,11 @@ class _BackupDownload(StreamingResponse):
             self.file.close()
 
 
-def _prepare_download(package, directory):
+def _prepare_download(package, directory, outline_adoption):
     file = TemporaryFile(dir=directory)
     try:
         size = 0
-        for chunk in _backup_chunks(package):
+        for chunk in _backup_chunks(package, outline_adoption):
             size += len(chunk)
             if size > MAX_BACKUP_BYTES:
                 raise size_error()
@@ -247,7 +266,12 @@ def _prepare_download(package, directory):
 
 def _import_backup(domain, reader):
     try:
-        return import_manuscript(domain, reader.package())
+        package = reader.package()
+        return import_manuscript(
+            domain,
+            package,
+            backup_outline_adoption=reader.pack.get("outline_adoption", UNRECORDED_OUTLINE_ADOPTION),
+        )
     except UnicodeError, RecursionError:
         raise _invalid() from None
 
@@ -260,13 +284,17 @@ def register_routes(app, domain):
     )
     def get_backup(branch_id: str, include_reference_evidence_for: ReferenceSelection = None):
         try:
-            package = export_manuscript(
-                domain,
-                branch_id,
-                include_reference_evidence_for=include_reference_evidence_for or (),
-                before_read=_check_saved_text_size,
-            )
-            return _prepare_download(package, domain.db.path.parent)
+            with domain.db.connect() as tx:
+                tx.execute("BEGIN")
+                package = export_manuscript(
+                    domain,
+                    branch_id,
+                    include_reference_evidence_for=include_reference_evidence_for or (),
+                    before_read=_check_saved_text_size,
+                    transaction=tx,
+                )
+                outline_adoption = read_outline_head(tx, branch_id)
+            return _prepare_download(package, domain.db.path.parent, outline_adoption)
         except OSError:
             raise DomainError(
                 "manuscript_backup_storage", "无法写入独立备份，请检查本机磁盘空间后重试。", 507

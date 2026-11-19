@@ -210,6 +210,7 @@ def test_checkpoints_keep_exact_sources_and_portable_links_through_independent_b
     assert original["content"] not in entries[volume_id]["body"]
 
     rows = [json.loads(line.split(b" ", 1)[1]) for line in download.content.split(b"\n")[1:-2]]
+    assert ["outline_adoption", "value", outline["id"]] in rows
     item_index = next(
         index
         for index, row in enumerate(rows)
@@ -220,6 +221,11 @@ def test_checkpoints_keep_exact_sources_and_portable_links_through_independent_b
     ) as target:
         _identify(target)
         unrelated = target.post("/api/novels", json={"title": "独立存档保留作品"}).json()["id"]
+        wrong_adoption = [
+            [*row[:2], "different-outlined-revision"] if row[0] == "outline_adoption" else row for row in rows
+        ]
+        rejected = target.post(BACKUP_IMPORT_PATH, headers=BINARY, content=framed(wrong_adoption))
+        assert rejected.status_code == 400 and rejected.json()["code"] == "manuscript_backup"
         for field, value in (
             ("branch_id", "foreign-branch"),
             ("scoped_chapter_ids", [second_id]),

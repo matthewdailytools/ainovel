@@ -4,6 +4,8 @@ import type { ReferenceHistory } from './referenceArchive'
 import type { SettingsVersion } from './settingsSyncModel'
 import { restoreStateSyncStores } from './restoreStateOfflineStore'
 import {
+  OutlineDirectoryOrderError,
+  outlineChapterPlans,
   outlineObjectSignature,
   outlineCardFromReference,
   prepareOutlineVersion,
@@ -11,6 +13,7 @@ import {
   validateOutlineActiveBasis,
   validateOutlineVersionSources,
   type OutlineArchivePending,
+  type OutlineDirectoryHistory,
   type OutlineExistingPromise,
   type OutlineHeadObject,
   type OutlineHistory,
@@ -24,8 +27,25 @@ import {
 type OutlineHead = { branchId: string; versionId?: string; deferred?: OutlineArchivePending }
 type StoredOutline = OutlineVersionRecord & { branchId: string }
 type StoredSeed = { branchId: string; id: string; seed: OutlinePromiseSeed }
-type ApplyOptions = { source?: ProjectSource; publicationId?: string | null; consumePublication?: boolean }
+type ApplyOptions = {
+  source?: ProjectSource
+  publicationId?: string | null
+  consumePublication?: boolean
+  outlineDirectoryHistory?: OutlineDirectoryHistory
+}
 type FailCode = 'format' | 'ownership' | 'conflict' | 'missing'
+
+function rewindDirectory(chapters: Iterable<LocalChapter>, batches: OutlineDirectoryHistory['batches']) {
+  const positions = new Map<string, number>()
+  for (const chapter of chapters) if (!chapter.archived) positions.set(chapter.id, chapter.position)
+  if (new Set(positions.values()).size !== positions.size) return
+  for (const moves of batches) {
+    if (moves.some(({ chapterId, to }) => positions.get(chapterId) !== to)) return
+    for (const { chapterId, from } of moves) positions.set(chapterId, from)
+    if (new Set(positions.values()).size !== positions.size) return
+  }
+  return positions
+}
 
 export const outlineReadStores = [
   'projects',
@@ -64,7 +84,7 @@ type Access = {
   readPublication(tx: Tx, branchId: string, objectId: string): Promise<LocalPublication | undefined>
   markPublication(tx: Tx, branchId: string, ...objects: string[]): Promise<void>
   stageOutlineTargets(tx: Tx, branchId: string, version: OutlineVersion): Promise<void>
-  fail(code: FailCode, message: string): never
+  fail(code: FailCode, message: string, cause?: unknown): never
 }
 
 export function createOutlineOfflineStore({
@@ -190,7 +210,13 @@ export function createOutlineOfflineStore({
     }
   }
 
-  async function validateSources(tx: Tx, branch: string, version: OutlineVersion, adopting: boolean) {
+  async function validateSources(
+    tx: Tx,
+    branch: string,
+    version: OutlineVersion,
+    use: 'historical' | 'live' | 'imported-adoption',
+    directoryHistory?: OutlineDirectoryHistory,
+  ) {
     const lookup: OutlineSourceLookup = {
       project: (id) => getProjectVersion(tx, branch, id),
       settings: async (id) => (await getSettingsVersion(tx, branch, id))?.version,
@@ -202,17 +228,41 @@ export function createOutlineOfflineStore({
       )
       lookup.reference = (id) => references.get(id)
     }
-    if (adopting) {
-      const chapters = new Map((await listChaptersTx(tx, branch)).map((chapter) => [chapter.id, chapter]))
+    const chapters =
+      use === 'historical'
+        ? undefined
+        : new Map((await listChaptersTx(tx, branch)).map((chapter) => [chapter.id, chapter]))
+    if (chapters) {
       lookup.chapter = (id) => chapters.get(id)
       const promises = await promisesTx(tx, branch)
       lookup.promise = (id) => promises.get(id)
     }
     try {
-      await validateOutlineVersionSources(version, lookup)
+      try {
+        await validateOutlineVersionSources(version, lookup, use === 'imported-adoption' ? 'frozen' : 'live')
+      } catch (error) {
+        if (!(error instanceof OutlineDirectoryOrderError) || !chapters || !directoryHistory?.batches.length)
+          throw error
+        const positions = rewindDirectory(chapters.values(), directoryHistory.batches)
+        if (
+          !positions ||
+          outlineChapterPlans(version.plan).some(
+            ({ chapter_id }) =>
+              !positions.has(chapter_id) ||
+              positions.get(chapter_id) !== directoryHistory.positionsAtAdoption.get(chapter_id),
+          )
+        )
+          throw error
+        lookup.chapter = (id) => {
+          const chapter = chapters.get(id)
+          const position = positions.get(id)
+          return chapter && position !== undefined ? { ...chapter, position } : undefined
+        }
+        await validateOutlineVersionSources(version, lookup)
+      }
     } catch (error) {
       if (error instanceof DOMException) throw error
-      fail('missing', error instanceof Error ? error.message : '大纲依据尚未齐备。')
+      fail('missing', error instanceof Error ? error.message : '大纲依据尚未齐备。', error)
     }
   }
 
@@ -293,6 +343,7 @@ export function createOutlineOfflineStore({
     tx: Tx,
     project: LocalProject,
     history: OutlineHistory,
+    backupAdoption?: string | null,
   ): Promise<OutlineArchivePending | undefined> {
     const branchId = project.branch.id
     for (const version of history.versions) {
@@ -319,7 +370,13 @@ export function createOutlineOfflineStore({
     if (!reason) {
       try {
         await assertCurrentBasis(tx, branchId, selected)
-        await validateSources(tx, branchId, selected, true)
+        // The backup's active head can coexist with a later directory order.
+        await validateSources(
+          tx,
+          branchId,
+          selected,
+          backupAdoption === revisionId ? 'imported-adoption' : 'live',
+        )
       } catch (error) {
         if (
           !(error instanceof Error) ||
@@ -330,6 +387,7 @@ export function createOutlineOfflineStore({
         reason = error.message
       }
     }
+    if (!reason && backupAdoption === null) reason = '原工作版本的大纲待复核，请确认后采用。'
     if (!reason) {
       await moveHead(tx, project, selected, undefined, false)
       return undefined
@@ -349,7 +407,7 @@ export function createOutlineOfflineStore({
       if ((previous?.versionId ?? null) !== base) fail('conflict', '本机已有另一版确认大纲，请重新核对。')
       await checkArchivedPromises(tx, branch, previous, version)
       await assertCurrentBasis(tx, branch, version, true)
-      await validateSources(tx, branch, version, true)
+      await validateSources(tx, branch, version, 'live')
       await result(
         tx.objectStore('outlineVersions').add({ branchId: branch, version } satisfies StoredOutline),
       )
@@ -363,7 +421,7 @@ export function createOutlineOfflineStore({
     const branchId = project.branch.id
     const previous = await getHead(tx, branchId)
     await assertCurrentBasis(tx, branchId, version)
-    await validateSources(tx, branchId, version, true)
+    await validateSources(tx, branchId, version, 'live')
     await result(tx.objectStore('outlineVersions').add({ branchId, version } satisfies StoredOutline))
     await moveHead(tx, project, version, previous, false)
     await markPublication(tx, branchId, `outline-version:${version.id}`, `outline:${branchId}`)
@@ -387,7 +445,7 @@ export function createOutlineOfflineStore({
           outlineObjectSignature({ ...object, version: existing.version }) !== outlineObjectSignature(object)
         )
           fail('conflict', '大纲同一源修订保存了不同内容。')
-        await validateSources(tx, branch, version, false)
+        await validateSources(tx, branch, version, 'historical')
         const { source } = options
         if (source && (!existing?.source || source.sequence < existing.source.sequence)) {
           await result(
@@ -410,7 +468,7 @@ export function createOutlineOfflineStore({
       if (!chosen?.source) return fail('missing', '缺少云端采用的大纲来源。')
       await checkArchivedPromises(tx, branch, head, chosen.version)
       await assertCurrentBasis(tx, branch, chosen.version)
-      await validateSources(tx, branch, chosen.version, true)
+      await validateSources(tx, branch, chosen.version, 'live', options.outlineDirectoryHistory)
       if (head?.versionId !== chosen.version.id) await moveHead(tx, project, chosen.version, head)
       if (options.consumePublication && publication)
         await result(tx.objectStore('publications').delete([branch, publication.objectId]))

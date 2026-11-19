@@ -1,16 +1,21 @@
 import 'fake-indexeddb/auto'
+import { IDBFactory } from 'fake-indexeddb'
 import { expect, it } from 'vitest'
 import {
   applySyncedObject,
   confirmLocalOutline,
   createLocalChapter,
   createLocalProject,
+  exportLocalBackup,
   exportLocalManuscript,
+  importLocalBackup,
   importLocalManuscript,
+  manuscriptHash,
   readLocalOutline,
   readLocalPublications,
   syncObjectSignature,
   validateSyncedObject,
+  type ManuscriptPack,
 } from './offlineStore'
 import {
   outlinePromiseSeed,
@@ -18,6 +23,7 @@ import {
   type OutlineHistory,
   type OutlineVersion,
 } from './outlineSyncModel'
+import { encodeWebManuscriptBackup } from './webManuscriptBackup'
 
 function plan(chapterId: string): OutlineVersion {
   return {
@@ -238,4 +244,70 @@ it('交换包保留采用大纲和来源设备，缺失实际伏笔时留档并�
     ).rejects.toThrow('等待原伏笔记录 bell-origin')
     expect((await readLocalOutline(novelId)).promises).toEqual([])
   }
+})
+
+it('备份恢复保留原采用大纲的章纲顺序，新确认仍核对当前目录', async () => {
+  const id = 'restored-outline-order'
+  const branchId = 'restored-outline-order-branch'
+  const ids = ['outline-order-first', 'outline-order-second']
+  const prior = plan(ids[0])
+  const unit = prior.plan.volumes[0].units[0]
+  unit.chapters.push({ ...unit.chapters[0], chapter_id: ids[1] })
+  const adopted = { ...prior, id: 'outline-order-adopted', parent_id: prior.id }
+  const pack: ManuscriptPack = {
+    format: 'ainovel-manuscript/1',
+    novel: { id, title: '重排后的独立备份', brief: '', created: 1 },
+    branch: { id: branchId, novel_id: id, name: '默认', mode: 'advisory', story_revision: 0, created: 1 },
+    chapters: ids.map((chapterId, index) => ({
+      id: chapterId,
+      branch_id: branchId,
+      title: `第 ${index + 1} 章`,
+      position: 2 - index,
+      revision: 0,
+      archived: 0,
+      stale: 0,
+    })),
+    revisions: ids.map((chapter_id) => ({
+      id: `${chapter_id}-revision`,
+      chapter_id,
+      revision: 0,
+      parent_id: null,
+      content: '',
+      sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      cause: 'create',
+      created: 1,
+    })),
+    outline_history: { adopted_revision_id: adopted.id, versions: [prior, adopted] },
+  }
+  const checkpointDb = globalThis.indexedDB
+  const legacy = await encodeWebManuscriptBackup(pack, manuscriptHash)
+  const mismatched = await encodeWebManuscriptBackup(pack, manuscriptHash, prior.id)
+  await expect(importLocalBackup(mismatched)).rejects.toThrow('大纲采用依据与原修订不符')
+  await importLocalManuscript(new Blob([JSON.stringify(pack)]))
+  expect((await readLocalOutline(id)).restorePending?.reason).toContain('章节目录一致')
+  expect((await readLocalOutline(id)).current).toBeUndefined()
+  const pendingBackup = await exportLocalBackup(id)
+  for (const backup of [legacy, pendingBackup]) {
+    globalThis.indexedDB = new IDBFactory()
+    await importLocalBackup(backup)
+    expect((await readLocalOutline(id)).restorePending?.revisionId).toBe(adopted.id)
+    expect((await readLocalOutline(id)).current).toBeUndefined()
+  }
+  globalThis.indexedDB = new IDBFactory()
+  await importLocalBackup(await encodeWebManuscriptBackup(pack, manuscriptHash, adopted.id))
+  const restored = await readLocalOutline(id)
+  expect(restored.chapters.map((chapter) => chapter.id)).toEqual([...ids].reverse())
+  expect(restored.current?.version).toEqual(adopted)
+  expect(restored.restorePending).toBeUndefined()
+  expect((await exportLocalManuscript(id)).outline_history).toEqual(pack.outline_history)
+
+  const next = { ...adopted, id: 'outline-order-next', parent_id: adopted.id }
+  await expect(confirmLocalOutline(id, adopted.id, next)).rejects.toThrow('章纲顺序须与章节目录一致')
+  const reordered = structuredClone(next)
+  reordered.plan.volumes[0].units[0].chapters.reverse()
+  await confirmLocalOutline(id, adopted.id, reordered)
+  const current = await readLocalOutline(id)
+  expect(current.current?.version).toEqual(reordered)
+  expect(current.versions.find(({ version }) => version.id === adopted.id)?.version).toEqual(adopted)
+  globalThis.indexedDB = checkpointDb
 })

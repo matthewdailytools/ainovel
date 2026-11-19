@@ -208,7 +208,7 @@ def _freeze_cards(tx, branch_id, references, previous):
     return list(frozen.values())
 
 
-def _validate(graph, plan, basis, confirmed):
+def _validate(graph, plan, basis, confirmed, *, preserve_backup_order=False):
     chapters = {row["id"]: row for row in graph["chapters"] if not row["archived"]}
     settings = {item["id"] for item in basis["items"]}
     promises = {
@@ -227,7 +227,7 @@ def _validate(graph, plan, basis, confirmed):
     if len(active_ids) != len(set(active_ids)) or not set(active_ids) <= chapters.keys():
         raise DomainError("outline_chapter", "章纲必须引用本工作版本未归档的章节，且每章仅能安排一次。")
     positions = [chapters[identifier]["position"] for identifier in active_ids]
-    if positions != sorted(positions):
+    if not preserve_backup_order and positions != sorted(positions):
         raise DomainError("outline_order", "章纲顺序须与章节目录一致。")
     if any(
         len(chapter["setting_ids"]) != len(set(chapter["setting_ids"]))
@@ -317,7 +317,15 @@ def save_outline(domain, branch_id, data, *, before_write=None, include_setting_
 
 
 def save_outline_tx(
-    tx, branch_id, data, *, before_write=None, frozen_cards=None, sync_source=None, archive_source=None
+    tx,
+    branch_id,
+    data,
+    *,
+    before_write=None,
+    frozen_cards=None,
+    sync_source=None,
+    archive_source=None,
+    preserve_backup_order=False,
 ):
     if before_write is not None:
         before_write(tx)
@@ -361,7 +369,9 @@ def save_outline_tx(
             and source.get("project_id") == basis["project_id"]
         ):
             basis["generation_id"] = source["generation_id"]
-    _validate(graph_snapshot(tx, branch_id), payload, basis, False)
+    _validate(
+        graph_snapshot(tx, branch_id), payload, basis, False, preserve_backup_order=preserve_backup_order
+    )
     _insert(tx, branch_id, data.base_revision + 1, False, payload, basis)
     return _view(tx, branch_id)
 
@@ -372,7 +382,9 @@ def confirm_outline(domain, branch_id, data, *, before_write=None, include_setti
         return _with_setting_ledger(tx, branch_id, view) if include_setting_ledger else view
 
 
-def confirm_outline_tx(tx, branch_id, data, *, before_write=None, source_confirmed=False):
+def confirm_outline_tx(
+    tx, branch_id, data, *, before_write=None, source_confirmed=False, preserve_backup_order=False
+):
     if before_write is not None:
         before_write(tx)
     row = _latest(tx, branch_id)
@@ -392,7 +404,7 @@ def confirm_outline_tx(tx, branch_id, data, *, before_write=None, source_confirm
         requirement_changed = _required_promises_changed(previous["plan"] if previous else None, plan)
         if requirement_changed and not (data.acknowledge_required_promises or source_confirmed):
             raise DomainError("outline_required_promises", "请核对必达承诺变更后再确认大纲。", 409)
-        _validate(graph, plan, basis, True)
+        _validate(graph, plan, basis, True, preserve_backup_order=preserve_backup_order)
         if data.impact_sha256:
             from .outline_confirmation_impact import confirmation_impact
 
