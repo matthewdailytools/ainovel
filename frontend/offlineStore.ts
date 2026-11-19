@@ -1719,7 +1719,16 @@ export async function restoreLocalCheckpoint(
           (prepared.outline && target.scope === 'volume'),
       ),
       true,
-      prepared.outline,
+      {
+        outline: prepared.outline,
+        removedScopeClears: {
+          changed: plan.lengthTargets.changed,
+          historicalOutlines: [
+            ...(plan.currentOutline ? [plan.currentOutline] : []),
+            ...(captured.pack.outline_history?.versions ?? []),
+          ],
+        },
+      },
     )
     await markPublication(tx, branchId, ...publications)
     project.branch.story_revision++

@@ -28,6 +28,7 @@ import {
   readLocalSnapshotHistory,
   readLocalSourceRevision,
   readLocalStory,
+  readLocalSyncSnapshot,
   restoreLocalChapter,
   restoreLocalCheckpoint,
   saveLocalChapter,
@@ -648,6 +649,79 @@ test('volume restore uses historical facts and targets, preserves the outside vo
     restoreLocalCheckpoint(id, volume.id, blocked.basis, 'cross-volume-request'),
   ).rejects.toMatchObject({ code: 'conflict' })
 })
+
+test.each([false, true])(
+  'book restore clears a removed volume by exact historical source, previously sealed=%s',
+  async (sealed) => {
+    const { pack, book, volume, original, secondRoot } = await checkpointFixture()
+    const current = pack.outline_history!.versions.find(({ id }) => id === book.shared.outline_id)!
+    const older = {
+      ...current,
+      id: 'before-late-volume',
+      plan: { ...current.plan, volumes: current.plan.volumes.slice(0, 1) },
+    }
+    const archived: PortableCheckpoint = {
+      ...book,
+      shared: { ...book.shared, outline_id: older.id },
+      scoped_chapter_ids: [original.chapter_id],
+      chapters: book.chapters.map((chapter) =>
+        chapter.id === secondRoot.chapter_id ? { ...chapter, archived: 1 } : chapter,
+      ),
+      restore_sources: { ...volume.restore_sources!, facts: [], length_targets: [] },
+    }
+    const late = {
+      scope: 'volume',
+      scope_id: 'new-city',
+      targets: { min_chars: 9, max_chars: null, expected_chapters: 1 },
+    }
+    vi.stubGlobal('indexedDB', new IDBFactory())
+    await importLocalManuscript(
+      bundle({
+        ...pack,
+        outline_history: {
+          ...pack.outline_history,
+          adopted_revision_id: current.id,
+          versions: [older, { ...current, parent_id: older.id }],
+        },
+        restore_state: { facts: [], length_targets: [late] },
+        snapshot_history: { entries: [await sealCheckpoint(archived)] },
+      }),
+    )
+    const id = pack.novel.id
+    const previous = sealed ? (await readLocalSyncSnapshot(id)).restoreStateSync.versions[0] : undefined
+    const [firstVolume, lateVolume] = current.plan.volumes
+    await confirmLocalOutline(id, current.id, {
+      ...current,
+      id: 'author-merged-volumes',
+      parent_id: current.id,
+      plan: {
+        ...current.plan,
+        volumes: [{ ...firstVolume, units: [...firstVolume.units, ...lateVolume.units] }],
+      },
+    })
+    const dormant = (await readLocalSyncSnapshot(id)).restoreStateSync
+    expect(dormant.versions).toEqual(previous ? [previous] : [])
+    expect((await exportLocalManuscript(id)).restore_state?.length_targets).toEqual([late])
+
+    const preview = await readLocalCheckpointRestore(id, archived.id)
+    expect(preview).toMatchObject({ blockers: [], lengthTargetCount: 1 })
+    await restoreLocalCheckpoint(id, archived.id, preview.basis, 'restore-before-late-volume')
+    const outgoing = (await readLocalSyncSnapshot(id)).restoreStateSync
+    const [, head] = outgoing.heads[0]
+    expect(head).toMatchObject({ kind: 'length-target-head', scope: 'volume', scope_id: late.scope_id })
+    expect(outgoing.versions.find(({ version }) => version.id === head.revision_id)?.version).toMatchObject({
+      scope: late.scope,
+      scope_id: late.scope_id,
+      targets: null,
+      outline_version_id: current.id,
+      parent_id: previous?.version.id ?? null,
+    })
+    expect((await readLocalSyncSnapshot(id)).restoreStateSync).toEqual(outgoing)
+    expect((await exportLocalManuscript(id)).restore_state?.length_targets).toEqual([
+      { ...late, targets: null },
+    ])
+  },
+)
 
 test('forked checkpoint persists its receipt atomically and replays concurrent requests only once', async () => {
   const { pack, volume, original } = await checkpointFixture()

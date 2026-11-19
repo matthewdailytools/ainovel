@@ -46,6 +46,11 @@ type Head = {
 }
 type Version = { branchId: string; object: RestoreStateVersion }
 type Options = { publicationId?: string | null; consumePublication?: boolean }
+type TargetStaging = {
+  outline?: OutlineVersion
+  seedsOnly?: boolean
+  removedScopeClears?: { changed: ReadonlySet<string>; historicalOutlines: readonly OutlineVersion[] }
+}
 type Access = {
   transact<T>(
     names: (typeof stores)[number][],
@@ -136,20 +141,31 @@ export function createRestoreStateOfflineStore({
     branchId: string,
     targets: PortableCheckpointLengthTarget[],
     publish: boolean,
-    selectedOutline?: OutlineVersion,
-    seedsOnly = false,
+    { outline: selectedOutline, seedsOnly, removedScopeClears }: TargetStaging = {},
   ) {
     const activeId = selectedOutline?.id ?? (await outlineVersionId(tx, branchId))
     const outline = selectedOutline ?? (activeId && (await getOutline(tx, branchId, activeId)))
     const volumes = new Set(outline ? outline.plan.volumes.map(({ id }) => id) : [])
     for (const target of targets) {
-      if (target.scope === 'volume' && !volumes.has(target.scope_id!)) continue
       const slot = lengthTargetKey(target)
+      const removedVolume = target.scope === 'volume' && !volumes.has(target.scope_id!)
+      if (removedVolume && (target.targets !== null || !removedScopeClears?.changed.has(slot))) continue
       const saved = await getHead(tx, branchId, slot)
       if (seedsOnly && saved) continue
       const row = saved ?? { branchId, slot }
-      const outline_version_id = target.scope === 'volume' ? activeId! : null
       const current = row.head && (await getVersion(tx, branchId, row.head.revision_id))?.object
+      let outline_version_id = target.scope === 'volume' ? (activeId ?? null) : null
+      if (removedVolume) {
+        const pending = row.pending?.payload
+        outline_version_id =
+          (current?.kind === 'length-target-version' && current.version.outline_version_id) ||
+          (pending?.kind === 'length-target-version' && pending.draft.outline_version_id) ||
+          removedScopeClears?.historicalOutlines.find(({ plan }) =>
+            plan.volumes.some(({ id }) => id === target.scope_id),
+          )?.id ||
+          null
+        if (!outline_version_id) continue
+      }
       if (
         !row.pending &&
         current?.kind === 'length-target-version' &&
@@ -184,7 +200,7 @@ export function createRestoreStateOfflineStore({
       branchId,
       state?.length_targets.filter(({ scope }) => scope === 'volume') ?? [],
       true,
-      outline,
+      { outline },
     )
   }
 
@@ -206,7 +222,7 @@ export function createRestoreStateOfflineStore({
           false,
         )
     }
-    await stageTargets(tx, branchId, state.length_targets, false, undefined, true)
+    await stageTargets(tx, branchId, state.length_targets, false, { seedsOnly: true })
   }
 
   async function seal(projectId: string) {
@@ -269,13 +285,13 @@ export function createRestoreStateOfflineStore({
         return fail('format', '正式事实或篇幅目标的父修订属于其他范围。')
     }
     if (object.kind === 'length-target-version') {
-      const { scope, scope_id, outline_version_id } = object.version
+      const { scope, scope_id, outline_version_id, targets } = object.version
       if (outline_version_id) {
         const outline = await getOutline(tx, branch, outline_version_id)
         if (!outline) return fail('missing', '等待篇幅目标所属的大纲版本。')
         if (!outline.plan.volumes.some(({ id }) => id === scope_id))
           return fail('format', '篇幅目标指定的卷不属于引用的大纲版本。')
-        if (adopting && (await outlineVersionId(tx, branch)) !== outline_version_id)
+        if (adopting && targets !== null && (await outlineVersionId(tx, branch)) !== outline_version_id)
           return fail('missing', '等待采用篇幅目标所属的准确大纲。')
       }
       if (adopting && scope === 'chapter' && (await getChapter(tx, scope_id!))?.branch_id !== branch)
@@ -288,9 +304,11 @@ export function createRestoreStateOfflineStore({
     if (original.chapter_id !== chapter_id) return fail('format', '正式事实的章稿属于其他章节。')
     if (!adopting) return { original }
     const chapter = await getChapter(tx, chapter_id)
-    const native = chapter?.branch_id === branch ? await chapterHead(tx, chapter) : undefined
-    if (!native || (chapter?.archived && facts.length))
+    if (chapter?.branch_id !== branch || (chapter.archived && facts.length))
       return fail('missing', '等待章稿目录和正式事实的当前状态一致。')
+    if (chapter.archived) return { original }
+    const native = await chapterHead(tx, chapter)
+    if (!native) return fail('missing', '等待章稿目录和正式事实的当前状态一致。')
     if (native.id !== original.id) {
       const alias = await result<{ chapterAdopted?: true } | undefined>(
         tx.objectStore('storyChapterAliases').get([branch, original.id, native.id]),
@@ -327,6 +345,7 @@ export function createRestoreStateOfflineStore({
     return transact([...stores], 'readwrite', async (tx) => {
       const project = await readProject(tx, projectId)
       const branchId = project.branch.id
+      if (branchId !== object.branch_id) return false
       const { version } = captured
       const verified = await resolve(tx, version, !immutable)
       if (
@@ -356,12 +375,18 @@ export function createRestoreStateOfflineStore({
       if (current?.head?.revision_id !== object.revision_id) {
         const state = (await readRestoreState(tx, branchId)) ?? emptyState()
         if (version.kind === 'fact-set-version') {
+          const { chapter_id, facts } = version.version
+          const nativeRevisionId = verified.native?.id
+          if (facts.length && !nativeRevisionId)
+            return fail('missing', '等待正式事实引用的章稿修订正式采用。')
           state.facts = [
-            ...state.facts.filter(({ evidence }) => evidence.chapter_id !== version.version.chapter_id),
-            ...version.version.facts.map((fact) => ({
-              ...fact,
-              evidence: { ...fact.evidence, revision_id: verified.native!.id },
-            })),
+            ...state.facts.filter(({ evidence }) => evidence.chapter_id !== chapter_id),
+            ...(nativeRevisionId
+              ? facts.map((fact) => ({
+                  ...fact,
+                  evidence: { ...fact.evidence, revision_id: nativeRevisionId },
+                }))
+              : []),
           ]
         } else {
           const { scope, scope_id, targets } = version.version
