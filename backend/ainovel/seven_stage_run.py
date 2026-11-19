@@ -826,6 +826,7 @@ def _volume_checkpoint(worker, state, volume):
 
 def _writing(worker, state):
     from .outline_workspace import _chapter_plans, read_outline
+    from .workflow_inspection import body_chars
 
     branch = worker.task["branch_id"]
     view = read_outline(worker.domain, branch)
@@ -847,7 +848,7 @@ def _writing(worker, state):
     step = f"chapter-{chapter['id']}"
     if not state.get("child_id"):
         _unchanged(_story_revision(worker.domain, branch), state["story_revision"])
-        if chapter["content"].strip():
+        if body_chars(chapter["content"]):
             completed.append({"id": chapter["id"], "revision": chapter["revision"], "existing": True})
             _transition(worker, state, "writing")
             return
@@ -875,8 +876,14 @@ def _writing(worker, state):
         return
     if artifact["status"] != "accepted":
         _unchanged(_story_revision(worker.domain, branch), state["story_revision"])
+        length = artifact["payload"].get("review", {}).get("chapter_length") or {}
+        if chapter["content"].strip():
+            prompt = length.get("reason") or "请核对候选后手动采纳。"
+            _checkpoint(
+                worker, "needs_review", "本章保存稿只有标题、排版或不可计入的字符，已保留原稿。" + prompt
+            )
+            return
         if not worker.task["payload"]["auto_adopt_body"] or not artifact["payload"].get("review_passed"):
-            length = artifact["payload"].get("review", {}).get("chapter_length") or {}
             _checkpoint(worker, "needs_review", length.get("reason") or "本章正文已生成，请核对候选后采纳。")
             return
         worker.domain.accept(

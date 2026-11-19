@@ -41,7 +41,13 @@ import { OfflineReferenceHistory } from './OfflineReferenceHistory'
 import { OfflineStory } from './OfflineStory'
 import { OfflineRulePreview } from './OfflineRulePreview'
 import { ChapterRestorePreview } from './ChapterRestorePreview'
-import { discardOwnDraft, readDraft, writeDraft, type Draft } from './drafts'
+import { chapterDraftOwner, discardOwnDraft, readDraft, writeDraft, type Draft } from './drafts'
+
+function clearChapterDraft(id: string) {
+  void chapterDraftOwner()
+    .then((owner) => discardOwnDraft(id, owner))
+    .catch(() => undefined)
+}
 
 type EditorState = {
   chapter: LocalChapter
@@ -143,8 +149,8 @@ export function OfflineWorkspace() {
 
   useEffect(() => {
     let active = true
-    listLocalProjects()
-      .then((rows) => {
+    Promise.all([chapterDraftOwner(), listLocalProjects()])
+      .then(([, rows]) => {
         if (active) {
           setProjects(rows)
           setReady(true)
@@ -181,20 +187,28 @@ export function OfflineWorkspace() {
     if (!dirty || !editor || !draftId) return
     let active = true
     const timer = setTimeout(() => {
-      void writeDraft({
-        id: draftId,
-        base: editor.base.revision,
-        revisionId: editor.base.id,
-        text: editor.text,
-        updated: Date.now(),
-      }).then(
-        () => {
-          if (active) setDraftNotice('输入已暂存为草稿。')
-        },
-        () => {
-          if (active) setDraftNotice('无法暂存当前输入，请下载草稿以保留这段文字。')
-        },
-      )
+      void chapterDraftOwner()
+        .then((owner) => {
+          if (!active) return
+          return writeDraft(
+            {
+              id: draftId,
+              base: editor.base.revision,
+              revisionId: editor.base.id,
+              text: editor.text,
+              updated: Date.now(),
+            },
+            owner,
+          )
+        })
+        .then(
+          () => {
+            if (active) setDraftNotice('输入已暂存为草稿。')
+          },
+          () => {
+            if (active) setDraftNotice('无法暂存当前输入，请下载草稿以保留这段文字。')
+          },
+        )
     }, 250)
     return () => {
       active = false
@@ -339,7 +353,7 @@ export function OfflineWorkspace() {
     setHistoryTarget('')
     setPreview(undefined)
     try {
-      const saved = await readDraft(`offline/${selected.branch.id}/${chapter.id}`)
+      const saved = await readDraft(`offline/${selected.branch.id}/${chapter.id}`, await chapterDraftOwner())
       if (saved && saved.text !== base.content) setRecovery(saved)
     } catch {
       setDraftNotice('无法读取编辑草稿，已打开正式保存稿。')
@@ -365,7 +379,7 @@ export function OfflineWorkspace() {
     refreshWorkbench()
     setRecovery(undefined)
     setDraftNotice('')
-    if (draftId) void discardOwnDraft(draftId).catch(() => undefined)
+    if (draftId) clearChapterDraft(draftId)
   }
 
   async function save() {
@@ -665,8 +679,7 @@ export function OfflineWorkspace() {
                     const text = event.target.value
                     setEditor((value) => value && { ...value, text })
                     setDraftNotice('')
-                    if (draftId && text === editor.base.content)
-                      void discardOwnDraft(draftId).catch(() => undefined)
+                    if (draftId && text === editor.base.content) clearChapterDraft(draftId)
                     setStatus('')
                   }}
                 />

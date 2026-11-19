@@ -6,17 +6,6 @@ export type Draft = {
   revisionId?: string
   fromOtherWindow?: boolean
 }
-const windowId = (() => {
-  const fallback = crypto.randomUUID()
-  try {
-    const id = sessionStorage.getItem('ainovel-draft-window') || fallback
-    sessionStorage.setItem('ainovel-draft-window', id)
-    return id
-  } catch {
-    return fallback
-  }
-})()
-
 export function createDraftOwner(ownerKey: string): () => Promise<string> {
   let owner: Promise<string> | undefined
   return () =>
@@ -58,6 +47,8 @@ export function createDraftOwner(ownerKey: string): () => Promise<string> {
     }))
 }
 
+export const chapterDraftOwner = createDraftOwner('ainovel-draft-window')
+
 type Stored = Draft & { chapter_id?: string; window_id?: string }
 let connection: Promise<IDBDatabase> | undefined
 function open() {
@@ -68,7 +59,8 @@ function open() {
     request.onerror = () => reject(request.error)
   }))
 }
-export async function readDraft(id: string, owner = windowId): Promise<Draft | undefined> {
+export async function readDraft(id: string, owner?: string): Promise<Draft | undefined> {
+  const windowId = owner ?? (await chapterDraftOwner())
   const db = await open()
   return new Promise((resolve, reject) => {
     const request = db.transaction('drafts').objectStore('drafts').getAll()
@@ -76,29 +68,31 @@ export async function readDraft(id: string, owner = windowId): Promise<Draft | u
       const rows = (request.result as Stored[])
         .filter((row) => row.chapter_id === id || row.id === id)
         .sort((a, b) => b.updated - a.updated)
-      const row = rows.find((row) => row.window_id === owner) || rows[0]
-      resolve(row ? { ...row, id, fromOtherWindow: row.window_id !== owner } : undefined)
+      const row = rows.find((row) => row.window_id === windowId) || rows[0]
+      resolve(row ? { ...row, id, fromOtherWindow: row.window_id !== windowId } : undefined)
     }
     request.onerror = () => reject(request.error)
   })
 }
-export async function writeDraft(draft: Draft, owner = windowId): Promise<void> {
+export async function writeDraft(draft: Draft, owner?: string): Promise<void> {
+  const windowId = owner ?? (await chapterDraftOwner())
   const db = await open()
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('drafts', 'readwrite')
     transaction
       .objectStore('drafts')
-      .put({ ...draft, id: draft.id + '@' + owner, chapter_id: draft.id, window_id: owner })
+      .put({ ...draft, id: draft.id + '@' + windowId, chapter_id: draft.id, window_id: windowId })
     transaction.oncomplete = () => resolve()
     transaction.onabort = () => reject(transaction.error)
   })
 }
 
-export async function discardOwnDraft(id: string, owner = windowId): Promise<void> {
+export async function discardOwnDraft(id: string, owner?: string): Promise<void> {
+  const windowId = owner ?? (await chapterDraftOwner())
   const db = await open()
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('drafts', 'readwrite')
-    transaction.objectStore('drafts').delete(id + '@' + owner)
+    transaction.objectStore('drafts').delete(id + '@' + windowId)
     transaction.oncomplete = () => resolve()
     transaction.onabort = () => reject(transaction.error)
   })

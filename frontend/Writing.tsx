@@ -15,7 +15,7 @@ import {
 import type { Notify } from './App'
 import { Difference, Editor, type Selection } from './Editor'
 import { ChapterRestorePreview, type ChapterRestorePreviewProps } from './ChapterRestorePreview'
-import { readDraft, writeDraft, type Draft } from './drafts'
+import { chapterDraftOwner, readDraft, writeDraft, type Draft } from './drafts'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
 import { ChapterContext } from './ChapterContext'
@@ -239,6 +239,7 @@ export function Writing({
   const alive = useRef(true)
   useEffect(() => {
     alive.current = true
+    void chapterDraftOwner()
     return () => {
       alive.current = false
     }

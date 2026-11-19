@@ -264,6 +264,56 @@ test('离线重开可恢复暂存输入，同章保存稿更新时先比较再�
   await expect(reopened.getByText('本地已保存 · 修订 2', { exact: true })).toBeVisible()
 })
 
+test('复制离线标签后两份正文草稿各自可恢复，一窗保存不清除另一窗', async ({ page, context }) => {
+  await createWorkspace(page)
+  await expect(page.getByText('离线页面就绪', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+  await context.setOffline(true)
+  await page.reload()
+  await expect(page.getByRole('combobox', { name: '离线作品', exact: true })).toBeEnabled()
+  const draftOwner = (tab: Page) => tab.evaluate(() => sessionStorage.getItem('ainovel-draft-window'))
+  const originalOwner = await draftOwner(page)
+  expect(originalOwner).toBeTruthy()
+  const popup = page.waitForEvent('popup')
+  await page.evaluate(() => {
+    window.open(location.href, '_blank')
+  })
+  const duplicate = await popup
+  // The duplicate opens the chapter first. Ownership should already belong to the original page.
+  await selectManuscript(duplicate)
+  await selectManuscript(page)
+  expect(await draftOwner(page)).toBe(originalOwner)
+  expect(await draftOwner(duplicate)).not.toBe(originalOwner)
+
+  const originalText = '原标签保存了只有它知道的线索。'
+  const duplicateText = '复制标签选择另一条寻铃路线。'
+  for (const [tab, text] of [
+    [page, originalText],
+    [duplicate, duplicateText],
+  ] as const) {
+    await tab.getByLabel('章节正文').fill(text)
+    await expect(tab.getByText('输入已暂存为草稿。', { exact: true })).toBeVisible()
+  }
+
+  async function recoverDraft(tab: Page, saved: string, draft: string) {
+    tab.once('dialog', (dialog) => dialog.accept())
+    await tab.reload()
+    await selectManuscript(tab)
+    const editor = tab.getByLabel('章节正文')
+    await expect(editor).toHaveValue(saved)
+    await tab.getByText('有未提交的暂存草稿', { exact: true }).press('Enter')
+    await tab.getByRole('button', { name: '载入暂存草稿' }).press('Enter')
+    await expect(editor).toHaveValue(draft)
+  }
+
+  await recoverDraft(duplicate, '', duplicateText)
+  await duplicate.getByRole('button', { name: '保存正文到浏览器' }).press('Enter')
+  await expect(duplicate.getByText('本地已保存 · 修订 1', { exact: true })).toBeVisible()
+  await recoverDraft(page, duplicateText, originalText)
+  await expect(page.getByRole('region', { name: '并发稿件', exact: true })).toContainText(duplicateText)
+  await expect(page.getByRole('button', { name: '保存正文到浏览器' })).toBeDisabled()
+})
+
 test('浏览器存储升级中断时原稿完整，重试可读回', async ({ page }) => {
   const title = '遗铃 · 存储升级'
   const body = '铃本来就刻着师姐的名字。'

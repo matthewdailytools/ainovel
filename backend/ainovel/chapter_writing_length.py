@@ -38,15 +38,16 @@ def prompt_basis(frozen):
 
 def chapter_check(frozen, text):
     source = next(row for row in frozen["targets"] if row["scope"] == "chapter")["target"]
-    if not source or source["targets"] is None:
-        return None
-    minimum = source["targets"]["min_chars"]
-    maximum = source["targets"]["max_chars"]
-    if minimum is None and maximum is None:
-        return None
+    targets = (source or {}).get("targets") or {}
+    minimum = targets.get("min_chars")
+    maximum = targets.get("max_chars")
     actual = body_chars(text)
     reason = ""
-    if minimum is not None and actual < minimum:
+    if not actual:
+        reason = "本章候选没有有效正文。候选已保留，请补写后手动采纳。"
+    elif minimum is None and maximum is None:
+        return None
+    elif minimum is not None and actual < minimum:
         reason = f"本章候选 {actual} 个有效字符，低于采用的下限 {minimum}。候选已保留，请核对后手动采纳。"
     elif maximum is not None and actual > maximum:
         reason = f"本章候选 {actual} 个有效字符，高于采用的上限 {maximum}。候选已保留，请核对后手动采纳。"

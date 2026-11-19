@@ -546,6 +546,85 @@ def test_complete_chapter_run_uses_frozen_applicable_length_targets(client, doma
     assert model.calls.count("writing.expand_plot") == 1
 
 
+@pytest.mark.parametrize("format_source", ["saved_chapter", "generated_candidate"])
+def test_format_only_text_requires_author_action_in_m5(client, domain, settings, story, format_source):
+    formatting = "## 排版标题\r\n> -   \r\n***\r\n\u200b"
+    assert body_chars(formatting) == 0 and formatting.strip()
+    chapter_id = story["chapter_id"]
+    if format_source == "saved_chapter":
+        domain.save(chapter_id, 0, formatting)
+    original = domain.chapter(chapter_id)
+    branch, endpoint, run_id = start(client, domain, story, "outline")
+
+    class FormattingModel(Model):
+        async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+            response = await super().generate(account, task_id, system, prompt, max_output, **kwargs)
+            instruction = json.loads(prompt.split("\n只返回")[0])["任务"]
+            if format_source == "generated_candidate" and instruction.get("action") == "writing.expand_plot":
+                return {**response, "text": formatting}
+            return response
+
+    model = FormattingModel(settings=settings)
+    drain(settings, model)
+    parent = domain.task(run_id)
+    assert parent["status"] == "needs_review", parent["error"]
+    first = parent["result"]["seven_stage_run"]
+    assert first["stage"] == "writing" and first["completed_chapters"] == []
+    [child_id] = first["children"]
+    child = domain.task(child_id)
+    candidate = domain.artifact(child["result"]["artifact_id"])
+    assert candidate["status"] == "candidate" and candidate["payload"]["review_passed"]
+    assert candidate["base_revision"] == original["revision"]
+    assert domain.chapter(chapter_id) == original
+    if format_source == "saved_chapter":
+        assert candidate["payload"]["text"] == BODY
+        assert "已保留原稿" in parent["error"]
+    else:
+        check = candidate["payload"]["review"]["chapter_length"]
+        assert check == {
+            "actual_chars": 0,
+            "min_chars": None,
+            "max_chars": None,
+            "reason": parent["error"],
+        }
+        assert "没有有效正文" in check["reason"]
+        assert candidate["payload"]["text"] == formatting
+    assert model.calls.count("writing.expand_plot") == 1
+    assert "对账立项章纲与节奏" not in model.calls
+
+    assert client.post(f"{endpoint}/{run_id}/resume").status_code == 200
+    drain(settings, model)
+    waiting = domain.task(run_id)
+    assert waiting["status"] == "needs_review"
+    assert waiting["result"]["seven_stage_run"] == first
+    assert domain.chapter(chapter_id) == original
+    assert model.calls.count("writing.expand_plot") == 1
+
+    candidate_url = f"/api/artifacts/{candidate['id']}"
+    if format_source == "generated_candidate":
+        candidate = verify(
+            client.patch(
+                candidate_url, json={"candidate_revision": candidate["candidate_revision"], "text": BODY}
+            )
+        )
+    verify(
+        client.post(
+            candidate_url + "/accept",
+            json={"idempotency_key": uid(), "candidate_revision": candidate["candidate_revision"]},
+        )
+    )
+    assert client.post(f"{endpoint}/{run_id}/resume").status_code == 200
+    drain(settings, model)
+    later = domain.task(run_id)["result"]["seven_stage_run"]
+    assert later["stage"] == "inspection" and later["children"][0] == child_id
+    saved = domain.chapter(chapter_id, branch)
+    assert (saved["content"], saved["revision"]) == (BODY, original["revision"] + 1)
+    assert later["completed_chapters"] == [
+        {"id": chapter_id, "revision": saved["revision"], "artifact_id": candidate["id"]}
+    ]
+    assert model.calls.count("writing.expand_plot") == model.calls.count("对账立项章纲与节奏") == 1
+
+
 @pytest.mark.parametrize("origin", ["idea", "settings", "outline"])
 def test_seven_stage_run_reaches_verified_checkpoints(client, domain, settings, story, origin):
     count = 2 if origin == "idea" else 1
