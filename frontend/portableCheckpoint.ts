@@ -215,6 +215,10 @@ function parseRestoreState({
   return { facts, length_targets }
 }
 
+export function decodePortableRestoreState(value: unknown) {
+  return parseRestoreState(fields(value, ['facts', 'length_targets']))
+}
+
 export function lengthTargetKey({
   scope,
   scope_id,
@@ -228,7 +232,7 @@ export async function validatePortableRestoreState(
   volumes: ReadonlySet<string>,
   archivedChapters: ReadonlySet<string>,
 ) {
-  const state = parseRestoreState(fields(value, ['facts', 'length_targets']))
+  const state = decodePortableRestoreState(value)
   verifyTargetScopes(state.length_targets, heads, volumes)
   await verifyFacts(state.facts, ({ chapter_id }) =>
     archivedChapters.has(chapter_id) ? undefined : heads.get(chapter_id),

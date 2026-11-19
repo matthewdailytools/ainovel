@@ -2,6 +2,7 @@ import type { LocalChapter, LocalProject, LocalPublication } from './offlineStor
 import type { ProjectSource } from './projectSyncModel'
 import type { ReferenceHistory } from './referenceArchive'
 import type { SettingsVersion } from './settingsSyncModel'
+import { restoreStateSyncStores } from './restoreStateOfflineStore'
 import {
   outlineObjectSignature,
   outlineCardFromReference,
@@ -40,7 +41,13 @@ export const outlineReadStores = [
   'storyHistory',
   'referenceArchives',
 ] as const
-export const outlineWriteStores = [...outlineReadStores, 'projectVersions', 'publications'] as const
+export const outlineWriteStores = [
+  ...outlineReadStores,
+  'projectVersions',
+  'publications',
+  'restoreStates',
+  ...restoreStateSyncStores,
+] as const
 type StoreName = (typeof outlineWriteStores)[number]
 type Tx = IDBTransaction
 type Access = {
@@ -56,6 +63,7 @@ type Access = {
   readReferenceHistory(tx: Tx, branchId: string): Promise<ReferenceHistory | undefined>
   readPublication(tx: Tx, branchId: string, objectId: string): Promise<LocalPublication | undefined>
   markPublication(tx: Tx, branchId: string, ...objects: string[]): Promise<void>
+  stageOutlineTargets(tx: Tx, branchId: string, version: OutlineVersion): Promise<void>
   fail(code: FailCode, message: string): never
 }
 
@@ -72,6 +80,7 @@ export function createOutlineOfflineStore({
   readReferenceHistory,
   readPublication,
   markPublication,
+  stageOutlineTargets,
   fail,
 }: Access) {
   const getHead = (tx: Tx, branchId: string) =>
@@ -346,6 +355,7 @@ export function createOutlineOfflineStore({
       )
       await moveHead(tx, project, version, previous)
       await markPublication(tx, branch, `outline-version:${version.id}`, `outline:${branch}`)
+      await stageOutlineTargets(tx, branch, version)
     })
   }
 

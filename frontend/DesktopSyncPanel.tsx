@@ -7,6 +7,8 @@ import { SyncScopePreview } from './SyncScopePreview'
 import { describeProjectVersion, type ProjectVersion } from './projectSyncModel'
 import type { ArchivedReferenceCard } from './referenceArchive'
 import { referenceAssessmentLabel, referenceFieldLabels } from './ReferenceCardHistory'
+import { describeFactSet, describeLengthTarget } from './restoreStateConflictText'
+import type { RestoreStateVersion } from './restoreStateSyncModel'
 import { describeSettingsVersion, type SettingsVersion } from './settingsSyncModel'
 
 type Conflict = { id: string; object_id: string }
@@ -69,6 +71,11 @@ type Comparison = {
   story_versions?: Record<string, StoryVersion>
   reference_versions?: Record<string, ArchivedReferenceCard>
   setting_use_versions?: Record<string, components['schemas']['SettingUseVersion']>
+  fact_set_versions?: Record<string, Extract<RestoreStateVersion, { kind: 'fact-set-version' }>['version']>
+  length_target_versions?: Record<
+    string,
+    Extract<RestoreStateVersion, { kind: 'length-target-version' }>['version']
+  >
   remote: {
     head_revision: string
     parent_revision: string | null
@@ -99,6 +106,14 @@ const storyStates: Record<string, string> = {
 
 function readable(side: Side, comparison: Comparison) {
   if (!side) return '无此对象或已归档'
+  if (side.kind === 'fact-set-head' && side.revision_id) {
+    const version = comparison.fact_set_versions?.[side.revision_id]
+    return version ? describeFactSet(version) : '尚未收到该章的正式事实版本。'
+  }
+  if (side.kind === 'length-target-head' && side.revision_id) {
+    const version = comparison.length_target_versions?.[side.revision_id]
+    return version ? describeLengthTarget(version) : '尚未收到该范围的篇幅目标版本。'
+  }
   if (side.kind === 'project-head' && side.revision_id) {
     const version = comparison.project_versions?.[side.revision_id]
     return version ? describeProjectVersion(version) : '尚未取得该版本的立项来源。'

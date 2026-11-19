@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { IDBFactory } from 'fake-indexeddb'
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import {
+  acknowledgeLocalPublications,
+  applySyncedObject,
   confirmLocalProjectBrief,
   createLocalChapter,
   createLocalProject,
@@ -10,10 +12,13 @@ import {
   readLocalChapterRestore,
   readLocalHistory,
   readLocalPublications,
+  readLocalRulePreview,
   readLocalWorkflowHistory,
   restoreLocalChapter,
   saveLocalChapter,
   syncManuscriptObjects,
+  syncObjectSignature,
+  validateSyncedObject,
 } from './offlineStore'
 import { httpSyncTransport, syncWebManuscript } from './manuscriptSync'
 import {
@@ -24,11 +29,14 @@ import {
   queueSyncResolution,
   readSyncState,
   setSyncEnabled,
+  SyncRestoreStateRejected,
   type PushChange,
   type SyncReceipt,
   type SyncTransport,
 } from './syncClient'
 import { inspectionExcerptTransferReason } from './workflowPrivacy'
+import { buildRestoreStateVersion, restoreStateHead, restoreStateObjectId } from './restoreStateSyncModel'
+import { captureStoryEvidence, compactJSON } from './storySyncModel'
 
 beforeEach(() => {
   globalThis.indexedDB = new IDBFactory()
@@ -120,6 +128,224 @@ function service(device: string, objectId: string, acceptedBeforeDisconnect: boo
   }
   return { transport, latest, submitted, log }
 }
+
+test('formal fact and length heads publish their checked versions first and chapter edit publishes an empty set once', async () => {
+  const original = await createLocalProject('正式依据同步')
+  const chapter = await createLocalChapter(original.novel.id, '渡口')
+  const [root] = await readLocalHistory(original.novel.id, chapter.id)
+  const saved = await saveLocalChapter(original.novel.id, chapter.id, root.id, '门内响铃𠮷😀。\r\n铜铃落地。')
+  const pack = await exportLocalManuscript(original.novel.id)
+  const evidence = await captureStoryEvidence(saved, 4, 9)
+  const facts = [
+    { subject: '旧铃', kind: 'event', statement: '已经落地。', truth: 'fact', story_time: '', evidence },
+  ]
+  globalThis.indexedDB = new IDBFactory()
+  const project = await importLocalManuscript(
+    new Blob([
+      JSON.stringify({
+        ...pack,
+        restore_state: { facts, length_targets: [{ scope: 'book', scope_id: null, targets: null }] },
+      }),
+    ]),
+  )
+  const scope = { service: 'http://127.0.0.1:8888', workId: project.branch.id, deviceId: 'author-web' }
+  const cloud = service(scope.deviceId, 'unused', false)
+  await setSyncEnabled(scope, true)
+  await syncWebManuscript(project, scope, cloud.transport)
+  const factKey = `fact-set-head:${await manuscriptHash(compactJSON([scope.workId, chapter.id]))}`
+  const lengthKey = `length-target-head:${await manuscriptHash(compactJSON([scope.workId, 'book', null]))}`
+  const first = cloud.latest.get(factKey)!
+  const length = cloud.latest.get(lengthKey)!
+  const factVersion = cloud.latest.get(`fact-set-version:${first.payload?.revision_id}`)!
+  const limitVersion = cloud.latest.get(`length-target-version:${length.payload?.revision_id}`)!
+  expect(factVersion.payload?.version).toMatchObject({
+    facts,
+    chapter_revision_id: saved.id,
+    parent_id: null,
+  })
+  expect(limitVersion.payload?.version).toMatchObject({
+    scope: 'book',
+    scope_id: null,
+    outline_version_id: null,
+    targets: null,
+  })
+  expect(factVersion.sequence).toBeLessThan(first.sequence)
+  expect(cloud.latest.get(`revision:${saved.id}`)!.sequence).toBeLessThan(factVersion.sequence)
+  expect(limitVersion.sequence).toBeLessThan(length.sequence)
+  expect((await readLocalRulePreview(project.novel.id)).facts).toHaveLength(1)
+
+  const put = IDBObjectStore.prototype.put
+  const failure = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    value,
+    key,
+  ) {
+    if (this.name === 'restoreSyncHeads') throw new DOMException('Storage full', 'QuotaExceededError')
+    return put.call(this, value, key)
+  })
+  try {
+    await expect(
+      saveLocalChapter(project.novel.id, chapter.id, saved.id, '后来改稿。'),
+    ).rejects.toMatchObject({
+      code: 'quota',
+    })
+  } finally {
+    failure.mockRestore()
+  }
+  expect((await readLocalHistory(project.novel.id, chapter.id)).at(-1)).toEqual(saved)
+  expect((await readLocalRulePreview(project.novel.id)).facts).toHaveLength(1)
+  expect(await readLocalPublications(project.branch.id)).toEqual([])
+
+  const amended = await saveLocalChapter(project.novel.id, chapter.id, saved.id, '后来改稿。')
+  await syncWebManuscript(project, scope, cloud.transport)
+  const empty = cloud.latest.get(factKey)!
+  const emptyVersion = cloud.latest.get(`fact-set-version:${empty.payload?.revision_id}`)!
+  expect(empty.parent_revision).toBe(first.change_id)
+  expect(emptyVersion.payload?.version).toMatchObject({
+    facts: [],
+    chapter_revision_id: amended.id,
+    parent_id: first.payload?.revision_id,
+  })
+  expect((await readLocalRulePreview(project.novel.id)).facts).toEqual([])
+  const cursor = cloud.log.length
+  await syncWebManuscript(project, scope, cloud.transport)
+  expect(cloud.log).toHaveLength(cursor)
+
+  const interrupted = await saveLocalChapter(
+    project.novel.id,
+    chapter.id,
+    amended.id,
+    '服务器先拒绝这份稿的清除。',
+  )
+  let rejected: string | undefined
+  const awaitingChapter: SyncTransport = {
+    ...cloud.transport,
+    async push(request) {
+      if (request.object_id === factKey) {
+        rejected ??= request.change_id
+        if (request.change_id === rejected)
+          throw new SyncRestoreStateRejected('sync_restore_state_dependency', '等待该章稿正式采用。')
+      }
+      return cloud.transport.push(request)
+    },
+  }
+  const pending = await syncWebManuscript(project, scope, awaitingChapter)
+  expect(pending.deferred).toContainEqual({ object_id: factKey, reason: '等待该章稿正式采用。' })
+  expect(cloud.latest.get(factKey)).toEqual(empty)
+  const freshest = await saveLocalChapter(project.novel.id, chapter.id, interrupted.id, '后来正式保存的稿。')
+  await syncWebManuscript(project, scope, awaitingChapter)
+  const completed = cloud.latest.get(factKey)!
+  expect(completed.change_id).not.toBe(rejected)
+  expect(completed.parent_revision).toBe(empty.change_id)
+  expect(
+    cloud.latest.get(`fact-set-version:${completed.payload?.revision_id}`)!.payload?.version,
+  ).toMatchObject({
+    chapter_revision_id: freshest.id,
+    facts: [],
+  })
+})
+
+test.each([false, true])(
+  'formal facts wait for exact same-text chapter adoption, explicit=%s',
+  async (explicit) => {
+    const project = await createLocalProject('云端正确原稿')
+    const key = project.novel.id
+    const branch = project.branch.id
+    const chapter = await createLocalChapter(key, '老城')
+    const [root] = await readLocalHistory(key, chapter.id)
+    const text = '窗外𠮷😀，铃响。'
+    const revision = {
+      ...root,
+      revision: 1,
+      id: 'received-revision',
+      parent_id: root.id,
+      content: text,
+      sha256: await manuscriptHash(text),
+    }
+    const source = {
+      format: 'ainovel-manuscript-sync/1',
+      kind: 'revision',
+      branch_id: branch,
+      revision,
+    } as const
+    const version = await buildRestoreStateVersion(
+      branch,
+      {
+        kind: 'fact-set-version',
+        draft: {
+          chapter_id: chapter.id,
+          chapter_revision_id: revision.id,
+          parent_id: null,
+          facts: [
+            {
+              subject: '旧铃',
+              kind: 'event',
+              statement: '听见旧铃。',
+              truth: 'fact',
+              story_time: '',
+              evidence: await captureStoryEvidence(revision, 2, 6),
+            },
+          ],
+        },
+      },
+      manuscriptHash,
+    )
+    const head = restoreStateHead(version)
+    const versionKey = await restoreStateObjectId(version, manuscriptHash)
+    const headKey = await restoreStateObjectId(head, manuscriptHash)
+    expect(await validateSyncedObject(project, versionKey, version)).toEqual(version)
+    await expect(validateSyncedObject(project, headKey + 'x', head)).rejects.toThrow('摘要')
+    await expect(applySyncedObject(key, versionKey, version, 'null')).rejects.toMatchObject({
+      code: 'missing',
+    })
+    expect(await applySyncedObject(key, `revision:${revision.id}`, source, 'null')).toBe(true)
+    expect(await applySyncedObject(key, versionKey, version, 'null')).toBe(true)
+    await expect(applySyncedObject(key, headKey, head, 'null')).rejects.toMatchObject({ code: 'missing' })
+    expect((await readLocalRulePreview(key)).facts).toEqual([])
+    const sameText = await saveLocalChapter(key, chapter.id, root.id, text)
+    expect(sameText.id).not.toBe(revision.id)
+    await expect(applySyncedObject(key, headKey, head, 'null')).rejects.toMatchObject({ code: 'missing' })
+    const exact = {
+      format: 'ainovel-manuscript-sync/1',
+      kind: 'chapter',
+      chapter: { ...chapter, revision: 1 },
+      head: revision,
+    } as const
+    if (explicit) {
+      const previous = syncManuscriptObjects(await exportLocalManuscript(key)).get(`chapter:${chapter.id}`)!
+      expect(
+        await applySyncedObject(key, `chapter:${chapter.id}`, exact, syncObjectSignature(previous)),
+      ).toBe(true)
+      expect(await applySyncedObject(key, headKey, head, 'stale')).toBe(false)
+      expect((await readLocalRulePreview(key)).facts).toEqual([])
+      expect(await applySyncedObject(key, headKey, head, 'null')).toBe(true)
+    }
+    const cloud = service('receiver', 'unused', false)
+    const scope = { service: 'http://127.0.0.1:8888', workId: branch, deviceId: 'receiver' }
+    await setSyncEnabled(scope, true)
+    await acknowledgeLocalPublications(await readLocalPublications(branch))
+    for (const [objectId, payload] of [
+      [`revision:${revision.id}`, source],
+      [`chapter:${chapter.id}`, exact],
+      [versionKey, version],
+      [headKey, head],
+    ] as const) {
+      await cloud.transport.push({
+        object_id: objectId,
+        change_id: objectId,
+        parent_revision: null,
+        payload,
+        tombstone: false,
+      })
+    }
+    await syncWebManuscript(project, scope, cloud.transport)
+    expect((await readLocalRulePreview(key)).facts[0]).toMatchObject({
+      quote: '𠮷😀',
+      evidence: { revision_id: sameText.id, start: 2, end: 6 },
+    })
+    expect(cloud.submitted.filter(({ object_id }) => object_id === headKey)).toHaveLength(1)
+  },
+)
 
 test.each([false, true])(
   'chapter keeps a later save across an interrupted send, server accepted=%s',

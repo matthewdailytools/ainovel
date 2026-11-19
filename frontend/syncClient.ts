@@ -52,6 +52,14 @@ export function pendingPayloads(pending: readonly Pending[]): [string, SyncPaylo
 }
 
 export class SyncResolutionChanged extends Error {}
+export class SyncRestoreStateRejected extends Error {
+  constructor(
+    readonly code: 'sync_restore_state_dependency' | 'sync_restore_state_integrity' | 'sync_object_size',
+    message: string,
+  ) {
+    super(message)
+  }
+}
 type Replica = { key: string; enabled: boolean; cursor: number; serial: number }
 type LedgerBinding = { workId: string; service: string; ledgerId: string }
 type LedgerCheckpoint = { ledger_id: string; cursor: number }
@@ -622,15 +630,24 @@ export async function pushSyncPending(
   transport: SyncTransport,
   limit = 50,
   privateInspections?: ReadonlySet<string>,
+  onRestoreRejected?: (
+    change: Pending,
+    error: SyncRestoreStateRejected,
+  ) => Promise<'retain' | 'discard' | false>,
 ) {
   const key = scopeKey(scope)
+  const held = new Set<string>()
   let count = 0
   while (count < limit) {
     const state = await readSyncState(scope)
     const { deferred } = workflowTransferRestrictions(pendingPayloads(state.pending), privateInspections)
     const pending = state.pending.find((entry) => {
       const id = entry.kind === 'push' ? entry.request.object_id : entry.object_id
-      return !deferred.has(id) && (entry.kind === 'resolve' || !state.blockedObjects.includes(id))
+      return (
+        !held.has(entry.request.change_id) &&
+        !deferred.has(id) &&
+        (entry.kind === 'resolve' || !state.blockedObjects.includes(id))
+      )
     })
     if (!state.enabled || !pending) break
     let response: unknown
@@ -642,11 +659,27 @@ export async function pushSyncPending(
     } catch (error) {
       if (error instanceof SyncLedgerChanged) throw error
       // The request may have committed. Recover its original receipt before any caller retry.
-      response = await transport.receipt(pending.request.change_id).catch((reason: unknown) => {
+      let receiptRead = false
+      try {
+        response = await transport.receipt(pending.request.change_id)
+        receiptRead = true
+      } catch (reason) {
         if (reason instanceof SyncLedgerChanged) throw reason
-        return null
-      })
+        response = null
+      }
       if (response === null) {
+        if (receiptRead && error instanceof SyncRestoreStateRejected && onRestoreRejected) {
+          const outcome = await onRestoreRejected(pending, error)
+          if (outcome) {
+            if (outcome === 'discard' && pending.kind === 'push') {
+              await transact('readwrite', async (tx) => {
+                await wait(tx.objectStore('outbox').delete([key, pending.request.change_id]))
+              })
+            }
+            held.add(pending.request.change_id)
+            continue
+          }
+        }
         if (pending.kind === 'resolve' && error instanceof SyncResolutionChanged) {
           await transact('readwrite', async (tx) => {
             await wait(tx.objectStore('outbox').delete([key, pending.request.change_id]))

@@ -23,12 +23,13 @@ from .db import DomainError
 from .chapter_conflicts import verified_chapter
 from .cloud_attachments import SCHEMA as ATTACHMENT_SCHEMA, register_routes as register_attachments
 from .manuscript_exchange import RevisionObject, _source_link
-from .outline_sync import OutlineVersionObject, parse_outline_object
+from .outline_sync import OutlineHeadObject, OutlineVersionObject, parse_outline_object
 from .outline_sync import validate_version_sources as validate_outline_sources
 from .models import Input
 from .project_sync import ProjectVersionObject, parse_project_object
 from .reference_portability import ReferenceCardVersionObject
 from .reference_sync import parse_reference_object, validate_version_parent as validate_reference_parent
+from . import restore_state_sync
 from .setting_use_portability import (
     SettingUseVersionObject,
     parse_setting_use_object,
@@ -565,6 +566,7 @@ class SyncStore:
                     StoryVersionObject,
                     ReferenceCardVersionObject,
                     SettingUseVersionObject,
+                    *restore_state_sync.VERSION_OBJECTS,
                 ),
             ):
                 if data.parent_revision is not None:
@@ -578,6 +580,7 @@ class SyncStore:
                     raise DomainError("sync_parent_unknown", "父修订尚未入库或不属于该对象。", 409)
             head = self._head(tx, work, data.object_id)
             if data.parent_revision == head:
+                self._validate_restore_state_adoption(tx, work, formal)
                 return self._append(tx, work, device, data, fingerprint, payload, data.change_id, "applied")
             return self._append(
                 tx, work, device, data, fingerprint, payload, head, "conflict", data.change_id
@@ -615,6 +618,8 @@ class SyncStore:
         return self._append(tx, work, device, data, fingerprint, payload, data.change_id, "applied")
 
     def _validate_formal(self, tx, work, object_id, payload, tombstone):
+        if object_id.startswith(restore_state_sync.RESTORE_STATE_PREFIXES):
+            return self._validate_restore_state(tx, work, object_id, payload, tombstone)
         family = object_id.partition(":")[0].removesuffix("-version")
         contracts = {
             "project": ("立项", ProjectVersionObject, parse_project_object),
@@ -631,8 +636,8 @@ class SyncStore:
         error_code = f"sync_{'reference' if family == 'reference-card' else family.replace('-', '_')}"
 
         def source(object_id, model):
-            head = self._head(tx, work, object_id)
-            return model.model_validate_json(self._change(tx, work, head)["payload"]) if head else None
+            stored = self._formal_payload(tx, work, object_id)
+            return model.model_validate_json(stored) if stored else None
 
         def setting_use(identifier):
             stored = source(f"setting-use-version:{identifier}", SettingUseVersionObject)
@@ -715,6 +720,83 @@ class SyncStore:
                 reference_lookup=reference,
             )
         return value
+
+    def _formal_payload(self, tx, work, object_id):
+        head = self._head(tx, work, object_id)
+        if head:
+            return self._change(tx, work, head)["payload"]
+        return None
+
+    def _restore_state_version(self, tx, work, kind, identifier):
+        prefix, schema = (
+            (restore_state_sync.FACT_VERSION, restore_state_sync.FactSetVersionObject)
+            if kind in (restore_state_sync.FACT_VERSION, restore_state_sync.FACT_HEAD)
+            else (restore_state_sync.LENGTH_VERSION, restore_state_sync.LengthTargetVersionObject)
+        )
+        stored = self._formal_payload(tx, work, f"{prefix}:{identifier}")
+        return schema.model_validate_json(stored).version if stored else None
+
+    def _validate_restore_state(self, tx, work, object_id, payload, tombstone):
+        value = restore_state_sync.parse_restore_state_object(work, object_id, payload, tombstone)
+
+        def version_lookup(identifier):
+            return self._restore_state_version(tx, work, value.kind, identifier)
+
+        if not isinstance(value, restore_state_sync.VERSION_OBJECTS):
+            restore_state_sync.validate_head(work, value, version_lookup)
+            return value
+
+        def revision(identifier):
+            stored = self._formal_payload(tx, work, f"revision:{identifier}")
+            return RevisionObject.model_validate_json(stored).revision if stored else None
+
+        def outline(identifier):
+            stored = self._formal_payload(tx, work, f"outline-version:{identifier}")
+            return OutlineVersionObject.model_validate_json(stored).version if stored else None
+
+        restore_state_sync.validate_version_sources(
+            work,
+            value.version,
+            revision_lookup=revision,
+            outline_lookup=outline,
+            parent_lookup=version_lookup,
+            chapter_lookup=lambda identifier: self._head(tx, work, f"chapter:{identifier}"),
+        )
+        if previous := version_lookup(value.version.id):
+            if previous != value.version:
+                raise DomainError(restore_state_sync.INTEGRITY, "同一正式版本编号不能改写。", 409)
+        return value
+
+    def _validate_restore_state_adoption(self, tx, work, head):
+        if isinstance(head, restore_state_sync.FactSetHeadObject):
+            version = self._restore_state_version(tx, work, head.kind, head.revision_id)
+            address = f"chapter:{head.chapter_id}"
+            if self._head(tx, work, address) is None:
+                raise DomainError(restore_state_sync.DEPENDENCY, "请先同步事实所在章节的目录。", 409)
+            payload = self._formal_payload(tx, work, address)
+            if payload is None:
+                if not version.facts:
+                    return
+            else:
+                try:
+                    chapter = verified_chapter(work, address, json.loads(payload))
+                except DomainError as error:
+                    raise DomainError(
+                        restore_state_sync.INTEGRITY, "事实所依据的云端章稿无法核验。", 409
+                    ) from error
+                if chapter.head.id == version.chapter_revision_id:
+                    return
+            raise DomainError(restore_state_sync.DEPENDENCY, "请先采用事实所依据的正式章稿。", 409)
+        if isinstance(head, restore_state_sync.LengthTargetHeadObject) and head.scope == "volume":
+            version = self._restore_state_version(tx, work, head.kind, head.revision_id)
+            if version.targets is not None:
+                payload = self._formal_payload(tx, work, f"outline:{work}")
+                if not payload or OutlineHeadObject.model_validate_json(payload).revision_id != (
+                    version.outline_version_id
+                ):
+                    raise DomainError(
+                        restore_state_sync.DEPENDENCY, "请先采用卷级篇幅目标所依据的大纲。", 409
+                    )
 
     def _push_workflow(self, tx, work, device, data, payload, fingerprint):
         entry = parse_workflow_object(work, data.object_id, data.payload, data.tombstone)
@@ -927,7 +1009,8 @@ class SyncStore:
                 payload=payload,
                 tombstone=tombstone,
             )
-            self._validate_formal(tx, work, change.object_id, payload, tombstone)
+            formal = self._validate_formal(tx, work, change.object_id, payload, tombstone)
+            self._validate_restore_state_adoption(tx, work, formal)
             receipt = self._append(
                 tx,
                 work,

@@ -76,6 +76,7 @@ import {
   type ReferenceSyncObject,
 } from './referenceArchive'
 import {
+  compactJSON,
   storyObjectSignature,
   validateStoryHistory,
   validateStorySyncObject,
@@ -86,6 +87,7 @@ import {
 import { decodeWebManuscriptBackup, encodeWebManuscriptBackup } from './webManuscriptBackup'
 import {
   decodePortableCheckpointHistory,
+  lengthTargetKey,
   validatePortableRestoreState,
   verifyPortableCheckpoints,
   type PortableCheckpoint,
@@ -94,6 +96,15 @@ import {
   type PortableCheckpointSources,
   type PortableRestoreState,
 } from './portableCheckpoint'
+import { createRestoreStateOfflineStore, restoreStateSyncStores } from './restoreStateOfflineStore'
+import {
+  groupFactsByChapter,
+  isRestoreStateObjectId,
+  isRestoreStateSyncObject,
+  restoreStateObjectSignature,
+  validateRestoreStateSyncObject,
+  type RestoreStateSyncObject,
+} from './restoreStateSyncModel'
 import {
   createSettingUseOfflineStore,
   settingUseReadStores,
@@ -184,6 +195,7 @@ export type SyncedObject =
   | WorkflowSyncObject
   | ReferenceSyncObject
   | SettingUseSyncObject
+  | RestoreStateSyncObject
 
 function revisionSignature(row: LocalRevision) {
   return [row.id, row.chapter_id, row.revision, row.parent_id, row.sha256, row.cause, row.created]
@@ -232,6 +244,7 @@ export function syncObjectSignature(object: SyncedObject | null) {
     return workflowObjectSignature(object)
   if (object?.kind === 'reference-card-head' || object?.kind === 'reference-card-version')
     return referenceSyncSignature(object)
+  if (isRestoreStateSyncObject(object)) return restoreStateObjectSignature(object)
   return 'null'
 }
 
@@ -289,6 +302,7 @@ type Store =
   | 'snapshotArchives'
   | 'restoreStates'
   | 'snapshotForkReceipts'
+  | (typeof restoreStateSyncStores)[number]
   | (typeof settingUseStores)[number]
 type LocalProjectVersion = ProjectVersionRecord & { branchId: string }
 type LocalProjectHead = { branchId: string; versionId: string }
@@ -352,7 +366,7 @@ function result<T>(request: IDBRequest<T>): Promise<T> {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 10)
+    const request = indexedDB.open(DATABASE, 11)
     let blocked = false
     request.onblocked = () => {
       blocked = true
@@ -448,6 +462,15 @@ function openDatabase(): Promise<IDBDatabase> {
       if (event.oldVersion < 10) {
         db.createObjectStore('restoreStates', { keyPath: 'branchId' })
         db.createObjectStore('snapshotForkReceipts', { keyPath: ['branchId', 'requestId'] })
+      }
+      if (event.oldVersion < 11) {
+        db.createObjectStore('restoreSyncHeads', { keyPath: ['branchId', 'slot'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
+        db.createObjectStore('restoreSyncVersions', {
+          keyPath: ['branchId', 'object.version.id'],
+        }).createIndex('byBranch', 'branchId')
       }
     }
     request.onsuccess = () => {
@@ -699,6 +722,7 @@ async function writeChapterRevision(
   await result(tx.objectStore('chapters').put(chapter))
   await result(tx.objectStore('projects').put(project))
   await markPublication(tx, chapter.branch_id, `revision:${revision.id}`, `chapter:${chapter.id}`)
+  await restoreStateStore.clearChapterFacts(tx, project.branch.id, revision)
   return revision
 }
 
@@ -710,15 +734,22 @@ export async function saveLocalChapter(
 ): Promise<LocalRevision> {
   const body = content(text, 250_000, '正文')
   const sha256 = await manuscriptHash(body)
-  return transact(['projects', 'chapters', 'revisions', 'publications'], 'readwrite', async (tx) => {
-    const project = await readProject(tx, projectId)
-    const chapter = await readChapter(tx, project, chapterId)
-    const head = await chapterHead(tx, chapter)
-    if (!head || head.id !== baseId)
-      throw new OfflineStoreError('conflict', '本章已有新修订。当前输入保留，请查看已保存的新稿后另行处理。')
-    if (head.content === body) return head
-    return writeChapterRevision(tx, project, chapter, head, body, sha256, '作者编辑')
-  })
+  return transact(
+    ['projects', 'chapters', 'revisions', 'publications', 'restoreStates', ...restoreStateSyncStores],
+    'readwrite',
+    async (tx) => {
+      const project = await readProject(tx, projectId)
+      const chapter = await readChapter(tx, project, chapterId)
+      const head = await chapterHead(tx, chapter)
+      if (!head || head.id !== baseId)
+        throw new OfflineStoreError(
+          'conflict',
+          '本章已有新修订。当前输入保留，请查看已保存的新稿后另行处理。',
+        )
+      if (head.content === body) return head
+      return writeChapterRevision(tx, project, chapter, head, body, sha256, '作者编辑')
+    },
+  )
 }
 
 async function localRestorePreview(
@@ -971,22 +1002,26 @@ export function readLocalChapterRestore(projectId: string, chapterId: string, re
 }
 
 export function restoreLocalChapter(projectId: string, chapterId: string, revisionId: string, basis: string) {
-  return transact([...chapterRestoreStores, 'publications'], 'readwrite', async (tx) => {
-    const project = await readProject(tx, projectId)
-    const chapter = await readChapter(tx, project, chapterId)
-    const { current, target, basis: active } = await localRestorePreview(tx, project, chapter, revisionId)
-    if (active !== basis || current.id === target.id)
-      throw new OfflineStoreError('conflict', '正文或相关依据已有变化。请重新读取恢复预览。')
-    return writeChapterRevision(
-      tx,
-      project,
-      chapter,
-      current,
-      target.content,
-      target.sha256,
-      '恢复历史为新修订',
-    )
-  })
+  return transact(
+    [...chapterRestoreStores, 'publications', 'restoreStates', ...restoreStateSyncStores],
+    'readwrite',
+    async (tx) => {
+      const project = await readProject(tx, projectId)
+      const chapter = await readChapter(tx, project, chapterId)
+      const { current, target, basis: active } = await localRestorePreview(tx, project, chapter, revisionId)
+      if (active !== basis || current.id === target.id)
+        throw new OfflineStoreError('conflict', '正文或相关依据已有变化。请重新读取恢复预览。')
+      return writeChapterRevision(
+        tx,
+        project,
+        chapter,
+        current,
+        target.content,
+        target.sha256,
+        '恢复历史为新修订',
+      )
+    },
+  )
 }
 
 async function readManuscript(tx: IDBTransaction, project: LocalProject): Promise<ManuscriptPack> {
@@ -1597,7 +1632,14 @@ export async function restoreLocalCheckpoint(
     decodeSnapshotHistory({ entries: [entry] }),
     checkpointArtifactBases(captured.pack),
   )
-  const stores = [...new Set([...manuscriptPackageStores, ...outlineWriteStores, ...storyWriteStores])]
+  const stores = [
+    ...new Set([
+      ...manuscriptPackageStores,
+      ...outlineWriteStores,
+      ...storyWriteStores,
+      ...restoreStateSyncStores,
+    ]),
+  ]
   return transact(stores, 'readwrite', async (tx) => {
     const project = await readProject(tx, projectId)
     const branchId = project.branch.id
@@ -1646,6 +1688,39 @@ export async function restoreLocalCheckpoint(
       prepared.restoreState.length_targets.length
     )
       await writeRestoreState(tx, branchId, prepared.restoreState)
+    const factChapters = new Set(
+      prepared.writes.flatMap(({ chapter, revision }) => (revision || chapter.archived ? [chapter.id] : [])),
+    )
+    const before = groupFactsByChapter(captured.pack.restore_state?.facts ?? [])
+    const after = groupFactsByChapter(prepared.restoreState.facts)
+    for (const id of new Set([...before.keys(), ...after.keys()])) {
+      if (plan.touched.has(id) && compactJSON(before.get(id) ?? []) !== compactJSON(after.get(id) ?? []))
+        factChapters.add(id)
+    }
+    for (const chapterId of factChapters) {
+      const chapter = await result<LocalChapter | undefined>(tx.objectStore('chapters').get(chapterId))
+      const head = chapter && (await chapterHead(tx, chapter))
+      if (head)
+        await restoreStateStore.stageFacts(
+          tx,
+          branchId,
+          head,
+          after.get(chapterId) ?? [],
+          true,
+          before.has(chapterId) || after.has(chapterId),
+        )
+    }
+    await restoreStateStore.stageTargets(
+      tx,
+      branchId,
+      prepared.restoreState.length_targets.filter(
+        (target) =>
+          plan.lengthTargets.changed.has(lengthTargetKey(target)) ||
+          (prepared.outline && target.scope === 'volume'),
+      ),
+      true,
+      prepared.outline,
+    )
     await markPublication(tx, branchId, ...publications)
     project.branch.story_revision++
     await result(tx.objectStore('projects').put(project))
@@ -1887,6 +1962,15 @@ export function readLocalSourceRevision(projectId: string, revisionId: string) {
   })
 }
 
+export function hasLocalChapterAdoption(branchId: string, sourceId: string, nativeId: string) {
+  return transact(['storyChapterAliases'], 'readonly', async (tx) => {
+    const row = await result<{ chapterAdopted?: true } | undefined>(
+      tx.objectStore('storyChapterAliases').get([branchId, sourceId, nativeId]),
+    )
+    return row?.chapterAdopted === true
+  })
+}
+
 export function readLocalBoundChapterSource(
   projectId: string,
   binding: ArchivedInspection['chapter_bindings'][number],
@@ -1971,6 +2055,16 @@ export function readLocalPublications(branchId: string) {
   return transact(['publications'], 'readonly', (tx) => publicationRows(tx, branchId))
 }
 
+export function countLocalPendingPublications(branchId: string) {
+  return transact(['publications', 'restoreSyncHeads'], 'readonly', async (tx) => {
+    const rows = await publicationRows(tx, branchId)
+    return (
+      rows.length +
+      (await restoreStateStore.unpublishedCount(tx, branchId, new Set(rows.map(({ objectId }) => objectId))))
+    )
+  })
+}
+
 export function acknowledgeLocalPublications(records: LocalPublication[]) {
   return transact(['publications'], 'readwrite', async (tx) => {
     for (const { branchId, objectId, id } of records) {
@@ -1980,7 +2074,8 @@ export function acknowledgeLocalPublications(records: LocalPublication[]) {
   })
 }
 
-export function readLocalSyncSnapshot(projectId: string) {
+export async function readLocalSyncSnapshot(projectId: string) {
+  await restoreStateStore.seal(projectId)
   const stores = [
     ...new Set([
       ...settingsDependencyStores,
@@ -1990,24 +2085,47 @@ export function readLocalSyncSnapshot(projectId: string) {
       ...settingUseStores,
       'referenceArchives' as const,
       'publications' as const,
+      ...restoreStateSyncStores,
     ]),
   ]
   return transact(stores, 'readonly', async (tx) => {
     const project = await readProject(tx, projectId)
     const branchId = project.branch.id
-    const [manuscript, brief, settings, outline, story, workflow, reference, publications, settingUse] =
-      await Promise.all([
-        readManuscript(tx, project),
-        readProjectBrief(tx, branchId),
-        readSettings(tx, branchId),
-        outlineStore.readOutlineTx(tx, project),
-        storyStore.readStoryTx(tx, project),
-        readWorkflowSyncObjects(tx, branchId),
-        readReferenceHistory(tx, branchId),
-        publicationRows(tx, branchId),
-        settingUseStore.readSettingUseHistoryTx(tx, branchId),
-      ])
-    return { manuscript, brief, settings, outline, story, workflow, reference, publications, settingUse }
+    const [
+      manuscript,
+      brief,
+      settings,
+      outline,
+      story,
+      workflow,
+      reference,
+      publications,
+      settingUse,
+      restoreStateSync,
+    ] = await Promise.all([
+      readManuscript(tx, project),
+      readProjectBrief(tx, branchId),
+      readSettings(tx, branchId),
+      outlineStore.readOutlineTx(tx, project),
+      storyStore.readStoryTx(tx, project),
+      readWorkflowSyncObjects(tx, branchId),
+      readReferenceHistory(tx, branchId),
+      publicationRows(tx, branchId),
+      settingUseStore.readSettingUseHistoryTx(tx, branchId),
+      restoreStateStore.readSync(tx, branchId),
+    ])
+    return {
+      manuscript,
+      brief,
+      settings,
+      outline,
+      story,
+      workflow,
+      reference,
+      publications,
+      settingUse,
+      restoreStateSync,
+    }
   })
 }
 
@@ -2285,6 +2403,22 @@ const storyStore = createStoryOfflineStore({
 })
 export const { readLocalStory, confirmLocalStory, checkLocalStorySelection } = storyStore
 
+const restoreStateStore = createRestoreStateOfflineStore({
+  transact,
+  result,
+  readProject,
+  sourceRevision,
+  chapterHead,
+  readRestoreState,
+  writeRestoreState,
+  readPublication,
+  markPublication,
+  digest: manuscriptHash,
+  fail: (code, message) => {
+    throw new OfflineStoreError(code, message)
+  },
+})
+
 const outlineStore = createOutlineOfflineStore({
   transact,
   result,
@@ -2298,6 +2432,7 @@ const outlineStore = createOutlineOfflineStore({
   readStoryOutlinePromisesTx: storyStore.readStoryOutlinePromisesTx,
   readPublication,
   markPublication,
+  stageOutlineTargets: restoreStateStore.stageOutlineTargets,
   fail: (code, message) => {
     throw new OfflineStoreError(code, message)
   },
@@ -2342,6 +2477,8 @@ export async function validateSyncedObject(
   objectId: string,
   value: unknown,
 ): Promise<SyncedObject | null> {
+  if (isRestoreStateObjectId(objectId))
+    return validateRestoreStateSyncObject(project.branch.id, objectId, value, manuscriptHash)
   if (objectId.startsWith('project:') || objectId.startsWith('project-version:'))
     return validateProjectSyncObject(project.branch.id, objectId, value)
   if (objectId.startsWith('settings:') || objectId.startsWith('settings-version:'))
@@ -2431,6 +2568,8 @@ export function applySyncedObject(
   expected: string,
   options: ApplyOptions = {},
 ) {
+  if (isRestoreStateSyncObject(object))
+    return restoreStateStore.apply(projectId, objectId, object, expected, options)
   if (object?.kind === 'project-head' || object?.kind === 'project-version')
     return applyProjectObject(projectId, object, expected, options)
   if (object?.kind === 'settings-head' || object?.kind === 'settings-version')
@@ -2542,6 +2681,14 @@ export function applySyncedObject(
       const history: LocalRevision[] = []
       const sameSource = (left: LocalRevision, right: LocalRevision) =>
         JSON.stringify(revisionSignature(left)) === JSON.stringify(revisionSignature(right))
+      if (
+        object &&
+        head &&
+        head.sha256 === stored.head.sha256 &&
+        head.id !== stored.head.id &&
+        (!original || !sameSource(original, stored.head))
+      )
+        throw new OfflineStoreError('missing', '同文章稿仍等待云端采用所引用的准确原修订。')
       if (original && sameSource(original, stored.head)) {
         let cursor: LocalRevision | undefined = original
         while (cursor) {

@@ -13,7 +13,16 @@ from fastapi import Body
 import httpx
 from pydantic import Field, SecretStr, StringConstraints, TypeAdapter, ValidationError, model_validator
 
-from . import outline_sync, reference_sync, setting_use_desktop, settings_sync, story_sync, workflow_archive
+from . import (
+    outline_sync,
+    reference_sync,
+    restore_state_desktop,
+    restore_state_sync,
+    setting_use_desktop,
+    settings_sync,
+    story_sync,
+    workflow_archive,
+)
 from .chapter_adoption import remember_chapter_adoption
 from .chapter_conflicts import (
     ChapterObject,
@@ -349,6 +358,9 @@ def _parse(cls, value):
 
 
 def _local(tx, branch_id, object_id):
+    if object_id.startswith(restore_state_desktop.PREFIXES):
+        value = restore_state_desktop.read_object(tx, branch_id, object_id)
+        return value.model_dump() if value else None
     if object_id.startswith(SETTING_USE_VERSION):
         identifier = object_id.removeprefix(SETTING_USE_VERSION)
         version = setting_use_desktop.read_version(tx, branch_id, identifier)
@@ -444,7 +456,7 @@ def _remember(tx, branch_id, event, local_digest):
         "WHERE excluded.sequence>=desktop_sync_objects.sequence",
         (branch_id, event.object_id, event.head_revision, event.sequence, local_digest),
     )
-    if event.object_id.startswith((SETTING_USE_HEAD, SETTING_USE_VERSION)):
+    if event.object_id.startswith((SETTING_USE_HEAD, SETTING_USE_VERSION, *restore_state_desktop.PREFIXES)):
         tx.execute(
             "DELETE FROM desktop_sync_workflow_pending WHERE branch_id=? AND object_id=?",
             (branch_id, event.object_id),
@@ -559,6 +571,12 @@ def _apply_chapter(tx, domain, branch_id, event, *, force_revision=False):
 
 
 def _apply(tx, domain, branch_id, event, *, prose_merge=False):
+    if event.object_id.startswith(restore_state_desktop.HEAD_PREFIXES):
+        value = restore_state_sync.parse_restore_state_object(
+            branch_id, event.object_id, event.payload, event.tombstone
+        )
+        restore_state_desktop.apply_head(tx, branch_id, value)
+        return
     if event.object_id.startswith(SETTING_USE_HEAD):
         value = parse_setting_use_object(branch_id, event.object_id, event.payload, event.tombstone)
         setting_use_desktop.apply_head(tx, branch_id, value)
@@ -580,7 +598,8 @@ def _apply(tx, domain, branch_id, event, *, prose_merge=False):
         return
     if event.object_id.startswith("outline:"):
         value = outline_sync.parse_outline_object(branch_id, event.object_id, event.payload, event.tombstone)
-        outline_sync.apply_outline_head(tx, branch_id, value, event)
+        with restore_state_desktop.dependent_heads(tx, branch_id):
+            outline_sync.apply_outline_head(tx, branch_id, value, event)
         return
     if event.object_id.startswith("settings:"):
         value = settings_sync.parse_settings_object(
@@ -615,7 +634,10 @@ def _apply(tx, domain, branch_id, event, *, prose_merge=False):
         store_portable_evidence(tx, branch_id, wrapped.document)
         return
     if event.object_id.startswith("chapter:"):
-        _apply_chapter(tx, domain, branch_id, event, force_revision=prose_merge)
+        with restore_state_desktop.dependent_heads(
+            tx, branch_id, chapter_id=event.object_id.removeprefix("chapter:")
+        ):
+            _apply_chapter(tx, domain, branch_id, event, force_revision=prose_merge)
         return
     if event.object_id != f"branch:{branch_id}" or event.tombstone:
         raise DomainError("sync_scope", "同步对象超出当前文稿范围，需要人工检查。", 409)
@@ -640,6 +662,12 @@ def _apply(tx, domain, branch_id, event, *, prose_merge=False):
 
 
 def _verified_digest(branch_id, event):
+    if event.object_id.startswith(restore_state_desktop.PREFIXES):
+        return _digest(
+            restore_state_sync.parse_restore_state_object(
+                branch_id, event.object_id, event.payload, event.tombstone
+            ).model_dump()
+        )
     if event.object_id.startswith((SETTING_USE_HEAD, SETTING_USE_VERSION)):
         return _digest(
             parse_setting_use_object(branch_id, event.object_id, event.payload, event.tombstone).model_dump()
@@ -740,6 +768,7 @@ class DesktopSync:
                 + settings_sync.SCHEMA
                 + outline_sync.SCHEMA
                 + story_sync.SCHEMA
+                + restore_state_desktop.SCHEMA
                 + "\nCOMMIT;"
             )
 
@@ -968,13 +997,19 @@ class DesktopSync:
                 "story-version:",
                 "reference-card-version:",
                 SETTING_USE_VERSION,
+                *restore_state_desktop.VERSION_PREFIXES,
             )
         )
         if known and known["sequence"] >= incoming.sequence and not immutable:
             return
         if immutable:
             try:
-                if object_id.startswith(SETTING_USE_VERSION):
+                if object_id.startswith(restore_state_desktop.VERSION_PREFIXES):
+                    wrapped = restore_state_sync.parse_restore_state_object(
+                        branch_id, object_id, incoming.payload, incoming.tombstone
+                    )
+                    restore_state_desktop.observe_version(tx, branch_id, wrapped.version)
+                elif object_id.startswith(SETTING_USE_VERSION):
                     wrapped = parse_setting_use_object(
                         branch_id, object_id, incoming.payload, incoming.tombstone
                     )
@@ -1008,8 +1043,14 @@ class DesktopSync:
             _remember(tx, branch_id, incoming, _digest(wrapped.model_dump()))
             return
         if queued is not None and queued["conflict_id"] is None:
+            if object_id.startswith(restore_state_desktop.HEAD_PREFIXES):
+                value = restore_state_sync.parse_restore_state_object(
+                    branch_id, object_id, incoming.payload, incoming.tombstone
+                )
+                restore_state_desktop.acknowledge_head(tx, branch_id, value)
             _remember(tx, branch_id, incoming, queued["local_sha256"])
             return
+        restore_head = object_id.startswith(restore_state_desktop.HEAD_PREFIXES)
         try:
             local = _local(tx, branch_id, object_id)
             local_digest = _digest(local)
@@ -1020,10 +1061,19 @@ class DesktopSync:
         clean = local is None if known is None else known["local_sha256"] == local_digest
         if queued is not None and queued["conflict_id"] is not None:
             clean = queued["local_sha256"] == local_digest
+        if restore_head and not identical and not clean and queued is None:
+            try:
+                value = restore_state_sync.parse_restore_state_object(
+                    branch_id, object_id, incoming.payload, incoming.tombstone
+                )
+                clean = restore_state_desktop.matches_current(tx, branch_id, value)
+            except DomainError as error:
+                self._defer(tx, branch_id, incoming, error.message)
+                return
         if not identical and not clean:
             self._defer(tx, branch_id, incoming, "本机已有未同步修改，待与远端版本比较。")
             return
-        if not identical:
+        if not identical or restore_head:
             tx.execute("SAVEPOINT apply_sync_object")
             try:
                 _apply(tx, self.domain, branch_id, incoming, prose_merge=_is_prose_merge(queued))
@@ -1175,7 +1225,38 @@ class DesktopSync:
                 else (SETTING_USE_HEAD + value.slot_id): value.model_dump()
                 for value in setting_use_desktop.draft_objects(tx, branch_id)
             }
-            formal = {**projects, **handcraft, **settings, **stories, **outlines, **setting_uses, **workflows}
+            restore_states = {}
+            unavailable = set()
+            for entry in restore_state_desktop.draft_objects(
+                tx, branch_id, lambda address, reason: self._pending_workflow(tx, branch_id, address, reason)
+            ):
+                address = restore_state_sync.object_id(entry)
+                value = entry.model_dump()
+                if isinstance(entry, restore_state_sync.VERSION_OBJECTS):
+                    if (entry.version.parent_id in unavailable) or len(
+                        dumps(value).encode("utf-8")
+                    ) > MAX_OBJECT_BYTES:
+                        unavailable.add(entry.version.id)
+                        self._pending_workflow(
+                            tx, branch_id, address, "事实集合、篇幅版本或其父修订超过同步体积限制。"
+                        )
+                        continue
+                elif entry.revision_id in unavailable:
+                    self._pending_workflow(
+                        tx, branch_id, address, "事实集合或篇幅版本超过同步体积限制，已保留本机记录。"
+                    )
+                    continue
+                restore_states[address] = value
+            formal = {
+                **projects,
+                **handcraft,
+                **settings,
+                **stories,
+                **outlines,
+                **setting_uses,
+                **restore_states,
+                **workflows,
+            }
             blocked = False
             for object_id in [f"branch:{branch_id}", *histories, *object_ids, *formal, *documents]:
                 if tx.execute(
@@ -1283,6 +1364,30 @@ class DesktopSync:
                     with self.domain.db.connect(True) as tx:
                         self._pending_workflow(tx, branch_id, row["object_id"], error.message)
                     continue
+                if row["object_id"].startswith(restore_state_desktop.PREFIXES) and error.code in {
+                    restore_state_sync.DEPENDENCY,
+                    restore_state_sync.INTEGRITY,
+                    "sync_object_size",
+                }:
+                    with self.domain.db.connect(True) as tx:
+                        self._pending_workflow(tx, branch_id, row["object_id"], error.message)
+                        if row["conflict_id"] is None and row["object_id"].startswith(
+                            restore_state_desktop.HEAD_PREFIXES
+                        ):
+                            try:
+                                current = _local(tx, branch_id, row["object_id"])
+                            except DomainError:
+                                continue
+                            if _digest(current) != row["local_sha256"]:
+                                tx.execute(
+                                    "DELETE FROM desktop_sync_outbox WHERE branch_id=? AND change_id=?",
+                                    (branch_id, row["change_id"]),
+                                )
+                                tx.execute(
+                                    "INSERT OR IGNORE INTO desktop_sync_dirty VALUES(?,?)",
+                                    (branch_id, "restore-state"),
+                                )
+                    continue
                 if error.code == "sync_workflow_reference_scope" or (
                     row["object_id"].startswith(workflow_archive.WORKFLOW_PREFIXES)
                     and error.code in WORKFLOW_REJECTIONS
@@ -1337,10 +1442,12 @@ class DesktopSync:
                 "story": story_sync.read_story_version,
                 "reference-card": reference_sync.read_reference_version,
                 "setting-use": setting_use_desktop.read_version,
+                "fact-set-head": restore_state_desktop.read_version,
+                "length-target-head": restore_state_desktop.read_version,
             }
             family = remote.object_id.partition(":")[0]
             if family in readers and (
-                family in {"story", "reference-card", "setting-use"}
+                family in {"story", "reference-card", "setting-use", "fact-set-head", "length-target-head"}
                 or remote.object_id == f"{family}:{branch_id}"
             ):
                 read_version = readers[family]
@@ -1354,7 +1461,11 @@ class DesktopSync:
                     if payload and (identifier := payload.get("revision_id")):
                         if version := read_version(tx, branch_id, identifier):
                             versions[identifier] = version.model_dump()
-                label = "reference" if family == "reference-card" else family.replace("-", "_")
+                label = (
+                    "reference"
+                    if family == "reference-card"
+                    else family.removesuffix("-head").replace("-", "_")
+                )
                 result[f"{label}_versions"] = versions
             return result
 
@@ -1459,6 +1570,18 @@ class DesktopSync:
                         raise DomainError(
                             "sync_pending", "本机没有已同步的设定使用修订，请先同步源修订，再比较冲突。", 409
                         )
+                    if data.choice == "local" and remote.object_id.startswith(
+                        restore_state_desktop.HEAD_PREFIXES
+                    ):
+                        prefix = (
+                            restore_state_desktop.FACT_VERSION
+                            if remote.object_id.startswith(restore_state_desktop.FACT_HEAD)
+                            else restore_state_desktop.LENGTH_VERSION
+                        )
+                        if not local or not _shadow(tx, branch_id, prefix + local["revision_id"]):
+                            raise DomainError(
+                                "sync_pending", "请先同步本机事实或篇幅的来源修订，再比较冲突。", 409
+                            )
                     request = {
                         "change_id": data.idempotency_key,
                         "parent_revision": data.parent_revision,

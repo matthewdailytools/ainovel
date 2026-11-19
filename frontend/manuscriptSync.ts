@@ -2,7 +2,9 @@ import {
   applySyncedObject,
   acknowledgeLocalPublications,
   checkLocalStorySelection,
+  countLocalPendingPublications,
   forkLocalManuscript,
+  hasLocalChapterAdoption,
   manuscriptHash,
   readLocalPublications,
   readLocalSyncSnapshot,
@@ -33,6 +35,14 @@ import { workflowTransferRestrictions } from './workflowPrivacy'
 import type { SettingsConflictMerge } from './settingsSyncModel'
 import { referenceCardKey, referenceHeadObjectId } from './referenceArchive'
 import {
+  isRestoreStateObjectId,
+  isRestoreStateSyncObject,
+  isRestoreStateVersion,
+  restoreStateObjectId,
+  restoreStatePublicationSources,
+  restoreStateSlot,
+} from './restoreStateSyncModel'
+import {
   approveSyncResolution,
   enableSyncLedger,
   listSyncHeads,
@@ -50,6 +60,7 @@ import {
   requireSyncLedger,
   SyncLedgerChanged,
   SyncResolutionChanged,
+  SyncRestoreStateRejected,
   type SyncPayload,
   type SyncScope,
   type SyncTransport,
@@ -102,6 +113,12 @@ export function httpSyncTransport(
       if (response.status === 409 && ['sync_head_changed', 'sync_conflict_resolved'].includes(result.code)) {
         throw new SyncResolutionChanged('云端版本已更新。请再次同步并重新比较。')
       }
+      if (
+        result.code === 'sync_restore_state_dependency' ||
+        result.code === 'sync_restore_state_integrity' ||
+        result.code === 'sync_object_size'
+      )
+        throw new SyncRestoreStateRejected(result.code, result.message || '正式事实或篇幅目标暂未提交。')
       throw new Error(result.message || `同步请求失败（HTTP ${response.status}）。`)
     }
     return result
@@ -162,6 +179,7 @@ async function localObjects(project: LocalProject) {
     workflow,
     reference,
     settingUse,
+    restoreStateSync,
     publications,
   } = await readLocalSyncSnapshot(project.novel.id)
   const objects = syncManuscriptObjects(manuscript)
@@ -242,6 +260,9 @@ async function localObjects(project: LocalProject) {
       })
   }
   for (const [id, object] of workflow) objects.set(id, object)
+  for (const object of orderVersions(restoreStateSync.versions))
+    objects.set(await restoreStateObjectId(object, manuscriptHash), object)
+  for (const [id, object] of restoreStateSync.heads) objects.set(id, object)
   return {
     objects,
     versions,
@@ -250,6 +271,7 @@ async function localObjects(project: LocalProject) {
     story,
     reference,
     settingUse,
+    restoreStateSync,
     publications: new Map(publications.map((record) => [record.objectId, record])),
   }
 }
@@ -291,6 +313,8 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
     if (id.startsWith('workflow-completion:')) return 10
     if (id.startsWith('setting-use-version:')) return 8
     if (id.startsWith('setting-use:')) return 9
+    if (id.startsWith('fact-set-version:') || id.startsWith('length-target-version:')) return 8
+    if (id.startsWith('fact-set-head:') || id.startsWith('length-target-head:')) return 9
     return 1
   }
   const depth = (payload: SyncPayload | null | undefined) => {
@@ -311,19 +335,38 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
   )
   for (const head of heads) {
     const missingArchive = head.receipt?.tombstone && head.id.startsWith('chapter:') && !local.has(head.id)
+    const current = local.get(head.id)
+    const raw = head.receipt?.payload?.head
+    const possibleAlias =
+      current?.kind === 'chapter' &&
+      raw &&
+      typeof raw === 'object' &&
+      !Array.isArray(raw) &&
+      typeof raw.id === 'string' &&
+      raw.id !== current.head.id &&
+      raw.sha256 === current.head.sha256
+    const sameReceipt = head.baseline?.revision === head.revision
     if (
       !head.receipt ||
-      (head.baseline?.revision === head.revision && !missingArchive) ||
+      (sameReceipt && !missingArchive && !possibleAlias) ||
       blockedObjects.includes(head.id)
     )
       continue
     try {
       const object = await validateSyncedObject(project, head.id, head.receipt.payload)
       const target = syncObjectSignature(object)
-      const signature = syncObjectSignature(local.get(head.id) ?? null)
+      const signature = syncObjectSignature(current ?? null)
       const resolution = head.approval?.changeId === head.revision ? head.approval : undefined
       const safeBase = resolution?.signature ?? head.baseline?.signature ?? 'null'
       const publicationId = publications.get(head.id)?.id ?? null
+      const recordChapterAdoption =
+        !publicationId &&
+        signature === target &&
+        current?.kind === 'chapter' &&
+        object?.kind === 'chapter' &&
+        current.head.id !== object.head.id &&
+        !(await hasLocalChapterAdoption(project.branch.id, object.head.id, current.head.id))
+      if (sameReceipt && !missingArchive && !recordChapterAdoption) continue
       if (
         object?.kind === 'project-version' ||
         object?.kind === 'settings-version' ||
@@ -332,7 +375,8 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         object?.kind === 'setting-use-version' ||
         object?.kind === 'reference-card-version' ||
         object?.kind === 'workflow-inspection' ||
-        object?.kind === 'workflow-completion'
+        object?.kind === 'workflow-completion' ||
+        (isRestoreStateSyncObject(object) && isRestoreStateVersion(object))
       ) {
         const { device_id, change_id, sequence } = head.source ?? head.receipt
         const saved = await applySyncedObject(project.novel.id, head.id, object, signature, {
@@ -360,7 +404,9 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         head.id.startsWith('outline:') ||
         head.id.startsWith('story:') ||
         head.id.startsWith('setting-use:') ||
-        head.id.startsWith('reference-card:')
+        head.id.startsWith('reference-card:') ||
+        head.id.startsWith('fact-set-head:') ||
+        head.id.startsWith('length-target-head:')
       if (
         resolution &&
         ((resolution.publicationId ?? null) !== publicationId || resolution.signature !== signature)
@@ -382,6 +428,7 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         throw new Error('待归档章节的云端父版本格式无效。')
       if (
         archiveSource ||
+        recordChapterAdoption ||
         (signature !== target && signature === safeBase) ||
         (resolution && publicationId)
       ) {
@@ -603,6 +650,13 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
       unsent.set(id, '设定证据仍等待准确章稿、确认设定、大纲或父修订。')
       continue
     }
+    if (
+      isRestoreStateSyncObject(object) &&
+      restoreStatePublicationSources(object).some((source) => !heads.has(source) && !pending.has(source))
+    ) {
+      unsent.set(id, '正式事实或篇幅目标仍等待准确的章稿、大纲或父修订。')
+      continue
+    }
     const cardSource = referencePublicationSource(object)
     if (cardSource && !heads.has(cardSource) && !pending.has(cardSource)) {
       unsent.set(id, '手法卡的确切源修订尚未排到云端。')
@@ -629,11 +683,11 @@ async function draftChanges(project: LocalProject, scope: SyncScope, deferred: M
 }
 
 export async function readWebManuscriptSyncState(scope: SyncScope) {
-  const [state, publications] = await Promise.all([
+  const [state, localPending] = await Promise.all([
     readSyncProgress(scope),
-    readLocalPublications(scope.workId),
+    countLocalPendingPublications(scope.workId),
   ])
-  return { ...state, localPending: publications.length }
+  return { ...state, localPending }
 }
 
 export async function syncWebManuscript(project: LocalProject, scope: SyncScope, transport: SyncTransport) {
@@ -643,14 +697,54 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
     await pull(scope, transport)
     await acknowledgePublications(scope)
     const deferred = await reconcile(project, scope)
-    const { unsent, privacy } = await draftChanges(project, scope, deferred)
-    await pushSyncPending(scope, transport, undefined, privacy.inspectionIds)
+    let outgoing = await draftChanges(project, scope, deferred)
+    const rejected = new Map<string, string>()
+    let superseded = false
+    const onRestoreRejected: NonNullable<Parameters<typeof pushSyncPending>[4]> = async (change, error) => {
+      const id = change.kind === 'push' ? change.request.object_id : change.object_id
+      if (!isRestoreStateObjectId(id)) return false
+      if (change.kind === 'push' && error.code === 'sync_restore_state_dependency') {
+        const sent = change.request.payload
+        if (sent?.kind === 'fact-set-head' || sent?.kind === 'length-target-head') {
+          const { objects, publications } = await localObjects(project)
+          const current = objects.get(id) ?? null
+          if (
+            publications.has(id) &&
+            isRestoreStateSyncObject(current) &&
+            !isRestoreStateVersion(current) &&
+            current.revision_id !== sent.revision_id
+          ) {
+            superseded = true
+            return 'discard'
+          }
+        }
+      }
+      rejected.set(id, error.message)
+      return 'retain'
+    }
+    await pushSyncPending(scope, transport, undefined, outgoing.privacy.inspectionIds, onRestoreRejected)
+    if (superseded) {
+      await acknowledgePublications(scope)
+      const settled = await reconcile(project, scope)
+      outgoing = await draftChanges(project, scope, settled)
+      await pushSyncPending(scope, transport, undefined, outgoing.privacy.inspectionIds, onRestoreRejected)
+    }
     await pull(scope, transport)
     await acknowledgePublications(scope)
     const remaining = await reconcile(project, scope)
+    if (rejected.size) {
+      const stillPending = new Set(
+        (await readSyncState(scope)).pending.map((change) =>
+          change.kind === 'push' ? change.request.object_id : change.object_id,
+        ),
+      )
+      for (const id of rejected.keys()) if (!stillPending.has(id)) rejected.delete(id)
+    }
     return {
       ...(await readWebManuscriptSyncState(scope)),
-      deferred: [...new Map([...unsent, ...remaining, ...privacy.deferred])].map(([object_id, reason]) => ({
+      deferred: [
+        ...new Map([...outgoing.unsent, ...remaining, ...outgoing.privacy.deferred, ...rejected]),
+      ].map(([object_id, reason]) => ({
         object_id,
         reason,
       })),
@@ -668,8 +762,17 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
 export async function prepareWebResolution(project: LocalProject, scope: SyncScope, id: string) {
   const compared = await readSyncConflict(scope, id)
   if (!compared?.current || compared.resolvedBy) throw new Error('冲突已变化，请再次同步。')
-  const { objects, publications, versions, settings, outline, story, reference, settingUse } =
-    await localObjects(project)
+  const {
+    objects,
+    publications,
+    versions,
+    settings,
+    outline,
+    story,
+    reference,
+    settingUse,
+    restoreStateSync,
+  } = await localObjects(project)
   const object = objects.get(compared.incoming.object_id) ?? null
   const publicationId = publications.get(compared.incoming.object_id)?.id ?? null
   return {
@@ -682,6 +785,7 @@ export async function prepareWebResolution(project: LocalProject, scope: SyncSco
     story,
     reference,
     settingUse,
+    restoreStateSync,
     signature: syncObjectSignature(object),
     publicationId,
   }
@@ -901,6 +1005,31 @@ export async function resolveWebManuscript(
       !(await listSyncHeads(scope)).some(({ id }) => id === `setting-use-version:${source.version.id}`)
     )
       throw new Error('尚未取得该证据对应的源修订，请先同步后再比较。')
+  }
+  if (
+    fresh.incoming.object_id.startsWith('fact-set-head:') ||
+    fresh.incoming.object_id.startsWith('length-target-head:')
+  ) {
+    const chosen =
+      choice === 'local'
+        ? fresh.object
+        : choice === 'current'
+          ? fresh.current.payload
+          : fresh.incoming.payload
+    const selected = await validateSyncedObject(project, fresh.incoming.object_id, chosen)
+    const source =
+      isRestoreStateSyncObject(selected) &&
+      !isRestoreStateVersion(selected) &&
+      fresh.restoreStateSync.versions.find(({ version }) => version.id === selected.revision_id)
+    if (
+      !source ||
+      !isRestoreStateSyncObject(selected) ||
+      restoreStateSlot(source) !== restoreStateSlot(selected)
+    )
+      throw new Error('等待所选事实或篇幅目标的准确修订后，再处理冲突。')
+    const id = await restoreStateObjectId(source, manuscriptHash)
+    if (!(await listSyncHeads(scope)).some((entry) => entry.id === id))
+      throw new Error('请先同步所选事实或篇幅目标的准确修订。')
   }
   if (
     typeof choice === 'object' &&

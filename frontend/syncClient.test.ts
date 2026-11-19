@@ -13,6 +13,7 @@ import {
   readSyncState,
   requireSyncLedger,
   setSyncEnabled,
+  SyncRestoreStateRejected,
   type PushChange,
   type SyncReceipt,
   type SyncScope,
@@ -259,6 +260,52 @@ test('receipt recovery does not advance cursor past unrelated events and malform
   expect(concurrent.map((page) => page.count).sort()).toEqual([0, 2])
   expect(await readSyncState(first)).toMatchObject({ cursor: 2, pending: [] })
   expect(await readSyncHead(first, 'branch:work')).toMatchObject({ change_id: 'external' })
+})
+
+test('a confirmed dependency rejection waits without blocking unrelated outgoing edits', async () => {
+  const cloud = isolatedCloud()
+  const transport = cloud.transport(first)
+  await setSyncEnabled(first, true)
+  const fact = { ...write('等所选章稿采用'), object_id: 'fact-set-head:tracked' }
+  await queueSyncChange(first, fact, 'deferred-fact')
+  await queueSyncChange(first, write('另一章节仍应同步'), 'separate-chapter')
+  const rejection = new SyncRestoreStateRejected('sync_restore_state_dependency', '章稿尚待采用。')
+  const rejecting: SyncTransport = {
+    ...transport,
+    async push(change) {
+      if (change.object_id === fact.object_id) throw rejection
+      return transport.push(change)
+    },
+  }
+  const retain = vi.fn(async () => 'retain' as const)
+  expect(await pushSyncPending(first, rejecting, 1, undefined, retain)).toBe(1)
+  expect(retain).toHaveBeenCalledWith(
+    { kind: 'push', request: { ...fact, change_id: 'deferred-fact' } },
+    rejection,
+  )
+  expect(cloud.submissions).toEqual(['separate-chapter'])
+  expect((await readSyncState(first)).pending).toHaveLength(1)
+
+  const discard = vi.fn(async () => 'discard' as const)
+  await expect(
+    pushSyncPending(
+      first,
+      {
+        ...rejecting,
+        async receipt() {
+          throw new Error('未取得回执查询结果。')
+        },
+      },
+      undefined,
+      undefined,
+      discard,
+    ),
+  ).rejects.toBe(rejection)
+  expect(discard).not.toHaveBeenCalled()
+  expect((await readSyncState(first)).pending).toHaveLength(1)
+  expect(await pushSyncPending(first, rejecting, undefined, undefined, discard)).toBe(0)
+  expect(discard).toHaveBeenCalledOnce()
+  expect((await readSyncState(first)).pending).toHaveLength(0)
 })
 
 test('two devices retain base/edit/delete and propagate explicit resolution without reviving a tombstone', async () => {

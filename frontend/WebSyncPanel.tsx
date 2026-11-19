@@ -8,6 +8,7 @@ import { describeProjectVersion } from './projectSyncModel'
 import { describeSettingsVersion, type SettingsConflictMerge } from './settingsSyncModel'
 import { describeStoryVersion } from './storySyncModel'
 import { describeReferenceVersion } from './referenceArchive'
+import { describeFactSet, describeLengthTarget } from './restoreStateConflictText'
 import { setSyncEnabled, type SyncPayload } from './syncClient'
 import {
   cloudScope,
@@ -63,6 +64,14 @@ function excerpt(value: SyncPayload | null, comparison: Comparison) {
       `设定 ${version.item_id} · 采用版 ${version.settings_version_id}`,
       `正文 ${version.evidence.revision_id} · ${version.evidence.start}–${version.evidence.end}`,
     ].join('\n')
+  }
+  if (value.kind === 'fact-set-head' || value.kind === 'length-target-head') {
+    const source = comparison.restoreStateSync.versions.find(
+      ({ version }) => version.id === value.revision_id,
+    )
+    if (source?.kind === 'fact-set-version') return describeFactSet(source.version)
+    if (source?.kind === 'length-target-version') return describeLengthTarget(source.version)
+    return '等待所选事实或篇幅目标的准确修订。'
   }
   const part = value.head ?? value.novel
   if (part && typeof part === 'object' && !Array.isArray(part)) {
@@ -452,7 +461,11 @@ export function WebSyncPanel({
                           ? '立项版本'
                           : kind === 'setting-use-head'
                             ? '设定使用证据历史'
-                            : '原稿修订'
+                            : kind === 'fact-set-head'
+                              ? '正式事实历史'
+                              : kind === 'length-target-head'
+                                ? '篇幅目标历史'
+                                : '原稿修订'
                 if (window.confirm(`${label}并结束冲突？${history}保留。`)) void run('choose', choice)
               }}
             >
