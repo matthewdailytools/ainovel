@@ -254,8 +254,11 @@ test('从同一句创意逐台推进，经作者确认交付两章正文', async
     const editor = writing.getByRole('textbox', { name: '章节正文' })
     await editor.press('ControlOrMeta+a')
     await page.keyboard.insertText(bodies[index])
-    await writing.getByRole('button', { name: '保存', exact: true }).click()
+    const save = writing.getByRole('button', { name: '保存', exact: true })
+    await save.click()
     await expect.poll(async () => (await get(`/api/chapters/${chapter.id}`)).content).toBe(bodies[index])
+    await expect(writing.getByText('已保存', { exact: true })).toBeVisible()
+    await expect(save).toBeEnabled()
   }
   const chapterProofs = await Promise.all(chapters.map(async ({ id }) => get(`/api/chapters/${id}`)))
   expect(chapterProofs.map(({ revision }) => revision)).toEqual([1, 1])

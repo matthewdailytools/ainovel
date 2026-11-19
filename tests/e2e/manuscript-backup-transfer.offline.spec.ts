@@ -673,9 +673,9 @@ test('卷和整书历史恢复点随独立备份往返，断网另存可保留�
   const earlierPlan = await confirmOutline(0)
   const inspections = `${branch}/workflow-inspections`
   const targets = [
-    { scope: 'chapter', scope_id: second.id, minChars: 90, chapters: 1, status: 'red' },
-    { scope: 'volume', scope_id: 'portable-vol-2', minChars: 12, chapters: 1, status: 'green' },
-    { scope: 'book', scope_id: null, minChars: 20, chapters: 2, status: 'green' },
+    { scope: 'chapter', scope_id: second.id, minChars: 90, chapters: 1 },
+    { scope: 'volume', scope_id: 'portable-vol-2', minChars: 12, chapters: 1 },
+    { scope: 'book', scope_id: null, minChars: 20, chapters: 2 },
   ] as const
   type LengthTarget = { min_chars: number; max_chars: number | null; expected_chapters: number }
   type Inspection = {
@@ -982,23 +982,50 @@ test('卷和整书历史恢复点随独立备份往返，断网另存可保留�
         stale: 0,
       }),
     ])
-    for (const { scope, scope_id, minChars, chapters, status } of targets) {
-      const params = {
-        scope,
-        ...(scope_id ? { scope_id: scope === 'chapter' ? recoveredChapter.id : scope_id } : {}),
-      }
-      const state = await checked<Inspection>(
-        await desktop.request.get(`${recoveredBranch}/workflow-inspections`, { params }),
-      )
-      const length = { min_chars: minChars, max_chars: null, expected_chapters: chapters }
-      expect(state.preview.length_target.targets).toEqual(length)
-      expect(state.preview.items.find(({ check_id }) => check_id === '09')).toMatchObject({
-        status,
-        basis: { length_target: { targets: length } },
-      })
-      expect(state.latest).toBeNull()
-      expect(state.history).not.toContainEqual(expect.objectContaining({ id: originalReport.id }))
+    const [chapterLength, volumeLength, bookLength] = await Promise.all(
+      targets.map(async ({ scope, scope_id, minChars, chapters }) => {
+        const params = {
+          scope,
+          ...(scope_id ? { scope_id: scope === 'chapter' ? recoveredChapter.id : scope_id } : {}),
+        }
+        const state = await checked<Inspection>(
+          await desktop.request.get(`${recoveredBranch}/workflow-inspections`, { params }),
+        )
+        const target = state.preview.length_target
+        const check = state.preview.items.find(({ check_id }) => check_id === '09')
+        expect(target.targets).toEqual({ min_chars: minChars, max_chars: null, expected_chapters: chapters })
+        expect(check).toMatchObject({ status: 'red', basis: { length_target: target } })
+        expect(state.latest).toBeNull()
+        expect(state.history).not.toContainEqual(expect.objectContaining({ id: originalReport.id }))
+        return { check, target }
+      }),
+    )
+    const inheritedChapter = {
+      scope: 'chapter',
+      scope_id: recoveredChapter.id,
+      chapter_ids: [recoveredChapter.id],
+      length_target: chapterLength.target,
+      status: 'red',
     }
+    expect(volumeLength.check).toMatchObject({
+      summary: expect.stringContaining('符合本次配置目标。其中 1 个章或卷未达到'),
+      basis: { descendant_length_targets: [inheritedChapter] },
+    })
+    expect(bookLength.check).toMatchObject({
+      summary: expect.stringContaining('符合本次配置目标。其中 1 个章或卷未达到'),
+      basis: {
+        descendant_length_targets: [
+          {
+            scope: 'volume',
+            scope_id: targets[1].scope_id,
+            chapter_ids: [recoveredChapter.id],
+            length_target: volumeLength.target,
+            status: 'green',
+          },
+          inheritedChapter,
+        ],
+      },
+    })
     expect(
       await checked(
         await desktop.request.get(`${recoveredBranch}/chapters/${recoveredChapter.id}/scene-times`),
