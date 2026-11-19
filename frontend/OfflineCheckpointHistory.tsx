@@ -2,19 +2,22 @@ import { useEffect, useRef, useState } from 'react'
 import {
   hasLocalSnapshotHistory,
   manuscriptHash,
+  readLocalCheckpointFork,
   readLocalCheckpointRestore,
   readLocalSnapshotHistory,
   readLocalSourceRevision,
   type LocalRevision,
 } from './offlineStore'
 import type { PortableCheckpoint } from './portableCheckpoint'
+import { PortableCheckpointFork } from './PortableCheckpointFork'
 import { CheckpointRestoreAction } from './CheckpointRestoreAction'
 import { snapshotSharedChanges } from './workSnapshotView'
 
 type CheckpointChapter = PortableCheckpoint['chapters'][number]
-type RestoreControls = {
+type CheckpointControls = {
   disabled: boolean
   writeBlocked?: string
+  submitFork: (checkpointId: string, basis: string, name: string, requestId: string) => Promise<void>
   submitRestore: (
     checkpointId: string,
     basis: string,
@@ -29,7 +32,7 @@ export function OfflineCheckpointHistory({
 }: {
   projectId: string
   refreshToken: number
-} & RestoreControls) {
+} & CheckpointControls) {
   const [available, setAvailable] = useState(false)
   const [open, setOpen] = useState(false)
 
@@ -66,7 +69,8 @@ function CheckpointContents({
   disabled,
   writeBlocked,
   submitRestore,
-}: { projectId: string } & RestoreControls) {
+  submitFork,
+}: { projectId: string } & CheckpointControls) {
   const [checkpoints, setCheckpoints] = useState<PortableCheckpoint[]>()
   const [selected, setSelected] = useState('')
   const [failure, setFailure] = useState('')
@@ -153,6 +157,16 @@ function CheckpointContents({
         {checkpoint.scoped_chapter_ids.length} 章
       </p>
       {checkpoint.restore_sources && (
+        <PortableCheckpointFork
+          key={`fork-${checkpoint.id}`}
+          label={checkpoint.label}
+          mode="copy"
+          disabled={disabled}
+          previewFork={() => readLocalCheckpointFork(projectId, checkpoint.id)}
+          submitFork={(basis, name, requestId) => submitFork(checkpoint.id, basis, name, requestId)}
+        />
+      )}
+      {checkpoint.restore_sources && (
         <CheckpointRestoreAction
           key={checkpoint.id}
           label={checkpoint.label}
@@ -172,6 +186,8 @@ function CheckpointContents({
               affectedReports: preview.affectedReports,
               affectedSettingUses: preview.affectedSettingUses,
               notes: [
+                ...(preview.factCount ? [`按归档恢复 ${preview.factCount} 条事实及其章稿引用。`] : []),
+                ...(preview.lengthTargetCount ? [`更新 ${preview.lengthTargetCount} 项篇幅目标。`] : []),
                 ...(preview.sceneSpansForReview
                   ? [`${preview.sceneSpansForReview} 处场景绑定需重新核对。`]
                   : []),

@@ -501,6 +501,26 @@ async function receiptOf(tx: IDBTransaction, key: string, id?: string | null) {
     : null
 }
 
+export function readChapterBeforeArchive(scope: SyncScope, archived: SyncReceipt) {
+  const key = scopeKey(scope)
+  return transact('readonly', async (tx) => {
+    let retired = archived
+    while (retired.parent_revision) {
+      const previous = await receiptOf(tx, key, retired.parent_revision)
+      if (
+        !previous ||
+        previous.object_id !== retired.object_id ||
+        previous.sequence >= retired.sequence ||
+        previous.status === 'conflict'
+      )
+        invalid('待归档章节缺少可核对的云端父版本。')
+      if (!previous.tombstone) return previous
+      retired = previous
+    }
+    return null
+  })
+}
+
 export async function readSyncHead(scope: SyncScope, objectId: string) {
   const key = scopeKey(scope)
   return transact('readonly', async (tx) =>

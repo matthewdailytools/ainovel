@@ -17,6 +17,7 @@ const histories = {
   setting_use_history: ['adopted_heads', 'versions', 'native_bindings'],
   reference_history: ['adopted_heads', 'versions', 'source_devices', 'excerpts'],
   snapshot_history: ['entries'],
+  restore_state: ['facts', 'length_targets'],
 }
 
 type Digest = (text: string) => Promise<string>

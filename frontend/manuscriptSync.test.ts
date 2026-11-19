@@ -13,9 +13,12 @@ import {
   readLocalWorkflowHistory,
   restoreLocalChapter,
   saveLocalChapter,
+  syncManuscriptObjects,
 } from './offlineStore'
 import { httpSyncTransport, syncWebManuscript } from './manuscriptSync'
 import {
+  markSyncBaseline,
+  pullSyncPage,
   pushSyncPending,
   queueSyncChange,
   queueSyncResolution,
@@ -162,6 +165,56 @@ test.each([false, true])(
     expect(cloud.latest.get(id)?.payload?.head).toMatchObject({ id: restore.id })
   },
 )
+
+test('an old Web replica that accepted an empty archive head retries until the exact chapter history is available', async () => {
+  const source = await createLocalProject('同步已归档章节')
+  const chapter = await createLocalChapter(source.novel.id, '曾经的开篇')
+  const [root] = await readLocalHistory(source.novel.id, chapter.id)
+  const final = await saveLocalChapter(source.novel.id, chapter.id, root.id, '后来归档的正文。')
+  const pack = await exportLocalManuscript(source.novel.id)
+  const objects = syncManuscriptObjects(pack)
+  const id = `chapter:${chapter.id}`
+  const scope = { service: 'http://127.0.0.1:8888', workId: source.branch.id, deviceId: 'new-web' }
+  const cloud = service('desktop', 'unused', false)
+  const write = (object_id: string, change_id: string, parent_revision: string | null = null) => {
+    const payload = objects.get(object_id) ?? null
+    return cloud.transport.push({
+      object_id,
+      change_id,
+      parent_revision,
+      payload: JSON.parse(JSON.stringify(payload)),
+      tombstone: payload === null,
+    })
+  }
+  await write(`branch:${scope.workId}`, 'directory')
+  await write(`revision:${root.id}`, 'initial-contents')
+  await write(id, 'visible-chapter')
+  objects.delete(id)
+  await write(id, 'archive', 'visible-chapter')
+  await write(id, 'confirm-archive', 'archive')
+
+  globalThis.indexedDB = new IDBFactory()
+  const project = await importLocalManuscript(
+    new Blob([JSON.stringify({ ...pack, chapters: [], revisions: [] })]),
+  )
+  await setSyncEnabled(scope, true)
+  await pullSyncPage(scope, cloud.transport)
+  await markSyncBaseline(scope, id, { revision: 'confirm-archive', signature: 'null' })
+  const missing = await syncWebManuscript(project, scope, cloud.transport)
+  expect(missing.deferred).toEqual([{ object_id: id, reason: expect.stringContaining('连续正文修订') }])
+  expect((await exportLocalManuscript(project.novel.id)).chapters).toEqual([])
+
+  await write(`revision:${final.id}`, 'last-contents')
+  expect((await syncWebManuscript(project, scope, cloud.transport)).deferred).toEqual([])
+  const restored = await exportLocalManuscript(project.novel.id)
+  expect(restored.chapters).toEqual([{ ...pack.chapters[0], archived: 1 }])
+  expect(restored.revisions).toEqual([root, final])
+  expect(restored.source_revisions).toBeUndefined()
+  const cursor = cloud.log.length
+  await syncWebManuscript(project, scope, cloud.transport)
+  expect(await exportLocalManuscript(project.novel.id)).toEqual(restored)
+  expect(cloud.log).toHaveLength(cursor)
+})
 
 test('M1 workspace retains its later adoption when the prior head push must be retried', async () => {
   const project = await createLocalProject('待同步立项')

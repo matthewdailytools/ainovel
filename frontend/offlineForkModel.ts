@@ -47,7 +47,13 @@ function rekeyEvidence(entry: SettingsEvidence, chapters: Ids, revisions: Ids) {
   }
 }
 
-function forkSettings(history: SettingsHistory, settings: Ids, projects: Ids, chapters: Ids, revisions: Ids) {
+export function forkSettings(
+  history: SettingsHistory,
+  settings: Ids,
+  projects: Ids,
+  chapters: Ids,
+  revisions: Ids,
+) {
   return {
     adopted_revision_id: optionalId(settings, history.adopted_revision_id),
     versions: history.versions.map((version) => ({
@@ -70,7 +76,7 @@ function forkSettings(history: SettingsHistory, settings: Ids, projects: Ids, ch
   }
 }
 
-async function forkReferences(
+export async function forkReferences(
   history: ReferenceHistory,
   branchId: string,
   digest: ForkIO['digest'],
@@ -132,7 +138,7 @@ function forkRecord(record: StoryRecord, records: Ids): StoryRecord {
   }
 }
 
-async function forkStory(
+export async function forkStory(
   history: StoryHistory,
   branchId: string,
   records: Ids,
@@ -180,7 +186,7 @@ async function forkStory(
   return { adopted_heads, versions, source_devices: deviceIds(history.source_devices, ids), native_history }
 }
 
-function forkOutline(
+export function forkOutline(
   history: OutlineHistory,
   outlines: Ids,
   projects: Ids,

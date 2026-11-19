@@ -48,8 +48,10 @@ import {
 } from './workflowPrivacy'
 import { createStoryOfflineStore, storyReadStores, storyWriteStores } from './storyOfflineStore'
 import { buildOfflineFork, type OfflineForkSelection } from './offlineForkModel'
+import { buildCheckpointFork, previewCheckpointFork } from './offlineCheckpointFork'
 import {
   captureRecoveryCheckpoint,
+  chapterHeads,
   checkpointRestoreFingerprint,
   planCheckpointRestore,
   prepareCheckpointWrites,
@@ -84,11 +86,13 @@ import {
 import { decodeWebManuscriptBackup, encodeWebManuscriptBackup } from './webManuscriptBackup'
 import {
   decodePortableCheckpointHistory,
+  validatePortableRestoreState,
   verifyPortableCheckpoints,
   type PortableCheckpoint,
   type PortableCheckpointEntry,
   type PortableCheckpointHistory,
   type PortableCheckpointSources,
+  type PortableRestoreState,
 } from './portableCheckpoint'
 import {
   createSettingUseOfflineStore,
@@ -161,6 +165,7 @@ export type ManuscriptPack = LocalProject & {
   setting_use_history?: SettingUseHistory
   reference_history?: ReferenceHistory
   snapshot_history?: PortableCheckpointHistory
+  restore_state?: PortableRestoreState
 }
 const SYNC_FORMAT = 'ainovel-manuscript-sync/1'
 export type SyncedObject =
@@ -282,6 +287,8 @@ type Store =
   | 'storyChapterAliases'
   | 'referenceArchives'
   | 'snapshotArchives'
+  | 'restoreStates'
+  | 'snapshotForkReceipts'
   | (typeof settingUseStores)[number]
 type LocalProjectVersion = ProjectVersionRecord & { branchId: string }
 type LocalProjectHead = { branchId: string; versionId: string }
@@ -298,8 +305,21 @@ type LocalSnapshotEntry = {
   entry: PortableCheckpointEntry
   restoreReceipt?: { checkpointId: string; basis: string; result: LocalCheckpointReceipt }
 }
+type LocalCheckpointForkReceipt = { project: LocalProject; checkpointId: string }
+type StoredCheckpointFork = {
+  branchId: string
+  requestId: string
+  basis: string
+  title: string
+  receipt: LocalCheckpointForkReceipt
+}
 export type LocalPublication = { branchId: string; objectId: string; id: string }
-type ApplyOptions = { source?: ProjectSource; publicationId?: string | null; consumePublication?: boolean }
+type ApplyOptions = {
+  source?: ProjectSource
+  publicationId?: string | null
+  consumePublication?: boolean
+  archiveSource?: Extract<SyncedObject, { kind: 'chapter' }>
+}
 const projectStores = ['projects', 'projectHeads', 'projectVersions'] satisfies Store[]
 const manuscriptStores = ['projects', 'chapters', 'revisions', 'sourceRevisions'] satisfies Store[]
 const workflowStores = ['workflowInspections', 'workflowCompletions'] satisfies Store[]
@@ -332,7 +352,7 @@ function result<T>(request: IDBRequest<T>): Promise<T> {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 9)
+    const request = indexedDB.open(DATABASE, 10)
     let blocked = false
     request.onblocked = () => {
       blocked = true
@@ -424,6 +444,10 @@ function openDatabase(): Promise<IDBDatabase> {
           'byBranch',
           'branchId',
         )
+      }
+      if (event.oldVersion < 10) {
+        db.createObjectStore('restoreStates', { keyPath: 'branchId' })
+        db.createObjectStore('snapshotForkReceipts', { keyPath: ['branchId', 'requestId'] })
       }
     }
     request.onsuccess = () => {
@@ -1171,8 +1195,31 @@ const manuscriptPackageStores = [
     ...settingUseStores,
     'referenceArchives' as const,
     'snapshotArchives' as const,
+    'restoreStates' as const,
   ]),
 ]
+
+type LocalRestoreState = { branchId: string; state: PortableRestoreState }
+
+async function readRestoreState(tx: IDBTransaction, branchId: string) {
+  const row = await result<LocalRestoreState | undefined>(tx.objectStore('restoreStates').get(branchId))
+  return row?.state
+}
+
+async function writeRestoreState(tx: IDBTransaction, branchId: string, state: PortableRestoreState) {
+  const store = tx.objectStore('restoreStates')
+  if (state.facts.length || state.length_targets.length)
+    await result(store.put({ branchId, state } satisfies LocalRestoreState))
+  else await result(store.delete(branchId))
+}
+
+function manuscriptVolumes(outline?: OutlineHistory) {
+  return new Set(outline?.versions.flatMap(({ plan }) => plan.volumes.map(({ id }) => id)))
+}
+
+function archivedManuscriptChapters(chapters: LocalChapter[]) {
+  return new Set(chapters.filter(({ archived }) => archived).map(({ id }) => id))
+}
 
 function readManuscriptPackage(projectId: string, includeReferenceEvidenceFor: readonly string[] = []) {
   return transact(manuscriptPackageStores, 'readonly', async (tx) =>
@@ -1195,6 +1242,7 @@ async function readManuscriptPackageTx(
     referenceHistory,
     settingUseHistory,
     snapshotHistory,
+    restoreState,
   ] = await Promise.all([
     readManuscript(tx, project),
     readProjectBrief(tx, project.branch.id),
@@ -1205,7 +1253,17 @@ async function readManuscriptPackageTx(
     readReferenceHistory(tx, project.branch.id),
     settingUseStore.readSettingUseHistoryTx(tx, project.branch.id),
     readSnapshotHistoryTx(tx, project.branch.id),
+    readRestoreState(tx, project.branch.id),
   ])
+  const current = restoreState && chapterHeads(manuscript)
+  const archived = restoreState && archivedManuscriptChapters(manuscript.chapters)
+  const restore_state = restoreState && {
+    ...restoreState,
+    facts: restoreState.facts.filter(
+      ({ evidence }) =>
+        !archived?.has(evidence.chapter_id) && current?.get(evidence.chapter_id)?.id === evidence.revision_id,
+    ),
+  }
   const sourceDevices = settings.versions.flatMap(({ version, source, recordedDevice }) => {
     const device = source?.device_id ?? recordedDevice
     return device ? [[version.id, device] as const] : []
@@ -1248,6 +1306,9 @@ async function readManuscriptPackageTx(
     ...(storyHistory ? { story_history: storyHistory } : {}),
     ...(settingUseHistory ? { setting_use_history: settingUseHistory } : {}),
     ...(snapshotHistory.entries.length ? { snapshot_history: snapshotHistory } : {}),
+    ...(restore_state && (restore_state.facts.length || restore_state.length_targets.length)
+      ? { restore_state }
+      : {}),
     ...(referenceHistory
       ? {
           reference_history: {
@@ -1339,6 +1400,101 @@ export async function readLocalCheckpointRestore(
   return { ...plan.preview, basis }
 }
 
+async function verifiedForkSource(projectId: string, checkpointId: string) {
+  const pack = await readManuscriptPackage(projectId)
+  const entry = pack.snapshot_history?.entries.find(({ id }) => id === checkpointId)
+  if (!entry) throw new OfflineStoreError('missing', '找不到这个归档恢复点。')
+  const sealed = decodeSnapshotHistory({ entries: [entry] })
+  return { pack, basis: entry.sha256, checkpoint: sealed[0].checkpoint }
+}
+
+export async function readLocalCheckpointFork(projectId: string, checkpointId: string) {
+  const { pack, basis, checkpoint } = await verifiedForkSource(projectId, checkpointId)
+  return { basis, ...(await previewCheckpointFork(pack, checkpoint, validateManuscript)) }
+}
+
+async function findCheckpointForkReceipt(
+  tx: IDBTransaction,
+  branchId: string,
+  requestId: string,
+  checkpointId: string,
+  basis: string,
+  title: string,
+) {
+  const stored = await result<StoredCheckpointFork | undefined>(
+    tx.objectStore('snapshotForkReceipts').get([branchId, requestId]),
+  )
+  if (!stored) return undefined
+  if (stored.receipt.checkpointId !== checkpointId || stored.basis !== basis || stored.title !== title)
+    throw new OfflineStoreError('conflict', '此另存提交编号已用于其他内容，请重新预览。')
+  return stored.receipt
+}
+
+export async function createLocalCheckpointBranch(
+  projectId: string,
+  checkpointId: string,
+  name: string,
+  requestedBasis: string,
+  requestId: string,
+): Promise<LocalCheckpointForkReceipt> {
+  try {
+    validateProjectId(requestId)
+  } catch {
+    invalid('另存提交编号无效。')
+  }
+  const title = name.trim()
+  const replay = await transact(['projects', 'snapshotForkReceipts'], 'readonly', async (tx) => {
+    const { branch } = await readProject(tx, projectId)
+    return findCheckpointForkReceipt(tx, branch.id, requestId, checkpointId, requestedBasis, title)
+  })
+  if (replay) return replay
+  const { pack, checkpoint, basis } = await verifiedForkSource(projectId, checkpointId)
+  if (basis !== requestedBasis) throw new OfflineStoreError('conflict', '归档已有变化，请重新打开另存预览。')
+  let copy: ManuscriptPack
+  try {
+    const prepared = await buildCheckpointFork(pack, checkpoint, title, {
+      validate: validateManuscript,
+      digest: manuscriptHash,
+    })
+    copy = prepared.pack
+    const body = JSON.stringify(prepared.provenance)
+    copy.evidence = [
+      {
+        id: newId(),
+        kind: 'project',
+        title: '从归档另存的来源',
+        body,
+        sha256: await manuscriptHash(body),
+        chapters: [],
+      },
+    ]
+  } catch (error) {
+    if (error instanceof OfflineStoreError) throw error
+    invalid(error instanceof Error ? error.message : '找不到另存工作分支所需的完整来源。')
+  }
+  const project = await writeLocalManuscript(copy, async (tx) => {
+    const { branch } = await readProject(tx, projectId)
+    const previous = await findCheckpointForkReceipt(tx, branch.id, requestId, checkpointId, basis, title)
+    if (previous) return previous.project
+    const archived = await result<LocalSnapshotEntry | undefined>(
+      tx.objectStore('snapshotArchives').get([branch.id, checkpointId]),
+    )
+    if (branch.id !== checkpoint.branch_id || archived?.entry.sha256 !== basis)
+      throw new OfflineStoreError('conflict', '归档已有变化，请重新打开另存预览。')
+    const { novel, branch: target, evidence } = copy
+    await result(
+      tx.objectStore('snapshotForkReceipts').add({
+        branchId: branch.id,
+        requestId,
+        basis,
+        title,
+        receipt: { project: { novel, branch: target, evidence }, checkpointId },
+      } satisfies StoredCheckpointFork),
+    )
+  })
+  return { project, checkpointId }
+}
+
 function checkpointReceipt(entry: LocalSnapshotEntry | undefined, checkpointId: string, basis: string) {
   if (!entry) return undefined
   if (entry.restoreReceipt?.checkpointId === checkpointId && entry.restoreReceipt.basis === basis)
@@ -1386,6 +1542,17 @@ async function verifyPreparedCheckpointWrites(
       { original: sources, native: revised },
     )
   }
+  const chapters = new Map(pack.chapters.map((row) => [row.id, row]))
+  for (const { chapter } of prepared.writes) chapters.set(chapter.id, chapter)
+  const volumes = manuscriptVolumes(pack.outline_history)
+  for (const { id } of prepared.outline?.plan.volumes ?? []) volumes.add(id)
+  const updatedChapters = [...chapters.values()]
+  await validatePortableRestoreState(
+    prepared.restoreState,
+    chapterHeads({ chapters: updatedChapters, revisions: [...revised.values()] }),
+    volumes,
+    archivedManuscriptChapters(updatedChapters),
+  )
 }
 
 export async function restoreLocalCheckpoint(
@@ -1473,6 +1640,12 @@ export async function restoreLocalCheckpoint(
     }
     await storyStore.appendCheckpointStoryTx(tx, branchId, prepared.story)
     if (prepared.outline) await outlineStore.adoptCheckpointOutlineTx(tx, project, prepared.outline)
+    if (
+      captured.pack.restore_state ||
+      prepared.restoreState.facts.length ||
+      prepared.restoreState.length_targets.length
+    )
+      await writeRestoreState(tx, branchId, prepared.restoreState)
     await markPublication(tx, branchId, ...publications)
     project.branch.story_revision++
     await result(tx.objectStore('projects').put(project))
@@ -1499,6 +1672,13 @@ export async function exportLocalManuscript(
   includeReferenceEvidenceFor: readonly string[] = [],
 ): Promise<ManuscriptPack> {
   const pack = await readManuscriptPackage(projectId, includeReferenceEvidenceFor)
+  if (pack.restore_state)
+    await validatePortableRestoreState(
+      pack.restore_state,
+      chapterHeads(pack),
+      manuscriptVolumes(pack.outline_history),
+      archivedManuscriptChapters(pack.chapters),
+    )
   if (pack.snapshot_history) {
     await verifySnapshotHistory(decodeSnapshotHistory(pack.snapshot_history), {
       branch: pack.branch,
@@ -1832,12 +2012,15 @@ export function readLocalSyncSnapshot(projectId: string) {
 }
 
 export async function readLocalRulePreview(projectId: string) {
-  const stores = [...new Set([...outlineReadStores, ...storyReadStores, 'revisions' as const])]
+  const stores = [
+    ...new Set([...outlineReadStores, ...storyReadStores, 'revisions' as const, 'restoreStates' as const]),
+  ]
   const snapshot = await transact(stores, 'readonly', async (tx) => {
     const project = await readProject(tx, projectId)
-    const [outline, story] = await Promise.all([
+    const [outline, story, restoreState] = await Promise.all([
       outlineStore.readOutlineTx(tx, project),
       storyStore.readStoryTx(tx, project),
+      readRestoreState(tx, project.branch.id),
     ])
     const index = tx.objectStore('revisions').index('byRevision')
     const chapters = await Promise.all(
@@ -1846,12 +2029,12 @@ export async function readLocalRulePreview(projectId: string) {
         .map(async (chapter) => {
           const saved = await result<LocalRevision | undefined>(index.get([chapter.id, chapter.revision]))
           if (!saved) throw new OfflineStoreError('missing', '缺少章节的正式保存稿，请先恢复原稿。')
-          return { ...chapter, content: saved.content, revisionId: saved.id }
+          return { ...chapter, content: saved.content, revisionId: saved.id, sha256: saved.sha256 }
         }),
     )
-    return { outline, records: story.records, chapters }
+    return { outline, records: story.records, chapters, restoreState }
   })
-  return calculateOfflineRules(snapshot.chapters, snapshot.outline, snapshot.records)
+  return calculateOfflineRules(snapshot.chapters, snapshot.outline, snapshot.records, snapshot.restoreState)
 }
 
 export function confirmLocalProjectBrief(
@@ -2338,24 +2521,28 @@ export function applySyncedObject(
       (options.publicationId !== undefined && options.publicationId !== (publication?.id ?? null))
     )
       return false
-    if (!object) {
+    const stored = object ?? (old ? undefined : options.archiveSource)
+    if (!stored) {
       if (old && !old.archived) await result(chapters.put({ ...old, archived: 1 }))
     } else {
-      if (object.chapter.branch_id !== project.branch.id || object.chapter.id !== chapterId)
+      if (stored.chapter.branch_id !== project.branch.id || stored.chapter.id !== chapterId)
         invalid('云端章节归属无效。')
       if (
+        object &&
         (await listChaptersTx(tx, project.branch.id)).some(
           (chapter) =>
-            !chapter.archived && chapter.id !== chapterId && chapter.position === object.chapter.position,
+            !chapter.archived && chapter.id !== chapterId && chapter.position === stored.chapter.position,
         )
       )
         invalid('云端章位与本机目录冲突。')
       let revision = head?.revision ?? 0
-      const original = await sourceRevision(tx, branchId, object.head.id)
+      const original =
+        (await sourceRevision(tx, branchId, stored.head.id)) ??
+        (!object && stored.head.revision === 0 ? stored.head : undefined)
       const history: LocalRevision[] = []
       const sameSource = (left: LocalRevision, right: LocalRevision) =>
         JSON.stringify(revisionSignature(left)) === JSON.stringify(revisionSignature(right))
-      if (original && sameSource(original, object.head)) {
+      if (original && sameSource(original, stored.head)) {
         let cursor: LocalRevision | undefined = original
         while (cursor) {
           if (head && sameSource(cursor, head)) break
@@ -2368,29 +2555,31 @@ export function applySyncedObject(
         }
         if (head && !cursor) history.length = 0
       }
-      if (history.length && history.length === object.head.revision - (head?.revision ?? -1)) {
+      if (history.length && history.length === stored.head.revision - (head?.revision ?? -1)) {
         for (const entry of history.reverse()) {
           await result(versions.add(entry))
           await result(tx.objectStore('sourceRevisions').delete([branchId, entry.id]))
         }
-        revision = object.head.revision
-      } else if (!head || head.sha256 !== object.head.sha256) {
+        revision = stored.head.revision
+      } else if (!object) {
+        throw new OfflineStoreError('missing', '缺少待归档章节的连续正文修订，云端章稿将延后接收。')
+      } else if (!head || head.sha256 !== stored.head.sha256) {
         revision = head ? head.revision + 1 : 0
         await result(
           versions.add({
-            ...object.head,
+            ...stored.head,
             id: newId(),
             revision,
             parent_id: head?.id ?? null,
-            cause: `云同步，来源修订 ${object.head.id}`,
+            cause: `云同步，来源修订 ${stored.head.id}`,
           }),
         )
       }
-      await result(chapters.put({ ...object.chapter, archived: 0, stale: 0, revision }))
+      await result(chapters.put({ ...stored.chapter, archived: object ? 0 : 1, stale: 0, revision }))
       const adopted = await result<LocalRevision | undefined>(
         versions.index('byRevision').get([chapterId, revision]),
       )
-      if (adopted) await storyStore.rememberStoryChapterAlias(tx, branchId, object.head, adopted)
+      if (adopted) await storyStore.rememberStoryChapterAlias(tx, branchId, stored.head, adopted)
     }
     project.branch.story_revision++
     await result(projectStore.put(project))
@@ -2567,6 +2756,7 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     'setting_use_history',
     'reference_history',
     'snapshot_history',
+    'restore_state',
   ])
   if (pack.format !== FORMAT) invalid('稿件交换包格式无法读取，请使用兼容版本。')
   const n = fields(pack.novel, ['id', 'title', 'brief', 'created'])
@@ -2764,6 +2954,19 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
             story_history,
           }),
         })
+  let restore_state: PortableRestoreState | undefined
+  if (pack.restore_state != null) {
+    try {
+      restore_state = await validatePortableRestoreState(
+        pack.restore_state,
+        chapterHeads({ chapters, revisions }),
+        manuscriptVolumes(outline_history),
+        archivedManuscriptChapters(chapters),
+      )
+    } catch (error) {
+      invalid(error instanceof Error ? error.message : '正式事实或篇幅目标格式无效。')
+    }
+  }
   return {
     format: FORMAT,
     novel,
@@ -2780,6 +2983,7 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     ...(setting_use_history ? { setting_use_history } : {}),
     ...(reference_history ? { reference_history } : {}),
     ...(snapshot_history?.entries.length ? { snapshot_history } : {}),
+    ...(restore_state ? { restore_state } : {}),
   }
 }
 
@@ -2887,7 +3091,7 @@ export async function forkLocalManuscript(
 
 async function writeLocalManuscript(
   pack: ManuscriptPack,
-  verifySource?: (tx: IDBTransaction) => Promise<void>,
+  verifySource?: (tx: IDBTransaction) => Promise<LocalProject | void>,
 ): Promise<LocalProject> {
   const {
     novel,
@@ -2904,6 +3108,7 @@ async function writeLocalManuscript(
     setting_use_history,
     reference_history,
     snapshot_history,
+    restore_state,
   } = pack
   const settingUseSlots = new Map(
     await Promise.all(
@@ -2922,10 +3127,13 @@ async function writeLocalManuscript(
       ...settingUseStores,
       'referenceArchives' as const,
       'snapshotArchives' as const,
+      'restoreStates' as const,
+      'snapshotForkReceipts' as const,
     ]),
   ]
   return transact(stores, 'readwrite', async (tx) => {
-    if (verifySource) await verifySource(tx)
+    const previous = await verifySource?.(tx)
+    if (previous) return previous
     const project = { novel, branch, ...(evidence?.length ? { evidence } : {}) }
     await result(tx.objectStore('projects').add(project))
     for (const chapter of chapters) await result(tx.objectStore('chapters').add(chapter))
@@ -2983,6 +3191,7 @@ async function writeLocalManuscript(
       for (const entry of workflow_history.completions)
         await result(tx.objectStore('workflowCompletions').add({ branchId: branch.id, entry }))
     }
+    if (restore_state) await writeRestoreState(tx, branch.id, restore_state)
     for (const [sequence, entry] of (snapshot_history?.entries ?? []).entries())
       await result(
         tx

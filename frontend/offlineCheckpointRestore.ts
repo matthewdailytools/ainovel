@@ -6,7 +6,13 @@ import {
   type OutlineArchivePending,
   type OutlineVersion,
 } from './outlineSyncModel'
-import type { PortableCheckpoint, PortableCheckpointEntry } from './portableCheckpoint'
+import {
+  lengthTargetKey,
+  type PortableCheckpoint,
+  type PortableCheckpointEntry,
+  type PortableCheckpointLengthTarget,
+  type PortableRestoreState,
+} from './portableCheckpoint'
 import { prepareSettingsVersion, type SettingsEvidence } from './settingsSyncModel'
 import {
   allStoryEvidence,
@@ -32,6 +38,8 @@ export type LocalCheckpointPreview = {
   settingsChanged: boolean
   outlineChanged: boolean
   storyRecordCount: number
+  factCount: number
+  lengthTargetCount: number
   affectedReports: RestoreAffectedReport[]
   affectedSettingUses: { chapterTitle: string; title: string; versionId: string }[]
   sceneSpansForReview: number
@@ -84,14 +92,15 @@ export function checkpointRestoreFingerprint(
     pack.workflow_history?.completions.map(({ id }) => id).sort() ?? [],
     [...(reportAliases ?? [])].sort(),
     pack.reference_history?.adopted_heads ?? [],
+    pack.restore_state ?? null,
     source.sha256,
   ])
 }
 
-function chapterHeads(pack: ManuscriptPack) {
-  const directory = new Map(pack.chapters.map((row) => [row.id, row.revision]))
+export function chapterHeads({ chapters, revisions }: Pick<ManuscriptPack, 'chapters' | 'revisions'>) {
+  const directory = new Map(chapters.map((row) => [row.id, row.revision]))
   return new Map(
-    pack.revisions
+    revisions
       .filter((row) => directory.get(row.chapter_id) === row.revision)
       .map((row) => [row.chapter_id, row]),
   )
@@ -120,6 +129,8 @@ export function captureRecoveryCheckpoint(
   const current = chapterHeads(pack)
   const heads = historyHeads(pack)
   const outline = identify(pack)
+  const outlineVersion = versions(pack.outline_history).get(outline.outline_id ?? '')
+  const volumes = new Set(outlineVersion?.plan.volumes.map(({ id }) => id))
   const reports: PortableCheckpoint['reports'] = {}
   const inspection = pack.workflow_history?.inspections.at(-1)
   const completion = pack.workflow_history?.completions.at(-1)
@@ -153,8 +164,10 @@ export function captureRecoveryCheckpoint(
           { revision: native.revision, version_id: native.version_id },
         ]),
       ),
-      facts: [],
-      length_targets: [],
+      facts: pack.restore_state?.facts ?? [],
+      length_targets: (pack.restore_state?.length_targets ?? []).filter(
+        ({ scope, scope_id }) => scope !== 'volume' || volumes.has(scope_id!),
+      ),
       scene_spans_for_review: 0,
     },
   }
@@ -172,7 +185,12 @@ function windowIds(window: OutlineVersion['plan']['promises'][number]) {
   return [window.plant_chapter_id, window.opens_chapter_id, window.closes_chapter_id]
 }
 
-function activeImpacts({ pack, reportAliases }: Captured, changed: ReadonlySet<string>, shared: boolean) {
+function activeImpacts(
+  { pack, reportAliases }: Captured,
+  changed: ReadonlySet<string>,
+  shared: boolean,
+  lengthChanges: ReadonlySet<string>,
+) {
   const current = chapterHeads(pack)
   const active = new Map(pack.chapters.filter(({ archived }) => !archived).map((row) => [row.id, row]))
   const currentSignature = (link: { id: string; revision_id: string; sha256: string }) => {
@@ -199,9 +217,15 @@ function activeImpacts({ pack, reportAliases }: Captured, changed: ReadonlySet<s
     )
       continue
     const direct = chapter_bindings.some((row) => changed.has(row.id))
+    const lengthChanged = lengthChanges.has(lengthTargetKey(report))
     const check_ids = report.items.flatMap((item) =>
       ['pending', 'outdated'].includes(item.status) ||
-      !(shared || direct || item.author_review?.evidence.some((row) => changed.has(row.chapter_id)))
+      !(
+        shared ||
+        direct ||
+        (lengthChanged && item.check_id === '09') ||
+        item.author_review?.evidence.some((row) => changed.has(row.chapter_id))
+      )
         ? []
         : [item.check_id],
     )
@@ -220,7 +244,7 @@ function activeImpacts({ pack, reportAliases }: Captured, changed: ReadonlySet<s
     if (
       active.size === chapter_bindings.length &&
       chapter_bindings.every(currentSignature) &&
-      (shared || chapter_bindings.some((row) => changed.has(row.id)))
+      (shared || lengthChanges.has('book:') || chapter_bindings.some((row) => changed.has(row.id)))
     )
       reports.push({ id, kind: 'book_completion', scope: 'book', scope_id: null, check_ids: [] })
   return reports
@@ -232,6 +256,31 @@ function ownedStory(story: StoryVersion, touched: ReadonlySet<string>, localProm
     evidence.every(({ chapter_id }) => touched.has(chapter_id)) &&
     (evidence.length > 0 || localPromises.has(story.record_id))
   )
+}
+
+function restoreLengthTargets(
+  source: PortableCheckpoint,
+  current: PortableCheckpointLengthTarget[],
+  touched: ReadonlySet<string>,
+) {
+  const inScope = ({ scope, scope_id }: PortableCheckpointLengthTarget) =>
+    source.scope === 'book' ||
+    (scope === 'chapter' && touched.has(scope_id!)) ||
+    (scope === 'volume' && scope_id === source.scope_id)
+  const previous = new Map(current.map((row) => [lengthTargetKey(row), row]))
+  const selected = new Map(
+    (source.restore_sources?.length_targets ?? []).filter(inScope).map((row) => [lengthTargetKey(row), row]),
+  )
+  const status = new Map(previous)
+  for (const [key, row] of previous)
+    if (inScope(row) && !selected.has(key)) status.set(key, { ...row, targets: null })
+  for (const [key, row] of selected) status.set(key, row)
+  const changed = new Set(
+    [...status].flatMap(([key, row]) =>
+      compactJSON(row) !== compactJSON(previous.get(key) ?? null) ? [key] : [],
+    ),
+  )
+  return { values: [...status.values()], changed }
 }
 
 export function planCheckpointRestore(captured: Captured, source: PortableCheckpoint) {
@@ -248,8 +297,6 @@ export function planCheckpointRestore(captured: Captured, source: PortableCheckp
   const touched = new Set([...wanted, ...scoped])
   const blockers: string[] = []
   if (!source.restore_sources) blockers.push('这份归档缺少可执行恢复的正式依据。')
-  if (source.restore_sources?.facts.length || source.restore_sources?.length_targets.length)
-    blockers.push('此点包含桌面事实或明确的篇幅目标，请在桌面完整恢复。')
   if (source.shared.outline_id && source.restore_sources?.outline_live !== true)
     blockers.push('归档中的大纲仍待核对，请在桌面另存后审阅。')
   if (current.outline_id && current.outline_id !== adoptedOutlineId)
@@ -402,7 +449,16 @@ export function planCheckpointRestore(captured: Captured, source: PortableCheckp
     ...changedIds,
     ...(!whole && wanted.join() !== scoped.join() ? outside : []),
   ])
-  const affectedReports = activeImpacts(captured, capturedChanges, allBasesChange || storyRecordCount > 0)
+  const factSources = (source.restore_sources?.facts ?? []).filter(({ evidence }) =>
+    wanted.includes(evidence.chapter_id),
+  )
+  const lengthTargets = restoreLengthTargets(source, pack.restore_state?.length_targets ?? [], touched)
+  const affectedReports = activeImpacts(
+    captured,
+    capturedChanges,
+    allBasesChange || storyRecordCount > 0,
+    lengthTargets.changed,
+  )
   const diagnoses = versions(pack.settings_history).get(current.settings_id ?? '')
   const proofIndex = new Map(pack.setting_use_history?.versions.map(({ version }) => [version.id, version]))
   const affectedSettingUses: LocalCheckpointPreview['affectedSettingUses'] = []
@@ -446,6 +502,8 @@ export function planCheckpointRestore(captured: Captured, source: PortableCheckp
       settingsChanged,
       outlineChanged,
       storyRecordCount,
+      factCount: factSources.length,
+      lengthTargetCount: lengthTargets.changed.size,
       affectedReports,
       affectedSettingUses,
       sceneSpansForReview: source.restore_sources?.scene_spans_for_review ?? 0,
@@ -464,6 +522,8 @@ export function planCheckpointRestore(captured: Captured, source: PortableCheckp
     currentOutline,
     current,
     touched,
+    factSources,
+    lengthTargets,
   }
 }
 
@@ -580,7 +640,14 @@ export async function prepareCheckpointWrites(
           ),
         )
       : undefined
-  return { writes, project, settings, story, outline }
+  const restoreState: PortableRestoreState = {
+    facts: [
+      ...(pack.restore_state?.facts ?? []).filter(({ evidence }) => !plan.touched.has(evidence.chapter_id)),
+      ...plan.factSources.map((fact) => ({ ...fact, evidence: rebindProof(fact.evidence) })),
+    ],
+    length_targets: plan.lengthTargets.values,
+  }
+  return { writes, project, settings, story, outline, restoreState }
 }
 
 function buildReboundOutline(

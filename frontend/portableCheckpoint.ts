@@ -26,24 +26,37 @@ type CheckpointChapter = {
   archived: 0 | 1
   stale: 0 | 1
 }
-type LengthTarget = {
+export type PortableCheckpointLengthTarget = {
   scope: 'chapter' | 'volume' | 'book'
   scope_id: string | null
   targets: { min_chars: number | null; max_chars: number | null; expected_chapters: number | null } | null
 }
-type CheckpointRestoreSources = {
+const factKinds = [
+  'event',
+  'knowledge',
+  'capability',
+  'resource',
+  'relationship',
+  'promise',
+  'world',
+] as const
+const factTruths = ['fact', 'belief', 'uncertain', 'plan'] as const
+export type PortableCheckpointFact = {
+  subject: string
+  kind: (typeof factKinds)[number]
+  statement: string
+  truth: (typeof factTruths)[number]
+  story_time: string
+  evidence: SettingsEvidence
+}
+export type PortableRestoreState = {
+  facts: PortableCheckpointFact[]
+  length_targets: PortableCheckpointLengthTarget[]
+}
+type CheckpointRestoreSources = PortableRestoreState & {
   version: 'ainovel-portable-restore-sources/1'
   outline_live: boolean
   story_heads: Record<string, { revision: number; version_id: string }>
-  facts: {
-    subject: string
-    kind: string
-    statement: string
-    truth: string
-    story_time: string
-    evidence: SettingsEvidence
-  }[]
-  length_targets: LengthTarget[]
   scene_spans_for_review: number
 }
 export type PortableCheckpoint = {
@@ -149,20 +162,27 @@ function parseRestoreSources(value: unknown): CheckpointRestoreSources {
       return [id(key), { revision: integer(head.revision), version_id: hash(head.version_id) }]
     }),
   )
-  if (!Array.isArray(source.facts) || source.facts.length > maxStoryVersions) invalid()
-  const facts = source.facts.map((value) => {
+  return {
+    version: source.version,
+    outline_live: source.outline_live,
+    story_heads,
+    ...parseRestoreState(source),
+    scene_spans_for_review: integer(source.scene_spans_for_review),
+  }
+}
+
+function parseRestoreState({
+  facts: factRows,
+  length_targets: targetRows,
+}: Record<string, unknown>): PortableRestoreState {
+  if (!Array.isArray(factRows) || factRows.length > maxStoryVersions) invalid()
+  const facts = factRows.map((value) => {
     const row = fields(value, ['subject', 'kind', 'statement', 'truth', 'story_time', 'evidence'])
-    const kind = text(row.kind)
-    const truth = text(row.truth)
+    const kind = factKinds.find((value) => value === row.kind)
+    const truth = factTruths.find((value) => value === row.truth)
     const subject = text(row.subject, 200, true)
     const statement = text(row.statement, 2000, true)
-    if (
-      !subject ||
-      !statement ||
-      !['event', 'knowledge', 'capability', 'resource', 'relationship', 'promise', 'world'].includes(kind) ||
-      !['fact', 'belief', 'uncertain', 'plan'].includes(truth)
-    )
-      invalid()
+    if (!subject || !statement || !kind || !truth) invalid()
     return {
       subject,
       kind,
@@ -172,8 +192,8 @@ function parseRestoreSources(value: unknown): CheckpointRestoreSources {
       evidence: parseSettingsEvidence(row.evidence),
     }
   })
-  if (!Array.isArray(source.length_targets) || source.length_targets.length > maxChapters) invalid()
-  const length_targets = source.length_targets.map((value): LengthTarget => {
+  if (!Array.isArray(targetRows) || targetRows.length > maxChapters) invalid()
+  const length_targets = targetRows.map((value): PortableCheckpointLengthTarget => {
     const row = fields(value, ['scope', 'scope_id', 'targets'])
     const { scope } = row
     if (scope !== 'chapter' && scope !== 'volume' && scope !== 'book') invalid()
@@ -192,14 +212,28 @@ function parseRestoreSources(value: unknown): CheckpointRestoreSources {
       invalid()
     return { scope, scope_id, targets: { min_chars, max_chars, expected_chapters } }
   })
-  return {
-    version: source.version,
-    outline_live: source.outline_live,
-    story_heads,
-    facts,
-    length_targets,
-    scene_spans_for_review: integer(source.scene_spans_for_review),
-  }
+  return { facts, length_targets }
+}
+
+export function lengthTargetKey({
+  scope,
+  scope_id,
+}: Pick<PortableCheckpointLengthTarget, 'scope' | 'scope_id'>) {
+  return `${scope}:${scope_id ?? ''}`
+}
+
+export async function validatePortableRestoreState(
+  value: unknown,
+  heads: ReadonlyMap<string, ChapterRevision & { id: string }>,
+  volumes: ReadonlySet<string>,
+  archivedChapters: ReadonlySet<string>,
+) {
+  const state = parseRestoreState(fields(value, ['facts', 'length_targets']))
+  verifyTargetScopes(state.length_targets, heads, volumes)
+  await verifyFacts(state.facts, ({ chapter_id }) =>
+    archivedChapters.has(chapter_id) ? undefined : heads.get(chapter_id),
+  )
+  return state
 }
 
 // JSON.parse has already checked the syntax. Inspect keys because re-export preserves the exact source
@@ -466,18 +500,7 @@ async function verifyRestoreSources(
       await verifyStoryEvidence(evidence, { id: evidence.revision_id, ...revision })
     }
   }
-  const volumes = new Set(outline?.plan.volumes.map(({ id }) => id))
-  const targetKeys = new Set<string>()
-  for (const { scope, scope_id } of sources.length_targets) {
-    const key = `${scope}:${scope_id ?? ''}`
-    if (
-      targetKeys.has(key) ||
-      (scope === 'chapter' && !chapterById.has(scope_id!)) ||
-      (scope === 'volume' && !volumes.has(scope_id!))
-    )
-      invalid()
-    targetKeys.add(key)
-  }
+  verifyTargetScopes(sources.length_targets, chapterById, new Set(outline?.plan.volumes.map(({ id }) => id)))
   const heads = new Map(Object.entries(sources.story_heads))
   const versions = new Map(story?.versions.map((row) => [row.id, row]))
   const selectedStories = new Map<string, StoryVersion>()
@@ -519,11 +542,40 @@ async function verifyRestoreSources(
       if (!version || version.archived || version.record.kind !== 'promise') invalid()
     }
   }
-  for (const { evidence } of sources.facts) {
+  await verifyFacts(sources.facts, (evidence) => {
     const chapter = chapterById.get(evidence.chapter_id)
     const version = revisions.get(evidence.revision_id)
-    if (!chapter || !version || evidence.revision_id !== chapter.revision_id) invalid()
-    const quote = await verifyStoryEvidence(evidence, { id: evidence.revision_id, ...version })
+    return chapter?.revision_id === evidence.revision_id && version
+      ? { id: evidence.revision_id, ...version }
+      : undefined
+  })
+}
+
+function verifyTargetScopes(
+  targets: PortableCheckpointLengthTarget[],
+  chapters: { has: (id: string) => boolean },
+  volumes: ReadonlySet<string>,
+) {
+  const targetKeys = new Set<string>()
+  for (const target of targets) {
+    const { scope, scope_id } = target
+    const key = lengthTargetKey(target)
+    if (
+      targetKeys.has(key) ||
+      (scope === 'chapter' && !chapters.has(scope_id!)) ||
+      (scope === 'volume' && !volumes.has(scope_id!))
+    )
+      invalid()
+    targetKeys.add(key)
+  }
+}
+
+async function verifyFacts(
+  facts: PortableCheckpointFact[],
+  head: (evidence: SettingsEvidence) => (ChapterRevision & { id: string }) | undefined,
+) {
+  for (const { evidence } of facts) {
+    const quote = await verifyStoryEvidence(evidence, head(evidence))
     if ([...quote].length > 2000) invalid()
   }
 }

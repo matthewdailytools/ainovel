@@ -42,6 +42,7 @@ import {
   pushSyncPending,
   queueSyncChange,
   queueSyncResolution,
+  readChapterBeforeArchive,
   readPublicationReceipts,
   readSyncConflict,
   readSyncProgress,
@@ -309,7 +310,12 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         (right.source?.sequence ?? right.receipt?.sequence ?? 0),
   )
   for (const head of heads) {
-    if (!head.receipt || head.baseline?.revision === head.revision || blockedObjects.includes(head.id))
+    const missingArchive = head.receipt?.tombstone && head.id.startsWith('chapter:') && !local.has(head.id)
+    if (
+      !head.receipt ||
+      (head.baseline?.revision === head.revision && !missingArchive) ||
+      blockedObjects.includes(head.id)
+    )
       continue
     try {
       const object = await validateSyncedObject(project, head.id, head.receipt.payload)
@@ -370,11 +376,20 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
         // An earlier accepted send becomes the CAS base. The newer local save remains pending.
         continue
       }
-      if ((signature !== target && signature === safeBase) || (resolution && publicationId)) {
+      const previous = missingArchive ? await readChapterBeforeArchive(scope, head.receipt) : null
+      const archiveSource = previous && (await validateSyncedObject(project, head.id, previous.payload))
+      if (archiveSource && archiveSource.kind !== 'chapter')
+        throw new Error('待归档章节的云端父版本格式无效。')
+      if (
+        archiveSource ||
+        (signature !== target && signature === safeBase) ||
+        (resolution && publicationId)
+      ) {
         if (
           !(await applySyncedObject(project.novel.id, head.id, object, signature, {
             publicationId,
             consumePublication: !!resolution,
+            archiveSource: archiveSource ?? undefined,
           }))
         ) {
           deferred.set(head.id, '本机内容已变化，下次同步会重新核对。')

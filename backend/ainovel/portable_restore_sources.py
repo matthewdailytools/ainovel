@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+from json import loads
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 
-from .db import DomainError
+from .db import DomainError, uid
 from .domain import utf16_slice
 from .models import Fact, Input
 from .outline_portability import OutlineVersion
@@ -18,7 +19,7 @@ from .project_portability import Identifier, ProjectVersion
 from .reference_portability import Revision as Count
 from .settings_portability import SettingsEvidence, SettingsVersion
 from .story_portability import MAX_VERSIONS, NativeStoryRevision, StoryRevisionId, StoryVersion
-from .workflow_inspection import LengthTargets
+from .workflow_inspection import LENGTH_TARGET_KIND, LengthTargets, _save_length_target
 
 if TYPE_CHECKING:
     from .portable_checkpoint import PortableCheckpoint
@@ -67,6 +68,112 @@ class PortableRestoreSources(Input):
     facts: list[CheckpointFact] = Field(max_length=MAX_VERSIONS)
     length_targets: list[CheckpointLengthTarget] = Field(max_length=5000)
     scene_spans_for_review: Count
+
+
+class PortableRestoreState(Input):
+    facts: list[CheckpointFact] = Field(max_length=MAX_VERSIONS)
+    length_targets: list[CheckpointLengthTarget] = Field(max_length=5000)
+
+
+def portable_fact(row, revision_id):
+    return CheckpointFact(
+        **{key: row[key] for key in ("subject", "kind", "statement", "truth", "story_time")},
+        evidence=SettingsEvidence(
+            chapter_id=row["chapter_id"],
+            revision_id=revision_id,
+            start=row["evidence_start"],
+            end=row["evidence_end"],
+            quote_sha256=sha256(row["evidence"].encode("utf-8")).hexdigest(),
+        ),
+    )
+
+
+def export_restore_state(tx, branch_id):
+    facts = [
+        portable_fact(row, row["revision_id"])
+        for row in tx.execute(
+            "SELECT f.*,r.id AS revision_id FROM facts f JOIN chapters c ON c.id=f.chapter_id "
+            "JOIN revisions r ON r.chapter_id=c.id AND r.revision=c.revision "
+            "WHERE f.branch_id=? AND c.branch_id=? AND c.archived=0 AND f.stale=0 AND f.source_revision=c.revision "
+            "ORDER BY f.chapter_id,f.evidence_start,f.evidence_end,f.subject,f.kind,f.statement,f.truth,f.story_time",
+            (branch_id, branch_id),
+        )
+    ]
+    targets = [
+        CheckpointLengthTarget.model_validate(
+            {key: value for key, value in loads(row["payload"]).items() if key != "revision"}
+        )
+        for row in tx.execute(
+            "SELECT payload FROM (SELECT payload,ROW_NUMBER() OVER("
+            "PARTITION BY json_extract(payload,'$.scope'),json_extract(payload,'$.scope_id') "
+            "ORDER BY rowid DESC) AS rank FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted') "
+            "WHERE rank=1 ORDER BY json_extract(payload,'$.scope'),json_extract(payload,'$.scope_id')",
+            (branch_id, LENGTH_TARGET_KIND),
+        )
+    ]
+    if facts or targets:
+        return PortableRestoreState(facts=facts, length_targets=targets)
+    return None
+
+
+def _fact_quote(fact, revision):
+    evidence = fact.evidence
+    _, quote, _ = utf16_slice(revision.content, evidence.start, evidence.end)
+    if sha256(quote.encode("utf-8")).hexdigest() != evidence.quote_sha256:
+        raise checkpoint_error("恢复点事实的原文摘要不符。", 409)
+    return Fact.model_validate({**fact.model_dump(exclude={"evidence"}), "evidence": quote})
+
+
+def validate_restore_state(state, chapter_heads, outline_history, archived_chapters):
+    volumes = {
+        volume.id
+        for version in (outline_history.versions if outline_history else ())
+        for volume in version.plan.volumes
+    }
+    keys = {(row.scope, row.scope_id) for row in state.length_targets}
+    scopes = {"chapter": chapter_heads.keys(), "volume": volumes, "book": {None}}
+    if len(keys) != len(state.length_targets) or any(
+        identifier not in scopes[kind] for kind, identifier in keys
+    ):
+        raise DomainError("manuscript_restore_state", "稿件事实及篇幅目标的范围重复或不存在。")
+    rows = []
+    for fact in state.facts:
+        proof = fact.evidence
+        revision = chapter_heads.get(proof.chapter_id)
+        if proof.chapter_id in archived_chapters or not revision or revision.id != proof.revision_id:
+            raise DomainError("manuscript_restore_state", "正式事实须引用尚在目录中的当前章稿准确修订。")
+        try:
+            row = _fact_quote(fact, revision)
+        except (DomainError, ValidationError) as error:
+            raise DomainError("manuscript_restore_state", "正式事实的原文选区或摘要无效。") from error
+        rows.append((revision, proof, row))
+    return rows
+
+
+def import_restore_state(tx, branch_id, state, rows):
+    tx.executemany(
+        "INSERT INTO facts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)",
+        [
+            (
+                uid(),
+                branch_id,
+                revision.chapter_id,
+                revision.revision,
+                fact.subject,
+                fact.kind,
+                fact.statement,
+                fact.truth,
+                fact.story_time,
+                fact.evidence,
+                proof.start,
+                proof.end,
+            )
+            for revision, proof, fact in rows
+        ],
+    )
+    for row in state.length_targets:
+        targets = row.targets.model_dump() if row.targets is not None else None
+        _save_length_target(tx, branch_id, row.scope, row.scope_id, None, targets)
 
 
 @dataclass(frozen=True)
@@ -147,18 +254,7 @@ class RestoreSourceCatalog:
             chapter = chapters.get(row["chapter_id"])
             if row["stale"] or not chapter or chapter["revision"] != row["source_revision"]:
                 continue
-            facts.append(
-                CheckpointFact(
-                    **{key: row[key] for key in ("subject", "kind", "statement", "truth", "story_time")},
-                    evidence=SettingsEvidence(
-                        chapter_id=chapter["id"],
-                        revision_id=chapter["revision_id"],
-                        start=row["evidence_start"],
-                        end=row["evidence_end"],
-                        quote_sha256=sha256(row["evidence"].encode("utf-8")).hexdigest(),
-                    ),
-                )
-            )
+            facts.append(portable_fact(row, chapter["revision_id"]))
         return PortableRestoreSources(
             version="ainovel-portable-restore-sources/1",
             outline_live=manifest["outline_live"],
@@ -344,10 +440,7 @@ class RestoreSourceCatalog:
         if not chapter or evidence.revision_id != chapter.revision_id:
             raise checkpoint_error("恢复点事实未引用当时保存的章稿。", 409)
         revision = self.native_revisions[evidence.revision_id]
-        _, quote, _ = utf16_slice(revision.content, evidence.start, evidence.end)
-        if sha256(quote.encode("utf-8")).hexdigest() != evidence.quote_sha256:
-            raise checkpoint_error("恢复点事实的原文摘要不符。", 409)
-        data = Fact.model_validate({**fact.model_dump(exclude={"evidence"}), "evidence": quote})
+        data = _fact_quote(fact, revision)
         return {
             **data.model_dump(),
             "chapter_id": chapter.id,

@@ -792,12 +792,12 @@ def _restore_setup(tx, source, target, chapters, snapshot_id):
             definition_ids[kind] = current["id"]
             continue
         payload = deepcopy(saved["payload"])
+        basis = {**origin, "source_artifact_id": saved["id"]}
         if kind == PROJECT:
             payload["revision"] = (adopted_project["revision"] if adopted_project else 0) + 1
             payload["candidate_id"] = None
-        definition_ids[kind] = _artifact(
-            tx, target, kind, payload, {**origin, "source_artifact_id": saved["id"]}
-        )
+            basis["previous_project_id"] = adopted_project["id"] if adopted_project else None
+        definition_ids[kind] = _artifact(tx, target, kind, payload, basis)
 
     before = source["workspace"]
     workspace = (

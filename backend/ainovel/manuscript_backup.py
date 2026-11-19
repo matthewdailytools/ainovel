@@ -34,6 +34,7 @@ HISTORIES = {
     "reference_history": ("adopted_heads", "versions", "source_devices", "excerpts"),
     "setting_use_history": ("adopted_heads", "versions", "native_bindings"),
     "snapshot_history": ("entries",),
+    "restore_state": ("facts", "length_targets"),
 }
 
 

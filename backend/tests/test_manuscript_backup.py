@@ -45,6 +45,91 @@ def _identify(client):
     client.headers["X-Ainovel-CSRF"] = client.get("/api/session").json()["csrf"]
 
 
+def test_portable_restore_state_reinstalls_native_facts_and_preserves_cleared_targets(
+    client, settings, domain, story
+):
+    chapter_id = story["chapter_id"]
+    branch = f"/api/branches/{story['branch_id']}"
+    quote = "𠮷所记😀\r\n铜铃"
+    saved = domain.save(chapter_id, 0, f"前言{quote}已归还。")
+    created = client.post(
+        "/api/facts",
+        json={
+            "chapter_id": chapter_id,
+            "source_revision": saved["revision"],
+            "subject": "学徒",
+            "kind": "event",
+            "statement": "归还了铜铃。",
+            "evidence": quote,
+        },
+    )
+    assert created.status_code == 201, created.text
+    inspection = branch + "/workflow-inspections"
+    configured = client.put(
+        inspection + "/length-targets",
+        json={"scope": "book", "targets": {"min_chars": 50, "expected_chapters": 1}},
+    )
+    assert configured.is_success, configured.text
+    download = client.get(branch + "/manuscript-backup")
+    assert download.is_success, download.text
+    rows = [json.loads(line.split(b" ", 1)[1]) for line in download.content.splitlines()[1:-1]]
+    proof = next(row[2]["evidence"] for row in rows if row[:2] == ["restore_state.facts", "item"])
+    assert proof["start"] == 2 and proof["end"] == 12
+    assert proof["quote_sha256"] == sha256(quote.encode()).hexdigest()
+    rows.append(
+        [
+            "restore_state.length_targets",
+            "item",
+            {
+                "scope": "chapter",
+                "scope_id": chapter_id,
+                "targets": None,
+            },
+        ]
+    )
+
+    with TestClient(create_app(replace(settings, data_dir=settings.data_dir / "restore-state"))) as receiver:
+        _identify(receiver)
+        wrong = deepcopy(rows)
+        evidence = next(row[2]["evidence"] for row in wrong if row[:2] == ["restore_state.facts", "item"])
+        evidence["start"] = 3
+        rejected = receiver.post(BACKUP_IMPORT_PATH, headers=BINARY, content=framed(wrong))
+        assert rejected.status_code == 400 and rejected.json()["code"] == "manuscript_restore_state"
+        archived_rows = deepcopy(rows)
+        next(row[2] for row in archived_rows if row[:2] == ["chapters", "item"])["archived"] = 1
+        rejected = receiver.post(BACKUP_IMPORT_PATH, headers=BINARY, content=framed(archived_rows))
+        assert rejected.status_code == 400 and rejected.json()["code"] == "manuscript_restore_state"
+        assert receiver.get("/api/novels").json() == []
+        accepted = receiver.post(BACKUP_IMPORT_PATH, headers=BINARY, content=framed(rows))
+        assert accepted.status_code == 201, accepted.text
+        facts = receiver.get(branch + "/facts").json()
+        assert len(facts) == 1
+        assert {
+            key: facts[0][key] for key in ("source_revision", "evidence", "evidence_start", "evidence_end")
+        } == {
+            "source_revision": saved["revision"],
+            "evidence": quote,
+            "evidence_start": proof["start"],
+            "evidence_end": proof["end"],
+        }
+        report = receiver.get(inspection).json()["preview"]
+        assert next(row for row in report["items"] if row["check_id"] == "09")["status"] == "red"
+        state = receiver.get(branch + "/manuscript-package").json()["restore_state"]
+        assert state["facts"][0]["evidence"] == proof
+        assert state["length_targets"] == [
+            {
+                "scope": "book",
+                "scope_id": None,
+                "targets": {"min_chars": 50, "max_chars": None, "expected_chapters": 1},
+            },
+            {"scope": "chapter", "scope_id": chapter_id, "targets": None},
+        ]
+    with domain.db.connect(True) as tx:
+        tx.execute("UPDATE chapters SET archived=1 WHERE id=?", (chapter_id,))
+    assert client.get(branch + "/facts").json()[0]["evidence"] == quote
+    assert client.get(branch + "/manuscript-package").json()["restore_state"]["facts"] == []
+
+
 def test_checkpoints_keep_exact_sources_and_portable_links_through_independent_backup(
     client, settings, domain, story
 ):

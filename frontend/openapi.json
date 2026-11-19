@@ -8799,6 +8799,9 @@
           },
           "snapshot_history": {
             "anyOf": [{ "$ref": "#/components/schemas/PortableCheckpointHistory" }, { "type": "null" }]
+          },
+          "restore_state": {
+            "anyOf": [{ "$ref": "#/components/schemas/PortableRestoreState" }, { "type": "null" }]
           }
         },
         "additionalProperties": false,
@@ -9800,6 +9803,26 @@
           "scene_spans_for_review"
         ],
         "title": "PortableRestoreSources"
+      },
+      "PortableRestoreState": {
+        "properties": {
+          "facts": {
+            "items": { "$ref": "#/components/schemas/CheckpointFact" },
+            "type": "array",
+            "maxItems": 20000,
+            "title": "Facts"
+          },
+          "length_targets": {
+            "items": { "$ref": "#/components/schemas/CheckpointLengthTarget" },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Length Targets"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["facts", "length_targets"],
+        "title": "PortableRestoreState"
       },
       "PortableRevision": {
         "properties": {

@@ -8,7 +8,12 @@ import {
 } from './outlineSyncModel'
 import type { ArchivedReferenceCard } from './referenceArchive'
 import type { SettingsVersion } from './settingsSyncModel'
-import type { StoryVersion } from './storySyncModel'
+import { verifyStoryEvidence, type StoryVersion } from './storySyncModel'
+import {
+  lengthTargetKey,
+  type PortableCheckpointLengthTarget,
+  type PortableRestoreState,
+} from './portableCheckpoint'
 
 export { bodyCountMethod } from './bodyCountUnicode16'
 
@@ -45,7 +50,7 @@ export function bodyChars(text: string) {
   return count
 }
 
-type RuleChapter = LocalChapter & { content: string; revisionId: string }
+type RuleChapter = LocalChapter & { content: string; revisionId: string; sha256: string }
 type RuleOutline = {
   current?: { version: OutlineVersion }
   versions: { version: OutlineVersion }[]
@@ -56,30 +61,77 @@ type RuleOutline = {
   restorePending?: { reason: string }
 }
 type RuleStory = { version: StoryVersion; invalidReasons: string[] }
+type LengthMeasurements = { chapters: number; chars: number; empty: number }
+
+function measureTarget(target: PortableCheckpointLengthTarget | undefined, measured: LengthMeasurements) {
+  if (!target) return {}
+  const { targets } = target
+  const lengthIssues = []
+  if (!measured.chapters || measured.empty) lengthIssues.push('所查范围有缺章或空稿')
+  if (targets?.expected_chapters != null && measured.chapters !== targets.expected_chapters)
+    lengthIssues.push('章数偏离冻结目标')
+  if (
+    (targets?.min_chars != null && measured.chars < targets.min_chars) ||
+    (targets?.max_chars != null && measured.chars > targets.max_chars)
+  )
+    lengthIssues.push('正文字符数超出冻结目标')
+  return { lengthTarget: targets, lengthIssues }
+}
 
 export async function calculateOfflineRules(
   chapters: RuleChapter[],
   outline: RuleOutline,
   records: RuleStory[],
+  restoreState?: PortableRestoreState,
 ) {
   let progress = 0
-  const saved = chapters
-    .filter(({ archived }) => !archived)
-    .map(({ id, position, title, content, revisionId, revision, stale }) => {
-      // Desktop uses SQLite trim(content) on the saved manuscript directory.
-      if (/[^ ]/u.test(content)) progress = Math.max(progress, position)
-      return { id, position, title, revisionId, revision, stale: !!stale, chars: bodyChars(content) }
-    })
+  const targets = new Map(restoreState?.length_targets.map((row) => [lengthTargetKey(row), row]))
+  const active = chapters.filter(({ archived }) => !archived)
+  const saved = active.map(({ id, position, title, content, revisionId, revision, stale }) => {
+    // Desktop uses SQLite trim(content) on the saved manuscript directory.
+    if (/[^ ]/u.test(content)) progress = Math.max(progress, position)
+    const chars = bodyChars(content)
+    return {
+      id,
+      position,
+      title,
+      revisionId,
+      revision,
+      stale: !!stale,
+      chars,
+      ...measureTarget(targets.get(`chapter:${id}`), { chapters: 1, chars, empty: chars ? 0 : 1 }),
+    }
+  })
   const summarize = (entries: typeof saved) => ({
     chapters: entries.length,
     chars: entries.reduce((total, { chars }) => total + chars, 0),
     empty: entries.filter(({ chars }) => !chars).length,
     stale: entries.filter(({ stale }) => stale).length,
   })
+  const book = summarize(saved)
+  const source = new Map(active.map((row) => [row.id, row]))
+  const facts = []
+  for (const fact of restoreState?.facts ?? []) {
+    const { evidence } = fact
+    const head = source.get(evidence.chapter_id)
+    if (head?.revisionId !== evidence.revision_id) continue
+    const quote = await verifyStoryEvidence(evidence, {
+      id: head.revisionId,
+      chapter_id: head.id,
+      content: head.content,
+      sha256: head.sha256,
+    })
+    facts.push({ ...fact, quote, chapterTitle: head.title, chapterRevision: head.revision })
+  }
   const result = {
     chapters: saved,
-    book: summarize(saved),
-    volumes: [] as ({ id: string; title: string } & ReturnType<typeof summarize>)[],
+    book: { ...book, ...measureTarget(targets.get('book:'), book) },
+    volumes: [] as ({
+      id: string
+      title: string
+    } & ReturnType<typeof summarize> &
+      ReturnType<typeof measureTarget>)[],
+    facts,
     promises: [] as {
       id: string
       title: string
@@ -113,13 +165,12 @@ export async function calculateOfflineRules(
     return result
   }
   result.outlineRevision = version.id
-  result.volumes = version.plan.volumes.map(({ id, title, units }) => ({
-    id,
-    title,
-    ...summarize(
+  result.volumes = version.plan.volumes.map(({ id, title, units }) => {
+    const measured = summarize(
       units.flatMap(({ chapters }) => chapters.map(({ chapter_id }) => directory.get(chapter_id)!)),
-    ),
-  }))
+    )
+    return { id, title, ...measured, ...measureTarget(targets.get(`volume:${id}`), measured) }
+  })
   const observed = new Map(records.map((row) => [row.version.record_id, row]))
   for (const window of version.plan.promises) {
     const id = window.promise_id

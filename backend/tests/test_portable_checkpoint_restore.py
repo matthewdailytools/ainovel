@@ -273,10 +273,19 @@ def test_archive_volume_restore_is_local_atomic_and_preserves_exact_history(
     with imported_work(client, settings, branch, tmp_path / "restored-volume") as target:
         before = chapter(target, first["id"])
         inspection = path + "/workflow-inspections"
+        old_target = verify(target.get(inspection, params={"scope": "volume", "scope_id": "vol-1"}))[
+            "preview"
+        ]["length_target"]
+        assert old_target["targets"]["min_chars"] == 3
         verify(
             target.put(
                 inspection + "/length-targets",
-                json={"scope": "volume", "scope_id": "vol-1", "targets": {"min_chars": 20}},
+                json={
+                    "scope": "volume",
+                    "scope_id": "vol-1",
+                    "base_target_id": old_target["id"],
+                    "targets": {"min_chars": 20},
+                },
             )
         )
         reviewed = verify(target.get(inspection, params={"scope": "chapter", "scope_id": first["id"]}))[

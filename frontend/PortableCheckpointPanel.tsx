@@ -10,6 +10,13 @@ type ArchivedChapterDiff = {
   snapshot: { revision: number; content: string }
   current: { revision: number; content: string; archived: 0 | 1 } | null
 }
+type ForkPreviewResponse = {
+  basis_sha256: string
+  chapter_count: number
+  story_record_count: number
+  scene_spans_for_review: number
+  outline: 'confirmed' | 'draft' | 'none'
+}
 
 const scopeLabels = { book: '全书', volume: '卷' }
 const date = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
@@ -144,9 +151,31 @@ export function PortableCheckpointPanel({
               {snapshot.restore_sources && (
                 <div key={snapshot.id}>
                   <PortableCheckpointFork
-                    checkpointUrl={checkpointUrl}
                     label={snapshot.label}
-                    onRestored={onRestored}
+                    previewFork={async () => {
+                      const preview = await api<ForkPreviewResponse>(`${checkpointUrl}/fork-preview`)
+                      return {
+                        basis: preview.basis_sha256,
+                        chapterCount: preview.chapter_count,
+                        storyRecordCount: preview.story_record_count,
+                        sceneSpansForReview: preview.scene_spans_for_review,
+                        outline:
+                          preview.outline === 'draft'
+                            ? 'archived'
+                            : preview.outline === 'none'
+                              ? 'missing'
+                              : 'confirmed',
+                        blockers: [],
+                      }
+                    }}
+                    submitFork={(basis, name, requestId) =>
+                      api<{ branch_id: string }>(`${checkpointUrl}/fork`, 'POST', {
+                        basis_sha256: basis,
+                        branch_name: name,
+                        idempotency_key: requestId,
+                      })
+                    }
+                    onSaved={(receipt) => onRestored?.(receipt.branch_id)}
                   />
                   <CheckpointRestoreAction
                     label={snapshot.label}

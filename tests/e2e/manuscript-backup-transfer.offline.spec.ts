@@ -8,7 +8,7 @@ import {
 } from '@playwright/test'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, stat, truncate } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, stat, truncate } from 'node:fs/promises'
 import type { LocalRevision } from '../../frontend/offlineStore'
 
 const title = '渡口风铃 · 跨端长篇备份'
@@ -101,7 +101,7 @@ test('独立 Web 在断网双标签下核对旧预览，整组恢复并从恢复
   page,
   browser,
   baseURL,
-}) => {
+}, testInfo) => {
   await page.goto('/')
   const { csrf } = await checked<{ csrf: string }>(await page.request.get('/api/session'))
   const headers = { 'X-Ainovel-CSRF': csrf }
@@ -117,6 +117,23 @@ test('独立 Web 在断网双标签下核对旧预览，整组恢复并从恢复
   }
   const original = ['学徒📯在渡口拾起铜铃。', '门内响过两声。\r\n守铃人接过信物。']
   const rewritten = ['学徒把铜铃留在桥下。', '门内等待第三声。']
+  const oldQuote = '响过两声。\r\n守铃人'
+  const sizing = `${branch}/workflow-inspections/length-targets`
+  async function saveFact(chapterId: string, revision: number, evidence: string, statement: string) {
+    await checked(
+      await page.request.post('/api/facts', {
+        headers,
+        data: {
+          chapter_id: chapterId,
+          source_revision: revision,
+          subject: '守铃人',
+          kind: 'event',
+          evidence,
+          statement,
+        },
+      }),
+    )
+  }
   for (const [index, chapter] of chapters.entries()) {
     await checked<Chapter>(
       await page.request.put(`/api/chapters/${chapter.id}`, {
@@ -125,6 +142,10 @@ test('独立 Web 在断网双标签下核对旧预览，整组恢复并从恢复
       }),
     )
   }
+  await saveFact(chapters[1].id, 1, oldQuote, '收到铜铃。')
+  const oldTarget = await checked<{ preview: { length_target: { id: string } } }>(
+    await page.request.put(sizing, { headers, data: { scope: 'book', targets: { min_chars: 100 } } }),
+  )
   const old = await checked<{ id: string }>(
     await page.request.post(`${branch}/work-snapshots`, {
       headers,
@@ -139,6 +160,13 @@ test('独立 Web 在断网双标签下核对旧预览，整组恢复并从恢复
       }),
     )
   }
+  await saveFact(chapters[0].id, 2, '留在桥下', '铜铃仍未交付。')
+  await checked(
+    await page.request.put(sizing, {
+      headers,
+      data: { scope: 'book', base_target_id: oldTarget.preview.length_target.id, targets: { min_chars: 1 } },
+    }),
+  )
   const exported = await page.request.get(`${branch}/manuscript-backup`)
   expect(exported.ok()).toBe(true)
   const bytes = await exported.body()
@@ -204,6 +232,42 @@ test('独立 Web 在断网双标签下核对旧预览，整组恢复并从恢复
     for (const [index, chapter] of chapters.entries()) {
       expect((await webRevision(writer, chapter.id, 3 + index)).sha256).toBe(digest(original[index]))
     }
+    const rules = writer.getByText('本机规则核算', { exact: true })
+    await rules.press('Enter')
+    await expect(writer.getByText(/冻结篇幅目标 至少 100 字符.*正文字符数超出冻结目标/)).toBeVisible()
+    await writer.getByText('正式故事事实（1）', { exact: true }).press('Enter')
+    await expect(writer.getByText('收到铜铃。', { exact: true })).toBeVisible()
+    expect(await writer.locator('blockquote').filter({ hasText: '响过两声。' }).textContent()).toBe(oldQuote)
+    const output = testInfo.outputPath('restored-facts-and-target.ainovel-backup')
+    const download = writer.waitForEvent('download')
+    await writer.getByRole('button', { name: '下载独立作品备份', exact: true }).click()
+    await (await download).saveAs(output)
+    const target = await isolatedDesktop(testInfo.outputPath('formal-restored-sqlite'), page.request)
+    const targetContext = await browser.newContext({ baseURL: target.origin })
+    try {
+      const { csrf } = await checked<{ csrf: string }>(await targetContext.request.get('/api/session'))
+      await checked(
+        await targetContext.request.post('/api/manuscript-backups/import', {
+          headers: { 'X-Ainovel-CSRF': csrf, 'Content-Type': 'application/octet-stream' },
+          data: await readFile(output),
+        }),
+      )
+      const facts = await checked(await targetContext.request.get(`${branch}/facts`))
+      expect(facts).toEqual([
+        expect.objectContaining({
+          chapter_id: chapters[1].id,
+          source_revision: 4,
+          evidence: oldQuote,
+        }),
+      ])
+      const { preview } = await checked<{ preview: { length_target: { targets: unknown } } }>(
+        await targetContext.request.get(`${branch}/workflow-inspections`),
+      )
+      expect(preview.length_target.targets).toMatchObject({ min_chars: 100 })
+    } finally {
+      await targetContext.close()
+      await target.stop()
+    }
     await writer.reload()
     await writer.getByRole('combobox', { name: '离线作品', exact: true }).selectOption({ label: title })
     await archive.getByText('已导入的卷书恢复点', { exact: true }).press('Enter')
@@ -214,6 +278,10 @@ test('独立 Web 在断网双标签下核对旧预览，整组恢复并从恢复
     await expect(saved).toContainText('已恢复为新的当前修订。')
     expect((await webRevision(writer, chapters[0].id, 4)).sha256).toBe(digest(rewritten[0]))
     expect((await webRevision(writer, chapters[1].id, 5)).sha256).toBe(digest(latest))
+    await rules.press('Enter')
+    await expect(writer.getByText(/冻结篇幅目标 至少 1 字符.*已达标/)).toBeVisible()
+    await writer.getByText('正式故事事实（1）', { exact: true }).press('Enter')
+    await expect(writer.getByText('铜铃仍未交付。', { exact: true })).toBeVisible()
   } finally {
     await context.close()
   }
@@ -479,12 +547,12 @@ test('超过 24 MiB 的独立备份由桌面经断网 Web 返回另一套 SQLite
   }
 })
 
-test('卷和整书历史恢复点随独立备份往返，保持原编号、范围与精确章稿', async ({
+test('卷和整书历史恢复点随独立备份往返，断网另存可保留当时的全书上下文', async ({
   page,
   browser,
   baseURL,
 }, testInfo) => {
-  test.setTimeout(90_000)
+  test.setTimeout(120_000)
   await page.goto('/')
   const { csrf } = await checked<{ csrf: string }>(await page.request.get('/api/session'))
   const headers = { 'X-Ainovel-CSRF': csrf }
@@ -682,6 +750,9 @@ test('卷和整书历史恢复点随独立备份往返，保持原编号、范�
   await (await download).saveAs(sourceFile)
 
   const webFile = testInfo.outputPath('portable-snapshot-web.ainovel-backup')
+  const webCopyFile = testInfo.outputPath('portable-snapshot-web-copy.ainovel-backup')
+  const copyName = '归铃卷检查点的本机副本'
+  let copyId: string
   const webContext = await browser.newContext({ baseURL, viewport: { width: 320, height: 900 } })
   try {
     const web = await webContext.newPage()
@@ -702,6 +773,30 @@ test('卷和整书历史恢复点随独立备份往返，保持原编号、范�
     const preserved = history.getByRole('region', { name: '归档恢复点原稿', exact: true })
     await expect(preserved).toContainText(digest(secondText))
     expect(await preserved.locator('pre').textContent()).toBe(secondText)
+    const action = history.getByRole('button', { name: '预览归档另存', exact: true })
+    await expect(action).toBeEnabled()
+    await action.press('Enter')
+    const copyPreview = history.getByRole('region', { name: '归档另存预览', exact: true })
+    await expect(
+      copyPreview.getByRole('heading', { name: '从「末卷旧恢复点」另存本机作品副本' }),
+    ).toBeFocused()
+    await expect(copyPreview).toContainText('2 章 · 1 条故事记录 · 正式大纲')
+    await copyPreview.getByRole('textbox', { name: '本机作品副本名称', exact: true }).fill(copyName)
+    const saveCopy = copyPreview.getByRole('button', { name: '建立本机作品副本', exact: true })
+    await expect(saveCopy).toBeDisabled()
+    await copyPreview.getByRole('checkbox', { name: '我已核对另存范围', exact: true }).check()
+    await expect(saveCopy).toBeEnabled()
+    await saveCopy.press('Enter')
+    await expect(
+      history.getByText(`已从归档建立本机作品副本「${copyName}」。`, { exact: true }),
+    ).toBeVisible()
+    const projects = web.getByRole('combobox', { name: '离线作品', exact: true })
+    await expect(projects).toHaveValue(source.id)
+    const secondButton = web.getByRole('button', { name: '2. 旧宅归铃', exact: true })
+    const editor = web.getByRole('textbox', { name: '章节正文', exact: true })
+    await expect(secondButton).toBeEnabled()
+    await secondButton.press('Enter')
+    await expect(editor).toHaveValue(rewritten)
     await picker.selectOption(book.id)
     await expect(chapters.getByRole('button')).toHaveCount(2)
     await expect(preserved).toHaveCount(0)
@@ -713,6 +808,27 @@ test('卷和整书历史恢复点随独立备份往返，保持原编号、范�
     const outgoing = web.waitForEvent('download', { timeout: 15_000 })
     await webBackup.press('Enter')
     await (await outgoing).saveAs(webFile)
+
+    await web.reload()
+    await projects.selectOption({ label: copyName })
+    copyId = await projects.inputValue()
+    expect(copyId).not.toBe(source.id)
+    const evidence = web.getByRole('region', { name: '随稿依据', exact: true })
+    await evidence.getByText('从归档另存的来源', { exact: true }).press('Enter')
+    await expect(evidence).toContainText(source.branch_id)
+    await expect(evidence).toContainText(volume.id)
+    await expect(evidence).toContainText(volume.manifest_sha256)
+    const firstButton = web.getByRole('button', { name: '1. 桥下钥匙', exact: true })
+    await expect(firstButton).toBeEnabled()
+    await firstButton.press('Enter')
+    await expect(editor).toHaveValue(firstText)
+    await expect(secondButton).toBeEnabled()
+    await secondButton.press('Enter')
+    await expect(editor).toHaveValue(secondText.replaceAll('\r\n', '\n'))
+    await expect(webBackup).toBeEnabled()
+    const outgoingCopy = web.waitForEvent('download', { timeout: 15_000 })
+    await webBackup.press('Enter')
+    await (await outgoingCopy).saveAs(webCopyFile)
   } finally {
     await webContext.close()
   }
@@ -790,6 +906,35 @@ test('卷和整书历史恢复点随独立备份往返，保持原编号、范�
     expect((await checked<Chapter>(await desktop.request.get(`/api/chapters/${second.id}`))).content).toBe(
       rewritten,
     )
+    const exchange = desktop.getByText('离线写作与交换', { exact: true })
+    if (!(await input.isVisible())) await exchange.click()
+    const copyImport = desktop.waitForResponse((item) =>
+      item.url().endsWith('/api/manuscript-backups/import'),
+    )
+    await input.setInputFiles(webCopyFile)
+    expect((await copyImport).status()).toBe(201)
+    const projects = desktop.getByRole('combobox', { name: '作品', exact: true })
+    await expect(projects).toHaveValue(copyId)
+    const importedBranch = desktop.getByRole('combobox', { name: '工作版本', exact: true })
+    await expect(importedBranch.locator('option:checked')).toHaveText(copyName)
+    const copiedBranch = await importedBranch.inputValue()
+    expect(copiedBranch).not.toBe(source.branch_id)
+    expect(copiedBranch).not.toBe(newBranchId)
+    const copiedDirectory = await checked<Chapter[]>(
+      await desktop.request.get(`/api/branches/${copiedBranch}/chapters`),
+    )
+    expect(copiedDirectory.map(({ id }) => id)).not.toContain(second.id)
+    const copiedSecond = await checked<Chapter>(
+      await desktop.request.get(`/api/chapters/${copiedDirectory[1].id}`),
+    )
+    expect(copiedSecond.content).toBe(secondText)
+    const copiedStory = await checked<StoryGraph>(
+      await desktop.request.get(`/api/branches/${copiedBranch}/story-graph`),
+    )
+    expect(copiedStory.records[0].payload).toMatchObject({
+      title: oldEventTitle,
+      sources: [{ chapter_id: copiedSecond.id, quote: oldQuote }],
+    })
   } finally {
     await Promise.all([context?.close(), target.stop()])
   }

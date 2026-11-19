@@ -16,6 +16,12 @@ from .db import DomainError, dumps, uid
 from .models import Input
 from .outline_portability import OutlineHistory
 from .portable_checkpoint import PortableCheckpointHistory, import_checkpoints, validate_checkpoint_history
+from .portable_restore_sources import (
+    PortableRestoreState,
+    export_restore_state,
+    import_restore_state,
+    validate_restore_state,
+)
 from .project_portability import Identifier, ProjectHistory
 from .project_sync import export_project_history, restore_project_history
 from .reference_portability import HashId as ReferenceVersionId, ReferenceHistory
@@ -119,6 +125,7 @@ class ManuscriptPackage(Input):
     snapshot_history: PortableCheckpointHistory | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    restore_state: PortableRestoreState | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def _digest(text):
@@ -263,7 +270,17 @@ def _index(package):
         _validate_report_history(package, revisions, setting_uses)
     if package.snapshot_history:
         validate_checkpoint_history(package, {row.id: row for row in package.revisions})
-    return histories
+    restored_facts = (
+        validate_restore_state(
+            package.restore_state,
+            {key: rows[-1] for key, rows in histories.items()},
+            package.outline_history,
+            {row.id for row in package.chapters if row.archived},
+        )
+        if package.restore_state
+        else ()
+    )
+    return histories, restored_facts
 
 
 def _validate_report_history(package, revisions, setting_uses):
@@ -475,10 +492,19 @@ def export_manuscript(
                 "setting_use_history": None
                 if checkpoint_sources_only
                 else export_setting_use_history(tx, branch_id),
+                "restore_state": None if checkpoint_sources_only else export_restore_state(tx, branch_id),
             }
         )
         if not checkpoint_sources_only:
             package.snapshot_history = export_checkpoint_history(tx, branch_id, package)
+        if package.restore_state:
+            current = {row.id: row.revision for row in package.chapters}
+            validate_restore_state(
+                package.restore_state,
+                {row.chapter_id: row for row in package.revisions if current[row.chapter_id] == row.revision},
+                package.outline_history,
+                {row.id for row in package.chapters if row.archived},
+            )
         if package.settings_history:
             validate_settings_history(
                 package.settings_history,
@@ -512,7 +538,7 @@ def export_manuscript(
 
 
 def import_manuscript(domain, package):
-    histories = _index(package)
+    histories, restored_facts = _index(package)
     outline = None
     with domain.db.connect(True) as tx:
         if (
@@ -597,6 +623,8 @@ def import_manuscript(domain, package):
             import_workflow_history(tx, branch.id, package.workflow_history)
         if package.snapshot_history:
             import_checkpoints(tx, branch, package.snapshot_history)
+        if package.restore_state:
+            import_restore_state(tx, branch.id, package.restore_state, restored_facts)
     result = {"id": novel.id, "branch_id": branch.id}
     if outline:
         result["outline_restore"] = outline

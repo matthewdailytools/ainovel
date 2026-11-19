@@ -4642,6 +4642,7 @@ export interface components {
       reference_history?: components['schemas']['ReferenceHistory'] | null
       setting_use_history?: components['schemas']['SettingUseHistory'] | null
       snapshot_history?: components['schemas']['PortableCheckpointHistory'] | null
+      restore_state?: components['schemas']['PortableRestoreState'] | null
     }
     /** Mapping */
     Mapping: {
@@ -5256,6 +5257,13 @@ export interface components {
       length_targets: components['schemas']['CheckpointLengthTarget'][]
       /** Scene Spans For Review */
       scene_spans_for_review: number
+    }
+    /** PortableRestoreState */
+    PortableRestoreState: {
+      /** Facts */
+      facts: components['schemas']['CheckpointFact'][]
+      /** Length Targets */
+      length_targets: components['schemas']['CheckpointLengthTarget'][]
     }
     /** PortableRevision */
     PortableRevision: {

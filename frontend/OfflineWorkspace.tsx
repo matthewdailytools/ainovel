@@ -4,6 +4,7 @@ import {
   confirmLocalOutline,
   confirmLocalSettings,
   confirmLocalStory,
+  createLocalCheckpointBranch,
   createLocalChapter,
   createLocalProject,
   exportLocalBackup,
@@ -290,6 +291,27 @@ export function OfflineWorkspace() {
     }
   }
 
+  async function submitCheckpointFork(checkpointId: string, basis: string, name: string, requestId: string) {
+    if (!selected || locked.current || syncBusy) throw new Error('请等待当前存储或同步操作完成。')
+    locked.current = true
+    setBusy(true)
+    try {
+      const { project } = await createLocalCheckpointBranch(
+        selected.novel.id,
+        checkpointId,
+        name,
+        basis,
+        requestId,
+      )
+      setProjects((rows) =>
+        rows.some(({ novel }) => novel.id === project.novel.id) ? rows : [...rows, project],
+      )
+    } finally {
+      locked.current = false
+      setBusy(false)
+    }
+  }
+
   function restoreFile(
     file: File | undefined,
     restore: (file: Blob) => Promise<LocalProject>,
@@ -530,6 +552,7 @@ export function OfflineWorkspace() {
                 disabled={busy}
                 writeBlocked={checkpointWriteBlocked}
                 submitRestore={submitCheckpointRestore}
+                submitFork={submitCheckpointFork}
               />
               <WebSyncPanel
                 key={selected.branch.id}
