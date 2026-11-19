@@ -509,7 +509,7 @@ export function CompletionPanel({
       {!basisReady && !error && <p role="status">正在读取完本依据…</p>}
       {current?.latest && (
         <section className="notice">
-          <h3>{current.latest.current ? '当前版本已完结' : '历史完结记录 · 当前依据已变化'}</h3>
+          <h3>{current.latest.current ? '当前版本已完结' : '历史完结记录 · 当前需重新核对'}</h3>
           <a className="button" href={`/api${endpoint}/${encodeURIComponent(current.latest.id)}/export`}>
             下载{current.latest.current ? '' : '历史'}交付包
           </a>
@@ -660,6 +660,8 @@ export function CompletionPanel({
                 <option value="author_decision">作者已裁定</option>
               </select>
             </label>
+            {decisions[id] === 'verified' && !form[id].sources.length && <p>请为本项添加当前正文引文。</p>}
+            {decisions[id] === 'author_decision' && <p>请在说明中记录作者确认的安排或留白。</p>}
           </section>
         ))}
         <EvidencePicker

@@ -147,7 +147,7 @@ def test_author_required_promise_controls_inspection_completion_and_portable_his
     assert restored["confirmed"]["setting_basis"]["required_promises_confirmation"] == "formal_source"
     assert restored["promises"][0]["fulfillment_met"] is True
 
-    domain.save(last["id"], last["revision"], "学徒转身离开，没有归还铜铃。")
+    changed = domain.save(last["id"], last["revision"], "学徒转身离开，没有归还铜铃。")
     assert item(read(client, inspections)["preview"], "07")["status"] == "red"
     previous = item(read(client, f"{inspections}/{completed_report['id']}"), "07")
     assert previous["status"] == "green" and previous["current_status"] == "outdated"
@@ -158,6 +158,17 @@ def test_author_required_promise_controls_inspection_completion_and_portable_his
     assert client.get(download).content == archive_zip
 
     record(required, {"status": "abandoned", "note": "经核对保留为后续题材空间。"})
+    attempted = {
+        **data,
+        "basis_sha256": read(client, completion)["basis_sha256"],
+        "author_decisions": {**data["author_decisions"], "promises": "author_decision"},
+        "ending": {"note": "作者记录当前结局。", "sources": [source(changed)]},
+        "characters": {"note": "学徒独自离开。", "sources": [source(changed)]},
+        "promises": {"note": "作者希望把归铃留待续篇。"},
+    }
+    pending = client.post(completion + "/preview", json=attempted).json()
+    assert next(row for row in pending["checks"] if row["id"] == "promises")["status"] == "red"
+    assert client.post(completion + "/confirm", json=attempted).json()["code"] == "completion_blocked"
     changed_plan = adopted_outline["plan"]
     del changed_plan["promises"][0]["fulfillment"]
     draft = save(changed_plan, adopted_outline["revision"])

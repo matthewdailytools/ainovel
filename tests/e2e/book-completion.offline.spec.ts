@@ -111,6 +111,15 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
     .getByRole('combobox', { name: '关键人物与关系判定', exact: true })
     .selectOption('author_decision')
   await panel.getByRole('combobox', { name: '伏笔与读者承诺判定', exact: true }).selectOption('verified')
+  const promiseSection = panel.getByRole('region', { name: '伏笔与读者承诺', exact: true })
+  await expect(promiseSection.getByText('请为本项添加当前正文引文。')).toBeVisible()
+  await previewButton.click()
+  await expect(proposed.getByText('待核对', { exact: true })).toHaveCount(2)
+  await expect(confirmButton).toBeDisabled()
+  await panel.getByLabel('引用用于').selectOption('promises')
+  await excerpt.press('ControlOrMeta+a')
+  await panel.getByRole('button', { name: '引用选区' }).click()
+  await panel.getByRole('combobox', { name: '伏笔与读者承诺判定', exact: true }).selectOption('verified')
   await previewButton.click()
   const materials = panel.getByRole('region', { name: '交付预览', exact: true })
   const sampleLabel = materials.locator('summary').filter({ hasText: /^试读\.md$/ })
@@ -172,7 +181,7 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
   })
   expect(changed.ok(), await changed.text()).toBe(true)
   await panel.getByRole('button', { name: '核对最新完本依据' }).click()
-  await expect(panel.getByRole('heading', { name: '历史完结记录 · 当前依据已变化' })).toBeVisible()
+  await expect(panel.getByRole('heading', { name: '历史完结记录 · 当前需重新核对' })).toBeVisible()
   await expect(official).toHaveCount(0)
   await expect(panel.getByRole('list', { name: '本次拟确认的六项完本判定', exact: true })).toBeVisible()
   await panel.getByText('完结判定与文件校验值', { exact: true }).click()
@@ -283,16 +292,23 @@ test('六项核对通过后确认完结，改稿后仍可离线恢复并下载�
     try {
       const web = await fresh.newPage()
       await web.goto(new URL('/offline/', page.url()).href)
+      await expect(web.getByText('离线页面就绪', { exact: true })).toBeVisible()
       const initial = structuredClone(pack)
       delete initial.workflow_history
       delete initial.evidence
+      // The cloud-only baseline intentionally omits both the reports and their dependent checkpoints.
+      delete initial.snapshot_history
       await web.getByLabel('导入新离线作品').setInputFiles({
         name: '仅稿件基线.json',
         mimeType: 'application/json',
         buffer: Buffer.from(JSON.stringify(initial)),
       })
+      await expect(web.getByRole('status').filter({ hasText: '已校验并导入稿件及历史。' })).toBeVisible()
+      await web.getByRole('combobox', { name: '离线作品', exact: true }).selectOption(novel.id)
+      const syncSummary = web.locator('summary').filter({ hasText: /^作品云同步$/ })
+      await expect(syncSummary).toBeVisible()
       await expect(web.getByLabel('历次体检与完本交付')).toHaveCount(0)
-      await web.getByText('作品云同步', { exact: true }).click()
+      await syncSummary.click()
       await web.getByLabel('同步服务地址').fill(cloud)
       await web.getByLabel('设备编号').fill('web-workflow-history')
       await web.getByLabel('设备凭据').fill(webToken)

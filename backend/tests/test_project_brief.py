@@ -8,7 +8,7 @@ from ainovel.db import uid
 from ainovel.worker import Worker
 from test_conception_workbench import basis, confirm, path, save
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
-from test_workflow_inspection import author
+from test_workflow_inspection import author, source
 
 
 IDEA = "学徒靠刻痕找回失散的师姐。"
@@ -398,9 +398,9 @@ def test_project_revision_preview_tracks_actual_downstream_records_and_rechecks_
                     "characters": "verified",
                     "promises": "verified",
                 },
-                "ending": {"note": "归还铜铃。"},
-                "characters": {"note": "学徒和师姐重逢。"},
-                "promises": {"note": "信物有交代。"},
+                "ending": {"note": "归还铜铃。", "sources": [source(chapter)]},
+                "characters": {"note": "学徒和师姐重逢。", "sources": [source(chapter)]},
+                "promises": {"note": "信物有交代。", "sources": [source(chapter)]},
                 "intro": "学徒寻找遗铃的失主。",
                 "spoiler_scope": "opening",
                 "sample_chapter_ids": [chapter["id"]],

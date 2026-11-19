@@ -18,7 +18,7 @@ test('长篇交付与分类设定册以冻结清单同步，从独立 Web 备份
   expect(newWork.ok()).toBe(true)
   const { branch_id } = await newWork.json()
   const branch = `/api/branches/${branch_id}`
-  const lead = '铜铃的来历已记录。'
+  const lead = '铜铃交还给师姐，她随学徒离开渡口。'
   let first: { id: string; revision: number } | undefined
   const text = lead + '学徒依据铜铃上的刻痕找到了师姐。'.repeat(11000)
   expect(Buffer.byteLength(text) * 2).toBeGreaterThan(1024 * 1024)
@@ -89,6 +89,9 @@ test('长篇交付与分类设定册以冻结清单同步，从独立 Web 备份
   expect(inspection.ok(), await inspection.text()).toBe(true)
   const { id: inspectionId } = await inspection.json()
   const { basis_sha256 } = await (await page.request.get(`${branch}/book-completion`)).json()
+  const sources = [
+    { chapter_id: first!.id, revision: first!.revision, start: 0, end: lead.length, quote: lead },
+  ]
   const completion = await page.request.post(`${branch}/book-completion/confirm`, {
     headers,
     data: {
@@ -100,9 +103,9 @@ test('长篇交付与分类设定册以冻结清单同步，从独立 Web 备份
         characters: 'verified',
         promises: 'verified',
       },
-      ending: { note: '铜铃归还。' },
-      characters: { note: '师姐与主角离开渡口。' },
-      promises: { note: '原有承诺均处理。' },
+      ending: { note: '铜铃归还。', sources },
+      characters: { note: '师姐与主角离开渡口。', sources },
+      promises: { note: '按约交还铜铃。', sources },
       intro: '一枚铜铃让两名故人重逢。',
       spoiler_scope: 'opening',
       sample_chapter_ids: [first!.id],

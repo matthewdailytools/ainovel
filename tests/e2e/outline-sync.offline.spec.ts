@@ -372,7 +372,8 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
   // The desktop package carries a dependency on the progressed story record, not a substitute.
   expect(pack.outline_history.required_story_records).toEqual([promiseId])
   expect(pack.story_history.adopted_heads[promiseId]).toBeTruthy()
-  const { story_history: _absent, ...missingStoryHistory } = pack
+  // A partial exchange fixture cannot include a checkpoint sealed against the omitted story history.
+  const { story_history: _absent, snapshot_history: _checkpoints, ...missingStoryHistory } = pack
   for (const [file, expectedAdopted] of [
     [pack, true],
     [missingStoryHistory, false],
@@ -389,6 +390,7 @@ test('桌面和离线 Web 比较正式大纲与伏笔分歧，保留原文和实
         mimeType: 'application/json',
         buffer: Buffer.from(JSON.stringify(file)),
       })
+      await expect(archive.getByRole('status').filter({ hasText: '已校验并导入稿件及历史。' })).toBeVisible()
       await archive.getByRole('combobox', { name: '离线作品', exact: true }).selectOption({ label: title })
       const pending = archive.getByLabel('离线大纲台')
       await pending.getByText('大纲台', { exact: true }).click()

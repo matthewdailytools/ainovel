@@ -15,7 +15,7 @@ from test_outline_workspace import chapter_plan, put_and_confirm, setting_confir
 from test_project_brief import BRIEF, IDEA
 from test_reference_flow import SOURCE, reference as reference_fixture, update as update_reference
 from test_reference_sync import card
-from test_workflow_inspection import author, item, report
+from test_workflow_inspection import author, item, report, source
 
 reference = reference_fixture
 
@@ -667,9 +667,9 @@ def test_rollback_keeps_numeric_review_but_blocks_completion_until_dependent_che
             "characters": "verified",
             "promises": "verified",
         },
-        "ending": {"note": "铜铃归还原主。"},
-        "characters": {"note": "学徒和师姐重逢。"},
-        "promises": {"note": "归铃的承诺已经兑现。"},
+        "ending": {"note": "铜铃归还原主。", "sources": [source(second)]},
+        "characters": {"note": "学徒和师姐重逢。", "sources": [source(second)]},
+        "promises": {"note": "归铃的承诺已经兑现。", "sources": [source(second)]},
         "intro": "学徒循着线索寻找铜铃的主人。",
         "spoiler_scope": "opening",
         "sample_chapter_ids": [first["id"]],

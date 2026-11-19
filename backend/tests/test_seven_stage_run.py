@@ -21,7 +21,7 @@ from test_project_brief import BRIEF, IDEA
 from test_reference_flow import SOURCE, reference as reference_fixture, update as update_reference
 from test_reference_flow import run as run_reference
 from test_work_snapshot import request_restore, route, save_project, verify
-from test_workflow_inspection import author, item, read, report
+from test_workflow_inspection import author, item, read, report, source as chapter_source
 
 
 BODY = "学徒进门听见铃响，获得一条新线索。"
@@ -287,9 +287,9 @@ def test_same_two_chapter_fixture_reaches_the_author_delivery_gate(client, domai
             "characters": "verified",
             "promises": "verified",
         },
-        "ending": {"note": BRIEF["ending"]},
-        "characters": {"note": "学徒完成两轮核对。"},
-        "promises": {"note": "核对两章样本记录。"},
+        "ending": {"note": BRIEF["ending"], "sources": [chapter_source(chapter)]},
+        "characters": {"note": "学徒完成两轮核对。", "sources": [chapter_source(chapter)]},
+        "promises": {"note": "核对两章样本记录。", "sources": [chapter_source(chapter)]},
         "intro": "学徒凭铜铃寻找失散的师姐。",
         "spoiler_scope": "opening",
         "sample_chapter_ids": [chapter["id"]],
@@ -458,9 +458,9 @@ def test_seven_stage_run_reaches_verified_checkpoints(client, domain, settings, 
                 "characters": "verified",
                 "promises": "verified",
             },
-            "ending": {"note": "主冲突以归还铜铃解决。"},
-            "characters": {"note": "确认学徒找到线索。"},
-            "promises": {"note": "铜铃线索完成本篇承诺。"},
+            "ending": {"note": "主冲突以归还铜铃解决。", "sources": [chapter_source(chapter)]},
+            "characters": {"note": "确认学徒找到线索。", "sources": [chapter_source(chapter)]},
+            "promises": {"note": "铜铃线索完成本篇承诺。", "sources": [chapter_source(chapter)]},
             "intro": "学徒循着一枚旧铃寻找师姐。",
             "spoiler_scope": "opening",
             "sample_chapter_ids": [chapter["id"]],
@@ -542,9 +542,9 @@ def test_backup_recovers_automatic_milestones_and_their_chapter_and_outline_hist
             "characters": "verified",
             "promises": "verified",
         },
-        "ending": {"note": "铜铃归还师姐。"},
-        "characters": {"note": "确认二人重逢。"},
-        "promises": {"note": "两卷均围绕还铃收束。"},
+        "ending": {"note": "铜铃归还师姐。", "sources": [chapter_source(published_second)]},
+        "characters": {"note": "确认二人重逢。", "sources": [chapter_source(published_second)]},
+        "promises": {"note": "两卷均围绕还铃收束。", "sources": [chapter_source(published_second)]},
         "intro": "循着铜铃去找它的主人。",
         "spoiler_scope": "opening",
         "sample_chapter_ids": [first["id"]],
@@ -781,9 +781,9 @@ def test_red_inspection_stops_completion_and_same_run_resumes_after_review(
                     "characters": "verified",
                     "promises": "verified",
                 },
-                "ending": {"note": "主冲突已收束。"},
-                "characters": {"note": "已核对学徒身份。"},
-                "promises": {"note": "铜铃线索已处理。"},
+                "ending": {"note": "主冲突已收束。", "sources": [chapter_source(chapter)]},
+                "characters": {"note": "已核对学徒身份。", "sources": [chapter_source(chapter)]},
+                "promises": {"note": "铜铃线索已处理。", "sources": [chapter_source(chapter)]},
                 "intro": "学徒循着铃声寻找线索。",
                 "spoiler_scope": "opening",
                 "sample_chapter_ids": [chapter["id"]],

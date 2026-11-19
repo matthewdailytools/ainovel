@@ -134,6 +134,15 @@ test('确认新大纲前分别显示实际章纲变化与旧稿候选，并对�
   const affectedVolume = await sign('ledger-volume')
   const affectedBook = await sign()
   const { basis_sha256 } = await checked(await page.request.get(completion))
+  const evidence = (chapter: typeof first) => [
+    {
+      chapter_id: chapter.id,
+      revision: chapter.revision,
+      start: 0,
+      end: chapter.content.length,
+      quote: chapter.content,
+    },
+  ]
   const delivery = await checked(
     await page.request.post(completion + '/confirm', {
       headers,
@@ -144,11 +153,11 @@ test('确认新大纲前分别显示实际章纲变化与旧稿候选，并对�
           reading: 'verified',
           ending: 'verified',
           characters: 'verified',
-          promises: 'verified',
+          promises: 'author_decision',
         },
-        ending: { note: '登记编号已核实，两章的主要目标兑现。' },
-        characters: { note: '学徒与守闸人完成交接。' },
-        promises: { note: '此稿未采用单列的伏笔承诺。' },
+        ending: { note: '登记编号已核实，两章的主要目标兑现。', sources: evidence(second) },
+        characters: { note: '学徒与守闸人完成交接。', sources: evidence(first) },
+        promises: { note: '作者确认此稿未采用单列的伏笔承诺。' },
         intro: '学徒到渡口调查一次复测。',
         spoiler_scope: 'opening',
         sample_chapter_ids: [first.id],

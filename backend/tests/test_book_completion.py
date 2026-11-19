@@ -13,9 +13,10 @@ from ainovel.domain import Domain
 from ainovel.manuscript_exchange import export_manuscript, import_manuscript
 from ainovel.worker import Worker
 from test_conception_workbench import confirm, item, path, save
+from test_project_brief import BRIEF, IDEA
 from test_workflow_archive import _members, _send_reports
 from test_workflow_cloud import _complete
-from test_workflow_inspection import author
+from test_workflow_inspection import author, source
 
 
 def test_finish_requires_six_checks_and_exports_immutable_package(client, domain, story, monkeypatch):
@@ -27,6 +28,7 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
     endpoint = f"/api/branches/{branch}/book-completion"
     inspection = f"/api/branches/{branch}/workflow-inspections"
     initial = client.get(endpoint).json()
+    evidence = author("01", chapter)["evidence"]
     data = {
         "basis_sha256": initial["basis_sha256"],
         "read_note": "作者已通读保存稿。",
@@ -36,9 +38,9 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
             "characters": "verified",
             "promises": "verified",
         },
-        "ending": {"note": "主冲突以归还铜铃解决。"},
-        "characters": {"note": "师姐与学徒重逢。作者裁定其后去向留白。"},
-        "promises": {"note": "铃和师姐的线索均在末章兑现。"},
+        "ending": {"note": "主冲突以归还铜铃解决。", "sources": evidence},
+        "characters": {"note": "师姐与学徒重逢。作者裁定其后去向留白。", "sources": evidence},
+        "promises": {"note": "铃和师姐的线索均在末章兑现。", "sources": evidence},
         "intro": "学徒循着一枚旧铃寻找师姐。",
         "spoiler_scope": "opening",
         "sample_chapter_ids": [chapter["id"]],
@@ -92,7 +94,15 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
         check = client.post(endpoint + "/preview", json=incomplete).json()
         assert [row["id"] for row in check["checks"] if row["status"] != "green"] == [gate]
         assert client.post(endpoint + "/confirm", json=incomplete).status_code == 409
+    for field in ("ending", "characters", "promises"):
+        unsupported = {**data, field: {"note": "只有说明，没有当前稿件引文。"}}
+        check = client.post(endpoint + "/preview", json=unsupported).json()
+        item = next(row for row in check["checks"] if row["id"] == field)
+        assert item["status"] == "pending"
+        assert "当前正文引文" in item["detail"]
+        assert client.post(endpoint + "/confirm", json=unsupported).json()["code"] == "completion_blocked"
     data["author_decisions"]["characters"] = "author_decision"
+    data["characters"]["sources"] = []
     quote = "归还了铜铃。"
     data["ending"]["sources"] = [
         {
@@ -159,6 +169,91 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
     historical = client.get(export)
     assert historical.status_code == 200
     assert historical.content == response.content
+
+
+def test_m7_uses_the_signed_text_length_basis_and_keeps_previous_delivery_readable(client, domain, story):
+    branch = story["branch_id"]
+    chapter = domain.save(story["chapter_id"], 0, "😀师姐把铜铃交还主人。")
+    project = client.put(
+        path(branch) + "/project-brief",
+        json={
+            "base_revision": 0,
+            "idempotency_key": "m7-length-brief",
+            "idea": IDEA,
+            "brief": BRIEF,
+        },
+    )
+    assert project.status_code == 200, project.text
+    endpoint = f"/api/branches/{branch}/book-completion"
+    inspection = f"/api/branches/{branch}/workflow-inspections"
+    data = {
+        "basis_sha256": client.get(endpoint).json()["basis_sha256"],
+        "read_note": "作者已通读保存稿。",
+        "author_decisions": {
+            "reading": "verified",
+            "ending": "verified",
+            "characters": "verified",
+            "promises": "author_decision",
+        },
+        "ending": {"note": "铃已归还。", "sources": [source(chapter)]},
+        "characters": {"note": "师姐主动完成交接。", "sources": [source(chapter)]},
+        "promises": {"note": "作者确认没有另设伏笔。"},
+        "intro": "学徒寻找一枚铜铃。",
+        "spoiler_scope": "opening",
+        "sample_chapter_ids": [chapter["id"]],
+        "materials_reviewed": True,
+    }
+    preview = client.post(endpoint + "/preview", json=data).json()
+    assert preview["checks"][0]["status"] == "pending"
+    assert "第 09 项签认篇幅" in preview["checks"][0]["detail"]
+    assert client.post(endpoint + "/confirm", json=data).json()["code"] == "completion_blocked"
+    revision = client.get(inspection).json()["preview"]
+    length_note = "作者确认由一卷两章缩为一章，范围覆盖全部内容。"
+    adjudication = client.post(
+        inspection,
+        json={
+            "basis_sha256": revision["basis_sha256"],
+            "author_reviews": [
+                author(row["check_id"], chapter)
+                | ({"basis_note": BRIEF["length"], "reason": length_note} if row["check_id"] == "09" else {})
+                for row in revision["items"]
+                if row["status"] == "pending"
+            ],
+        },
+    )
+    assert adjudication.status_code == 201, adjudication.text
+    length = next(row for row in adjudication.json()["items"] if row["check_id"] == "09")
+    assert length["basis"]["project_length"] == BRIEF["length"]
+    assert length["author_review"]["reason"] == length_note
+    data["basis_sha256"] = client.get(endpoint).json()["basis_sha256"]
+    confirmed = client.post(endpoint + "/confirm", json=data)
+    assert confirmed.status_code == 201, confirmed.text
+    record = confirmed.json()
+    assert record["checks"][0]["status"] == "green"
+    assert "第 09 项中的作者核对" in record["checks"][0]["detail"]
+    assert record["manifest"]["inspection_id"] == adjudication.json()["id"]
+    assert record["manifest"]["length_target"] is None
+    identifier = record["id"]
+    export = f"{endpoint}/{identifier}/export"
+    frozen = client.get(export).content
+
+    # Simulate a prior-policy confirmation with a note and no excerpt.
+    with domain.db.connect(True) as tx:
+        tx.execute(
+            "UPDATE artifacts SET basis=json_set(basis,'$.review.ending.sources',json('[]')) WHERE id=?",
+            (identifier,),
+        )
+    current = client.get(endpoint).json()
+    assert current["history"][0]["current"] is False
+    assert current["latest"]["current"] is False
+    assert current["basis_sha256"] == data["basis_sha256"]
+    history = client.get(f"{endpoint}/history/{identifier}").json()
+    assert history["basis_reconciles"] and not history["current"]
+    assert history["review"]["ending"]["sources"] == []
+    assert client.get(export).content == frozen
+    new = client.post(endpoint + "/confirm", json=data)
+    assert new.status_code == 201 and new.json()["id"] != identifier
+    assert client.get(export).content == frozen
 
 
 def test_m7_rejects_chapter_with_only_formatting_without_a_length_target(client, domain, story):
@@ -380,8 +475,8 @@ def test_prepared_introduction_cannot_be_relabelled_with_a_different_delivery_sc
             "promises": "verified",
         },
         "ending": candidate["closures"]["ending"],
-        "characters": {"note": "师姐与学徒重逢。"},
-        "promises": {"note": "铃匠身份已揭晓。"},
+        "characters": {"note": "师姐与学徒重逢。", "sources": [source(second)]},
+        "promises": {"note": "铃匠身份已揭晓。", "sources": [source(second)]},
         "intro": " " + candidate["intro"] + "\n",
         "spoiler_scope": "whole",
         "sample_chapter_ids": [opening["id"], second["id"]],

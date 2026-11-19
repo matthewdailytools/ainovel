@@ -24,6 +24,7 @@ KIND = "book_completion"
 VERSION = "book-completion/1"
 CLASSIFIED_VERSION = "book-completion/2"
 WORLD_CATEGORY = "world"
+CLOSURE_FIELDS = ("ending", "characters", "promises")
 
 
 class ClosureReview(Input):
@@ -129,10 +130,8 @@ def basis_fingerprint(manifest, stale_chapters, stale_outline, inspection_status
     return _hash(dumps([manifest, stale_chapters, stale_outline, inspection_statuses]))
 
 
-def _evidence(review, chapters):
-    if review is None:
-        return False
-    for source in review.sources:
+def _validate_evidence(sources, chapters):
+    for source in sources:
         row = chapters.get(source.chapter_id)
         if (
             not row
@@ -141,21 +140,25 @@ def _evidence(review, chapters):
             or (utf16_slice(row["content"], source.start, source.end)[1] != source.quote)
         ):
             raise DomainError("completion_evidence", "完本判断的引文须对应当前正文修订和原文范围。", 409)
-    return bool(review.note.strip())
+
+
+def _closure_has_basis(decision, sources):
+    return decision == "author_decision" or (decision == "verified" and bool(sources))
 
 
 def _closure_check(identifier, title, detail, data, chapters, blockers=()):
     decision = getattr(data.author_decisions, identifier) if data and data.author_decisions else "pending"
-    evidence = _evidence(getattr(data, identifier) if data else None, chapters)
+    review = getattr(data, identifier) if data else None
+    sources = review.sources if review else []
+    _validate_evidence(sources, chapters)
     if decision == "verified":
-        detail += "作者已核对本项正文和依据。"
+        detail += "作者已核对本项正文和依据。" if sources else "请为本项选择当前正文引文。"
     elif decision == "author_decision":
         detail += "已记录作者裁定。"
     else:
         detail += "等待作者核对或裁定。"
-    return _check(
-        identifier, title, detail, evidence and decision != "pending" and not blockers, bool(blockers)
-    )
+    passed = review and review.note.strip() and _closure_has_basis(decision, sources) and not blockers
+    return _check(identifier, title, detail, bool(passed), bool(blockers))
 
 
 def _check(identifier, title, detail, passed=False, blocked=False):
@@ -246,9 +249,20 @@ def _evaluate(tx, branch_id, data=None):
         [{"chars": body_chars(row["content"])} for row in chapters], targets
     )
     manuscript = length_status != "red" and (not expected or expected == list(by_id)) and not outline["stale"]
-    manuscript_detail = "核对目录、非空正文及大纲覆盖，并记录通读。"
-    if targets or length_status == "red":
-        manuscript_detail += length_detail
+    manuscript_detail = "核对目录、非空正文及大纲覆盖，并记录通读。" + length_detail
+    length_reviewed = length_status == "green"
+    if length_status == "pending":
+        length_review = (
+            next((item for item in report["items"] if item["check_id"] == "09"), None) if report else None
+        )
+        length_reviewed = bool(
+            length_review
+            and length_review["current_status"] == "green"
+            and length_review.get("author_review")
+        )
+        manuscript_detail += (
+            "已采用全书体检第 09 项中的作者核对。" if length_reviewed else "请先在全书体检第 09 项签认篇幅。"
+        )
     required_open = {
         row["promise_id"]: row["title"]
         for row in outline["promises"]
@@ -287,7 +301,7 @@ def _evaluate(tx, branch_id, data=None):
             "manuscript",
             "稿件齐全与通读",
             manuscript_detail,
-            bool(manuscript and reading_verified and data.read_note.strip()),
+            bool(manuscript and length_reviewed and reading_verified and data.read_note.strip()),
             not manuscript,
         ),
         _closure_check(
@@ -333,6 +347,13 @@ def _evaluate(tx, branch_id, data=None):
     return {"basis_sha256": basis, "checks": checks, "manifest": manifest, "materials": materials}
 
 
+def _confirmed_review(review):
+    decisions = review.get("author_decisions") or {}
+    return decisions.get("reading") == "verified" and all(
+        _closure_has_basis(decisions.get(field), review[field].get("sources")) for field in CLOSURE_FIELDS
+    )
+
+
 def _latest(tx, branch_id, basis):
     row = tx.execute(
         "SELECT id,payload,basis FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
@@ -345,7 +366,7 @@ def _latest(tx, branch_id, basis):
     stored = json.loads(row["basis"])
     return {
         "id": row["id"],
-        "current": stored["basis_sha256"] == basis and bool(stored["review"].get("author_decisions")),
+        "current": stored["basis_sha256"] == basis and _confirmed_review(stored["review"]),
         "review": stored["review"],
         "checks": value["checks"],
         "manifest": value["manifest"],
@@ -366,13 +387,16 @@ def register_routes(app, domain):
                 {
                     "id": row["id"],
                     "created": row["created"],
-                    "current": row["basis"] == value["basis_sha256"] and row["explicit_review"] is not None,
+                    "current": (
+                        row["matching_review"] is not None
+                        and _confirmed_review(json.loads(row["matching_review"]))
+                    ),
                 }
                 for row in tx.execute(
-                    "SELECT id,created,json_extract(basis,'$.basis_sha256') AS basis,"
-                    "json_extract(basis,'$.review.author_decisions') AS explicit_review FROM artifacts "
+                    "SELECT id,created,CASE WHEN json_extract(basis,'$.basis_sha256')=? "
+                    "THEN json_extract(basis,'$.review') END AS matching_review FROM artifacts "
                     "WHERE branch_id=? AND kind=? AND status='accepted' ORDER BY rowid DESC LIMIT 25",
-                    (branch_id, KIND),
+                    (value["basis_sha256"], branch_id, KIND),
                 )
             ] + [
                 {"id": row["id"], "created": row["created"], "current": False, **archive_origin(row)}
@@ -458,7 +482,7 @@ def register_routes(app, domain):
                 "checks": data["checks"],
                 "review": data["review"],
                 **(source or {"origin": "local"}),
-                "current": reconciles and not source and bool(data["review"].get("author_decisions")),
+                "current": reconciles and not source and _confirmed_review(data["review"]),
                 "basis_reconciles": reconciles,
                 **(
                     {

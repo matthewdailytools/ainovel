@@ -207,11 +207,21 @@ test('从一句创意自动生成至待核对完本，作者确认后接力关�
     .fill('已核对守闸人与学徒的行动。')
   await completion
     .getByRole('textbox', { name: '伏笔与读者承诺说明', exact: true })
-    .fill('已核对没有未回收的约定。')
+    .fill('作者确认本次短篇没有待处理的伏笔。')
+  await completion.getByText('添加正文依据', { exact: true }).click()
+  await completion.getByLabel('引用用于').selectOption('characters')
+  await completion.getByLabel('完本引文章节').selectOption(chapterSources[0].chapter_id)
+  const excerpt = completion.getByRole('textbox', { name: /保存稿修订.*选择要引用的文字/ })
+  await expect(excerpt).toBeVisible()
+  await excerpt.press('ControlOrMeta+a')
+  await completion.getByRole('button', { name: '引用选区' }).click()
   await completion.getByRole('checkbox', { name: '已通读本次稿件', exact: true }).check()
-  for (const name of ['主冲突与终局判定', '关键人物与关系判定', '伏笔与读者承诺判定']) {
+  for (const name of ['主冲突与终局判定', '关键人物与关系判定']) {
     await completion.getByRole('combobox', { name, exact: true }).selectOption('verified')
   }
+  await completion
+    .getByRole('combobox', { name: '伏笔与读者承诺判定', exact: true })
+    .selectOption('author_decision')
   await completion.getByRole('button', { name: '预览交付材料' }).click()
   const confirm = completion.getByRole('button', { name: '确认完结', exact: true })
   await expect(confirm).toBeDisabled()

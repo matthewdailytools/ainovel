@@ -4,7 +4,7 @@ from zipfile import ZipFile
 import pytest
 
 from test_outline_workspace import chapter_plan, put_and_confirm
-from test_workflow_inspection import author, item, read, report
+from test_workflow_inspection import author, item, read, report, source
 
 
 @pytest.mark.parametrize("level", ["unit", "volume"])
@@ -188,11 +188,11 @@ def test_outline_confirmation_forecasts_real_volume_book_and_delivery_impacts_wi
                 "reading": "verified",
                 "ending": "verified",
                 "characters": "verified",
-                "promises": "verified",
+                "promises": "author_decision",
             },
-            "ending": {"note": "旧尺已经归还。"},
-            "characters": {"note": "学徒与守夜人当面交接。"},
-            "promises": {"note": "本版本未声明其他承诺。"},
+            "ending": {"note": "旧尺已经归还。", "sources": [source(second)]},
+            "characters": {"note": "学徒与守夜人当面交接。", "sources": [source(second)]},
+            "promises": {"note": "作者确认本版本未声明其他承诺。"},
             "intro": "学徒发现旧尺上的裂纹。",
             "spoiler_scope": "opening",
             "sample_chapter_ids": [first["id"]],

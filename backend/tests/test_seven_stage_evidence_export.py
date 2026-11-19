@@ -12,7 +12,7 @@ from ainovel.db import DomainError, uid
 from ainovel import evidence_export
 from ainovel.evidence_export import export_evidence
 from test_seven_stage_run import Model, drain, start
-from test_workflow_inspection import author
+from test_workflow_inspection import author, source
 
 
 def _bundle(settings, task_id):
@@ -78,9 +78,9 @@ def test_seven_stage_evidence_pins_original_reviews_and_delivery_after_new_save(
                 "characters": "verified",
                 "promises": "verified",
             },
-            "ending": {"note": "核对本篇回收了寻找失主的承诺。"},
-            "characters": {"note": "检查学徒的选择。"},
-            "promises": {"note": "检查铃的去向。"},
+            "ending": {"note": "核对本篇回收了寻找失主的承诺。", "sources": [source(chapter)]},
+            "characters": {"note": "检查学徒的选择。", "sources": [source(chapter)]},
+            "promises": {"note": "检查铃的去向。", "sources": [source(chapter)]},
             "intro": "学徒循着旧铃寻找它的主人。",
             "spoiler_scope": "opening",
             "sample_chapter_ids": [chapter["id"]],
