@@ -18,7 +18,7 @@ from .outline_workspace import _chapter_plans, _view
 from .project_brief import confirmed_project_tx
 from .setting_review import confirmed_outline_settings
 from .story_graph import Source, graph_snapshot
-from .workflow_inspection import body_chars, current_length_target, latest_book_inspection, length_result
+from .workflow_inspection import body_chars, current_length_target, latest_book_inspection, length_assessment
 
 KIND = "book_completion"
 VERSION = "book-completion/1"
@@ -243,10 +243,13 @@ def _evaluate(tx, branch_id, data=None):
         if outline["confirmed"]
         else []
     )
-    length_target = manifest["length_target"]
-    targets = length_target["targets"] if length_target else None
-    length_status, length_detail = length_result(
-        [{"chars": body_chars(row["content"])} for row in chapters], targets
+    length_status, length_detail, _ = length_assessment(
+        tx,
+        branch_id,
+        "book",
+        [{"id": row["id"], "title": row["title"], "chars": body_chars(row["content"])} for row in chapters],
+        outline["confirmed"],
+        manifest["length_target"],
     )
     manuscript = length_status != "red" and (not expected or expected == list(by_id)) and not outline["stale"]
     manuscript_detail = "核对目录、非空正文及大纲覆盖，并记录通读。" + length_detail

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { expect, it } from 'vitest'
-import { bodyChars } from './offlineRules'
+import { bodyChars, calculateOfflineRules } from './offlineRules'
 import {
   confirmLocalOutline,
   confirmLocalStory,
@@ -12,6 +12,7 @@ import {
   saveLocalChapter,
 } from './offlineStore'
 import { outlinePromiseSeed, prepareOutlineVersion } from './outlineSyncModel'
+import type { PortableCheckpointLengthTarget } from './portableCheckpoint'
 import { captureStoryEvidence } from './storySyncModel'
 
 it('按 M6 同一有效字符口径排除 Markdown 标记、空白和不可见字符', () => {
@@ -25,6 +26,115 @@ it('按 M6 同一有效字符口径排除 Markdown 标记、空白和不可见�
   // Chromium's newer Unicode classifies U+088F as assigned. Desktop Unicode 16 does not.
   expect(bodyChars('甲\u088f\u{1fa89}')).toBe(2)
   expect(bodyChars('甲>乙\n> 引')).toBe(4)
+})
+
+it('保留各层自己的篇幅结果，并在上层列出范围内仍有效的未达标篇幅目标', async () => {
+  const chapters = ['门内', '尾声', '旧章'].map((title, index) => ({
+    id: `chapter-${index}`,
+    title,
+    branch_id: 'branch',
+    revision: 1,
+    position: index + 1,
+    content: '## 标题\n> **铃响。**',
+    revisionId: `rev-${index}`,
+    sha256: '0'.repeat(64),
+    archived: index === 2 ? (1 as const) : (0 as const),
+    stale: 0 as const,
+  }))
+  const [first, last, archived] = chapters
+  const version = prepareOutlineVersion({
+    id: 'current-outline',
+    parent_id: null,
+    project_version_id: null,
+    settings_version_id: null,
+    plan: {
+      summary: '门内找回铜铃',
+      volumes: [first, last].map(({ id, title }) => ({
+        id: `volume-${id}`,
+        title: `${title}卷`,
+        summary: '寻找铜铃',
+        units: [
+          {
+            id: `unit-${id}`,
+            title: '线索',
+            summary: '验证铃声',
+            chapters: [
+              { chapter_id: id, goal: '验铃', obstacle: '门外不响', turn: '推门', result: '听见铃声' },
+            ],
+          },
+        ],
+      })),
+    },
+  })
+  const outline = {
+    current: { version },
+    versions: [{ version }],
+    projectVersionId: null,
+    settings: null,
+    promises: [],
+    referenceVersions: [],
+  }
+  function target(
+    scope: PortableCheckpointLengthTarget['scope'],
+    scope_id: string | null,
+    minimum: number | null,
+  ): PortableCheckpointLengthTarget {
+    return {
+      scope,
+      scope_id,
+      targets: minimum === null ? null : { min_chars: minimum, max_chars: null, expected_chapters: null },
+    }
+  }
+  const state = {
+    facts: [],
+    length_targets: [
+      target('book', null, 1),
+      target('volume', `volume-${first.id}`, 1),
+      target('volume', `volume-${last.id}`, 80),
+      target('chapter', first.id, 80),
+      target('chapter', last.id, null),
+      target('chapter', archived.id, 80),
+      target('volume', 'removed-volume', 80),
+    ],
+  }
+  const chapterIssue = { scope: 'chapter', id: first.id, title: first.title }
+  const volumeIssue = { scope: 'volume', id: `volume-${last.id}`, title: `${last.title}卷` }
+  const active = await calculateOfflineRules(chapters, outline, [], state)
+  expect(active.book).toMatchObject({
+    chapters: 2,
+    chars: 6,
+    lengthIssues: [],
+    descendantLengthIssues: [chapterIssue, volumeIssue],
+  })
+  expect(active.volumes).toMatchObject([
+    { lengthIssues: [], descendantLengthIssues: [chapterIssue] },
+    { lengthIssues: ['正文字符数超出冻结目标'], descendantLengthIssues: [] },
+  ])
+  expect(active.chapters).toMatchObject([
+    { lengthIssues: ['正文字符数超出冻结目标'] },
+    { lengthTarget: null, lengthIssues: [] },
+  ])
+  const invalid = await calculateOfflineRules(
+    chapters,
+    { ...outline, projectVersionId: 'new-project' },
+    [],
+    state,
+  )
+  expect(invalid.outlineIssue).toBeTruthy()
+  expect(invalid.volumes).toEqual([])
+  expect(invalid.book.descendantLengthIssues).toEqual([chapterIssue])
+
+  const cleared = await calculateOfflineRules(chapters, outline, [], {
+    ...state,
+    length_targets: state.length_targets.map(({ scope, scope_id, targets }) => ({
+      scope,
+      scope_id,
+      targets: scope_id === first.id || scope_id === volumeIssue.id ? null : targets,
+    })),
+  })
+  expect(cleared.book.descendantLengthIssues).toEqual([])
+  expect(cleared.volumes.map(({ descendantLengthIssues }) => descendantLengthIssues)).toEqual([[], []])
+  expect(cleared.volumes[1]).toMatchObject({ lengthTarget: null, lengthIssues: [] })
 })
 
 it.each([undefined, 'author_required'] as const)(
@@ -104,8 +214,8 @@ it.each([undefined, 'author_required'] as const)(
     const before = await readLocalRulePreview(work)
     expect(before.outlineRevision).toBe(outline.id)
     expect(before.volumes).toEqual([
-      { id: 'start', title: '起因', chapters: 1, chars: 3, empty: 0, stale: 0 },
-      { id: 'end', title: '查证', chapters: 2, chars: 0, empty: 2, stale: 0 },
+      { id: 'start', title: '起因', chapters: 1, chars: 3, empty: 0, stale: 0, descendantLengthIssues: [] },
+      { id: 'end', title: '查证', chapters: 2, chars: 0, empty: 2, stale: 0, descendantLengthIssues: [] },
     ])
     expect(before.promises).toEqual([])
     await save(second.id, '____')

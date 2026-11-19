@@ -62,17 +62,19 @@ type RuleOutline = {
 }
 type RuleStory = { version: StoryVersion; invalidReasons: string[] }
 type LengthMeasurements = { chapters: number; chars: number; empty: number }
+type DescendantLengthIssue = { scope: 'chapter' | 'volume'; id: string; title: string }
 
 function measureTarget(target: PortableCheckpointLengthTarget | undefined, measured: LengthMeasurements) {
   if (!target) return {}
   const { targets } = target
+  if (targets === null) return { lengthTarget: null, lengthIssues: [] }
   const lengthIssues = []
   if (!measured.chapters || measured.empty) lengthIssues.push('所查范围有缺章或空稿')
-  if (targets?.expected_chapters != null && measured.chapters !== targets.expected_chapters)
+  if (targets.expected_chapters !== null && measured.chapters !== targets.expected_chapters)
     lengthIssues.push('章数偏离冻结目标')
   if (
-    (targets?.min_chars != null && measured.chars < targets.min_chars) ||
-    (targets?.max_chars != null && measured.chars > targets.max_chars)
+    (targets.min_chars !== null && measured.chars < targets.min_chars) ||
+    (targets.max_chars !== null && measured.chars > targets.max_chars)
   )
     lengthIssues.push('正文字符数超出冻结目标')
   return { lengthTarget: targets, lengthIssues }
@@ -109,6 +111,10 @@ export async function calculateOfflineRules(
     stale: entries.filter(({ stale }) => stale).length,
   })
   const book = summarize(saved)
+  const chapterIssues = new Map<string, DescendantLengthIssue>()
+  for (const { id, title, lengthIssues } of saved) {
+    if (lengthIssues?.length) chapterIssues.set(id, { scope: 'chapter', id, title })
+  }
   const source = new Map(active.map((row) => [row.id, row]))
   const facts = []
   for (const fact of restoreState?.facts ?? []) {
@@ -125,10 +131,15 @@ export async function calculateOfflineRules(
   }
   const result = {
     chapters: saved,
-    book: { ...book, ...measureTarget(targets.get('book:'), book) },
+    book: {
+      ...book,
+      ...measureTarget(targets.get('book:'), book),
+      descendantLengthIssues: [...chapterIssues.values()],
+    },
     volumes: [] as ({
       id: string
       title: string
+      descendantLengthIssues: DescendantLengthIssue[]
     } & ReturnType<typeof summarize> &
       ReturnType<typeof measureTarget>)[],
     facts,
@@ -166,10 +177,15 @@ export async function calculateOfflineRules(
   }
   result.outlineRevision = version.id
   result.volumes = version.plan.volumes.map(({ id, title, units }) => {
-    const measured = summarize(
-      units.flatMap(({ chapters }) => chapters.map(({ chapter_id }) => directory.get(chapter_id)!)),
+    const members = units.flatMap(({ chapters }) =>
+      chapters.map(({ chapter_id }) => directory.get(chapter_id)!),
     )
-    return { id, title, ...measured, ...measureTarget(targets.get(`volume:${id}`), measured) }
+    const measured = summarize(members)
+    const target = measureTarget(targets.get(`volume:${id}`), measured)
+    if (members.length && target.lengthIssues?.length)
+      result.book.descendantLengthIssues.push({ scope: 'volume', id, title })
+    const descendantLengthIssues = members.flatMap(({ id }) => chapterIssues.get(id) ?? [])
+    return { id, title, ...measured, ...target, descendantLengthIssues }
   })
   const observed = new Map(records.map((row) => [row.version.record_id, row]))
   for (const window of version.plan.promises) {

@@ -41,6 +41,16 @@ function LengthTarget({
   )
 }
 
+function DescendantLengthWarning({ issues }: { issues: OfflineRules['book']['descendantLengthIssues'] }) {
+  if (!issues.length) return null
+  return (
+    <p role="status">
+      其中 {issues.length} 个章或卷未达到各自已采用的篇幅目标。{' '}
+      {issues.map(({ scope, title }) => `${scope === 'chapter' ? '章' : '卷'} · ${title}`).join('、')}
+    </p>
+  )
+}
+
 export function OfflineRulePreview({
   read,
   refreshToken,
@@ -81,17 +91,21 @@ export function OfflineRulePreview({
             {data.book.stale} 章
             <LengthTarget target={data.book.lengthTarget} issues={data.book.lengthIssues} />
           </p>
+          <DescendantLengthWarning issues={data.book.descendantLengthIssues} />
           <details>
             <summary>章与卷的篇幅</summary>
             <p>{bodyCountMethod}</p>
             {!!data.volumes.length && (
               <ul aria-label="分卷篇幅">
-                {data.volumes.map(({ id, title, chapters, chars, lengthTarget, lengthIssues }) => (
-                  <li key={id}>
-                    {title} · {chapters} 章 · {chars} 个有效字符
-                    <LengthTarget target={lengthTarget} issues={lengthIssues} />
-                  </li>
-                ))}
+                {data.volumes.map(
+                  ({ id, title, chapters, chars, lengthTarget, lengthIssues, descendantLengthIssues }) => (
+                    <li key={id}>
+                      {title} · {chapters} 章 · {chars} 个有效字符
+                      <LengthTarget target={lengthTarget} issues={lengthIssues} />
+                      <DescendantLengthWarning issues={descendantLengthIssues} />
+                    </li>
+                  ),
+                )}
               </ul>
             )}
             {!!data.chapters.length && (

@@ -10,11 +10,13 @@ from ainovel import seven_stage_run
 from ainovel.api import create_app
 from ainovel.backups import create_backup, unpack_verified
 from ainovel.budget import Budget
+from ainovel.chapter_writing_length import KEY as CHAPTER_LENGTH_KEY
 from ainovel.db import DomainError, dumps, uid
 from ainovel.domain import Domain
 from ainovel.evidence_export import export_evidence
 from ainovel.providers import RequestNotSent
 from ainovel.reference_sync import reference_card_at
+from ainovel.workflow_inspection import _save_length_target, body_chars, current_length_target
 from ainovel.worker import Worker
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 from test_project_brief import BRIEF, IDEA
@@ -402,6 +404,146 @@ def test_idea_run_freezes_whole_book_chapter_count_separately_from_author_idea(c
         )
     )
     assert confirmed["idea"] == idea and confirmed["brief"]["length"] == length
+
+
+@pytest.mark.parametrize(
+    "case", ["below", "above", "missing_changed", "volume_changed", "clear_changed", "cleared", "unrelated"]
+)
+def test_complete_chapter_run_uses_frozen_applicable_length_targets(client, domain, settings, case):
+    branch = domain.create_novel("遗铃 · 篇幅依据")["branch_id"]
+    prefix = f"/api/branches/{branch}"
+    project = save_project(client, branch, 0, BRIEF["ending"])
+    chapter = domain.create_chapter(branch, "试铃")
+    planned = plan([chapter], ["bell"])
+    other = None
+    if case == "unrelated":
+        other = domain.create_chapter(branch, "回铃")
+        volume = plan([other], ["bell"])["volumes"][0]
+        volume.update(id="other-volume", title="第二卷")
+        volume["units"][0]["id"] = "other-unit"
+        planned["volumes"].append(volume)
+    confirmation_id = setting_confirmation(client, branch)
+    adopted = put_and_confirm(
+        client,
+        prefix + "/outline-workspace",
+        {"base_revision": 0, "confirmation_id": confirmation_id, "plan": planned},
+    )["confirmed"]
+    inspections = prefix + "/workflow-inspections"
+
+    def save_target(scope, scope_id, *, base=None, **limits):
+        return verify(
+            client.put(
+                inspections + "/length-targets",
+                json={"scope": scope, "scope_id": scope_id, "base_target_id": base, "targets": limits},
+            )
+        )["preview"]["length_target"]
+
+    emitted = f"## 排版标题\r\n**{BODY}**"
+    measured = body_chars(BODY)
+    assert body_chars(emitted) == measured and len(emitted) > measured
+    chapter_target = None
+    if case != "missing_changed":
+        limits = (
+            {"max_chars": measured - 1}
+            if case == "above"
+            else {"min_chars": measured + 1 if case in {"below", "cleared"} else measured}
+        )
+        chapter_target = save_target("chapter", chapter["id"], **limits)
+    volume_target = save_target("volume", "v", min_chars=100)
+    book_target = save_target("book", None, min_chars=200)
+
+    def clear_target():
+        with domain.db.connect(True) as tx:
+            current = current_length_target(tx, branch, "chapter", chapter["id"], include_cleared=True)
+            assert current == chapter_target
+            _save_length_target(tx, branch, "chapter", chapter["id"], current, None)
+            return current_length_target(tx, branch, "chapter", chapter["id"], include_cleared=True)
+
+    queued_chapter_target = clear_target() if case == "cleared" else chapter_target
+    initial_revision = domain.branch(branch)["story_revision"]
+    prompts = []
+
+    class LengthModel(Model):
+        async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
+            instruction = json.loads(prompt.split("\n只返回")[0])["任务"]
+            if instruction.get("action") == "writing.expand_plot":
+                prompts.append(instruction)
+                if len(prompts) == 1:
+                    if case == "missing_changed":
+                        save_target("chapter", chapter["id"], min_chars=1)
+                    elif case == "volume_changed":
+                        save_target("volume", "v", base=volume_target["id"], min_chars=101)
+                    elif case == "clear_changed":
+                        clear_target()
+                    elif case == "unrelated":
+                        save_target("chapter", other["id"], min_chars=1)
+                    assert domain.branch(branch)["story_revision"] == initial_revision
+                response = await super().generate(account, task_id, system, prompt, max_output, **kwargs)
+                return {**response, "text": emitted}
+            return await super().generate(account, task_id, system, prompt, max_output, **kwargs)
+
+    endpoint = prefix + "/seven-stage-runs"
+    response = client.post(
+        endpoint,
+        json={
+            "start_from": "outline",
+            "source_id": adopted["id"],
+            "account": "deepseek",
+            "budget_limit": 1,
+            "client_request_id": uid(),
+            "auto_adopt_body": True,
+        },
+    )
+    assert response.status_code == 202, response.text
+    run_id = response.json()["id"]
+    model = LengthModel(settings=settings)
+    drain(settings, model)
+    parent = domain.task(run_id)
+    assert parent["status"] == "needs_review", parent["error"]
+    state = parent["result"]["seven_stage_run"]
+    child = domain.task(state["children"][0])
+    candidate = domain.artifact(child["result"]["artifact_id"])
+    frozen = child["result"][CHAPTER_LENGTH_KEY]
+    assert candidate["basis"][CHAPTER_LENGTH_KEY] == frozen
+    assert frozen["project"] == {"id": project["id"], "revision": 1, "length": BRIEF["length"]}
+    assert frozen["targets"] == [
+        {"scope": "chapter", "scope_id": chapter["id"], "target": queued_chapter_target},
+        {"scope": "volume", "scope_id": "v", "target": volume_target},
+        {"scope": "book", "scope_id": None, "target": book_target},
+    ]
+    assert prompts[0]["篇幅依据"] == {
+        **frozen,
+        "targets": [row for row in frozen["targets"] if row["target"] and row["target"]["targets"]],
+    }
+    assert "不直接作为本章上下限" in prompts[0]["篇幅要求"]
+    assert candidate["payload"]["review_passed"]
+    if case in {"cleared", "unrelated"}:
+        assert state["stage"] == "inspection"
+        assert candidate["status"] == "accepted"
+        assert domain.chapter(chapter["id"])["content"] == emitted
+        assert len(prompts) == (2 if other else 1)
+        if case == "cleared":
+            assert "chapter_length" not in candidate["payload"]["review"]
+        return
+
+    assert state["stage"] == "writing" and candidate["status"] == "candidate"
+    assert domain.chapter(chapter["id"])["content"] == ""
+    assert model.calls.count("writing.expand_plot") == 1
+    if case in {"below", "above"}:
+        check = candidate["payload"]["review"]["chapter_length"]
+        assert check["actual_chars"] == measured and check["reason"] == parent["error"]
+        assert ("低于" if case == "below" else "高于") in check["reason"]
+    else:
+        assert "本章适用的篇幅目标已变化" in parent["error"]
+    assert (
+        client.post(f"/api/artifacts/{candidate['id']}/accept", json={"idempotency_key": uid()}).status_code
+        == 200
+    )
+    assert client.post(f"{endpoint}/{run_id}/resume").status_code == 200
+    drain(settings, model)
+    assert domain.task(run_id)["result"]["seven_stage_run"]["stage"] == "inspection"
+    assert domain.chapter(chapter["id"])["content"] == emitted
+    assert model.calls.count("writing.expand_plot") == 1
 
 
 @pytest.mark.parametrize("origin", ["idea", "settings", "outline"])

@@ -731,6 +731,7 @@ def chapter_basis(tx, branch_id, chapter_id, outline_id):
             return {
                 "id": outline_id,
                 "revision": confirmed["revision"],
+                "volume_id": volume["id"],
                 "volume": volume["title"],
                 "unit": unit["title"],
                 "chapter": chapter,

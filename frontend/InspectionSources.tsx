@@ -31,6 +31,37 @@ function storyLabel(labels: Record<string, string>, value: unknown, fallback: st
   return typeof value === 'string' && Object.hasOwn(labels, value) ? labels[value] : fallback
 }
 
+export function InspectionDescendantLengths({ basis }: { basis: Record<string, unknown> }) {
+  const rows = storyRows(basis.descendant_length_targets)
+  if (!rows.length) return null
+  return (
+    <details open={rows.some(({ status }) => status === 'red')}>
+      <summary>分章、分卷篇幅目标</summary>
+      <ul>
+        {rows.map((row) => {
+          const target = fields(row.length_target)
+          const bounds = fields(target?.targets)
+          const labels = [
+            [bounds?.expected_chapters, '章数'],
+            [bounds?.min_chars, '有效字符下限'],
+            [bounds?.max_chars, '有效字符上限'],
+          ].flatMap(([value, label]) => (typeof value === 'number' ? [`${label} ${value}`] : []))
+          return (
+            <li key={`${row.scope}/${row.scope_id}`}>
+              <strong>{`${row.scope === 'volume' ? '卷' : '章'} · ${row.title}`}</strong>
+              <p>
+                {`目标修订 ${target?.revision}`}
+                {labels.length > 0 && ` · ${labels.join('、')}`}
+              </p>
+              <p>{String(row.summary)}</p>
+            </li>
+          )
+        })}
+      </ul>
+    </details>
+  )
+}
+
 export function InspectionNarrativeEvidence({
   basis,
   chapters,

@@ -16,7 +16,7 @@ from test_conception_workbench import confirm, item, path, save
 from test_project_brief import BRIEF, IDEA
 from test_workflow_archive import _members, _send_reports
 from test_workflow_cloud import _complete
-from test_workflow_inspection import author, source
+from test_workflow_inspection import author, report, source
 
 
 def test_finish_requires_six_checks_and_exports_immutable_package(client, domain, story, monkeypatch):
@@ -180,6 +180,72 @@ def test_finish_requires_six_checks_and_exports_immutable_package(client, domain
     historical = client.get(export)
     assert historical.status_code == 200
     assert historical.content == response.content
+
+
+def test_m7_blocks_current_descendant_target_without_a_scoped_report(client, domain, story):
+    branch = story["branch_id"]
+    chapter = domain.save(story["chapter_id"], 0, "学徒找到师姐，归还了铜铃。")
+    inspection = f"/api/branches/{branch}/workflow-inspections"
+    endpoint = f"/api/branches/{branch}/book-completion"
+    preview = client.get(inspection).json()["preview"]
+    passing = report(
+        client,
+        inspection,
+        preview,
+        author_reviews=[
+            author(row["check_id"], chapter) for row in preview["items"] if row["status"] == "pending"
+        ],
+        length_targets={"min_chars": 1, "expected_chapters": 1},
+    )
+    basis = client.get(endpoint).json()["basis_sha256"]
+    data = {
+        "basis_sha256": basis,
+        "read_note": "作者已通读保存稿。",
+        "author_decisions": {name: "verified" for name in ("reading", "ending", "characters", "promises")},
+        **{
+            name: {"note": note, "sources": [source(chapter)]}
+            for name, note in (
+                ("ending", "作者核对已找到师姐并还铃。"),
+                ("characters", "师姐与学徒重逢。"),
+                ("promises", "寻找师姐及铃的线索已兑现。"),
+            )
+        },
+        "intro": "学徒追查一枚旧铃的下落。",
+        "spoiler_scope": "opening",
+        "sample_chapter_ids": [chapter["id"]],
+        "materials_reviewed": True,
+    }
+    accepted = client.post(endpoint + "/confirm", json=data)
+    assert accepted.status_code == 201, accepted.text
+    recorded = accepted.json()
+
+    target = client.put(
+        inspection + "/length-targets",
+        json={"scope": "chapter", "scope_id": chapter["id"], "targets": {"min_chars": 80}},
+    )
+    assert target.status_code == 200, target.text
+    assert target.json()["latest"] is None
+    current = client.get(endpoint).json()
+    assert not current["latest"]["current"]
+    assert current["latest"]["id"] == recorded["id"]
+    assert current["basis_sha256"] != basis
+    assert client.post(endpoint + "/confirm", json=data).json()["code"] == "completion_changed"
+    request = {**data, "basis_sha256": current["basis_sha256"]}
+    result = client.post(endpoint + "/preview", json=request)
+    assert result.status_code == 200, result.text
+    assert {check["id"]: check["status"] for check in result.json()["checks"]} == {
+        "manuscript": "red",
+        "ending": "green",
+        "characters": "green",
+        "promises": "green",
+        "inspection": "red",
+        "delivery": "green",
+    }
+    assert result.json()["manifest"]["inspection_id"] == passing["id"]
+    blocked = client.post(endpoint + "/confirm", json=request)
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "completion_blocked"
+    assert client.get(f"{endpoint}/{recorded['id']}/export").status_code == 200
 
 
 def test_m7_uses_the_signed_text_length_basis_and_keeps_previous_delivery_readable(client, domain, story):

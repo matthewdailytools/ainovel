@@ -530,12 +530,12 @@ def test_two_volume_inspection_and_completion_share_one_versioned_manuscript(
     )
     resolved = next(row for row in resolved_graph["records"] if row["id"] == promise["id"])
     scopes = {
-        "book": {},
-        "first_volume": {"scope": "volume", "scope_id": "volume-1"},
-        "second_volume": {"scope": "volume", "scope_id": "volume-2"},
         "first": {"scope": "chapter", "scope_id": first["id"]},
         "second": {"scope": "chapter", "scope_id": second["id"]},
         "third": {"scope": "chapter", "scope_id": third["id"]},
+        "first_volume": {"scope": "volume", "scope_id": "volume-1"},
+        "second_volume": {"scope": "volume", "scope_id": "volume-2"},
+        "book": {},
     }
     baseline = {key: reviewed_scope(client, inspection, scope, chapters) for key, scope in scopes.items()}
     for label, document in baseline.items():

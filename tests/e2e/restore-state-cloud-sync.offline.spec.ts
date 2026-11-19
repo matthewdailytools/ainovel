@@ -260,6 +260,7 @@ test('正式事实及章卷书篇幅双向同步，稿件分歧先保留并可�
     await expect(web.getByText(/^fact-set-head:[a-f0-9]{64} · /)).toBeVisible()
     await rules.press('Enter')
     await expect(web.getByText(/冻结篇幅目标 至少 90 字符/)).toBeVisible()
+    await expect(web.getByText('其中 1 个章或卷未达到各自已采用的篇幅目标。 卷 · 渡口卷')).toBeVisible()
     await expect(facts).toHaveCount(0)
     await web.getByRole('button', { name: /^比较冲突/ }).click()
     const compare = web.getByRole('region', { name: '云同步冲突比较' })

@@ -646,6 +646,13 @@ def test_rollback_keeps_numeric_review_but_blocks_completion_until_dependent_che
     second = domain.save(second["id"], 0, "学徒终于把铃送回给师姐。")
     base = f"/api/branches/{branch}"
     inspections = base + "/workflow-inspections"
+    scope = {"scope": "chapter", "scope_id": second["id"]}
+    scoped = report(
+        client,
+        inspections,
+        verify(client.get(inspections, params=scope))["preview"],
+        length_targets={"min_chars": 1},
+    )
     book_preview = verify(client.get(inspections))["preview"]
     issued = report(
         client,
@@ -676,13 +683,6 @@ def test_rollback_keeps_numeric_review_but_blocks_completion_until_dependent_che
         "materials_reviewed": True,
     }
     delivered = verify(client.post(completion + "/confirm", json=decision), 201)
-    scope = {"scope": "chapter", "scope_id": second["id"]}
-    scoped = report(
-        client,
-        inspections,
-        verify(client.get(inspections, params=scope))["preview"],
-        length_targets={"min_chars": 1},
-    )
 
     forecast = verify(client.get(f"{route(branch)}/{saved['id']}/preview"))
     affected = {row["id"]: row for row in forecast["affected_reports"]}

@@ -1,5 +1,52 @@
 import { expect, test } from '@playwright/test'
 
+test('全书篇幅核对直接显示未达标的章目标和采用修订', async ({ page }) => {
+  await page.goto('/')
+  const { csrf } = await (await page.request.get('/api/session')).json()
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const work = await page.request.post('/api/novels', { headers, data: { title: '拾铃 · 各层篇幅' } })
+  expect(work.ok(), await work.text()).toBe(true)
+  const { id: novelId, branch_id: branchId } = await work.json()
+  const branch = `/api/branches/${branchId}`
+  const created = await page.request.post(`${branch}/chapters`, { headers, data: { title: '门内' } })
+  expect(created.ok(), await created.text()).toBe(true)
+  const { id: chapterId } = await created.json()
+  const saved = await page.request.put(`/api/chapters/${chapterId}`, {
+    headers,
+    data: { base_revision: 0, content: '## 标题\n> **铃响。**' },
+  })
+  expect(saved.ok(), await saved.text()).toBe(true)
+
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novelId)
+  await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  const panel = page.getByRole('region', { name: '十处对账体检', exact: true })
+  const scope = panel.getByRole('combobox', { name: '检查范围', exact: true })
+  const minimum = panel.getByLabel('有效字符下限', { exact: true })
+  const saveTarget = panel.getByRole('button', { name: '保存篇幅目标', exact: true })
+  await minimum.fill('1')
+  await saveTarget.click()
+  await expect(panel.getByText('当前采用修订 1', { exact: true })).toBeVisible()
+  await scope.selectOption('chapter')
+  await panel.getByRole('combobox', { name: '选择章节', exact: true }).selectOption(chapterId)
+  await expect(panel.getByText('尚未采用数值目标', { exact: true })).toBeVisible()
+  await minimum.fill('80')
+  await saveTarget.click()
+  await expect(panel.getByText('当前采用修订 1', { exact: true })).toBeVisible()
+  await scope.selectOption('book')
+  await panel.getByText('本次依据与未核查项', { exact: true }).click()
+  const length = panel.getByRole('listitem').filter({ hasText: '09 字数、章数与篇幅' })
+  await expect(length.getByText('章 · 门内', { exact: true })).toBeVisible()
+  await expect(length.getByText('目标修订 1 · 有效字符下限 80', { exact: true })).toBeVisible()
+  await expect(
+    length.getByText('1 章、3 个有效字符。正文字符数超出冻结目标。', { exact: true }),
+  ).toBeVisible()
+  await expect(panel.getByText('已保存体检单', { exact: true })).toHaveCount(0)
+  const completion = page.getByRole('region', { name: '完本与交付', exact: true })
+  await completion.getByRole('button', { name: '核对最新完本依据' }).click()
+  await expect(completion.getByText(/1 个章或卷未达到各自已采用的篇幅目标/)).toBeVisible()
+})
+
 test('第 08 项区分章纲计划与采纳稿，按固定手法卡版本读取本机原文', async ({ page }) => {
   await page.goto('/')
   const { csrf } = await (await page.request.get('/api/session')).json()

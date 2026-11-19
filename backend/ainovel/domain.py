@@ -420,6 +420,10 @@ class Domain:
                 )
             if require_review and not payload.get("review_passed"):
                 raise DomainError("review_required", "候选尚未通过本轮检查，不能自动采纳。", 409)
+            if require_review and (length := artifact["basis"].get("chapter_writing_length")):
+                from .chapter_writing_length import check_automatic_acceptance
+
+                check_automatic_acceptance(db, artifact["branch_id"], length, payload["text"])
             result = {"artifact_id": artifact_id, "chapter_id": artifact["chapter_id"]}
             if chosen_memory is not None:
                 result["memory_selection"] = chosen_memory
@@ -849,6 +853,11 @@ class Domain:
                 from .outline_workspace import chapter_basis
 
                 initial["outline"] = chapter_basis(db, branch_id, payload["chapter_id"], outline_id)
+                volume_id = initial["outline"].pop("volume_id")
+                if payload["action"] == "writing.expand_plot":
+                    from .chapter_writing_length import KEY, freeze
+
+                    initial[KEY] = freeze(db, branch_id, payload["chapter_id"], volume_id)
             if outline_request := payload.get("outline_generation"):
                 from .outline_generation import freeze_tx
 

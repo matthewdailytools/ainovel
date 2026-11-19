@@ -930,7 +930,12 @@ async function relayOutline(page: Page, title: string) {
 }
 
 test('从确认大纲接力时可人工编辑并采纳候选，再由同一批次续至 M6', async ({ page }) => {
-  const { branch, chapter, outlineId, panel } = await relayOutline(page, '后台验证 · 作者采纳再接力')
+  const { branch, chapter, headers, outlineId, panel } = await relayOutline(page, '后台验证 · 作者采纳再接力')
+  const target = await page.request.put(branch + '/workflow-inspections/length-targets', {
+    headers,
+    data: { scope: 'chapter', scope_id: chapter.id, targets: { min_chars: 10000 } },
+  })
+  expect(target.ok(), await target.text()).toBe(true)
   await expect(panel.getByRole('checkbox', { name: '授权采纳通过检查的空章正文候选' })).not.toBeChecked()
   const submitted = await startFromPanel(page, branch)
   expect(submitted.ok(), await submitted.text()).toBe(true)
@@ -958,8 +963,11 @@ test('从确认大纲接力时可人工编辑并采纳候选，再由同一批�
   const source = await (await page.request.get('/api/artifacts/' + candidate)).json()
   const editor = page.getByRole('textbox', { name: '候选内容', exact: true })
   await expect(editor).toHaveValue(source.payload.text)
+  const lengthWarning = page.getByText(/生成时篇幅核算 · 本章候选 .*低于采用的下限 10000/)
+  await expect(lengthWarning).toBeVisible()
   const edited = source.payload.text + '\n\n作者补记：复查刻度后，学徒把尺归还给守闸人。'
   await editor.fill(edited)
+  await expect(lengthWarning).toHaveCount(0)
   await page.getByRole('button', { name: '保存候选编辑（原检查失效）', exact: true }).click()
   const accept = page.getByRole('button', { name: '采纳到正文', exact: true })
   const rereadMemory = page.getByRole('button', { name: '读取新版记忆并重新选择', exact: true })

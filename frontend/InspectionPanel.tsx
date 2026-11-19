@@ -4,6 +4,7 @@ import type { components } from './api-schema'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
 import { InspectionSemanticPanel, type InspectionSuggestion } from './InspectionSemanticPanel'
 import {
+  InspectionDescendantLengths,
   InspectionNarrativeEvidence,
   InspectionPacingEvidence,
   InspectionSources,
@@ -361,6 +362,7 @@ function CheckList({
               kind={item.check_id === '04' ? 'time' : 'viewpoint'}
             />
           )}
+          {item.check_id === '09' && <InspectionDescendantLengths basis={item.basis} />}
           {item.check_id === '10' && <InspectionPacingEvidence basis={item.basis} />}
           {reportId && canOpenSources(item) && (
             <InspectionSources

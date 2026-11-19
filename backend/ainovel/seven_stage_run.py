@@ -876,7 +876,8 @@ def _writing(worker, state):
     if artifact["status"] != "accepted":
         _unchanged(_story_revision(worker.domain, branch), state["story_revision"])
         if not worker.task["payload"]["auto_adopt_body"] or not artifact["payload"].get("review_passed"):
-            _checkpoint(worker, "needs_review", "本章正文已生成，请核对候选后采纳。")
+            length = artifact["payload"].get("review", {}).get("chapter_length") or {}
+            _checkpoint(worker, "needs_review", length.get("reason") or "本章正文已生成，请核对候选后采纳。")
             return
         worker.domain.accept(
             artifact["id"],
@@ -1024,6 +1025,9 @@ def run(worker):
     except DomainError as error:
         if error.code == "conception_setting_review":
             _checkpoint(worker, "needs_review", "设定体检有待核对项，请在设定台处理并确认后继续。")
+            return
+        if error.code in {"chapter_length_changed", "chapter_length_bounds"}:
+            _checkpoint(worker, "needs_review", error.message)
             return
         if error.code not in STALE_BASIS:
             raise

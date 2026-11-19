@@ -460,6 +460,69 @@ def length_result(manifest, targets):
     return "pending", measured + "请对照采用的篇幅目标。"
 
 
+def length_assessment(tx, branch_id, scope, manifest, confirmed_outline, length_revision):
+    target = length_revision["targets"] if length_revision else None
+    status, summary = length_result(manifest, target)
+    if scope == "chapter":
+        return status, summary, []
+    rows = tx.execute(
+        "SELECT id,payload FROM (SELECT id,payload,ROW_NUMBER() OVER("
+        "PARTITION BY json_extract(payload,'$.scope'),json_extract(payload,'$.scope_id') "
+        "ORDER BY rowid DESC) AS rank FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+        "AND (json_extract(payload,'$.scope')='chapter' OR "
+        "(?='book' AND json_extract(payload,'$.scope')='volume'))) WHERE rank=1",
+        (branch_id, LENGTH_TARGET_KIND, scope),
+    )
+    targets = {}
+    for row in rows:
+        payload = json.loads(row["payload"])
+        targets[payload["scope"], payload["scope_id"]] = {
+            "id": row["id"],
+            "revision": payload["revision"],
+            "targets": payload["targets"],
+        }
+    if not targets:
+        return status, summary, []
+
+    active = {row["id"]: row for row in manifest}
+    ranges = []
+    if scope == "book" and confirmed_outline:
+        for volume in confirmed_outline["plan"]["volumes"]:
+            members = [
+                active[chapter_id]
+                for _, _, chapter in _chapter_plans({"volumes": [volume]})
+                if (chapter_id := chapter["chapter_id"]) in active
+            ]
+            if members:
+                ranges.append(("volume", volume["id"], volume["title"], members))
+    ranges.extend(("chapter", row["id"], row["title"], [row]) for row in manifest)
+    descendants = []
+    for child_scope, identifier, title, members in ranges:
+        child = targets.get((child_scope, identifier))
+        if child is None:
+            continue
+        if child["targets"] is None:
+            child_status, detail = "cleared", "已清除本范围的数值目标。"
+        else:
+            child_status, detail = length_result(members, child["targets"])
+        descendants.append(
+            {
+                "scope": child_scope,
+                "scope_id": identifier,
+                "title": title,
+                "chapter_ids": [row["id"] for row in members],
+                "length_target": child,
+                "status": child_status,
+                "summary": detail,
+            }
+        )
+    failures = sum(row["status"] == "red" for row in descendants)
+    if failures:
+        status = "red"
+        summary += f"其中 {failures} 个章或卷未达到各自已采用的篇幅目标。"
+    return status, summary, descendants
+
+
 def _world_needs_confirmation(tx, branch_id):
     previous = latest_conception_revision(tx, branch_id, CONFIRMATION)
     versions = [_workspace(tx, branch_id), *([_read_payload(previous)] if previous else [])]
@@ -634,8 +697,8 @@ def _evaluate(tx, branch_id, scope, scope_id, *, roll_up=True):
     broken_cards = [row for row in [*planned_references, *references] if not row["source"]]
     length_revision = current_length_target(tx, branch_id, scope, scope_id, include_cleared=True)
     length_target = length_revision if length_revision and length_revision["targets"] is not None else None
-    length_status, length_summary = length_result(
-        manifest, length_target["targets"] if length_target else None
+    length_status, length_summary, descendant_lengths = length_assessment(
+        tx, branch_id, scope, manifest, confirmed, length_revision
     )
     item = partial(_item, manifest=manifest, scope=scope)
     items = [
@@ -738,6 +801,7 @@ def _evaluate(tx, branch_id, scope, scope_id, *, roll_up=True):
                 "method": COUNT_VERSION,
                 "project_length": (project or {}).get("brief", {}).get("length"),
                 "length_target": length_revision,
+                **({"descendant_length_targets": descendant_lengths} if descendant_lengths else {}),
             },
             length_status,
         ),

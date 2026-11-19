@@ -1,6 +1,7 @@
 import pytest
 
 from ainovel import workflow_inspection
+from ainovel.db import uid
 from ainovel.workflow_inspection import body_chars, latest_book_inspection
 from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
 
@@ -194,6 +195,119 @@ def test_numeric_targets_are_versioned_and_omission_cannot_remove_a_failed_targe
     assert historical["length_target"] == goal
     assert item(historical, "09") == {**item(created, "09"), "current_status": "outdated"}
     assert historical["basis_sha256"] == created["basis_sha256"]
+
+
+@pytest.mark.parametrize("target_scope", ["chapter", "volume"])
+def test_saved_descendant_length_target_blocks_only_its_current_ranges_without_a_report(
+    inspection_client, domain, story, target_scope
+):
+    client = inspection_client
+    branch = story["branch_id"]
+    first = domain.save(story["chapter_id"], 0, "## 排版标题\n> **铃响。**")
+    second = domain.create_chapter(branch, "卷外章")
+    domain.save(second["id"], 0, "师姐寻铃。")
+    plan = {
+        "summary": "寻找失铃",
+        "volumes": [
+            {
+                "id": f"v{index}",
+                "title": f"第{index}卷",
+                "summary": "寻找铜铃",
+                "units": [
+                    {
+                        "id": f"u{index}",
+                        "title": "线索",
+                        "summary": "找铃",
+                        "chapters": [{**chapter_plan(chapter["id"], "门内找铃"), "setting_ids": []}],
+                    }
+                ],
+            }
+            for index, chapter in enumerate((first, second), 1)
+        ],
+    }
+    put_and_confirm(client, f"/api/branches/{branch}/outline-workspace", {"base_revision": 0, "plan": plan})
+    route = endpoint(story)
+    book = report(client, route, read(client, route)["preview"], length_targets={"min_chars": 1})
+    assert item(book, "09")["status"] == "green"
+    volume = {"scope": "volume", "scope_id": "v1"}
+    chapter = {"scope": "chapter", "scope_id": first["id"]}
+    sibling = read(client, route, scope="volume", scope_id="v2")["preview"]
+    snapshot = client.post(f"/api/branches/{branch}/work-snapshots", json={"label": "原篇幅", **volume})
+    assert snapshot.status_code == 201, snapshot.text
+    checkpoint = f"/api/branches/{branch}/work-snapshots/{snapshot.json()['id']}"
+
+    owner = chapter if target_scope == "chapter" else volume
+    adopted = client.put(f"{route}/length-targets", json={**owner, "targets": {"min_chars": 80}})
+    assert adopted.status_code == 200, adopted.text
+    target = adopted.json()["preview"]["length_target"]
+    assert adopted.json()["latest"] is None
+    assert item(adopted.json()["preview"], "09")["status"] == "red"
+    current = read(client, route)
+    failure = item(current["preview"], "09")
+    assert failure["status"] == "red"
+    assert item(current["latest"], "09")["current_status"] == "outdated"
+    assert failure["basis"]["length_target"] == book["length_target"]
+    assert failure["basis"]["descendant_length_targets"] == [
+        {
+            **owner,
+            "title": first["title"] if target_scope == "chapter" else "第1卷",
+            "chapter_ids": [first["id"]],
+            "length_target": target,
+            "status": "red",
+            "summary": "1 章、3 个有效字符。正文字符数超出冻结目标。",
+        }
+    ]
+    assert item(read(client, route, **volume)["preview"], "09")["status"] == "red"
+    assert item(read(client, route, **chapter)["preview"], "09")["status"] == (
+        "red" if target_scope == "chapter" else "pending"
+    )
+    assert read(client, route, scope="volume", scope_id="v2")["preview"] == sibling
+    attempted_override = report(client, route, current["preview"], author_reviews=[author("09", first)])
+    assert item(attempted_override, "09")["status"] == "red"
+
+    restore = client.post(
+        checkpoint + "/restore",
+        json={
+            "basis_sha256": read(client, checkpoint + "/preview")["basis_sha256"],
+            "mode": "in_place",
+            "idempotency_key": uid(),
+        },
+    )
+    assert restore.status_code == 201, restore.text
+    cleared = item(read(client, route)["preview"], "09")
+    assert cleared["status"] == "green"
+    assert cleared["basis"]["length_target"] == book["length_target"]
+    [receipt] = cleared["basis"]["descendant_length_targets"]
+    assert receipt["status"] == "cleared"
+    assert receipt["length_target"]["revision"] == target["revision"] + 1
+    assert receipt["length_target"]["targets"] is None
+    assert item(read(client, route, **owner)["preview"], "09")["status"] == "pending"
+    assert item(read(client, route, scope="volume", scope_id="v2")["preview"], "09") == item(sibling, "09")
+    recorded = item(read(client, f"{route}/{attempted_override['id']}"), "09")
+    assert recorded["status"] == "red" and recorded["current_status"] == "outdated"
+    assert recorded["basis"] == failure["basis"]
+
+    readopted = client.put(f"{route}/length-targets", json={**owner, "targets": {"min_chars": 80}})
+    assert readopted.status_code == 200, readopted.text
+    outline_path = f"/api/branches/{branch}/outline-workspace"
+    confirmed = read(client, outline_path)["confirmed"]
+    first_volume, second_volume = plan["volumes"]
+    combined = {**second_volume, "units": first_volume["units"] + second_volume["units"]}
+    put_and_confirm(
+        client,
+        outline_path,
+        {"base_revision": confirmed["revision"], "plan": {**plan, "volumes": [combined]}},
+    )
+    moved = item(read(client, route)["preview"], "09")
+    destination = item(read(client, route, scope="volume", scope_id="v2")["preview"], "09")
+    if target_scope == "chapter":
+        assert moved["status"] == destination["status"] == "red"
+        assert (
+            moved["basis"]["descendant_length_targets"] == destination["basis"]["descendant_length_targets"]
+        )
+    else:
+        assert moved["status"] == "green" and destination["status"] == "pending"
+        assert "descendant_length_targets" not in moved["basis"]
 
 
 @pytest.mark.parametrize("change", ["revision", "outline_scope"])

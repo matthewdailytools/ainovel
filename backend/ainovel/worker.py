@@ -981,6 +981,7 @@ class Worker:
         outline = self.task["result"].get("outline")
         if outline:
             context["采用章纲"] = outline
+        chapter_writing_length = self.task["result"].get("chapter_writing_length")
         instruction = {
             "action": action,
             "作者要求": request["instruction"],
@@ -1028,6 +1029,15 @@ class Worker:
         elif action == "writing.expand_plot":
             if not chapter:
                 raise DomainError("chapter_required", "请选择目标章节。")
+            from .chapter_writing_length import chapter_check, prompt_basis
+
+            if chapter_writing_length and (length := prompt_basis(chapter_writing_length)):
+                instruction["篇幅依据"] = length
+                instruction["篇幅要求"] = (
+                    "本章采用的数值上下限按给定的有效字符口径执行。"
+                    "卷和全书数值是各自范围的累计目标，不直接作为本章上下限。"
+                    "立项文字是整书篇幅参考。展开本章场景和选择后果，避免重复凑字，不输出字数说明。"
+                )
             instruction["输出"] = "仅返回本章正文。忠实给定情节与结果，可补动作对白心理环境，不改关键结果。"
             plot_source = module_plot_source(request) if request.get("plot_contract_check") is True else None
             output = await self.call(
@@ -1040,6 +1050,8 @@ class Worker:
                 review = await attach_plot_review(
                     self, review, plot_source, output, chapter["position"], "author_instruction"
                 )
+            if chapter_writing_length and (checked := chapter_check(chapter_writing_length, output)):
+                review["chapter_length"] = checked
             payload, kind = (
                 {
                     "text": output,
@@ -1106,6 +1118,7 @@ class Worker:
                 "scene_binding": context["longform"].get("scene_binding"),
                 "chapter_scenes": context.get("chapter_scenes"),
                 **({"outline": outline} if outline else {}),
+                **({"chapter_writing_length": chapter_writing_length} if chapter_writing_length else {}),
             },
             self.task["id"],
             self.attempt,

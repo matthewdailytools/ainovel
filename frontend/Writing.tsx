@@ -1994,6 +1994,19 @@ function Candidate({
       : artifact.payload.text === undefined
         ? undefined
         : edit
+  const review = artifact.payload.review
+  const lengthCheck =
+    review && typeof review === 'object' && 'chapter_length' in review ? review.chapter_length : undefined
+  const lengthWarning =
+    artifact.status === 'candidate' &&
+    !candidateChanged &&
+    edit === artifact.payload.text &&
+    lengthCheck &&
+    typeof lengthCheck === 'object' &&
+    'reason' in lengthCheck &&
+    typeof lengthCheck.reason === 'string'
+      ? lengthCheck.reason
+      : ''
   return (
     <div className="candidate">
       {designKinds.has(artifact.kind) && (
@@ -2007,6 +2020,11 @@ function Candidate({
       <p className="small muted">
         {label(artifact.status)} · 基线修订 {artifact.base_revision ?? '设定'}。改变原文后采纳会再次校验。
       </p>
+      {lengthWarning && (
+        <p className="notice" role="status">
+          生成时篇幅核算 · {lengthWarning}
+        </p>
+      )}
       {outlineBasis && (
         <details className="notice">
           <summary>生成时的章纲 · 修订 {outlineBasis.revision}</summary>
