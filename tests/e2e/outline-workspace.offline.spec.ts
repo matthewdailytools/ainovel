@@ -90,7 +90,7 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
     data: {
       base_revision: draft.revision,
       base_story_revision: draft.story_revision,
-      idempotency_key: 'outline-cite-custom-resources',
+      idempotency_key: `outline-cite-custom-resources-${branch_id}`,
     },
   })
   expect(settingConfirmation.ok(), await settingConfirmation.text()).toBe(true)
@@ -138,7 +138,11 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   expect(beforeConfirm.records).toHaveLength(1)
   await page.getByRole('button', { name: '确认已保存大纲' }).click()
   await expect(page.getByText('已确认大纲修订 2', { exact: true })).toBeVisible()
-  await expect(page.getByRole('listitem').filter({ hasText: '油灯库存 · 资源台账 · 计划' })).toBeVisible()
+  const inventoryLedger = page.getByRole('region', { name: '油灯库存 · 资源台账', exact: true })
+  const plannedUse = inventoryLedger.getByRole('listitem')
+  await expect(plannedUse).toContainText('已计划 · 待正文证据')
+  await expect(plannedUse.getByRole('button', { name: '门外寻铃', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: '待定储备 · 资源台账', exact: true })).toHaveCount(0)
   await expect(page.getByText(/铃声为何消失 · 计划/)).toBeVisible()
   await expect(page.getByText(/门上的旧记号由谁刻下 · 计划/)).toBeVisible()
   await expect(page.getByText('查看伏笔阶段与原文', { exact: true })).toHaveCount(0)
