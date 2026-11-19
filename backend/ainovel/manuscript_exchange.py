@@ -14,6 +14,7 @@ from pydantic import Field, StringConstraints
 from .db import DomainError, dumps, uid
 from .models import Input
 from .outline_portability import OutlineHistory
+from .portable_checkpoint import PortableCheckpointHistory, import_checkpoints, validate_checkpoint_history
 from .project_portability import Identifier, ProjectHistory
 from .project_sync import export_project_history, restore_project_history
 from .reference_portability import HashId as ReferenceVersionId, ReferenceHistory
@@ -112,6 +113,9 @@ class ManuscriptPackage(Input):
     workflow_history: WorkflowHistory | None = Field(default=None, exclude_if=lambda value: value is None)
     reference_history: ReferenceHistory | None = Field(default=None, exclude_if=lambda value: value is None)
     setting_use_history: SettingUseHistory | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    snapshot_history: PortableCheckpointHistory | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
@@ -256,6 +260,8 @@ def _index(package):
     setting_uses = _validate_setting_uses(package, revisions)
     if package.workflow_history:
         _validate_report_history(package, revisions, setting_uses)
+    if package.snapshot_history:
+        validate_checkpoint_history(package, {row.id: row for row in package.revisions})
     return histories
 
 
@@ -400,6 +406,7 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), b
     from .setting_use_archive import export_setting_use_history
     from .settings_archive import export_settings_history, validate_settings_history
     from .story_archive import export_story_archive, validate_story_archive
+    from .work_snapshot import export_checkpoint_history
     from .workflow_archive import (
         export_workflow_history,
         has_frozen_reference_selection,
@@ -456,6 +463,7 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), b
                     tx, branch_id, include_evidence_for=include_reference_evidence_for
                 ),
                 "setting_use_history": export_setting_use_history(tx, branch_id),
+                "snapshot_history": export_checkpoint_history(tx, branch_id),
             }
         )
         if package.settings_history:
@@ -472,7 +480,12 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), b
                 package.chapters,
                 package.reference_history,
             )
-        if package.story_history or package.workflow_history or package.setting_use_history:
+        if (
+            package.story_history
+            or package.workflow_history
+            or package.setting_use_history
+            or package.snapshot_history
+        ):
             native = {row.id: row for row in package.revisions}
             revisions = {**native, **{row.id: row for row in package.source_revisions}}
             if package.story_history:
@@ -480,6 +493,8 @@ def export_manuscript(domain, branch_id, *, include_reference_evidence_for=(), b
             setting_uses = _validate_setting_uses(package, revisions)
             if package.workflow_history:
                 _validate_report_history(package, revisions, setting_uses)
+            if package.snapshot_history:
+                validate_checkpoint_history(package, native)
         return package
 
 
@@ -567,6 +582,8 @@ def import_manuscript(domain, package):
             from .workflow_archive import import_workflow_history
 
             import_workflow_history(tx, branch.id, package.workflow_history)
+        if package.snapshot_history:
+            import_checkpoints(tx, branch, package.snapshot_history)
     result = {"id": novel.id, "branch_id": branch.id}
     if outline:
         result["outline_restore"] = outline

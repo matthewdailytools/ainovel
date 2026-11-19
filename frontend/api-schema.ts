@@ -409,6 +409,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/portable-checkpoints': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Portable Checkpoints */
+    get: operations['list_portable_checkpoints_api_branches__branch_id__portable_checkpoints_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Portable Checkpoint */
+    get: operations['portable_checkpoint_api_branches__branch_id__portable_checkpoints__snapshot_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/chapters/{chapter_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Diff Portable Checkpoint Chapter */
+    get: operations['diff_portable_checkpoint_chapter_api_branches__branch_id__portable_checkpoints__snapshot_id__chapters__chapter_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/work-snapshots': {
     parameters: {
       query?: never
@@ -3464,6 +3515,34 @@ export interface components {
        */
       profile: string
     }
+    /** CheckpointChapter */
+    CheckpointChapter: {
+      /** Id */
+      id: string
+      /** Position */
+      position: number
+      /** Title */
+      title: string
+      /** Revision */
+      revision: number
+      /** Revision Id */
+      revision_id: string
+      /** Sha256 */
+      sha256: string
+      /** Archived */
+      archived: number
+      /** Stale */
+      stale: number
+    }
+    /** CheckpointShared */
+    CheckpointShared: {
+      /** Project Id */
+      project_id: string | null
+      /** Settings Id */
+      settings_id: string | null
+      /** Outline Id */
+      outline_id: string | null
+    }
     /** ClosureReview */
     ClosureReview: {
       /** Note */
@@ -4456,6 +4535,7 @@ export interface components {
       workflow_history?: components['schemas']['WorkflowHistory'] | null
       reference_history?: components['schemas']['ReferenceHistory'] | null
       setting_use_history?: components['schemas']['SettingUseHistory'] | null
+      snapshot_history?: components['schemas']['PortableCheckpointHistory'] | null
     }
     /** Mapping */
     Mapping: {
@@ -4926,6 +5006,61 @@ export interface components {
        * @enum {integer}
        */
       stale: 0 | 1
+    }
+    /** PortableCheckpoint */
+    PortableCheckpoint: {
+      /**
+       * Version
+       * @constant
+       */
+      version: 'ainovel-portable-checkpoint/1'
+      /** Id */
+      id: string
+      /** Branch Id */
+      branch_id: string
+      /** Label */
+      label: string
+      /**
+       * Scope
+       * @enum {string}
+       */
+      scope: 'volume' | 'book'
+      /** Scope Id */
+      scope_id: string | null
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose: 'manual' | 'milestone' | 'pre_restore'
+      /** Created */
+      created: number
+      /** Source Manifest Sha256 */
+      source_manifest_sha256: string
+      /** Story Revision */
+      story_revision: number
+      /** Scoped Chapter Ids */
+      scoped_chapter_ids: string[]
+      /** Chapters */
+      chapters: components['schemas']['CheckpointChapter'][]
+      shared: components['schemas']['CheckpointShared']
+      /** Reports */
+      reports: {
+        [key: string]: string
+      }
+    }
+    /** PortableCheckpointEntry */
+    PortableCheckpointEntry: {
+      /** Id */
+      id: string
+      /** Sha256 */
+      sha256: string
+      /** Body */
+      body: string
+    }
+    /** PortableCheckpointHistory */
+    PortableCheckpointHistory: {
+      /** Entries */
+      entries: components['schemas']['PortableCheckpointEntry'][]
     }
     /** PortableEvidence */
     PortableEvidence: {
@@ -7529,6 +7664,102 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+    }
+  }
+  list_portable_checkpoints_api_branches__branch_id__portable_checkpoints_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PortableCheckpoint'][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  portable_checkpoint_api_branches__branch_id__portable_checkpoints__snapshot_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        snapshot_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PortableCheckpoint']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  diff_portable_checkpoint_chapter_api_branches__branch_id__portable_checkpoints__snapshot_id__chapters__chapter_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        snapshot_id: string
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }

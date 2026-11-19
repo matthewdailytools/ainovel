@@ -913,6 +913,112 @@
         }
       }
     },
+    "/api/branches/{branch_id}/portable-checkpoints": {
+      "get": {
+        "summary": "List Portable Checkpoints",
+        "operationId": "list_portable_checkpoints_api_branches__branch_id__portable_checkpoints_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/PortableCheckpoint" },
+                  "title": "Response List Portable Checkpoints Api Branches  Branch Id  Portable Checkpoints Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}": {
+      "get": {
+        "summary": "Portable Checkpoint",
+        "operationId": "portable_checkpoint_api_branches__branch_id__portable_checkpoints__snapshot_id__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Snapshot Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/PortableCheckpoint" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/portable-checkpoints/{snapshot_id}/chapters/{chapter_id}": {
+      "get": {
+        "summary": "Diff Portable Checkpoint Chapter",
+        "operationId": "diff_portable_checkpoint_chapter_api_branches__branch_id__portable_checkpoints__snapshot_id__chapters__chapter_id__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Snapshot Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/work-snapshots": {
       "get": {
         "summary": "List Work Snapshots",
@@ -6897,6 +7003,63 @@
         "required": ["title", "kind"],
         "title": "Character"
       },
+      "CheckpointChapter": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "position": { "type": "integer", "maximum": 9007199254740991, "minimum": 1, "title": "Position" },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "revision": { "type": "integer", "maximum": 9007199254740991, "minimum": 0, "title": "Revision" },
+          "revision_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Revision Id"
+          },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Sha256" },
+          "archived": { "type": "integer", "maximum": 1, "minimum": 0, "title": "Archived" },
+          "stale": { "type": "integer", "maximum": 1, "minimum": 0, "title": "Stale" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "position", "title", "revision", "revision_id", "sha256", "archived", "stale"],
+        "title": "CheckpointChapter"
+      },
+      "CheckpointShared": {
+        "properties": {
+          "project_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Project Id"
+          },
+          "settings_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Settings Id"
+          },
+          "outline_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Outline Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["project_id", "settings_id", "outline_id"],
+        "title": "CheckpointShared"
+      },
       "ClosureReview": {
         "properties": {
           "note": { "type": "string", "maxLength": 4000, "title": "Note" },
@@ -8440,6 +8603,9 @@
           },
           "setting_use_history": {
             "anyOf": [{ "$ref": "#/components/schemas/SettingUseHistory" }, { "type": "null" }]
+          },
+          "snapshot_history": {
+            "anyOf": [{ "$ref": "#/components/schemas/PortableCheckpointHistory" }, { "type": "null" }]
           }
         },
         "additionalProperties": false,
@@ -9177,6 +9343,122 @@
         "type": "object",
         "required": ["id", "branch_id", "position", "title", "revision", "archived", "stale"],
         "title": "PortableChapter"
+      },
+      "PortableCheckpoint": {
+        "properties": {
+          "version": { "type": "string", "const": "ainovel-portable-checkpoint/1", "title": "Version" },
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "branch_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Branch Id"
+          },
+          "label": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Label" },
+          "scope": { "type": "string", "enum": ["volume", "book"], "title": "Scope" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "purpose": { "type": "string", "enum": ["manual", "milestone", "pre_restore"], "title": "Purpose" },
+          "created": { "type": "number", "minimum": 0, "title": "Created" },
+          "source_manifest_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Source Manifest Sha256"
+          },
+          "story_revision": {
+            "type": "integer",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Story Revision"
+          },
+          "scoped_chapter_ids": {
+            "items": { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Scoped Chapter Ids"
+          },
+          "chapters": {
+            "items": { "$ref": "#/components/schemas/CheckpointChapter" },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Chapters"
+          },
+          "shared": { "$ref": "#/components/schemas/CheckpointShared" },
+          "reports": {
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            "propertyNames": { "enum": ["workflow_inspection", "book_completion"] },
+            "type": "object",
+            "title": "Reports"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "id",
+          "branch_id",
+          "label",
+          "scope",
+          "scope_id",
+          "purpose",
+          "created",
+          "source_manifest_sha256",
+          "story_revision",
+          "scoped_chapter_ids",
+          "chapters",
+          "shared",
+          "reports"
+        ],
+        "title": "PortableCheckpoint"
+      },
+      "PortableCheckpointEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Sha256" },
+          "body": { "type": "string", "maxLength": 4194304, "minLength": 1, "title": "Body" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "sha256", "body"],
+        "title": "PortableCheckpointEntry"
+      },
+      "PortableCheckpointHistory": {
+        "properties": {
+          "entries": {
+            "items": { "$ref": "#/components/schemas/PortableCheckpointEntry" },
+            "type": "array",
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Entries"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["entries"],
+        "title": "PortableCheckpointHistory"
       },
       "PortableEvidence": {
         "properties": {

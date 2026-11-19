@@ -356,3 +356,241 @@ test('超过 24 MiB 的独立备份由桌面经断网 Web 返回另一套 SQLite
     await Promise.all([targetContext?.close(), target.stop()])
   }
 })
+
+test('卷和整书历史恢复点随独立备份往返，保持原编号、范围与精确章稿', async ({
+  page,
+  browser,
+  baseURL,
+}, testInfo) => {
+  test.setTimeout(90_000)
+  await page.goto('/')
+  const { csrf } = await checked<{ csrf: string }>(await page.request.get('/api/session'))
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const source = await checked<Novel>(
+    await page.request.post('/api/novels', { headers, data: { title: '两卷旧恢复点 · 渡口' } }),
+  )
+  const branch = `/api/branches/${source.branch_id}`
+  async function post<T>(route: string, data: unknown) {
+    return checked<T>(await page.request.post(route, { headers, data }))
+  }
+  async function put<T>(route: string, data: unknown) {
+    return checked<T>(await page.request.put(route, { headers, data }))
+  }
+
+  const first = await post<Chapter>(`${branch}/chapters`, { title: '桥下钥匙' })
+  const second = await post<Chapter>(`${branch}/chapters`, { title: '旧宅归铃' })
+  const firstText = '学徒在桥下拾到三齿钥匙。'
+  const secondText = '😀门内响起第二声。\r\n守铃人接过铜铃。'
+  await put(`/api/chapters/${first.id}`, { base_revision: 0, content: firstText })
+  await put(`/api/chapters/${second.id}`, { base_revision: 0, content: secondText })
+  const idea = '查清旧宅铜铃与桥下钥匙的来处。'
+  await put(`${branch}/conception/project-brief`, {
+    base_revision: 0,
+    idempotency_key: `portable-checkpoint-project-${source.branch_id}`,
+    idea,
+    brief: {
+      position: '归还铜铃',
+      track: '线索悬疑',
+      genre_ids: ['mystery'],
+      audience: '悬疑读者',
+      distinction: '按可回查的原句解开线索',
+      length: '两卷各一章',
+      ending: '铜铃交回原主。',
+    },
+  })
+  const conception = `${branch}/conception`
+  type SettingDraft = {
+    revision: number
+    story_revision: number
+    categories: { id: string; items: unknown[] }[]
+  }
+  const setup = await checked<SettingDraft>(await page.request.get(conception))
+  const persons = setup.categories.find(({ id }) => id === 'characters')!
+  persons.items = [{ id: 'keeper', title: '守铃人', detail: '负责接收旧宅的铜铃。' }]
+  const savedSetup = await put<SettingDraft>(conception, {
+    base_revision: setup.revision,
+    base_story_revision: setup.story_revision,
+    categories: setup.categories,
+  })
+  let adopted = await post<{ confirmation: { id: string } }>(conception + '/confirm', {
+    base_revision: savedSetup.revision,
+    base_story_revision: savedSetup.story_revision,
+    idempotency_key: `portable-checkpoint-settings-${source.branch_id}`,
+  })
+
+  const route = `${branch}/outline-workspace`
+  const outline = {
+    summary: '找到钥匙，带铜铃去旧宅。',
+    volumes: [first, second].map(({ id }, index) => ({
+      id: `portable-vol-${index + 1}`,
+      title: index === 0 ? '拾钥卷' : '归铃卷',
+      summary: '核对并执行卷内线索。',
+      units: [
+        {
+          id: `portable-unit-${index + 1}`,
+          title: '行动',
+          summary: '找到线索。',
+          chapters: [
+            {
+              chapter_id: id,
+              goal: '核对旧物',
+              obstacle: '来路不明',
+              turn: '确认原主人',
+              result: '完成交接',
+              setting_ids: ['keeper'],
+            },
+          ],
+        },
+      ],
+    })),
+  }
+  async function confirmOutline(base: number) {
+    const draft = await put<{ draft: { revision: number } }>(route, {
+      base_revision: base,
+      confirmation_id: adopted.confirmation.id,
+      plan: outline,
+    })
+    return post<{ confirmed: { revision: number } }>(route + '/confirm', {
+      base_revision: draft.draft.revision,
+    })
+  }
+  const earlierPlan = await confirmOutline(0)
+  const inspections = `${branch}/workflow-inspections`
+  const { preview } = await checked<{ preview: { basis_sha256: string } }>(
+    await page.request.get(inspections),
+  )
+  const originalReport = await post<{ id: string }>(inspections, { basis_sha256: preview.basis_sha256 })
+  const snapshots = `${branch}/work-snapshots`
+  type Snapshot = { id: string; manifest_sha256: string }
+  const volume = await post<Snapshot>(snapshots, {
+    label: '末卷旧恢复点',
+    scope: 'volume',
+    scope_id: 'portable-vol-2',
+  })
+  const book = await post<Snapshot>(snapshots, { label: '整书旧恢复点', scope: 'book' })
+  const secret = '未采用设定草稿只留本机。'
+  const state = await checked<SettingDraft>(await page.request.get(conception))
+  state.categories
+    .find(({ id }) => id === 'characters')!
+    .items.push({ id: 'scratch', title: '待确认稿', detail: secret, adoption_state: 'pending' })
+  await put(conception, {
+    base_revision: state.revision,
+    base_story_revision: state.story_revision,
+    categories: state.categories,
+  })
+  const pending = await post<Snapshot>(snapshots, { label: '含未确认编辑的恢复点', scope: 'book' })
+  const rewritten = '当前稿决定明天归还铜铃。'
+  await put(`/api/chapters/${second.id}`, { base_revision: 1, content: rewritten })
+  const withPending = await checked<SettingDraft>(await page.request.get(conception))
+  adopted = await post<{ confirmation: { id: string } }>(conception + '/confirm', {
+    base_revision: withPending.revision,
+    base_story_revision: withPending.story_revision,
+    idempotency_key: `portable-checkpoint-settings-reconfirmed-${source.branch_id}`,
+  })
+  outline.volumes[1].summary = '修改后的卷安排。'
+  await confirmOutline(earlierPlan.confirmed.revision)
+
+  type Entry = { id: string; body: string; sha256: string }
+  type Projection = {
+    source_manifest_sha256: string
+    scoped_chapter_ids: string[]
+    reports: { workflow_inspection?: string }
+    shared: Record<string, string | null>
+  }
+  type Pack = { snapshot_history: { entries: Entry[] } }
+  const pack = await checked<Pack>(await page.request.get(`${branch}/manuscript-package`))
+  const pendingArchive = pack.snapshot_history.entries.find(({ id }) => id === pending.id)
+  expect(pendingArchive?.body).toBeDefined()
+  expect(pendingArchive?.body).not.toContain(secret)
+  const archived = [volume, book].map((point) => {
+    const entry = pack.snapshot_history.entries.find(({ id }) => id === point.id)!
+    expect(entry.sha256).toBe(digest(entry.body))
+    expect(entry.body).not.toContain(secret)
+    const body: Projection = JSON.parse(entry.body)
+    expect(body.source_manifest_sha256).toBe(point.manifest_sha256)
+    expect(body.reports.workflow_inspection).toBe(originalReport.id)
+    expect(Object.values(body.shared).every(Boolean)).toBe(true)
+    return { entry, body }
+  })
+  expect(archived.map(({ body }) => body.scoped_chapter_ids)).toEqual([[second.id], [first.id, second.id]])
+
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(source.id)
+  await page.getByText('离线写作与交换', { exact: true }).click()
+  const sourceFile = testInfo.outputPath('portable-snapshot-source.ainovel-backup')
+  const sourceBackup = page.getByRole('button', { name: '下载独立作品备份', exact: true })
+  await expect(sourceBackup).toBeEnabled()
+  const download = page.waitForEvent('download', { timeout: 15_000 })
+  await sourceBackup.press('Enter')
+  await (await download).saveAs(sourceFile)
+
+  const webFile = testInfo.outputPath('portable-snapshot-web.ainovel-backup')
+  const webContext = await browser.newContext({ baseURL, viewport: { width: 320, height: 900 } })
+  try {
+    const web = await webContext.newPage()
+    await web.goto('/offline/')
+    await expect(web.getByText('离线页面就绪', { exact: true })).toBeVisible()
+    await expect.poll(() => web.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+    await webContext.setOffline(true)
+    await web.reload()
+    await web.getByLabel('从独立备份恢复作品', { exact: true }).setInputFiles(sourceFile)
+    await expect(web.getByText('已校验并恢复独立作品备份。', { exact: true })).toBeVisible()
+    const history = web.getByLabel('已导入的卷书恢复点', { exact: true })
+    await history.getByText('已导入的卷书恢复点', { exact: true }).press('Enter')
+    const picker = history.getByRole('combobox', { name: '选择已归档恢复点', exact: true })
+    const chapters = history.getByRole('list', { name: '恢复点章节', exact: true })
+    await picker.selectOption(volume.id)
+    await expect(chapters.getByRole('button')).toHaveCount(1)
+    await chapters.getByRole('button', { name: '查看「旧宅归铃」原稿', exact: true }).press('Enter')
+    const preserved = history.getByRole('region', { name: '归档恢复点原稿', exact: true })
+    await expect(preserved).toContainText(digest(secondText))
+    expect(await preserved.locator('pre').textContent()).toBe(secondText)
+    await picker.selectOption(book.id)
+    await expect(chapters.getByRole('button')).toHaveCount(2)
+    await expect(preserved).toHaveCount(0)
+    await chapters.getByRole('button', { name: '查看「桥下钥匙」原稿', exact: true }).press('Enter')
+    await expect(preserved).toContainText(firstText)
+    expect(await web.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
+    const webBackup = web.getByRole('button', { name: '下载独立作品备份', exact: true })
+    await expect(webBackup).toBeEnabled()
+    const outgoing = web.waitForEvent('download', { timeout: 15_000 })
+    await webBackup.press('Enter')
+    await (await outgoing).saveAs(webFile)
+  } finally {
+    await webContext.close()
+  }
+
+  const target = await isolatedDesktop(testInfo.outputPath('portable-snapshot-target'), page.request)
+  let context: BrowserContext | undefined
+  try {
+    context = await browser.newContext({ baseURL: target.origin })
+    const desktop = await context.newPage()
+    await desktop.goto('/')
+    await desktop.getByText('离线写作与交换', { exact: true }).click()
+    const input = desktop.getByLabel('导入独立作品备份', { exact: true })
+    const applied = desktop.waitForResponse((response) =>
+      response.url().endsWith('/api/manuscript-backups/import'),
+    )
+    await input.setInputFiles(webFile)
+    const response = await applied
+    expect(response.status()).toBe(201)
+    await expect(desktop.getByText('已从独立备份导入新作品。', { exact: true })).toBeVisible()
+    const resulting = await checked<Pack>(await desktop.request.get(`${branch}/manuscript-package`))
+    for (const { entry } of archived)
+      expect(resulting.snapshot_history.entries.find(({ id }) => id === entry.id)).toEqual(entry)
+    expect((await checked<Chapter>(await desktop.request.get(`/api/chapters/${second.id}`))).content).toBe(
+      rewritten,
+    )
+    expect((await desktop.request.get(`${snapshots}/${volume.id}/preview`)).status()).toBe(404)
+    await desktop.getByRole('button', { name: '故事与审阅', exact: true }).click()
+    const panel = desktop.getByRole('region', { name: '作品快照与回滚', exact: true })
+    await panel.getByText('跨端检查点归档', { exact: true }).press('Enter')
+    await panel.getByRole('combobox', { name: '已归档检查点', exact: true }).selectOption(volume.id)
+    await panel.getByRole('combobox', { name: '核对原稿章节', exact: true }).selectOption(second.id)
+    const original = panel.getByRole('region', { name: '归档章稿对照', exact: true })
+    await expect(original).toContainText('已核验归档原稿')
+    expect(await original.locator('pre').first().textContent()).toBe(secondText)
+  } finally {
+    await Promise.all([context?.close(), target.stop()])
+  }
+})

@@ -1,6 +1,7 @@
 """Work checkpoints with transactional, revision-aware restoration."""
 
 from copy import deepcopy
+from functools import cache
 import hashlib
 import json
 from time import time
@@ -28,6 +29,16 @@ from .outline_workspace import (
     _decode,
     _latest as latest_outline,
     _validate,
+)
+from .portable_checkpoint import (
+    VERSION as PORTABLE_CHECKPOINT_VERSION,
+    PortableCheckpoint,
+    PortableCheckpointEntry,
+    PortableCheckpointHistory,
+    archived_checkpoints,
+    checkpoint_error,
+    decode_checkpoint,
+    read_archived_checkpoint,
 )
 from .project_brief import KIND as PROJECT, confirmed_project_tx
 from .reference_fork import fork_reference_cards
@@ -299,6 +310,66 @@ def _summary(snapshot):
         "setting_id": manifest["confirmed_setting_id"],
         "outline_id": (manifest["confirmed_outline"] or {}).get("id"),
     }
+
+
+def export_checkpoint_history(tx, branch_id):
+    from .outline_sync import _source_id as outline_source_id
+    from .settings_sync import project_source_id, settings_source_id
+
+    @cache
+    def outline_version(identifier):
+        row = tx.execute(
+            "SELECT id,setting_basis FROM outline_revisions WHERE branch_id=? AND id=? AND confirmed=1",
+            (branch_id, identifier),
+        ).fetchone()
+        if not row:
+            raise checkpoint_error("恢复点引用的正式大纲已不可核验。", 409)
+        return outline_source_id(row)
+
+    portable_project = cache(lambda identifier: project_source_id(tx, branch_id, identifier))
+    portable_settings = cache(lambda identifier: settings_source_id(tx, branch_id, identifier))
+    entries = {row.id: row for row in archived_checkpoints(tx, branch_id)}
+    for row in tx.execute(
+        "SELECT id FROM artifacts WHERE branch_id=? AND kind=? AND status='accepted' "
+        "AND json_extract(payload,'$.scope') IN ('volume','book') ORDER BY rowid DESC",
+        (branch_id, KIND),
+    ):
+        if row["id"] in entries:
+            continue
+        saved = _summary(_read_snapshot(tx, branch_id, row["id"]))
+        body = dumps(
+            {
+                **{
+                    key: saved[key]
+                    for key in (
+                        "id",
+                        "label",
+                        "scope",
+                        "scope_id",
+                        "purpose",
+                        "created",
+                        "story_revision",
+                        "scoped_chapter_ids",
+                        "chapters",
+                    )
+                },
+                "version": PORTABLE_CHECKPOINT_VERSION,
+                "branch_id": branch_id,
+                "source_manifest_sha256": saved["manifest_sha256"],
+                "shared": {
+                    "project_id": portable_project(saved["project_id"]),
+                    "settings_id": portable_settings(saved["setting_id"]),
+                    "outline_id": outline_version(saved["outline_id"]) if saved["outline_id"] else None,
+                },
+                "reports": {
+                    kind: identifier
+                    for kind, identifier in saved["reports"].items()
+                    if kind in {"workflow_inspection", "book_completion"}
+                },
+            }
+        )
+        entries[saved["id"]] = PortableCheckpointEntry(id=saved["id"], sha256=_hash(body), body=body)
+    return PortableCheckpointHistory(entries=list(entries.values())) if entries else None
 
 
 def _changed(then, now, key):
@@ -989,6 +1060,51 @@ def restore(domain, branch_id, snapshot_id, data):
 
 def register_routes(app, domain):
     endpoint = "/api/branches/{branch_id}/work-snapshots"
+    archive_endpoint = "/api/branches/{branch_id}/portable-checkpoints"
+
+    @app.get(archive_endpoint)
+    def list_portable_checkpoints(branch_id: str) -> list[PortableCheckpoint]:
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            _branch(tx, branch_id)
+            checkpoints = [
+                decode_checkpoint(row, branch_id, status=409) for row in archived_checkpoints(tx, branch_id)
+            ]
+            return sorted(checkpoints, key=lambda row: (-row.created, row.id))
+
+    @app.get(archive_endpoint + "/{snapshot_id}")
+    def portable_checkpoint(branch_id: str, snapshot_id: str) -> PortableCheckpoint:
+        with domain.db.connect() as tx:
+            return read_archived_checkpoint(tx, branch_id, snapshot_id)
+
+    @app.get(archive_endpoint + "/{snapshot_id}/chapters/{chapter_id}")
+    def diff_portable_checkpoint_chapter(branch_id: str, snapshot_id: str, chapter_id: str):
+        from .manuscript_exchange import native_revision
+
+        with domain.db.connect() as tx:
+            tx.execute("BEGIN")
+            checkpoint = read_archived_checkpoint(tx, branch_id, snapshot_id)
+            if chapter_id not in checkpoint.scoped_chapter_ids:
+                raise DomainError("not_found", "该章节未包含在所选恢复点范围。", 404)
+            captured = next((row for row in checkpoint.chapters if row.id == chapter_id), None)
+            if not captured:
+                raise checkpoint_error("未取得此章的原始修订。", 409)
+            current = tx.execute(
+                "SELECT revision,content,archived FROM chapters WHERE branch_id=? AND id=?",
+                (branch_id, chapter_id),
+            ).fetchone()
+            original = native_revision(tx, branch_id, captured.revision_id)
+            if not original or (original.chapter_id, original.revision, original.sha256) != (
+                captured.id,
+                captured.revision,
+                captured.sha256,
+            ):
+                raise checkpoint_error("无法校验此章的原始修订。", 409)
+            return {
+                "title": captured.title,
+                "snapshot": {"revision": captured.revision, "content": original.content},
+                "current": dict(current) if current else None,
+            }
 
     @app.get(endpoint)
     def list_work_snapshots(branch_id: str):

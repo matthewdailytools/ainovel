@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { createHash } from 'node:crypto'
 
+import type { PortableCheckpoint } from '../../frontend/portableCheckpoint'
 import { authorSettingPlan } from './fixtures/authorSettingPlan'
 
 test('卷快照预览列出受影响报告，检查并发基线后仅恢复该卷稿件', async ({ page }) => {
@@ -137,6 +138,52 @@ test('卷快照预览列出受影响报告，检查并发基线后仅恢复该�
     id: otherReport.id,
     current: true,
   })
+
+  const archived: PortableCheckpoint = {
+    version: 'ainovel-portable-checkpoint/1',
+    id: 'archive-missing-origin',
+    branch_id: novel.branch_id,
+    label: '外部归档 · 缺少原稿',
+    scope: 'volume',
+    scope_id: volumes[0].id,
+    purpose: 'manual',
+    created: 1760000000,
+    source_manifest_sha256: '0'.repeat(64),
+    story_revision: 1,
+    scoped_chapter_ids: [chapter.id],
+    chapters: [
+      {
+        ...chapter,
+        position: 1,
+        revision: firstRevision,
+        revision_id: 'unavailable-origin',
+        sha256: createHash('sha256').update(first).digest('hex'),
+        archived: 0,
+        stale: 0,
+      },
+    ],
+    shared: { project_id: null, settings_id: null, outline_id: null },
+    reports: {},
+  }
+  await page.route('**/portable-checkpoints', (route) => route.fulfill({ json: [archived] }))
+  let attempts = 0
+  await page.route(`**/portable-checkpoints/${archived.id}/chapters/${chapter.id}`, (route) => {
+    attempts++
+    return route.fulfill({ status: 409, json: { code: 'snapshot_source', message: '原稿缺失。' } })
+  })
+  await panel.getByText('跨端检查点归档', { exact: true }).press('Enter')
+  const archivePanel = panel.getByRole('region', { name: '跨端检查点归档（只读）' })
+  await archivePanel.getByRole('combobox', { name: '已归档检查点' }).selectOption(archived.id)
+  await archivePanel.getByRole('combobox', { name: '核对原稿章节' }).selectOption(chapter.id)
+  await expect(archivePanel.getByRole('alert')).toContainText('无法核验归档原稿')
+  await expect(archivePanel.getByRole('region', { name: '归档章稿对照' })).toHaveCount(0)
+  await expect(archivePanel.getByRole('button', { name: '提交恢复' })).toHaveCount(0)
+  await expect(
+    panel.getByRole('combobox', { name: '已保存快照' }).getByRole('option', { name: archived.label }),
+  ).toHaveCount(0)
+  await archivePanel.getByRole('button', { name: '重试读取原稿' }).press('Enter')
+  await expect.poll(() => attempts).toBe(2)
+  await expect(archivePanel.getByRole('alert')).toContainText('核对原稿件包')
 })
 
 test('作品快照要求重新预览晚到的正文使用证明，并展示原位恢复与另存的影响', async ({ page }) => {

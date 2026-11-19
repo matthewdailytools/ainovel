@@ -3,6 +3,7 @@ import { api, ApiError, type Chapter } from './api'
 import type { components } from './api-schema'
 import { RestoreReportList, type RestoreAffectedReport } from './ChapterRestorePreview'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
+import { PortableCheckpointPanel } from './PortableCheckpointPanel'
 
 type Scope = 'book' | 'volume' | 'chapter'
 type Mode = 'in_place' | 'new_branch'
@@ -408,6 +409,7 @@ export function WorkSnapshotPanel({
           </form>
         </section>
       )}
+      <PortableCheckpointPanel key={branchId} branchId={branchId} />
     </section>
   )
 }

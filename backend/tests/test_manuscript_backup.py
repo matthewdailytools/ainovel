@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from dataclasses import replace
 from hashlib import sha256
 import json
@@ -11,6 +12,8 @@ from ainovel import manuscript_backup
 from ainovel.api import create_app
 from ainovel.manuscript_backup import BACKUP_IMPORT_PATH, BACKUP_MEDIA_TYPE, BackupReader
 from ainovel.manuscript_exchange import export_manuscript
+from test_outline_workspace import chapter_plan, put_and_confirm, setting_confirmation
+from test_project_brief import BRIEF, IDEA
 from test_reference_flow import reference as reference_fixture, update
 from test_reference_sync import archive, card
 from test_workflow_archive import _members, _send_reports
@@ -40,6 +43,143 @@ def raw_frames(rows):
 
 def _identify(client):
     client.headers["X-Ainovel-CSRF"] = client.get("/api/session").json()["csrf"]
+
+
+def test_checkpoints_keep_exact_sources_and_portable_links_through_independent_backup(
+    client, settings, domain, story
+):
+    branch_id = story["branch_id"]
+    branch = f"/api/branches/{branch_id}"
+    first_id = story["chapter_id"]
+    second_id = domain.create_chapter(branch_id, "第二卷章序")["id"]
+    original = domain.save(first_id, 0, "😀卷末，学徒把铜铃交给师姐。")
+    second = domain.save(second_id, 0, "师姐来到旧宅门前。")
+    project = client.put(
+        branch + "/conception/project-brief",
+        json={
+            "base_revision": 0,
+            "idempotency_key": "portable-checkpoint-fixture",
+            "idea": IDEA,
+            "brief": BRIEF,
+        },
+    )
+    assert project.is_success, project.text
+    setting_id = setting_confirmation(client, branch_id)
+    plan = {
+        "summary": "查找铃声来源。",
+        "volumes": [
+            {
+                "id": f"volume-{number}",
+                "title": f"第 {number} 卷",
+                "summary": "追踪铜铃的去向。",
+                "units": [
+                    {
+                        "id": f"unit-{number}",
+                        "title": "去向",
+                        "summary": "寻找手持铜铃的人。",
+                        "chapters": [chapter_plan(chapter, "找到师姐")],
+                    }
+                ],
+            }
+            for number, chapter in enumerate((first_id, second_id), 1)
+        ],
+    }
+    outline = put_and_confirm(
+        client,
+        branch + "/outline-workspace",
+        {"base_revision": 0, "confirmation_id": setting_id, "plan": plan},
+    )["confirmed"]
+    route = branch + "/work-snapshots"
+    inspection_route = branch + "/workflow-inspections"
+    inspected = client.get(inspection_route).json()["preview"]
+    report = client.post(inspection_route, json={"basis_sha256": inspected["basis_sha256"]})
+    assert report.status_code == 201, report.text
+    checkpoints = {}
+    for scope, scope_id in (("book", None), ("volume", "volume-1"), ("chapter", first_id)):
+        saved = client.post(
+            route, json={"label": f"原始恢复点 {scope}", "scope": scope, "scope_id": scope_id}
+        )
+        assert saved.status_code == 201, saved.text
+        checkpoints[scope] = saved.json()
+    assert checkpoints["book"]["reports"]["workflow_inspection"] == report.json()["id"]
+    changed = domain.save(first_id, original["revision"], "改稿后，学徒仍在门外。")
+    download = client.get(branch + "/manuscript-backup")
+    assert download.status_code == 200, download.text
+    reader = BackupReader()
+    reader.feed(download.content)
+    package = reader.package()
+    entries = {row.id: row.model_dump() for row in package.snapshot_history.entries}
+    assert checkpoints["chapter"]["id"] not in entries
+    book_id, volume_id = [checkpoints[scope]["id"] for scope in ("book", "volume")]
+    book = json.loads(entries[book_id]["body"])
+    volume = json.loads(entries[volume_id]["body"])
+    assert book["scoped_chapter_ids"] == [first_id, second_id]
+    assert volume["scoped_chapter_ids"] == [first_id]
+    assert volume["source_manifest_sha256"] == checkpoints["volume"]["manifest_sha256"]
+    assert volume["shared"] == {
+        "project_id": project.json()["id"],
+        "settings_id": setting_id,
+        "outline_id": outline["id"],
+    }
+    assert volume["reports"] == {"workflow_inspection": report.json()["id"]}
+    assert original["content"] not in entries[volume_id]["body"]
+
+    rows = [json.loads(line.split(b" ", 1)[1]) for line in download.content.split(b"\n")[1:-2]]
+    item_index = next(
+        index
+        for index, row in enumerate(rows)
+        if row[:2] == ["snapshot_history.entries", "item"] and row[2]["id"] == volume_id
+    )
+    with TestClient(
+        create_app(replace(settings, data_dir=settings.data_dir / "portable-checkpoints"))
+    ) as target:
+        _identify(target)
+        unrelated = target.post("/api/novels", json={"title": "独立存档保留作品"}).json()["id"]
+        for field, value in (
+            ("branch_id", "foreign-branch"),
+            ("scoped_chapter_ids", [second_id]),
+            ("shared", {**volume["shared"], "outline_id": "missing-outline"}),
+            ("chapters", [{**volume["chapters"][0], "sha256": "0" * 64}, volume["chapters"][1]]),
+            ("workspace", {"draft": "不会作为归档字段写入"}),
+        ):
+            forged = deepcopy(rows)
+            body = json.dumps({**volume, field: value}, ensure_ascii=False)
+            forged[item_index][2].update(body=body, sha256=sha256(body.encode()).hexdigest())
+            rejected = target.post(BACKUP_IMPORT_PATH, headers=BINARY, content=framed(forged))
+            assert rejected.status_code == 400 and rejected.json()["code"] == "snapshot_source"
+        corrupted = deepcopy(rows)
+        corrupted[item_index][2]["body"] += " "
+        rejected = target.post(BACKUP_IMPORT_PATH, headers=BINARY, content=framed(corrupted))
+        assert rejected.status_code == 400 and rejected.json()["code"] == "snapshot_source"
+        repeated = [*rows, rows[item_index]]
+        rejected = target.post(BACKUP_IMPORT_PATH, headers=BINARY, content=framed(repeated))
+        assert rejected.status_code == 400 and rejected.json()["code"] == "snapshot_source"
+        assert [row["id"] for row in target.get("/api/novels").json()] == [unrelated]
+
+        accepted = target.post(BACKUP_IMPORT_PATH, headers=BINARY, content=download.content)
+        assert accepted.status_code == 201, accepted.text
+        archived = branch + "/portable-checkpoints"
+        assert {row["id"] for row in target.get(archived).json()} == set(entries)
+        assert target.get(f"{archived}/{volume_id}").json() == volume
+        assert target.get(f"{route}/{volume_id}/preview").status_code == 404
+        chapter_route = f"{archived}/{volume_id}/chapters/"
+        assert target.get(chapter_route + first_id).json() == {
+            "title": original["title"],
+            "snapshot": {"revision": original["revision"], "content": original["content"]},
+            "current": {"revision": changed["revision"], "content": changed["content"], "archived": 0},
+        }
+        assert target.get(chapter_route + second_id).status_code == 404
+        assert (
+            target.get(f"{archived}/{book_id}/chapters/{second_id}").json()["snapshot"]["content"]
+            == second["content"]
+        )
+        assert target.get(f"{branch}/workflow-inspections/{report.json()['id']}").is_success
+        reexport = target.get(branch + "/manuscript-backup")
+        assert reexport.status_code == 200, reexport.text
+        read_again = BackupReader()
+        read_again.feed(reexport.content)
+        returned = {row.id: row.model_dump() for row in read_again.package().snapshot_history.entries}
+        assert {key: returned[key] for key in entries} == entries
 
 
 def test_large_backup_replaces_neither_existing_work_nor_the_ordinary_upload_limit(

@@ -34,6 +34,7 @@ import { OfflineSettings, type OfflineSettingsHandle } from './OfflineSettings'
 import { OfflineOutline } from './OfflineOutline'
 import { OfflineSettingUse, type SavedSelection } from './OfflineSettingUse'
 import { OfflineWorkflowHistory } from './OfflineWorkflowHistory'
+import { OfflineCheckpointHistory } from './OfflineCheckpointHistory'
 import { OfflineReferenceHistory } from './OfflineReferenceHistory'
 import { OfflineStory } from './OfflineStory'
 import { OfflineRulePreview } from './OfflineRulePreview'
@@ -462,6 +463,11 @@ export function OfflineWorkspace() {
                 projectId={selected.novel.id}
                 refreshToken={workbenchRefresh}
                 download={download}
+              />
+              <OfflineCheckpointHistory
+                key={`checkpoints-${selected.branch.id}`}
+                projectId={selected.novel.id}
+                refreshToken={workbenchRefresh}
               />
               <WebSyncPanel
                 key={selected.branch.id}

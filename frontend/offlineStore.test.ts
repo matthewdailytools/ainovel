@@ -4,9 +4,11 @@ import {
   createLocalChapter,
   createLocalProject,
   confirmLocalProjectBrief,
+  confirmLocalOutline,
   applySyncedObject,
   exportLocalBackup,
   exportLocalManuscript,
+  hasLocalSnapshotHistory,
   importLocalBackup,
   importLocalManuscript,
   listLocalProjects,
@@ -15,12 +17,15 @@ import {
   readLocalPublications,
   readLocalHistory,
   readLocalProjectBrief,
+  readLocalSnapshotHistory,
+  readLocalSourceRevision,
   restoreLocalChapter,
   saveLocalChapter,
   validateManuscript,
   validateSyncedObject,
 } from './offlineStore'
 import { encodeWebManuscriptBackup } from './webManuscriptBackup'
+import type { PortableCheckpoint } from './portableCheckpoint'
 
 beforeEach(() => vi.stubGlobal('indexedDB', new IDBFactory()))
 
@@ -114,6 +119,175 @@ test('independent backup rejects truncation, corruption and broken references be
   expect((await readLocalHistory(initial.novel.id, chapter.id)).at(-1)).toEqual(latest)
   await expect(importLocalBackup(archive)).rejects.toMatchObject({ code: 'conflict' })
   expect(await exportLocalManuscript(initial.novel.id)).toEqual(original)
+})
+
+async function checkpointFixture() {
+  const work = await createLocalProject('旧城遗铃')
+  const chapter = await createLocalChapter(work.novel.id, '故人说铃')
+  const second = await createLocalChapter(work.novel.id, '新城作坊')
+  const [firstRoot] = await readLocalHistory(work.novel.id, chapter.id)
+  const [secondRoot] = await readLocalHistory(work.novel.id, second.id)
+  const original = await saveLocalChapter(work.novel.id, chapter.id, firstRoot.id, '原稿𠮷😀\r\n遗铃在门外。')
+  await confirmLocalOutline(work.novel.id, null, {
+    id: 'sealed-outline',
+    parent_id: null,
+    project_version_id: null,
+    settings_version_id: null,
+    reference_cards: [],
+    promise_sources: {},
+    plan: {
+      summary: '追查旧城遗铃',
+      promises: [],
+      volumes: [
+        {
+          id: 'old-city',
+          title: '旧城',
+          summary: '回查原始铸记',
+          units: [
+            {
+              id: 'old-bell',
+              title: '旧铃',
+              summary: '沿听来的铃声追查',
+              chapters: [
+                {
+                  chapter_id: chapter.id,
+                  goal: '确定铃的来源',
+                  obstacle: '铃声失真',
+                  turn: '看清刻痕',
+                  result: '找到铸造者',
+                  setting_ids: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  })
+  const captured = await exportLocalManuscript(work.novel.id)
+  await saveLocalChapter(work.novel.id, chapter.id, original.id, '正文已更新。')
+  const pack = await exportLocalManuscript(work.novel.id)
+  const { branch_id, ...first } = captured.chapters[0]
+  const { branch_id: _otherBranchId, ...other } = captured.chapters[1]
+  const volume: PortableCheckpoint = {
+    version: 'ainovel-portable-checkpoint/1',
+    id: 'volume-history',
+    branch_id,
+    label: '检查点 · 旧城😀',
+    scope: 'volume',
+    scope_id: 'old-city',
+    purpose: 'manual',
+    created: 1,
+    source_manifest_sha256: await manuscriptHash('桌面原清单'),
+    story_revision: captured.branch.story_revision,
+    scoped_chapter_ids: [chapter.id],
+    chapters: [
+      { ...first, revision_id: original.id, sha256: original.sha256 },
+      { ...other, revision_id: secondRoot.id, sha256: secondRoot.sha256 },
+    ],
+    shared: { project_id: null, settings_id: null, outline_id: 'sealed-outline' },
+    reports: {},
+  }
+  const book: PortableCheckpoint = {
+    ...volume,
+    id: 'book-history',
+    label: '全书归档',
+    scope: 'book',
+    scope_id: null,
+    purpose: 'milestone',
+    created: 2,
+    scoped_chapter_ids: [chapter.id, second.id],
+  }
+  const snapshot_history = { entries: [await sealCheckpoint(volume), await sealCheckpoint(book)] }
+  return { pack: { ...pack, snapshot_history }, volume, book, original, secondRoot }
+}
+
+async function sealCheckpoint(
+  checkpoint: PortableCheckpoint,
+  raw = `${JSON.stringify(checkpoint, null, 2)}\r\n`,
+) {
+  return { id: checkpoint.id, sha256: await manuscriptHash(raw), body: raw }
+}
+
+test('sealed checkpoints survive manuscript and independent backup and point to the exact earlier chapter', async () => {
+  const { pack, volume, book, original } = await checkpointFixture()
+  expect(await hasLocalSnapshotHistory(pack.novel.id)).toBe(false)
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  await importLocalManuscript(bundle(pack))
+  expect(await hasLocalSnapshotHistory(pack.novel.id)).toBe(true)
+  expect(await readLocalSnapshotHistory(pack.novel.id)).toEqual([book, volume])
+  expect(await readLocalSourceRevision(pack.novel.id, volume.chapters[0].revision_id)).toEqual(original)
+  expect((await readLocalHistory(pack.novel.id, original.chapter_id)).at(-1)?.content).toBe('正文已更新。')
+  expect((await exportLocalManuscript(pack.novel.id)).snapshot_history).toEqual(pack.snapshot_history)
+  const backup = await exportLocalBackup(pack.novel.id)
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  await importLocalBackup(backup)
+  expect(await readLocalSnapshotHistory(pack.novel.id)).toEqual([book, volume])
+  expect((await exportLocalManuscript(pack.novel.id)).snapshot_history).toEqual(pack.snapshot_history)
+})
+
+test('a checkpoint with invalid seals, ownership, scoped chapter order or missing basis rejects the entire pack', async () => {
+  const { pack, volume, book, original, secondRoot } = await checkpointFixture()
+  const valid = pack.snapshot_history.entries[0]
+  const invalid = [
+    { ...valid, sha256: 'a'.repeat(64) },
+    await sealCheckpoint({ ...volume, branch_id: 'another-branch' }),
+    await sealCheckpoint({ ...volume, source_manifest_sha256: 'malformed-source-sha' }),
+    await sealCheckpoint({
+      ...volume,
+      chapters: [
+        {
+          ...volume.chapters[0],
+          ...{ revision_id: secondRoot.id, revision: secondRoot.revision, sha256: secondRoot.sha256 },
+        },
+        volume.chapters[1],
+      ],
+    }),
+    await sealCheckpoint({ ...volume, scoped_chapter_ids: [secondRoot.chapter_id] }),
+    await sealCheckpoint({ ...volume, shared: { ...volume.shared, outline_id: 'discarded-outline' } }),
+    await sealCheckpoint({ ...volume, reports: { workflow_inspection: 'draft-reports-arent-accepted' } }),
+    await sealCheckpoint({ ...book, scoped_chapter_ids: book.scoped_chapter_ids.slice().reverse() }),
+    await sealCheckpoint(volume, valid.body.replace('"label":', '"l\\u0061bel":"隐匿文字", "label":')),
+  ]
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  const other = await createLocalProject('保留已保存作品')
+  for (const entry of invalid) {
+    const archive = await encodeWebManuscriptBackup(
+      { ...pack, snapshot_history: { entries: [entry] } },
+      manuscriptHash,
+    )
+    await expect(importLocalBackup(archive)).rejects.toMatchObject({ code: 'format' })
+  }
+  const remote = { ...original, id: 'source-only-revision' }
+  const sourceOnly = await sealCheckpoint({
+    ...volume,
+    chapters: volume.chapters.map((chapter) =>
+      chapter.id === remote.chapter_id ? { ...chapter, revision_id: remote.id } : chapter,
+    ),
+  })
+  await expect(
+    importLocalManuscript(
+      bundle({ ...pack, source_revisions: [remote], snapshot_history: { entries: [sourceOnly] } }),
+    ),
+  ).rejects.toMatchObject({ code: 'format' })
+  expect(await listLocalProjects()).toEqual([other])
+  expect(await readLocalSnapshotHistory(other.novel.id)).toEqual([])
+  const add = IDBObjectStore.prototype.add
+  const failure = vi.spyOn(IDBObjectStore.prototype, 'add').mockImplementation(function (
+    this: IDBObjectStore,
+    value,
+    key,
+  ) {
+    if (this.name === 'snapshotArchives') throw new DOMException('Storage full', 'QuotaExceededError')
+    return add.call(this, value, key)
+  })
+  try {
+    await expect(importLocalManuscript(bundle(pack))).rejects.toMatchObject({ code: 'quota' })
+    expect(await listLocalProjects()).toEqual([other])
+  } finally {
+    failure.mockRestore()
+  }
+  await expect(importLocalManuscript(bundle(pack))).resolves.toMatchObject({ novel: pack.novel })
 })
 
 test('quota failure aborts the whole browser write and preserves existing formal versions', async () => {

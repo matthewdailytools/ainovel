@@ -28,6 +28,7 @@ import {
   validateOutlineSyncObject,
   type OutlineHeadObject,
   type OutlineHistory,
+  type OutlineVersion,
   type OutlineVersionObject,
 } from './outlineSyncModel'
 import {
@@ -73,6 +74,14 @@ import {
   type StoryVersionObject,
 } from './storySyncModel'
 import { decodeWebManuscriptBackup, encodeWebManuscriptBackup } from './webManuscriptBackup'
+import {
+  decodePortableCheckpointHistory,
+  verifyPortableCheckpoints,
+  type PortableCheckpoint,
+  type PortableCheckpointEntry,
+  type PortableCheckpointHistory,
+  type PortableCheckpointSources,
+} from './portableCheckpoint'
 import {
   createSettingUseOfflineStore,
   settingUseReadStores,
@@ -143,6 +152,7 @@ export type ManuscriptPack = LocalProject & {
   story_history?: StoryHistory
   setting_use_history?: SettingUseHistory
   reference_history?: ReferenceHistory
+  snapshot_history?: PortableCheckpointHistory
 }
 const SYNC_FORMAT = 'ainovel-manuscript-sync/1'
 export type SyncedObject =
@@ -263,6 +273,7 @@ type Store =
   | 'storyHistory'
   | 'storyChapterAliases'
   | 'referenceArchives'
+  | 'snapshotArchives'
   | (typeof settingUseStores)[number]
 type LocalProjectVersion = ProjectVersionRecord & { branchId: string }
 type LocalProjectHead = { branchId: string; versionId: string }
@@ -273,6 +284,7 @@ type LocalWorkflowEntry<Entry extends ArchivedInspection | ArchivedCompletion> =
   entryJson?: string
   source?: ProjectSource
 }
+type LocalSnapshotEntry = { branchId: string; sequence: number; entry: PortableCheckpointEntry }
 export type LocalPublication = { branchId: string; objectId: string; id: string }
 type ApplyOptions = { source?: ProjectSource; publicationId?: string | null; consumePublication?: boolean }
 const projectStores = ['projects', 'projectHeads', 'projectVersions'] satisfies Store[]
@@ -307,7 +319,7 @@ function result<T>(request: IDBRequest<T>): Promise<T> {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 8)
+    const request = indexedDB.open(DATABASE, 9)
     let blocked = false
     request.onblocked = () => {
       blocked = true
@@ -393,6 +405,12 @@ function openDatabase(): Promise<IDBDatabase> {
           store.createIndex('byBranch', 'branchId')
           store.createIndex('byChapter', ['branchId', 'chapterId'])
         }
+      }
+      if (event.oldVersion < 9) {
+        db.createObjectStore('snapshotArchives', { keyPath: ['branchId', 'entry.id'] }).createIndex(
+          'byBranch',
+          'branchId',
+        )
       }
     }
     request.onsuccess = () => {
@@ -949,6 +967,142 @@ async function readManuscript(tx: IDBTransaction, project: LocalProject): Promis
   }
 }
 
+async function readSnapshotHistoryTx(
+  tx: IDBTransaction,
+  branchId: string,
+): Promise<PortableCheckpointHistory> {
+  const entries = await result<LocalSnapshotEntry[]>(
+    tx.objectStore('snapshotArchives').index('byBranch').getAll(branchId),
+  )
+  return { entries: entries.sort((left, right) => left.sequence - right.sequence).map(({ entry }) => entry) }
+}
+
+function decodeSnapshotHistory(history: unknown) {
+  try {
+    return decodePortableCheckpointHistory(history)
+  } catch (error) {
+    return invalid(error instanceof Error ? error.message : '无法读取卷书检查点。')
+  }
+}
+
+async function verifySnapshotHistory(
+  sealed: ReturnType<typeof decodeSnapshotHistory>,
+  sources: PortableCheckpointSources,
+) {
+  try {
+    await verifyPortableCheckpoints(sealed, sources, manuscriptHash)
+  } catch (error) {
+    invalid(error instanceof Error ? error.message : '无法校验卷书检查点。')
+  }
+  return { entries: sealed.map(({ entry }) => entry) }
+}
+
+function checkpointArtifactSources(
+  pack: Pick<ManuscriptPack, 'project_history' | 'settings_history' | 'outline_history' | 'workflow_history'>,
+) {
+  return {
+    projects: new Set(pack.project_history?.versions.map(({ id }) => id)),
+    settings: new Set(pack.settings_history?.versions.map(({ id }) => id)),
+    outlines: new Map(pack.outline_history?.versions.map((row) => [row.id, row])),
+    inspections: new Set(pack.workflow_history?.inspections.map(({ id }) => id)),
+    completions: new Set(pack.workflow_history?.completions.map(({ id }) => id)),
+  }
+}
+
+async function storedCheckpointArtifactIds(
+  tx: IDBTransaction,
+  store: Store,
+  branchId: string,
+  ids: (string | null | undefined)[],
+) {
+  const known = new Set<string>()
+  for (const id of new Set(ids)) {
+    if (id && (await result(tx.objectStore(store).getKey([branchId, id])))) known.add(id)
+  }
+  return known
+}
+
+export function hasLocalSnapshotHistory(projectId: string): Promise<boolean> {
+  return transact(['projects', 'snapshotArchives'], 'readonly', async (tx) => {
+    const { branch } = await readProject(tx, projectId)
+    return (
+      (await result(tx.objectStore('snapshotArchives').index('byBranch').getKey(branch.id))) !== undefined
+    )
+  })
+}
+
+export async function readLocalSnapshotHistory(projectId: string): Promise<PortableCheckpoint[]> {
+  const archive = await transact(
+    [
+      ...manuscriptStores,
+      ...workflowStores,
+      'snapshotArchives',
+      'projectVersions',
+      'settingsVersions',
+      'outlineVersions',
+    ],
+    'readonly',
+    async (tx) => {
+      const { branch } = await readProject(tx, projectId)
+      const stored = await readSnapshotHistoryTx(tx, branch.id)
+      if (!stored.entries.length) return null
+      const sealed = decodeSnapshotHistory(stored)
+      const revisions = new Map<string, LocalRevision>()
+      const outlines = new Map<string, OutlineVersion>()
+      const chapterIds = new Set((await listChaptersTx(tx, branch.id)).map(({ id }) => id))
+      const revisionIds = new Set<string>()
+      const outlineIds = new Set<string>()
+      for (const { checkpoint } of sealed) {
+        for (const { revision_id } of checkpoint.chapters) revisionIds.add(revision_id)
+        if (checkpoint.shared.outline_id) outlineIds.add(checkpoint.shared.outline_id)
+      }
+      for (const id of revisionIds) {
+        const revision = await result<LocalRevision | undefined>(tx.objectStore('revisions').get(id))
+        if (revision) revisions.set(id, revision)
+      }
+      for (const id of outlineIds) {
+        const outline = await outlineStore.readOutlineVersion(tx, branch.id, id)
+        if (outline) outlines.set(id, outline.version)
+      }
+      const [projects, settings, inspections, completions] = await Promise.all([
+        storedCheckpointArtifactIds(
+          tx,
+          'projectVersions',
+          branch.id,
+          sealed.map(({ checkpoint }) => checkpoint.shared.project_id),
+        ),
+        storedCheckpointArtifactIds(
+          tx,
+          'settingsVersions',
+          branch.id,
+          sealed.map(({ checkpoint }) => checkpoint.shared.settings_id),
+        ),
+        storedCheckpointArtifactIds(
+          tx,
+          'workflowInspections',
+          branch.id,
+          sealed.map(({ checkpoint }) => checkpoint.reports.workflow_inspection),
+        ),
+        storedCheckpointArtifactIds(
+          tx,
+          'workflowCompletions',
+          branch.id,
+          sealed.map(({ checkpoint }) => checkpoint.reports.book_completion),
+        ),
+      ])
+      return {
+        sealed,
+        sources: { branch, chapterIds, revisions, outlines, projects, settings, inspections, completions },
+      }
+    },
+  )
+  if (!archive) return []
+  await verifySnapshotHistory(archive.sealed, archive.sources)
+  return archive.sealed
+    .map(({ checkpoint }) => checkpoint)
+    .sort((left, right) => right.created - left.created)
+}
+
 function readManuscriptPackage(
   projectId: string,
   includeReferenceEvidenceFor: readonly string[] = [],
@@ -961,6 +1115,7 @@ function readManuscriptPackage(
       ...storyReadStores,
       ...settingUseStores,
       'referenceArchives' as const,
+      'snapshotArchives' as const,
     ]),
   ]
   return transact(stores, 'readonly', async (tx) => {
@@ -974,6 +1129,7 @@ function readManuscriptPackage(
       storyHistory,
       referenceHistory,
       settingUseHistory,
+      snapshotHistory,
     ] = await Promise.all([
       readManuscript(tx, project),
       readProjectBrief(tx, project.branch.id),
@@ -983,6 +1139,7 @@ function readManuscriptPackage(
       storyStore.readStoryHistoryTx(tx, project),
       readReferenceHistory(tx, project.branch.id),
       settingUseStore.readSettingUseHistoryTx(tx, project.branch.id),
+      readSnapshotHistoryTx(tx, project.branch.id),
     ])
     const sourceDevices = settings.versions.flatMap(({ version, source, recordedDevice }) => {
       const device = source?.device_id ?? recordedDevice
@@ -1025,6 +1182,7 @@ function readManuscriptPackage(
         : {}),
       ...(storyHistory ? { story_history: storyHistory } : {}),
       ...(settingUseHistory ? { setting_use_history: settingUseHistory } : {}),
+      ...(snapshotHistory.entries.length ? { snapshot_history: snapshotHistory } : {}),
       ...(referenceHistory
         ? {
             reference_history: {
@@ -1044,6 +1202,14 @@ export async function exportLocalManuscript(
   includeReferenceEvidenceFor: readonly string[] = [],
 ): Promise<ManuscriptPack> {
   const pack = await readManuscriptPackage(projectId, includeReferenceEvidenceFor)
+  if (pack.snapshot_history) {
+    await verifySnapshotHistory(decodeSnapshotHistory(pack.snapshot_history), {
+      branch: pack.branch,
+      chapterIds: new Set(pack.chapters.map(({ id }) => id)),
+      revisions: new Map(pack.revisions.map((row) => [row.id, row])),
+      ...checkpointArtifactSources(pack),
+    })
+  }
   if (
     pack.workflow_history?.inspections.some(({ report }) => hasInspectionReferenceQuote(report)) ||
     pack.evidence?.some(hasProjectedInspectionReferenceQuote)
@@ -2102,6 +2268,7 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     'story_history',
     'setting_use_history',
     'reference_history',
+    'snapshot_history',
   ])
   if (pack.format !== FORMAT) invalid('稿件交换包格式无法读取，请使用兼容版本。')
   const n = fields(pack.novel, ['id', 'title', 'brief', 'created'])
@@ -2283,6 +2450,20 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
       invalid(error instanceof Error ? error.message : '历史体检或完本档案无法读取。')
     }
   }
+  const snapshot_history =
+    pack.snapshot_history === undefined
+      ? undefined
+      : await verifySnapshotHistory(decodeSnapshotHistory(pack.snapshot_history), {
+          branch,
+          chapterIds: new Set(chaptersById.keys()),
+          revisions: new Map(revisions.map((row) => [row.id, row])),
+          ...checkpointArtifactSources({
+            project_history,
+            settings_history,
+            outline_history,
+            workflow_history,
+          }),
+        })
   return {
     format: FORMAT,
     novel,
@@ -2298,6 +2479,7 @@ export async function validateManuscript(value: unknown): Promise<ManuscriptPack
     ...(story_history ? { story_history } : {}),
     ...(setting_use_history ? { setting_use_history } : {}),
     ...(reference_history ? { reference_history } : {}),
+    ...(snapshot_history?.entries.length ? { snapshot_history } : {}),
   }
 }
 
@@ -2421,6 +2603,7 @@ async function writeLocalManuscript(
     story_history,
     setting_use_history,
     reference_history,
+    snapshot_history,
   } = pack
   const settingUseSlots = new Map(
     await Promise.all(
@@ -2438,6 +2621,7 @@ async function writeLocalManuscript(
       ...storyWriteStores,
       ...settingUseStores,
       'referenceArchives' as const,
+      'snapshotArchives' as const,
     ]),
   ]
   return transact(stores, 'readwrite', async (tx) => {
@@ -2499,6 +2683,12 @@ async function writeLocalManuscript(
       for (const entry of workflow_history.completions)
         await result(tx.objectStore('workflowCompletions').add({ branchId: branch.id, entry }))
     }
+    for (const [sequence, entry] of (snapshot_history?.entries ?? []).entries())
+      await result(
+        tx
+          .objectStore('snapshotArchives')
+          .add({ branchId: branch.id, sequence, entry } satisfies LocalSnapshotEntry),
+      )
     return project
   })
 }
