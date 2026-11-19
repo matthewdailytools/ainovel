@@ -115,6 +115,8 @@ def _seven_stage_evidence(domain, entry, folder):
                             "SELECT result FROM receipts WHERE artifact_id=?", (identifier,)
                         )
                         if (record := json.loads(raw["result"])).get("revision") == revision
+                        and record.get("artifact_id") == identifier
+                        and record.get("chapter_id") == chapter_id
                     ),
                     None,
                 )
@@ -218,7 +220,7 @@ def _seven_stage_report(entry):
     task = entry["task"]
     run = entry["seven_stage"]
     lines = [
-        f"# {entry['branch']['name']} · 七台接力验收",
+        "# 七台接力验收",
         "",
         f"批次 `{task['id']}` · {task['status']} · 阶段 {run['stage']}",
         f"本批次记录 {len(run['completed_chapters'])} 个已保存章稿修订。",
@@ -256,8 +258,122 @@ def _seven_stage_report(entry):
         )
     else:
         lines.extend(["", "所选账本快照中没有本批次可核验的费用行。"])
-    lines.extend(["", "准确章稿、原回执、版本标识、任务和费用见 evidence.json。", ""])
+    lines.extend(["", "本批冻结章稿、确认版本及费用依据见 evidence.json。", ""])
     return "\n".join(lines)
+
+
+def _batch_manuscript(task, run):
+    # Revision rows freeze chapter text, while a workbench chapter title can change independently.
+    # Use titles only when corroborated by a frozen report on that exact revision.
+    chapters = run["completed_chapters"]
+    catalogues = [(record["report"]["chapters"], record["chapter_bindings"]) for record in run["inspections"]]
+    if delivery := run["delivery"]:
+        catalogues.append((delivery["manifest"]["chapters"], delivery["chapter_bindings"]))
+    frozen_metadata = {}
+    for catalogue, bindings in catalogues:
+        revision_ids = {(row["id"], row["revision"], row["sha256"]): row["revision_id"] for row in bindings}
+        for chapter in catalogue:
+            key = (chapter["id"], chapter["revision"], chapter["sha256"])
+            if identifier := revision_ids.get(key):
+                frozen_metadata[(*key, identifier)] = chapter
+    lines = ["# 七台接力批次冻结章稿", "", f"批次 `{task['id']}` · 已记录 {len(chapters)} 章。", ""]
+    if not chapters:
+        lines.extend(["此批次尚未记录已保存章稿。", ""])
+    for number, chapter in enumerate(chapters, 1):
+        key = (chapter["chapter_id"], chapter["revision"], chapter["sha256"], chapter["id"])
+        metadata = frozen_metadata.get(key)
+        title = f"第 {metadata['position']} 章 · {metadata['title']}" if metadata else f"第 {number} 条章稿"
+        lines.extend(
+            [
+                f"## {title}",
+                "",
+                f"章稿 `{chapter['chapter_id']}` · 修订 `{chapter['id']}` · SHA-256 `{chapter['sha256']}`",
+                "",
+                chapter["content"],
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _batch_share_entry(entry):
+    task, run = entry["task"], entry["seven_stage"]
+    completed = []
+    for chapter in run["completed_chapters"]:
+        fields = ("id", "chapter_id", "revision", "parent_id", "content", "sha256", "artifact_id")
+        proof = {field: chapter[field] for field in fields}
+        if receipt := chapter["adoption_receipt"]:
+            proof["adoption_receipt"] = {
+                key: receipt[key] for key in ("artifact_id", "chapter_id", "revision")
+            }
+        completed.append(proof)
+
+    inspections = []
+    for row in run["inspections"]:
+        report = row["report"]
+        inspections.append(
+            {
+                "id": row["id"],
+                "chapter_bindings": row["chapter_bindings"],
+                "report": {
+                    "version": report["version"],
+                    "basis_sha256": report["basis_sha256"],
+                    "items": [
+                        {"check_id": item["check_id"], "status": item["status"]} for item in report["items"]
+                    ],
+                },
+            }
+        )
+
+    delivery = None
+    if row := run["delivery"]:
+        manifest = row["manifest"]
+        delivery = {
+            "id": row["id"],
+            "chapter_bindings": row["chapter_bindings"],
+            "basis_sha256": row["basis_sha256"],
+            "checks": [{"id": item["id"], "status": item["status"]} for item in row["checks"]],
+            "manifest": {key: manifest[key] for key in ("format", "inspection_id", "files")},
+            "zip": row["zip"],
+        }
+
+    calls = (
+        "id",
+        "task_id",
+        "provider",
+        "model",
+        "actual_model",
+        "currency",
+        "reserved",
+        "charged",
+        "status",
+        "input_tokens",
+        "output_tokens",
+        "input_rate",
+        "output_rate",
+        "created",
+    )
+    versions = ("project_id", "setting_id", "outline_id")
+    return {
+        "task": {"id": task["id"], "status": task["status"], "start_from": task["payload"]["start_from"]},
+        "seven_stage": {
+            "stage": run["stage"],
+            "child_task_ids": run["child_task_ids"],
+            "dependencies": {key: run["dependencies"][key] for key in versions},
+            "delivery_dependencies": (
+                {key: run["delivery_dependencies"][key] for key in versions}
+                if run["delivery_dependencies"] is not None
+                else None
+            ),
+            "completed_chapters": completed,
+            "inspections": inspections,
+            "delivery": delivery,
+        },
+        "manuscript_sha256": entry["manuscript_sha256"],
+        "billing_evidence": entry["billing_evidence"],
+        "calls": [{key: row[key] for key in calls} for row in entry.get("calls", [])],
+        "cost_by_currency": entry.get("cost_by_currency", {}),
+    }
 
 
 def revision_report(entry):
@@ -379,7 +495,10 @@ def _ledger_calls(usage, task_ids):
     ]
 
 
-def export_evidence(settings, task_ids, *, usage_ledger=None):
+def export_evidence(settings, task_ids, *, usage_ledger=None, batch_only=False):
+    task_ids = list(dict.fromkeys(task_ids))
+    if batch_only and len(task_ids) != 1:
+        raise DomainError("acceptance_evidence", "仅导出批次证据时须指定一个七台父批次编号。", 400)
     if usage_ledger is not None:
         usage_ledger = usage_ledger.resolve()
         if not usage_ledger.is_file():
@@ -389,20 +508,32 @@ def export_evidence(settings, task_ids, *, usage_ledger=None):
             raise DomainError("acceptance_evidence", "共享费用账本须与验收稿件目录的费用账本分开。", 409)
     with data_directory_gate(settings.data_dir, wait=True):
         backup = create_backup(settings, Database(settings.data_dir / "manuscripts.sqlite"))
-    folder = settings.data_dir / "acceptance" / ("export-" + uid())
-    folder.mkdir(parents=True)
+    folder = settings.data_dir / "acceptance" / (("batch-" if batch_only else "export-") + uid())
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=folder.parent) as staging:
+        pending = Path(staging) / "bundle"
+        pending.mkdir()
+        report = _export_backup(settings, task_ids, usage_ledger, batch_only, backup, pending)
+        pending.rename(folder)
+    return {"folder": str(folder), "tasks": len(report["tasks"]), "restore": report["restore"]}
+
+
+def _export_backup(settings, task_ids, usage_ledger, batch_only, backup, folder):
     report = {
         "created": time(),
-        "backup": backup,
         "human_creative_acceptance": "unverified",
         "human_benefit_acceptance": "unverified",
         "note": "从同一数据库备份恢复后导出。运行中任务只是该快照的进度，不代表整书完成。费用为配置价格估算；未知调用保留预留。",
         "tasks": [],
     }
+    if batch_only:
+        report["format"] = "seven-stage-batch-evidence/1"
+    else:
+        report["backup"] = backup
     with TemporaryDirectory(dir=settings.data_dir) as temporary, ExitStack() as stack:
         restored = Path(temporary)
         counts = unpack_verified(Path(backup["path"]), restored)
-        report["restore"] = {"integrity": "ok", "counts": counts}
+        report["restore"] = {"integrity": "ok"} if batch_only else {"integrity": "ok", "counts": counts}
         db = Database(restored / "manuscripts.sqlite")
         domain = Domain(db)
         ledger = usage_ledger if usage_ledger is not None else restored / "usage-evidence.sqlite"
@@ -415,41 +546,46 @@ def export_evidence(settings, task_ids, *, usage_ledger=None):
             # Pin one read transaction before capturing any of the requested families.
             usage.execute("BEGIN")
             usage.execute("SELECT name FROM sqlite_schema LIMIT 1").fetchone()
-        for task_id in dict.fromkeys(task_ids):
+        for task_id in task_ids:
             task = domain.task(task_id)
+            seven_stage = task["kind"] == "seven_stage_run"
+            if batch_only and not seven_stage:
+                raise DomainError("acceptance_evidence", "仅导出批次证据适用于七台父批次编号。", 400)
             branch_id = task["branch_id"]
             related_tasks = db.all("SELECT * FROM tasks WHERE branch_id=? ORDER BY created", (branch_id,))
             related_ids = [item["id"] for item in related_tasks]
-            placeholders = ",".join("?" for _ in related_ids)
-            manuscript = domain.export(branch_id)
-            (folder / (task_id + ".md")).write_text(manuscript, encoding="utf-8", newline="\n")
             chapters = db.all("SELECT * FROM chapters WHERE branch_id=? ORDER BY position", (branch_id,))
             entry = {
                 "task": task,
                 "related_tasks": related_tasks,
                 "branch": domain.branch(branch_id),
                 "chapters": [{**c, "nonblank_chars": char_count(c["content"])} for c in chapters],
-                "manuscript_sha256": hashlib.sha256(manuscript.encode()).hexdigest(),
-                "facts": db.all("SELECT * FROM facts WHERE branch_id=?", (branch_id,)),
                 "artifacts": db.all(
                     "SELECT * FROM artifacts WHERE branch_id=? ORDER BY created", (branch_id,)
                 ),
-                "events": db.all(
-                    f"SELECT * FROM task_events WHERE task_id IN ({placeholders}) ORDER BY id", related_ids
-                ),
-                "steps": db.all(f"SELECT * FROM task_steps WHERE task_id IN ({placeholders})", related_ids),
             }
-            if task["kind"] == "seven_stage_run":
-                entry["seven_stage"] = _seven_stage_evidence(domain, entry, folder)
-            else:
-                entry["completion"] = domain.completion(branch_id)
-            run = entry.get("seven_stage")
-            if run:
+            if not batch_only:
+                placeholders = ",".join("?" for _ in related_ids)
+                entry.update(
+                    facts=db.all("SELECT * FROM facts WHERE branch_id=?", (branch_id,)),
+                    events=db.all(
+                        f"SELECT * FROM task_events WHERE task_id IN ({placeholders}) ORDER BY id",
+                        related_ids,
+                    ),
+                    steps=db.all(f"SELECT * FROM task_steps WHERE task_id IN ({placeholders})", related_ids),
+                )
+            if seven_stage:
+                run = entry["seven_stage"] = _seven_stage_evidence(domain, entry, folder)
+                manuscript = _batch_manuscript(task, run)
                 billed_ids = [task_id, *run["child_task_ids"]]
             else:
+                manuscript = domain.export(branch_id)
+                entry["completion"] = domain.completion(branch_id)
                 billed_ids = related_ids if usage_ledger is None else [task_id]
+            (folder / (task_id + ".md")).write_text(manuscript, encoding="utf-8", newline="\n")
+            entry["manuscript_sha256"] = hashlib.sha256(manuscript.encode()).hexdigest()
             calls = _ledger_calls(usage, billed_ids) if usage is not None else []
-            if run or usage_ledger is not None:
+            if seven_stage or usage_ledger is not None:
                 entry["billing_evidence"] = {
                     "source": "shared_ledger" if usage_ledger is not None else "data_directory_backup",
                     "task_ids": billed_ids,
@@ -469,10 +605,12 @@ def export_evidence(settings, task_ids, *, usage_ledger=None):
                     }
                     for currency in {c["currency"] for c in calls}
                 }
-            report["tasks"].append(entry)
             (folder / (task_id + "-修订报告.md")).write_text(
                 revision_report(entry), encoding="utf-8", newline="\n"
             )
+            if batch_only:
+                report["tasks"].append(_batch_share_entry(entry))
+                continue
             if run := entry.get("seven_stage"):
                 planning = ["# 接力使用的规划", "", task["payload"].get("idea") or "", ""]
                 for key, title in (("project_id", "立项"), ("setting_id", "设定"), ("outline_id", "大纲")):
@@ -498,6 +636,17 @@ def export_evidence(settings, task_ids, *, usage_ledger=None):
                     encoding="utf-8",
                     newline="\n",
                 )
+            if seven_stage:
+                current = domain.export(branch_id)
+                filename = f"{task_id}-当前工作稿.md"
+                (folder / filename).write_text(current, encoding="utf-8", newline="\n")
+                context_keys = ("related_tasks", "chapters", "facts", "artifacts", "events", "steps")
+                entry["work_context"] = {
+                    **{key: entry.pop(key) for key in context_keys},
+                    "scope": "branch_diagnostics",
+                    "manuscript": {"file": filename, "sha256": hashlib.sha256(current.encode()).hexdigest()},
+                }
+            report["tasks"].append(entry)
     (folder / "evidence.json").write_text(dumps(report), encoding="utf-8", newline="\n")
     lines = ["# 整书验收证据快照", "", report["note"], "", "作者创作质量与实际收益：未验证。", ""]
     for entry in report["tasks"]:
@@ -505,14 +654,22 @@ def export_evidence(settings, task_ids, *, usage_ledger=None):
         if run := entry.get("seven_stage"):
             lines.extend(
                 [
-                    f"## {entry['branch']['name']} · 七台接力",
+                    "## 七台接力",
                     "",
                     f"批次 `{task['id']}` · {task['status']} · 阶段 {run['stage']}。",
-                    f"[快照当前正文]({task['id']}.md) · SHA-256 `{entry['manuscript_sha256']}`。",
-                    f"[接力修订与验收报告]({task['id']}-修订报告.md) · [接力规划]({task['id']}-规划.md)。",
+                    f"[本批冻结章稿]({task['id']}.md) · SHA-256 `{entry['manuscript_sha256']}`。",
+                    f"[接力修订与验收报告]({task['id']}-修订报告.md) · [证据清单](evidence.json)。",
                     "",
                 ]
             )
+            if context := entry.get("work_context"):
+                lines.extend(
+                    [
+                        f"[接力规划]({task['id']}-规划.md) · [当前工作稿]({context['manuscript']['file']})。",
+                        "证据清单的 `work_context` 为本机分支诊断，包含当前稿和同分支其他任务。按批次整理材料可用 `--batch-only` 单独导出。",
+                        "",
+                    ]
+                )
             continue
         completed = entry["completion"]
         lines.extend(
@@ -534,17 +691,21 @@ def export_evidence(settings, task_ids, *, usage_ledger=None):
             ]
         )
     (folder / "README.md").write_text("\n".join(lines), encoding="utf-8", newline="\n")
-    return {"folder": str(folder), "tasks": len(report["tasks"]), "restore": report["restore"]}
+    return report
 
 
 def main():
     parser = argparse.ArgumentParser(description="从实际备份恢复并导出验收证据，不调用模型")
     parser.add_argument("--task", action="append", required=True)
     parser.add_argument("--usage-ledger", type=Path, help="只读核对独立验收稿库关联的共享费用账本")
+    parser.add_argument("--batch-only", action="store_true", help="仅导出一个七台父批次的冻结证据")
     args = parser.parse_args()
     print(
         json.dumps(
-            export_evidence(Settings.load(), args.task, usage_ledger=args.usage_ledger), ensure_ascii=False
+            export_evidence(
+                Settings.load(), args.task, usage_ledger=args.usage_ledger, batch_only=args.batch_only
+            ),
+            ensure_ascii=False,
         )
     )
 

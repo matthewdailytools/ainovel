@@ -150,6 +150,7 @@ uv run python -m ainovel.evidence_export --task '半自动任务标识' --task '
 
 # 七台接力结束或暂停后，导出已有任务及其本地费用证据。
 uv run python -m ainovel.evidence_export --task '此处粘贴父批次编号'
+uv run python -m ainovel.evidence_export --task '此处粘贴父批次编号' --batch-only
 # 若本次验收关联独立的共享费用账本，导出时指定账本文件。
 uv run python -m ainovel.evidence_export --task '此处粘贴父批次编号' --usage-ledger 'D:/approved-usage/usage.sqlite'
 ```
@@ -160,7 +161,9 @@ uv run python -m ainovel.evidence_export --task '此处粘贴父批次编号' --
 
 证据导出包含两份独立正文、采用规划、可阅读的修订报告、未采纳候选及完整 JSON 记录；历史报告标明来源版本是否仍有效。历史两种模式各保存过 36 章，有限返修后仍有待审问题；它们保留为历史回归，不代替当前新版本验收。当前加强验证的两版本各保存3章并暂停在第4章检查点，见[联合更正记录](docs/product-validation/2026-11-15-chapter3-joint-corrections.md)。新两种整书、作者文学判断和使用收益仍未验证。
 
-七台证据使用接力批次实际采用的章稿修订、M6 体检、M7 判定与冻结 ZIP，并标出它们是否仍适用于当前稿。费用按本次父任务和稳定关联的子任务核对，保留待确认的费用预留。默认读取验收数据目录的账本备份。指定 `--usage-ledger` 时读取共享账本的只读快照，沿用同一批次范围。报告注明账本来源及证据是否齐全。
+七台证据使用接力批次实际采用的章稿修订、M6 体检、M7 判定与冻结 ZIP，并标出它们是否仍适用于当前稿。默认的 `<批次号>.md` 记录该批冻结章稿，`<批次号>-当前工作稿.md` 和 `work_context` 保存本机诊断。`--batch-only` 一次导出一个父批次，返回 `acceptance/batch-*` 目录，包含冻结正文、判定摘要、已确认的交付包和该批费用。整库备份仍留在本机。
+
+费用按本次父任务和稳定关联的子任务核对，保留待确认的费用预留。默认读取验收数据目录的账本备份。指定 `--usage-ledger` 时读取共享账本的只读快照，沿用同一批次范围。报告注明账本来源及证据是否齐全。
 
 ## 设计文档
 

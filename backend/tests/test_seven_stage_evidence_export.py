@@ -56,7 +56,9 @@ def test_seven_stage_evidence_pins_original_reviews_and_delivery_after_new_save(
         json={
             "basis_sha256": preview["basis_sha256"],
             "author_reviews": [
-                author(item["check_id"], chapter) for item in preview["items"] if item["status"] == "pending"
+                author(item["check_id"], chapter) | {"reason": "只留在本机体检的核对说明。"}
+                for item in preview["items"]
+                if item["status"] == "pending"
             ],
         },
     )
@@ -107,13 +109,27 @@ def test_seven_stage_evidence_pins_original_reviews_and_delivery_after_new_save(
     bundle_zip = (folder / exported["zip"]["file"]).read_bytes()
     assert exported["zip"]["sha256"] == sha256(bundle_zip).hexdigest()
 
-    domain.save(chapter["id"], chapter["revision"], "作者另行修改了这份合成存稿。")
+    edited_text = "作者另行修改了这份合成存稿。"
+    edited_title = "批次完成后另取的标题"
+    domain.save(chapter["id"], chapter["revision"], edited_text)
+    assert client.patch(f"/api/chapters/{chapter['id']}", json={"title": edited_title}).status_code == 200
     history_folder, historical, run = _bundle(settings, task_id)
     delivery = run["delivery"]
     assert delivery["id"] == original_delivery["id"] and not delivery["current"]
     assert all(not row["current"] for row in run["inspections"])
     assert run["completed_chapters"][0] == {**original, "current": False}
     assert historical["calls"] == entry["calls"] and Budget(settings).report() == before
+    frozen_file = history_folder / f"{task_id}.md"
+    frozen = frozen_file.read_text("utf-8")
+    assert original["content"] in frozen and chapter["title"] in frozen
+    assert original["id"] in frozen and original["sha256"] in frozen
+    assert edited_text not in frozen and edited_title not in frozen
+    assert historical["manuscript_sha256"] == sha256(frozen_file.read_bytes()).hexdigest()
+    context = historical["work_context"]
+    current_file = history_folder / context["manuscript"]["file"]
+    assert context["scope"] == "branch_diagnostics"
+    assert edited_text in current_file.read_text("utf-8") and edited_title in current_file.read_text("utf-8")
+    assert context["manuscript"]["sha256"] == sha256(current_file.read_bytes()).hexdigest()
     historical_zip = (history_folder / delivery["zip"]["file"]).read_bytes()
     with (
         ZipFile(BytesIO(official_zip.content)) as official,
@@ -127,19 +143,78 @@ def test_seven_stage_evidence_pins_original_reviews_and_delivery_after_new_save(
     markdown = (history_folder / f"{task_id}-修订报告.md").read_text("utf-8")
     assert "历史依据" in markdown and "三层正式验收" not in markdown
 
+    shared_folder = Path(export_evidence(settings, [task_id], batch_only=True)["folder"])
+    raw = (shared_folder / "evidence.json").read_text("utf-8")
+    share = json.loads(raw)
+    assert share["format"] == "seven-stage-batch-evidence/1"
+    assert "backup" not in share and share["restore"] == {"integrity": "ok"}
+    shared = share["tasks"][0]
+    assert shared["task"] == {"id": task_id, "status": "succeeded", "start_from": "idea"}
+    assert shared["manuscript_sha256"] == historical["manuscript_sha256"]
+    assert shared["seven_stage"]["completed_chapters"][0]["sha256"] == original["sha256"]
+    shared_inspection = next(
+        row for row in shared["seven_stage"]["inspections"] if row["id"] == original_inspection["id"]
+    )
+    assert shared_inspection["report"]["basis_sha256"] == original_inspection["basis_sha256"]
+    assert shared_inspection["chapter_bindings"] == report["chapter_bindings"]
+    assert len(shared["seven_stage"]["delivery"]["checks"]) == 6
+    assert shared["seven_stage"]["delivery"]["manifest"]["inspection_id"] == original_inspection["id"]
+    assert (shared_folder / frozen_file.name).read_bytes() == frozen_file.read_bytes()
+    assert (shared_folder / delivery["zip"]["file"]).read_bytes() == historical_zip
+    assert {file.name for file in shared_folder.iterdir()} == {
+        "README.md",
+        "evidence.json",
+        frozen_file.name,
+        delivery["zip"]["file"],
+        f"{task_id}-修订报告.md",
+    }
+    assert all(fragment not in raw for fragment in (edited_text, edited_title, "只留在本机体检的核对说明。"))
+    assert Budget(settings).report() == before
 
-def test_seven_stage_evidence_rejects_missing_original_adoption_receipt(client, domain, settings, story):
+
+def test_batch_markdown_uses_only_metadata_bound_to_the_exact_original_revision():
+    digest = sha256(b"shared content").hexdigest()
+    chapter = {"id": "c1", "revision": 1, "sha256": digest}
+    title = "历史标题"
+    metadata = {**chapter, "title": title, "position": 4}
+    binding = {**chapter, "revision_id": "different-chain"}
+    run = {
+        "completed_chapters": [
+            {**chapter, "chapter_id": chapter["id"], "id": "batch-source", "content": "shared content"}
+        ],
+        "inspections": [{"report": {"chapters": [metadata]}, "chapter_bindings": [binding]}],
+        "delivery": None,
+    }
+    unbound = evidence_export._batch_manuscript({"id": "batch"}, run)
+    assert title not in unbound and "第 1 条章稿" in unbound and "shared content" in unbound
+    binding["revision_id"] = "batch-source"
+    assert "第 4 章 · 历史标题" in evidence_export._batch_manuscript({"id": "batch"}, run)
+
+
+@pytest.mark.parametrize("batch_only", [False, True])
+def test_seven_stage_evidence_rejects_unverified_original_adoption_receipt(
+    client, domain, settings, story, batch_only
+):
     _, _, task_id = start(client, domain, story, "idea")
     drain(settings, Model(settings=settings))
     state = domain.task(task_id)["result"]["seven_stage_run"]
     artifact_id = state["completed_chapters"][0]["artifact_id"]
     with domain.db.connect(True) as tx:
-        tx.execute("DELETE FROM receipts WHERE artifact_id=?", (artifact_id,))
+        if batch_only:
+            tx.execute(
+                "UPDATE receipts SET result=json_set(result,'$.chapter_id','wrong-chapter') WHERE artifact_id=?",
+                (artifact_id,),
+            )
+        else:
+            tx.execute("DELETE FROM receipts WHERE artifact_id=?", (artifact_id,))
     with pytest.raises(DomainError, match=rf"{artifact_id} 的原采纳回执"):
-        export_evidence(settings, [task_id])
+        export_evidence(settings, [task_id], batch_only=batch_only)
+    assert list((settings.data_dir / "acceptance").iterdir()) == []
 
 
-def test_seven_stage_backup_ledger_keeps_same_branch_batches_separate(client, domain, settings, story):
+def test_seven_stage_backup_ledger_keeps_same_branch_batches_separate(
+    client, domain, settings, story, monkeypatch, capsys
+):
     branch, endpoint, first_id = start(client, domain, story, "idea")
     assert client.post(f"{endpoint}/{first_id}/pause").json()["status"] == "paused"
     assert client.post(f"{endpoint}/{first_id}/resume").json()["status"] == "queued"
@@ -161,12 +236,19 @@ def test_seven_stage_backup_ledger_keeps_same_branch_batches_separate(client, do
     assert queued.status_code == 202, queued.text
     second_id = queued.json()["id"]
     manual = domain.queue(
-        "module", {"account": "deepseek", "novel_id": domain.task(first_id)["novel_id"]}, branch
+        "module",
+        {
+            "account": "deepseek",
+            "novel_id": domain.task(first_id)["novel_id"],
+            "brief": "同作品另一任务的创作输入",
+        },
+        branch,
     )
 
     ledger = Budget(settings)
     provider = settings.providers["deepseek"]
     first_call = ledger.reserve(provider, first_state["children"][0], 10, 10)
+    ledger.metadata(first_call, "试跑模型", "本批服务方私有请求标识")
     ledger.settle(first_call, {"input": 2, "output": 1})
     second_call = ledger.reserve(provider, second_id, 10, 10)
     manual_call = ledger.reserve(provider, manual["id"], 10, 10)
@@ -186,7 +268,49 @@ def test_seven_stage_backup_ledger_keeps_same_branch_batches_separate(client, do
     assert second["billing_evidence"]["task_ids"] == [second_id]
     assert first["cost_by_currency"]["CNY"] == {"settled": 0.000012, "held_unknown": 0}
     assert second["cost_by_currency"]["CNY"] == {"settled": 0, "held_unknown": 0.0001}
+    for item in (first, second):
+        assert "related_tasks" not in item and "artifacts" not in item
+        assert {first_id, second_id, manual["id"]} <= {
+            task["id"] for task in item["work_context"]["related_tasks"]
+        }
+    first_chapter = first["seven_stage"]["completed_chapters"][0]["content"]
+    pending = (folder / f"{second_id}.md").read_text("utf-8")
+    assert "此批次尚未记录已保存章稿" in pending and first_chapter not in pending
+    assert first_chapter in (folder / second["work_context"]["manuscript"]["file"]).read_text("utf-8")
+    assert first["calls"][0]["request_id"] == "本批服务方私有请求标识"
+
+    monkeypatch.setattr("sys.argv", ["evidence_export", "--task", first_id, "--batch-only"])
+    monkeypatch.setattr(evidence_export.Settings, "load", lambda: settings)
+    evidence_export.main()
+    scoped = Path(json.loads(capsys.readouterr().out)["folder"])
+    share_raw = (scoped / "evidence.json").read_text("utf-8")
+    share = json.loads(share_raw)["tasks"][0]
+    assert share["billing_evidence"] == first["billing_evidence"]
+    assert share["cost_by_currency"] == first["cost_by_currency"]
+    assert [call["id"] for call in share["calls"]] == [first_call]
+    assert share["calls"][0]["actual_model"] == "试跑模型"
+    assert all(
+        value not in share_raw
+        for value in (
+            second_id,
+            manual["id"],
+            second_call,
+            manual_call,
+            "同作品另一任务的创作输入",
+            "本批服务方私有请求标识",
+            "work_context",
+            '"account"',
+        )
+    )
+    assert not list(scoped.glob("*.zip"))
     assert ledger.report() == before
+
+    before_paths = set(scoped.parent.iterdir())
+    with pytest.raises(DomainError, match="须指定一个七台父批次"):
+        export_evidence(settings, [first_id, second_id], batch_only=True)
+    with pytest.raises(DomainError, match="适用于七台父批次"):
+        export_evidence(settings, [manual["id"]], batch_only=True)
+    assert set(scoped.parent.iterdir()) == before_paths
 
 
 def test_source_snapshots_are_gated_and_isolated_evidence_unpack_does_not_hold_gate(
