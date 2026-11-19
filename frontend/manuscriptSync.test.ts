@@ -11,11 +11,13 @@ import {
   importLocalManuscript,
   manuscriptHash,
   readLocalChapterRestore,
+  readLocalCheckpointRestore,
   readLocalHistory,
   readLocalPublications,
   readLocalRulePreview,
   readLocalWorkflowHistory,
   restoreLocalChapter,
+  restoreLocalCheckpoint,
   saveLocalChapter,
   syncManuscriptObjects,
   syncObjectSignature,
@@ -38,6 +40,7 @@ import {
   readSyncState,
   setSyncEnabled,
   SyncRestoreStateRejected,
+  type ChapterDirectoryRequest,
   type PushChange,
   type SyncReceipt,
   type SyncTransport,
@@ -45,6 +48,7 @@ import {
 import { inspectionExcerptTransferReason } from './workflowPrivacy'
 import { buildRestoreStateVersion, restoreStateHead, restoreStateObjectId } from './restoreStateSyncModel'
 import { captureStoryEvidence, compactJSON } from './storySyncModel'
+import type { PortableCheckpoint } from './portableCheckpoint'
 
 beforeEach(() => {
   globalThis.indexedDB = new IDBFactory()
@@ -144,6 +148,7 @@ async function pushDirectoryFixture(
   ordered: { id: string; position: number }[],
   changeId = 'swapped-directory',
   invalidChild = false,
+  actor = 'desktop',
 ) {
   const moves = []
   for (const [index, chapter] of ordered.entries()) {
@@ -162,7 +167,7 @@ async function pushDirectoryFixture(
         payload,
         tombstone: false,
       },
-      'desktop',
+      actor,
     )
     moves.push({
       chapter_id: chapter.id,
@@ -172,7 +177,7 @@ async function pushDirectoryFixture(
       receipt_id: receiptId,
     })
   }
-  await cloud.commit(
+  return cloud.commit(
     {
       object_id: `chapter-directory:${changeId}`,
       change_id: changeId,
@@ -185,9 +190,358 @@ async function pushDirectoryFixture(
       },
       tombstone: false,
     },
-    'desktop',
+    actor,
   )
 }
+
+test.each([
+  'committed-before-disconnect',
+  'committed-then-newer-directory',
+  'disconnected-before-commit',
+  'stale-comparison',
+  'archive-outside-closed-cycle',
+  'prepared-prose-before-directory',
+] as const)('outgoing Web directory publishes its entire checkpoint order, outcome=%s', async (outcome) => {
+  const created = await createLocalProject('浏览器恢复目录后同步')
+  const key = created.novel.id
+  const first = await createLocalChapter(key, '初章')
+  const second = await createLocalChapter(key, '次章')
+  const [initial] = await readLocalHistory(key, first.id)
+  const original = await saveLocalChapter(key, first.id, initial.id, '共同采用的章稿。')
+  const pack = await exportLocalManuscript(key)
+  const checkpoint: PortableCheckpoint = {
+    version: 'ainovel-portable-checkpoint/1',
+    id: 'checkpoint-swapped-directory',
+    branch_id: created.branch.id,
+    label: '次章在前的检查点',
+    scope: 'book',
+    scope_id: null,
+    purpose: 'manual',
+    created: 1,
+    source_manifest_sha256: await manuscriptHash('独立书稿包目录'),
+    story_revision: pack.branch.story_revision,
+    scoped_chapter_ids: [second.id, first.id],
+    chapters: [...pack.chapters].reverse().map((chapter, index) => {
+      const revision = pack.revisions.find(
+        (record) => record.chapter_id === chapter.id && record.revision === chapter.revision,
+      )!
+      return {
+        id: chapter.id,
+        position: index + 1,
+        title: chapter.title,
+        revision: chapter.revision,
+        revision_id: revision.id,
+        sha256: revision.sha256,
+        archived: chapter.archived,
+        stale: chapter.stale,
+      }
+    }),
+    shared: { project_id: null, settings_id: null, outline_id: null },
+    reports: {},
+    restore_sources: {
+      version: 'ainovel-portable-restore-sources/1',
+      outline_live: false,
+      story_heads: {},
+      length_targets: [],
+      facts: [],
+      scene_spans_for_review: 0,
+    },
+  }
+  const body = JSON.stringify(checkpoint)
+  globalThis.indexedDB = new IDBFactory()
+  const project = await importLocalManuscript(
+    new Blob([
+      JSON.stringify({
+        ...pack,
+        snapshot_history: { entries: [{ id: checkpoint.id, sha256: await manuscriptHash(body), body }] },
+      }),
+    ]),
+  )
+  const archived =
+    outcome === 'archive-outside-closed-cycle' ? await createLocalChapter(key, '检查点之后的章') : null
+  const archiveHistory = archived ? await readLocalHistory(key, archived.id) : []
+  const scope = {
+    service: 'http://127.0.0.1:8888',
+    workId: project.branch.id,
+    deviceId: 'browser-publisher',
+  }
+  const cloud = service(scope.deviceId, 'unused', false)
+  const token = 'b'.repeat(32)
+  const ledger = 'a'.repeat(32)
+  const attempts: ChapterDirectoryRequest[] = []
+  const ordinary: PushChange[] = []
+  const accepted: SyncReceipt[] = []
+  const stale = outcome === 'stale-comparison'
+  const prepared = outcome === 'prepared-prose-before-directory'
+  const newerDirectory = outcome === 'committed-then-newer-directory'
+  const expectedOrder = newerDirectory ? [first.id, second.id] : [second.id, first.id]
+  const firstPosition = newerDirectory ? 1 : 2
+  let disconnected = false
+  let stopPreparedSource = prepared
+  let newest: typeof original | undefined
+  let recoveryId: string
+  async function saveDraft(content: string) {
+    const head = (await readLocalHistory(key, first.id)).at(-1)!
+    newest = await saveLocalChapter(key, first.id, head.id, content)
+  }
+
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    if (disconnected) throw new Error('同步传输中断')
+    const target = new URL(String(url))
+    const path = target.pathname.split(`/works/${scope.workId}`)[1]
+    if (path === '/checkpoint') return Response.json({ ledger_id: ledger, cursor: cloud.log.length })
+    expect(new Headers(init?.headers).get('X-Ainovel-Ledger')).toBe(ledger)
+    if (path === '/pull') {
+      return Response.json(await cloud.transport.pull(Number(target.searchParams.get('after'))))
+    }
+    if (path.startsWith('/receipts/') || path.startsWith('/changes/')) {
+      const receipt = cloud.log.find(
+        ({ change_id, device_id }) =>
+          change_id === path.split('/')[2] && (path.startsWith('/changes/') || device_id === scope.deviceId),
+      )
+      return receipt ? Response.json(receipt) : new Response(null, { status: 404 })
+    }
+    if (path === '/push') {
+      const request: PushChange = JSON.parse(String(init?.body))
+      ordinary.push(request)
+      if (stopPreparedSource && request.object_id === `revision:${newest?.id}`) {
+        stopPreparedSource = false
+        throw new Error('已排队的原章位稿件尚未送达')
+      }
+      return Response.json(await cloud.commit(request))
+    }
+    expect(path).toBe('/chapter-order-batches')
+    expect(init?.method).toBe('POST')
+    expect(target.searchParams.get('device_id')).toBe(scope.deviceId)
+    const request: ChapterDirectoryRequest = JSON.parse(String(init?.body))
+    attempts.push(request)
+    if (stale && attempts.length === 1) {
+      const parent = cloud.latest.get(`chapter:${first.id}`)!
+      await cloud.commit(
+        {
+          object_id: parent.object_id,
+          change_id: 'advanced-cloud-chapter',
+          parent_revision: parent.change_id,
+          payload: parent.payload,
+          tombstone: false,
+        },
+        'desktop',
+      )
+    }
+    if (stale) {
+      if (attempts.length === 1) {
+        expect(
+          request.moves.some(
+            (move) => cloud.latest.get(`chapter:${move.chapter_id}`)?.change_id !== move.head_revision,
+          ),
+        ).toBe(true)
+      }
+      return Response.json(
+        { code: 'sync_chapter_order_changed', message: '章位比较以后已有新章头。' },
+        { status: 409 },
+      )
+    }
+    if (attempts.length > 1 || outcome !== 'disconnected-before-commit') {
+      for (const move of request.moves) {
+        expect(cloud.latest.get(`chapter:${move.chapter_id}`)?.change_id).toBe(move.head_revision)
+      }
+      accepted.push(
+        await pushDirectoryFixture(
+          cloud,
+          scope.workId,
+          request.moves.map((move) => ({ id: move.chapter_id, position: move.next_position })),
+          request.change_id,
+          false,
+          scope.deviceId,
+        ),
+      )
+    }
+    if (attempts.length === 1 && !archived && !prepared) {
+      if (newerDirectory) {
+        const recovery = await readLocalCheckpointRestore(key, recoveryId)
+        expect(recovery.blockers).toEqual([])
+        await restoreLocalCheckpoint(key, recoveryId, recovery.basis, 'author-restores-newer-order')
+      }
+      await saveDraft('等待目录回执时另写的新稿。')
+      disconnected = true
+      throw new Error('目录提交时连接中断')
+    }
+    return Response.json(accepted.at(-1))
+  })
+
+  const transport = httpSyncTransport(scope, token)
+  await transport.enable()
+  expect((await syncWebManuscript(project, scope, transport)).deferred).toEqual([])
+  const before = cloud.log.length
+  const chapterHeads = new Map(
+    [first.id, second.id].map((id) => [id, cloud.latest.get(`chapter:${id}`)!.change_id]),
+  )
+  let preparedChapter: PushChange | undefined
+  if (prepared) {
+    await saveDraft('已针对原章位排队的正文。')
+    await expect(syncWebManuscript(project, scope, transport)).rejects.toThrow('已排队的原章位稿件尚未送达')
+    const { pending } = await readSyncState(scope)
+    const chapter = pending.find(
+      (row) => row.kind === 'push' && row.request.object_id === `chapter:${first.id}`,
+    )
+    expect(chapter).toMatchObject({
+      kind: 'push',
+      request: { payload: { chapter: { position: 1 }, head: newest } },
+    })
+    if (chapter?.kind !== 'push') throw new Error('缺少已准备好的普通章稿请求')
+    preparedChapter = chapter.request
+    chapterHeads.set(first.id, preparedChapter.change_id)
+  }
+  ordinary.length = 0
+  const preview = await readLocalCheckpointRestore(key, checkpoint.id)
+  expect(preview.blockers).toEqual([])
+  if (archived)
+    expect(preview.changes).toContainEqual(expect.objectContaining({ id: archived.id, action: 'archive' }))
+  recoveryId = (await restoreLocalCheckpoint(key, checkpoint.id, preview.basis, 'author-restores-order'))
+    .recoveryCheckpointId
+  const restoredHistory = await readLocalHistory(key, first.id)
+  expect(restoredHistory.slice(0, 2)).toEqual([initial, original])
+  if (stale) await saveDraft('比较失效仍保留的本机正文。')
+
+  let firstSync = await syncWebManuscript(project, scope, transport).catch((error: unknown) => error)
+  if (prepared && !attempts.length) firstSync = await syncWebManuscript(project, scope, transport)
+  expect(attempts).toHaveLength(1)
+  const request = attempts[0]
+  expect(request.moves).toEqual(
+    expect.arrayContaining([
+      { chapter_id: first.id, position: 1, next_position: 2, head_revision: chapterHeads.get(first.id) },
+      { chapter_id: second.id, position: 2, next_position: 1, head_revision: chapterHeads.get(second.id) },
+    ]),
+  )
+  expect(request.moves).toHaveLength(2)
+  if (archived) {
+    expect(firstSync).toMatchObject({ deferred: [], conflicts: [] })
+    expect(accepted).toHaveLength(1)
+    const tombstone = cloud.latest.get(`chapter:${archived.id}`)!
+    expect(tombstone).toMatchObject({ payload: null, tombstone: true, status: 'applied' })
+    expect(tombstone.sequence).toBeGreaterThan(accepted[0].sequence)
+    expect(ordinary.filter(({ tombstone: deleted }) => deleted)).toEqual([
+      expect.objectContaining({ object_id: `chapter:${archived.id}` }),
+    ])
+    const current = await exportLocalManuscript(key)
+    expect(current.chapters.filter(({ archived }) => !archived).map(({ id }) => id)).toEqual(expectedOrder)
+    expect(current.chapters.find(({ id }) => id === archived.id)).toMatchObject({ archived: 1, position: 3 })
+    expect(current.revisions.filter(({ chapter_id }) => chapter_id === archived.id)).toEqual(archiveHistory)
+    return
+  }
+  if (preparedChapter) {
+    expect(firstSync).toMatchObject({ deferred: [], conflicts: [] })
+    expect(accepted).toHaveLength(1)
+    const manifest = accepted[0]
+    const cloudHistory = cloud.log.slice(before)
+    expect(
+      cloudHistory.filter(
+        ({ sequence, object_id, change_id }) =>
+          sequence < manifest.sequence &&
+          object_id.startsWith('chapter:') &&
+          !change_id.startsWith('chapter-order-part-'),
+      ),
+    ).toEqual([expect.objectContaining(preparedChapter)])
+    const preparedSource = cloud.latest.get(`revision:${newest!.id}`)!
+    const publishedPrepared = cloudHistory.find(({ change_id }) => change_id === preparedChapter.change_id)!
+    const restoredSource = restoredHistory.at(-1)!
+    expect(preparedSource.sequence).toBeLessThan(publishedPrepared.sequence)
+    expect(cloud.latest.get(`revision:${restoredSource.id}`)?.sequence).toBeGreaterThan(manifest.sequence)
+    expect(cloud.latest.get(`chapter:${first.id}`)?.payload).toMatchObject({
+      chapter: { position: 2 },
+      head: { id: restoredSource.id, content: original.content },
+    })
+    expect((await exportLocalManuscript(key)).chapters.map(({ id }) => id)).toEqual(expectedOrder)
+    expect(await readLocalHistory(key, first.id)).toEqual(restoredHistory)
+    return
+  }
+  expect((await readSyncState(scope)).directory?.request).toEqual(request)
+  expect(ordinary.filter(({ object_id }) => object_id.startsWith('chapter:'))).toEqual([])
+  expect((await exportLocalManuscript(key)).chapters.map(({ id }) => id)).toEqual(expectedOrder)
+  const exactHistory = await readLocalHistory(key, first.id)
+  const otherHistory = await readLocalHistory(key, second.id)
+  expect(exactHistory.slice(0, restoredHistory.length)).toEqual(restoredHistory)
+  expect(exactHistory.at(-1)).toEqual(newest)
+
+  vi.resetModules()
+  const restarted = await import('./manuscriptSync')
+  disconnected = false
+  const secondSync = await restarted
+    .syncWebManuscript(project, scope, restarted.httpSyncTransport(scope, token))
+    .catch((error: unknown) => error)
+  if (stale) {
+    for (const report of [firstSync, secondSync]) {
+      expect(report).toMatchObject({
+        deferred: expect.arrayContaining([expect.objectContaining({ reason: '章位比较以后已有新章头。' })]),
+      })
+    }
+    expect(attempts).toEqual([request])
+    expect((await readSyncState(scope)).directory?.request).toEqual(request)
+    expect(accepted).toEqual([])
+    expect(ordinary.filter(({ object_id }) => object_id.startsWith('chapter:'))).toEqual([])
+    expect(cloud.log.slice(before).some(({ object_id }) => object_id.startsWith('chapter-directory:'))).toBe(
+      false,
+    )
+    expect(cloud.latest.get(`chapter:${first.id}`)?.payload?.chapter).toMatchObject({ position: 1 })
+    expect(cloud.latest.get(`chapter:${second.id}`)?.payload?.chapter).toMatchObject({ position: 2 })
+  } else {
+    expect(firstSync).toBeInstanceOf(Error)
+    expect(secondSync).toMatchObject({ deferred: [], conflicts: [] })
+    expect((await readSyncState(scope)).directory).toBeUndefined()
+    if (newerDirectory) {
+      expect(attempts).toHaveLength(2)
+      expect(accepted).toHaveLength(2)
+      expect(attempts[1].change_id).not.toBe(request.change_id)
+      expect(attempts[1].moves).toEqual(
+        expect.arrayContaining(
+          request.moves.map((move) => ({
+            chapter_id: move.chapter_id,
+            position: move.next_position,
+            next_position: move.position,
+            head_revision: cloud.log.find(
+              (receipt) =>
+                receipt.object_id === `chapter:${move.chapter_id}` &&
+                receipt.change_id.startsWith('chapter-order-part-'),
+            )!.change_id,
+          })),
+        ),
+      )
+    } else {
+      expect(attempts).toEqual(outcome === 'disconnected-before-commit' ? [request, request] : [request])
+      expect(accepted).toHaveLength(1)
+    }
+    expect(accepted[0].change_id).toBe(request.change_id)
+    const manifest = accepted.at(-1)!
+    expect(
+      cloud.log
+        .slice(before, manifest.sequence - 1)
+        .filter(
+          ({ object_id, change_id }) =>
+            object_id.startsWith('chapter:') && !change_id.startsWith('chapter-order-part-'),
+        ),
+    ).toEqual([])
+    const moved = cloud.log
+      .filter(
+        (receipt) =>
+          receipt.object_id === `chapter:${first.id}` && receipt.change_id.startsWith('chapter-order-part-'),
+      )
+      .at(-1)!
+    const latest = cloud.latest.get(`chapter:${first.id}`)!
+    expect(latest.sequence).toBeGreaterThan(manifest.sequence)
+    expect(latest.parent_revision).toBe(moved.change_id)
+    expect(latest.payload).toMatchObject({
+      chapter: { position: firstPosition },
+      head: { id: newest!.id, content: newest!.content },
+    })
+    expect(cloud.latest.get(`revision:${newest!.id}`)?.payload).toMatchObject({ revision: newest })
+    expect(cloud.latest.get(`chapter:${second.id}`)?.payload?.chapter).toMatchObject({
+      position: 3 - firstPosition,
+    })
+  }
+  expect((await exportLocalManuscript(key)).chapters.map(({ id }) => id)).toEqual(expectedOrder)
+  expect(await readLocalHistory(key, first.id)).toEqual(exactHistory)
+  expect(await readLocalHistory(key, second.id)).toEqual(otherHistory)
+})
 
 test('directory adoption waits for the whole group and a later ordinary head stays applicable', async () => {
   const project = await createLocalProject('换序后接续正文')

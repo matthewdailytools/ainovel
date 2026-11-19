@@ -27,7 +27,17 @@ export type SyncReceipt = PushChange & {
 
 export const CHAPTER_DIRECTORY_PREFIX = 'chapter-directory:'
 const CHAPTER_ORDER_PART = /^chapter-order-part-[a-f0-9]{64}$/
-const MAX_DIRECTORY_CHAPTERS = 5000
+export const MAX_DIRECTORY_CHAPTERS = 5000
+
+export type ChapterDirectoryRequest = {
+  change_id: string
+  moves: { chapter_id: string; position: number; next_position: number; head_revision: string }[]
+}
+type StagedChapterDirectory = {
+  request: ChapterDirectoryRequest
+  publications: { objectId: string; id: string }[]
+  error?: string
+}
 
 export type Resolution =
   | { choice: 'current' | 'incoming'; parent_revision: string }
@@ -40,6 +50,7 @@ export type SyncTransport = {
   pull: (after: number) => Promise<unknown>
   receipt: (changeId: string) => Promise<unknown | null>
   resolve: (conflictId: string, request: ResolutionRequest) => Promise<unknown>
+  applyChapterDirectory?: (request: ChapterDirectoryRequest) => Promise<unknown>
   verifyLedger?: () => Promise<void>
 }
 
@@ -56,6 +67,7 @@ export function pendingPayloads(pending: readonly Pending[]): [string, SyncPaylo
 }
 
 export class SyncResolutionChanged extends Error {}
+export class SyncChapterDirectoryRejected extends Error {}
 export class SyncRestoreStateRejected extends Error {
   constructor(
     readonly code: 'sync_restore_state_dependency' | 'sync_restore_state_integrity' | 'sync_object_size',
@@ -64,7 +76,13 @@ export class SyncRestoreStateRejected extends Error {
     super(message)
   }
 }
-type Replica = { key: string; enabled: boolean; cursor: number; serial: number }
+type Replica = {
+  key: string
+  enabled: boolean
+  cursor: number
+  serial: number
+  directory?: StagedChapterDirectory
+}
 type LedgerBinding = { workId: string; service: string; ledgerId: string }
 type LedgerCheckpoint = { ledger_id: string; cursor: number }
 type Queued = { key: string; id: string; position: number; pending: Pending }
@@ -508,12 +526,39 @@ async function readSyncStateTx(tx: IDBTransaction, key: string, scope: SyncScope
     pending: pending.sort((left, right) => left.position - right.position).map((entry) => entry.pending),
     conflicts: unresolved.map((entry) => entry.id),
     blockedObjects: [...new Set(unresolved.map((entry) => entry.objectId))],
+    ...(state.directory ? { directory: state.directory } : {}),
   }
 }
 
 export function readSyncState(scope: SyncScope) {
   const key = scopeKey(scope)
   return transact('readonly', (tx) => readSyncStateTx(tx, key, scope))
+}
+
+export function stageChapterDirectory(scope: SyncScope, directory: StagedChapterDirectory) {
+  const key = scopeKey(scope)
+  return transact('readwrite', async (tx) => {
+    const state = await replica(tx, key)
+    if (!state.enabled) throw new SyncClientError('disabled', '请先为当前作品启用同步。')
+    if (state.directory) return state.directory
+    await wait(tx.objectStore('replicas').put({ ...state, directory }))
+    return directory
+  })
+}
+
+export function recordChapterDirectoryRejection(scope: SyncScope, changeId: string, error: string | null) {
+  const key = scopeKey(scope)
+  return transact('readwrite', async (tx) => {
+    const state = await replica(tx, key)
+    if (state.directory?.request.change_id !== changeId) return
+    if (error === null && !state.directory.error) return
+    await wait(
+      tx.objectStore('replicas').put({
+        ...state,
+        directory: error === null ? undefined : { ...state.directory, error },
+      } satisfies Replica),
+    )
+  })
 }
 
 export function readSyncProgress(scope: SyncScope) {
@@ -585,7 +630,7 @@ export async function listSyncHeads(scope: SyncScope) {
   })
 }
 
-export function readChapterDirectory(scope: SyncScope, manifest: SyncReceipt) {
+function directoryMoves(scope: SyncScope, manifest: SyncReceipt) {
   const value = manifest.payload
   if (
     manifest.object_id !== CHAPTER_DIRECTORY_PREFIX + manifest.change_id ||
@@ -601,7 +646,7 @@ export function readChapterDirectory(scope: SyncScope, manifest: SyncReceipt) {
   const chapters = new Set<string>()
   const previousPositions = new Set<number>()
   const positions = new Set<number>()
-  const moves = value.moves.map((entry) => {
+  return value.moves.map((entry) => {
     const move = plain(entry)
     const { chapter_id, position, next_position, head_revision, receipt_id } = move
     if (
@@ -630,6 +675,35 @@ export function readChapterDirectory(scope: SyncScope, manifest: SyncReceipt) {
       childId: identifier(receipt_id),
     }
   })
+}
+
+export function verifyChapterDirectoryReceipt(
+  scope: SyncScope,
+  value: unknown,
+  request: ChapterDirectoryRequest,
+) {
+  const receipt = readReceipt(value)
+  const moves = directoryMoves(scope, receipt)
+  if (
+    receipt.change_id !== request.change_id ||
+    receipt.device_id !== scope.deviceId ||
+    moves.length !== request.moves.length ||
+    moves.some(({ chapterId, from, to, parentId }, index) => {
+      const move = request.moves[index]
+      return (
+        chapterId !== move.chapter_id ||
+        from !== move.position ||
+        to !== move.next_position ||
+        parentId !== move.head_revision
+      )
+    })
+  )
+    invalid('目录批次回执与本机冻结提交不符。')
+  return receipt
+}
+
+export function readChapterDirectory(scope: SyncScope, manifest: SyncReceipt) {
+  const moves = directoryMoves(scope, manifest)
   const key = scopeKey(scope)
   return transact('readonly', async (tx) =>
     Promise.all(
@@ -660,6 +734,7 @@ export function markChapterDirectory(
   scope: SyncScope,
   manifest: SyncReceipt,
   members: { objectId: string; receiptId: string; baseline?: SyncBaseline }[],
+  own = false,
 ) {
   const key = scopeKey(scope)
   return transact('readwrite', async (tx) => {
@@ -687,6 +762,12 @@ export function markChapterDirectory(
         baseline: { revision: directory.revision, signature: 'null', sequence: directory.sequence },
       } satisfies Head),
     )
+    if (own) {
+      const state = await replica(tx, key)
+      if (state.directory?.request.change_id === manifest.change_id) {
+        await wait(tx.objectStore('replicas').put({ ...state, directory: undefined } satisfies Replica))
+      }
+    }
   })
 }
 
@@ -770,17 +851,19 @@ export async function pushSyncPending(
     change: Pending,
     error: SyncRestoreStateRejected,
   ) => Promise<'retain' | 'discard' | false>,
+  directoryHolds?: { objects: ReadonlySet<string>; prepared: ReadonlySet<string> },
 ) {
   const key = scopeKey(scope)
-  const directoryBlocked = await transact(
-    'readonly',
-    async (tx) =>
-      new Set(
-        (await wait<Head[]>(tx.objectStore('heads').index('byReplica').getAll(key)))
-          .filter((head) => head.directoryParts?.length)
-          .map(({ id }) => id),
-      ),
-  )
+  const directoryBlocked = await transact('readonly', async (tx) => {
+    const [state, heads] = await Promise.all([
+      replica(tx, key),
+      wait<Head[]>(tx.objectStore('heads').index('byReplica').getAll(key)),
+    ])
+    return new Set([
+      ...heads.filter((head) => head.directoryParts?.length).map(({ id }) => id),
+      ...(state.directory?.request.moves.map(({ chapter_id }) => `chapter:${chapter_id}`) ?? []),
+    ])
+  })
   const held = new Set<string>()
   let count = 0
   while (count < limit) {
@@ -801,6 +884,8 @@ export async function pushSyncPending(
         !held.has(entry.request.change_id) &&
         !deferred.has(id) &&
         !directoryBlocked.has(sourceChapter) &&
+        (!directoryHolds?.objects.has(sourceChapter) ||
+          directoryHolds.prepared.has(entry.request.change_id)) &&
         (entry.kind === 'resolve' || !state.blockedObjects.includes(id))
       )
     })

@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 import pytest
 
 from ainovel import restore_state_desktop as desktop, restore_state_sync as wire
@@ -103,6 +105,130 @@ def test_desktop_projects_public_facts_and_length_in_both_directions_without_ech
         assert read_length(domain, branch, "book")["targets"] is None
         assert read_length(domain, branch, "chapter", chapter_id)["targets"] == chapter_target["targets"]
         assert kept_state(right, branch, origin, right_token) == inbound_head
+
+
+def test_desktop_waits_for_late_same_text_chapter_source_after_directory_batch(domain, story, tmp_path):
+    branch, first = story["branch_id"], story["chapter_id"]
+    content, quote = "🌧\r\n守岗人听见铜铃。", "铜铃"
+    domain.save(first, 0, content)
+    second = domain.create_chapter(branch, "第二章")["id"]
+    domain.save(second, 0, "第二章正文。")
+    receiver = paired(domain, branch, tmp_path / "late-chapter-source.sqlite")
+    with linked_cloud(domain, receiver, branch, tmp_path) as linked:
+        _, right, origin, left_token, right_token, cloud, endpoint, _ = linked
+        checkpoint = verify(cloud.get(endpoint + "/checkpoint", headers=_headers(left_token)))
+        headers = _headers(left_token, checkpoint["ledger_id"])
+        initial = verify(cloud.get(endpoint + "/pull", headers=headers))
+        chapters = {
+            row["payload"]["chapter"]["id"]: row
+            for row in initial["changes"]
+            if row["object_id"].startswith("chapter:")
+        }
+        original = chapters[first]["payload"]["head"]
+        manifest = verify(
+            cloud.post(
+                endpoint + "/chapter-order-batches",
+                headers=headers,
+                json={
+                    "change_id": "swap-before-late-source",
+                    "moves": [
+                        {
+                            "chapter_id": chapter_id,
+                            "position": position,
+                            "next_position": next_position,
+                            "head_revision": chapters[chapter_id]["head_revision"],
+                        }
+                        for chapter_id, position, next_position in ((first, 1, 2), (second, 2, 1))
+                    ],
+                },
+            )
+        )
+        move = next(row for row in manifest["payload"]["moves"] if row["chapter_id"] == first)
+        part = verify(cloud.get(f"{endpoint}/changes/{move['receipt_id']}", headers=headers))
+        revision = {
+            **original,
+            "id": uid(),
+            "parent_id": original["id"],
+            "revision": original["revision"] + 1,
+            "cause": "从跨端归档恢复",
+        }
+
+        def push(identifier, payload, parent=None):
+            return verify(
+                cloud.post(
+                    endpoint + "/push",
+                    headers=headers,
+                    json={
+                        "change_id": uid(),
+                        "object_id": identifier,
+                        "parent_revision": parent,
+                        "payload": payload,
+                        "tombstone": False,
+                    },
+                )
+            )
+
+        head = push(
+            f"chapter:{first}",
+            {
+                **part["payload"],
+                "chapter": {**part["payload"]["chapter"], "revision": revision["revision"]},
+                "head": revision,
+            },
+            part["head_revision"],
+        )
+        assert head["status"] == "applied"
+        waiting = right.run(branch, origin, right_token)
+        assert [row["object_id"] for row in waiting["deferred"]] == [f"chapter:{first}"]
+        assert not waiting["conflicts"] and not waiting["pending"]
+        assert receiver.chapter(first)["position"] == 2 and receiver.chapter(second)["position"] == 1
+        assert receiver.chapter(first)["revision"] == original["revision"]
+        assert not facts(receiver, branch)
+
+        source = push(
+            f"revision:{revision['id']}",
+            {"format": wire.FORMAT, "kind": "revision", "branch_id": branch, "revision": revision},
+        )
+        assert source["sequence"] > head["sequence"]
+        data = {
+            "parent_id": None,
+            "chapter_id": first,
+            "chapter_revision_id": revision["id"],
+            "facts": [
+                {
+                    "subject": "守岗人",
+                    "kind": "knowledge",
+                    "statement": "守岗人听到铜铃。",
+                    "truth": "fact",
+                    "story_time": "日落",
+                    "evidence": {
+                        "chapter_id": first,
+                        "revision_id": revision["id"],
+                        "start": 9,
+                        "end": 11,
+                        "quote_sha256": sha256(quote.encode()).hexdigest(),
+                    },
+                }
+            ],
+        }
+        version = wire.FactSetVersion(id=wire.version_id(branch, data), **data)
+        for wrapped in (wire.version_object(branch, version), wire.head_object(branch, version)):
+            fact_receipt = push(wire.object_id(wrapped), wrapped.model_dump())
+            assert fact_receipt["status"] == "applied"
+        assert kept_state(right, branch, origin, right_token) == fact_receipt["sequence"]
+        assert kept_state(right, branch, origin, right_token) == fact_receipt["sequence"]
+        exported = export_manuscript(receiver, branch)
+        restored_ids = {original["id"], revision["id"]}
+        assert [row.model_dump() for row in exported.revisions if row.id in restored_ids] == [
+            original,
+            revision,
+        ]
+        assert exported.restore_state.facts == version.facts
+        rows = receiver.db.all(
+            "SELECT source_revision,evidence FROM facts WHERE chapter_id=? AND stale=0",
+            (first,),
+        )
+        assert [(row["source_revision"], row["evidence"]) for row in rows] == [(revision["revision"], quote)]
 
 
 def test_fact_conflict_retains_both_exact_versions_until_author_selects_cloud(domain, story, tmp_path):

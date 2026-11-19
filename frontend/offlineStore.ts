@@ -2609,14 +2609,24 @@ export function applySyncedChapterDirectory(
     previousSignature?: string
     parentWasAdopted: boolean
   }[],
+  own?: { publications: { objectId: string; id: string }[] },
 ) {
-  return transact(['projects', 'chapters', 'revisions', 'storyChapterAliases'], 'readwrite', async (tx) => {
+  const stores = [
+    'projects',
+    'chapters',
+    'revisions',
+    'storyChapterAliases',
+    'publications',
+  ] satisfies Store[]
+  return transact(stores, 'readwrite', async (tx) => {
     const project = await readProject(tx, projectId)
     const branchId = project.branch.id
     const rows = await listChaptersTx(tx, branchId)
     const byChapter = new Map(rows.map((chapter) => [chapter.id, chapter]))
     const nextPositions = new Map<string, number>()
     const adopted = new Map<string, { matchesRemote: boolean; projectedBaseline?: string }>()
+    const acknowledged: { objectId: string; id: string }[] = []
+    const frozen = new Map(own?.publications.map(({ objectId, id }) => [objectId, id]))
     let groupPosition: 'before' | 'after' | undefined
     for (const { before, after, previousSignature, parentWasAdopted } of moves) {
       const { id } = before.chapter
@@ -2628,15 +2638,17 @@ export function applySyncedChapterDirectory(
         invalid('目录批次属于其他工作版本。')
       const chapter = byChapter.get(id)
       if (!chapter) continue
-      if (chapter.archived) return null
-      const position =
-        chapter.position === before.chapter.position
-          ? 'before'
-          : chapter.position === after.chapter.position
-            ? 'after'
-            : undefined
-      if (!position || (groupPosition && position !== groupPosition)) return null
-      groupPosition = position
+      if (!own) {
+        if (chapter.archived) return null
+        const position =
+          chapter.position === before.chapter.position
+            ? 'before'
+            : chapter.position === after.chapter.position
+              ? 'after'
+              : undefined
+        if (!position || (groupPosition && position !== groupPosition)) return null
+        groupPosition = position
+      }
       const head = await chapterHead(tx, chapter)
       if (!head) invalid('本机稿件缺少当前修订。')
       const local = { format: SYNC_FORMAT, kind: 'chapter', chapter, head } as const
@@ -2667,9 +2679,22 @@ export function applySyncedChapterDirectory(
         matchesRemote: exact || parentWasAdopted,
         projectedBaseline,
       })
+      const objectId = `chapter:${id}`
+      const publication = frozen.get(objectId)
+      if (
+        exact &&
+        !chapter.archived &&
+        chapter.stale === before.chapter.stale &&
+        chapter.position === after.chapter.position &&
+        publication
+      )
+        acknowledged.push({ objectId, id: publication })
     }
     const active = rows.filter(({ archived }) => !archived)
-    if (new Set(active.map(({ id, position }) => nextPositions.get(id) ?? position)).size !== active.length)
+    if (
+      !own &&
+      new Set(active.map(({ id, position }) => nextPositions.get(id) ?? position)).size !== active.length
+    )
       return null
     // A prior attempt may have written the complete directory before acknowledging its receipts.
     if (groupPosition === 'before') {
@@ -2679,6 +2704,10 @@ export function applySyncedChapterDirectory(
       }
       project.branch.story_revision++
       await result(tx.objectStore('projects').put(project))
+    }
+    for (const { objectId, id } of acknowledged) {
+      if ((await readPublication(tx, branchId, objectId))?.id === id)
+        await result(tx.objectStore('publications').delete([branchId, objectId]))
     }
     return adopted
   })

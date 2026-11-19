@@ -647,6 +647,13 @@ def _apply_chapter(tx, domain, branch_id, event, *, force_revision=False):
     ).fetchone()
     if not local:
         raise DomainError("sync_history", "本机当前章稿缺少修订记录。", 409)
+    if (
+        row["content"] == head.content
+        and local["id"] != head.id
+        and source_revision(tx, branch_id, head.id) != head
+    ):
+        # The same prose may still be a new formal revision with its own facts and references.
+        raise DomainError("sync_history", "同文章稿仍等待云端采用所引用的准确原修订。", 409)
     history = _source_extension(tx, branch_id, head, source_revision(tx, branch_id, local["id"]))
     if history:
         chapter = dict(row)

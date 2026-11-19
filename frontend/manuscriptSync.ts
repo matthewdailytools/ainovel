@@ -52,6 +52,7 @@ import {
   listSyncHeads,
   markChapterDirectory,
   markSyncBaseline,
+  MAX_DIRECTORY_CHAPTERS,
   pendingPayloads,
   pullSyncPage,
   pushSyncPending,
@@ -63,10 +64,15 @@ import {
   readSyncConflict,
   readSyncProgress,
   readSyncState,
+  recordChapterDirectoryRejection,
   requireSyncLedger,
+  stageChapterDirectory,
+  SyncChapterDirectoryRejected,
   SyncLedgerChanged,
   SyncResolutionChanged,
   SyncRestoreStateRejected,
+  verifyChapterDirectoryReceipt,
+  type ChapterDirectoryRequest,
   type SyncPayload,
   type SyncScope,
   type SyncBaseline,
@@ -124,6 +130,19 @@ export function httpSyncTransport(scope: SyncScope, token: string) {
         throw new SyncResolutionChanged('云端版本已更新。请再次同步并重新比较。')
       }
       if (
+        path.startsWith('/chapter-order-batches?') &&
+        [409, 413].includes(response.status) &&
+        [
+          'sync_chapter_order_changed',
+          'sync_chapter_order_limit',
+          'sync_object_size',
+          'sync_request_size',
+          'sync_replay',
+          'sync_reserved',
+        ].includes(code)
+      )
+        throw new SyncChapterDirectoryRejected(message || '云端目录已变化，请先核对原章位和采用头。')
+      if (
         response.status === 409 &&
         ['sync_chapter_order_changed', 'sync_chapter_order_scheduled', 'sync_chapter_order_limit'].includes(
           code,
@@ -172,6 +191,7 @@ export function httpSyncTransport(scope: SyncScope, token: string) {
       }
       return conflicts
     },
+    applyChapterDirectory: (batch) => request(`/chapter-order-batches?${deviceQuery}`, batch),
     async resolveChapterOrder(
       selection: ChapterOrderResolution,
       ledgerId: string,
@@ -379,12 +399,14 @@ async function acknowledgePublications(scope: SyncScope) {
 }
 
 type SyncHead = Awaited<ReturnType<typeof listSyncHeads>>[number]
+type DirectoryMove = ChapterDirectoryRequest['moves'][number]
 
 async function reconcileChapterDirectories(
   project: LocalProject,
   scope: SyncScope,
   heads: SyncHead[],
   deferred: Map<string, string>,
+  pending: Awaited<ReturnType<typeof readSyncState>>['directory'],
 ) {
   const chapters = new Map(
     heads.filter(({ directoryParts }) => directoryParts?.length).map((head) => [head.id, head]),
@@ -400,6 +422,8 @@ async function reconcileChapterDirectories(
   for (const directory of directories) {
     const manifest = directory.receipt!
     try {
+      const own = pending?.request.change_id === manifest.change_id ? pending : undefined
+      if (own) verifyChapterDirectoryReceipt(scope, manifest, own.request)
       const moves = await readChapterDirectory(scope, manifest)
       const checked = await Promise.all(
         moves.map(async ({ chapterId, from, to, parent, child }) => {
@@ -440,7 +464,7 @@ async function reconcileChapterDirectories(
           }
         }),
       )
-      const adopted = await applySyncedChapterDirectory(project.novel.id, checked)
+      const adopted = await applySyncedChapterDirectory(project.novel.id, checked, own)
       if (!adopted) throw new Error('目录批次与本机章位或稿件依据不一致，已保留本机目录。')
       const members = checked.map(({ after, base, child }) => {
         const result = adopted.get(after.chapter.id)
@@ -457,7 +481,7 @@ async function reconcileChapterDirectories(
         }
         return { objectId: child.object_id, receiptId: child.change_id, baseline }
       })
-      await markChapterDirectory(scope, manifest, members)
+      await markChapterDirectory(scope, manifest, members, !!own)
       for (const { objectId, receiptId, baseline } of members) {
         const head = chapters.get(objectId)!
         head.directoryParts = head.directoryParts!.filter((id) => id !== receiptId)
@@ -476,10 +500,10 @@ async function reconcileChapterDirectories(
 }
 
 async function reconcile(project: LocalProject, scope: SyncScope) {
-  const { blockedObjects } = await readSyncState(scope)
+  const { blockedObjects, directory } = await readSyncState(scope)
   const heads = await listSyncHeads(scope)
   const deferred = new Map<string, string>()
-  await reconcileChapterDirectories(project, scope, heads, deferred)
+  await reconcileChapterDirectories(project, scope, heads, deferred, directory)
   const { objects: local, publications } = await localObjects(project)
   const priority = (id: string) => {
     if (id.startsWith('revision:') || id.startsWith('project-version:')) return 0
@@ -643,6 +667,203 @@ async function reconcile(project: LocalProject, scope: SyncScope) {
   return deferred
 }
 
+function knownChapterPosition(payload: SyncPayload | null | undefined, workId: string, chapterId: string) {
+  const chapter = payload?.chapter
+  if (
+    payload?.kind === 'chapter' &&
+    chapter &&
+    typeof chapter === 'object' &&
+    !Array.isArray(chapter) &&
+    chapter.id === chapterId &&
+    chapter.branch_id === workId &&
+    chapter.archived === 0 &&
+    typeof chapter.position === 'number' &&
+    Number.isSafeInteger(chapter.position) &&
+    chapter.position > 0
+  )
+    return chapter.position
+  return undefined
+}
+
+function closedDirectoryMoves(moves: DirectoryMove[]) {
+  const remaining = new Map(moves.map((move) => [move.position, move]))
+  const closed: DirectoryMove[] = []
+  while (remaining.size) {
+    const path = new Map<number, DirectoryMove>()
+    let position = remaining.keys().next().value!
+    for (let move = remaining.get(position); move; move = remaining.get(position)) {
+      remaining.delete(position)
+      path.set(position, move)
+      position = move.next_position
+    }
+    for (let move = path.get(position); move; move = path.get(position)) {
+      path.delete(position)
+      closed.push(move)
+      position = move.next_position
+    }
+  }
+  return closed
+}
+
+function recognizesDirectoryPosition(head: SyncHead, workId: string, move: DirectoryMove) {
+  const signature = head.baseline?.signature
+  if (!signature) return false
+  const fields: unknown = JSON.parse(signature)
+  return (
+    Array.isArray(fields) &&
+    fields[0] === 'chapter' &&
+    fields[1] === move.chapter_id &&
+    fields[2] === workId &&
+    fields[3] === move.position
+  )
+}
+
+async function prepareChapterDirectory(
+  project: LocalProject,
+  scope: SyncScope,
+  deferred: Map<string, string>,
+) {
+  const [snapshot, heads, state] = await Promise.all([
+    localObjects(project),
+    listSyncHeads(scope),
+    readSyncState(scope),
+  ])
+  const active = new Map(
+    [...snapshot.objects.values()].flatMap((value) =>
+      value?.kind === 'chapter' ? [[value.chapter.id, value.chapter.position] as const] : [],
+    ),
+  )
+  const cloud = new Map(
+    heads.flatMap((head) => {
+      if (!head.id.startsWith('chapter:') || !head.receipt || head.receipt.tombstone) return []
+      const id = head.id.slice('chapter:'.length)
+      const position = knownChapterPosition(head.receipt.payload, scope.workId, id)
+      return position === undefined ? [] : [[id, { head, position }] as const]
+    }),
+  )
+  const desired = [...cloud].flatMap(([id, { head, position }]) => {
+    const next = active.get(id)
+    return next !== undefined && next !== position
+      ? [{ chapter_id: id, position, next_position: next, head_revision: head.revision }]
+      : []
+  })
+  let staged = state.directory
+  if (
+    staged?.error &&
+    staged.request.moves.every(({ chapter_id }) => active.get(chapter_id) === cloud.get(chapter_id)?.position)
+  ) {
+    await recordChapterDirectoryRejection(scope, staged.request.change_id, null)
+    staged = undefined
+  }
+  const knownPositions = new Set([...cloud.values()].map(({ position }) => position))
+  const sameMembership = cloud.size === active.size && [...active.keys()].every((id) => cloud.has(id))
+  const moves = sameMembership || knownPositions.size !== cloud.size ? desired : closedDirectoryMoves(desired)
+  moves.sort((left, right) => left.position - right.position)
+  const participants = new Set(
+    moves.length >= 2 ? moves.map(({ chapter_id }) => `chapter:${chapter_id}`) : [],
+  )
+  const alreadyQueued = state.pending.filter((row) =>
+    participants.has(row.kind === 'push' ? row.request.object_id : row.object_id),
+  )
+  if (
+    state.enabled &&
+    !staged &&
+    participants.size >= 2 &&
+    moves.length <= MAX_DIRECTORY_CHAPTERS &&
+    knownPositions.size === cloud.size &&
+    !alreadyQueued.length &&
+    !state.blockedObjects.some((id) => participants.has(id)) &&
+    moves.every((move) => {
+      const { head } = cloud.get(move.chapter_id)!
+      return (
+        !deferred.has(head.id) &&
+        !head.directoryParts?.length &&
+        recognizesDirectoryPosition(head, scope.workId, move)
+      )
+    })
+  ) {
+    for (const move of moves) {
+      const { head } = cloud.get(move.chapter_id)!
+      const checked = await validateSyncedObject(project, head.id, head.receipt!.payload)
+      if (checked?.kind !== 'chapter' || checked.chapter.position !== move.position)
+        throw new Error('云端目录的原章稿依据无法核对。')
+    }
+    staged = await stageChapterDirectory(scope, {
+      request: { change_id: crypto.randomUUID(), moves },
+      publications: [...participants].flatMap((id) => {
+        const marker = snapshot.publications.get(id)
+        return marker ? [{ objectId: id, id: marker.id }] : []
+      }),
+    })
+  }
+  const frozen = new Set(staged?.request.moves.map(({ chapter_id }) => `chapter:${chapter_id}`))
+  const held = new Map(
+    [...new Set([...participants, ...frozen])].map((id) => [
+      id,
+      frozen.has(id) && staged?.error ? staged.error : '章位调整等待整组云端回执。',
+    ]),
+  )
+  const prepared = new Set<string>()
+  if (!staged) {
+    const sourceSends = new Map(
+      state.pending.flatMap((row) =>
+        row.kind === 'push' && row.request.object_id.startsWith('revision:')
+          ? [[row.request.object_id, row.request] as const]
+          : [],
+      ),
+    )
+    for (const row of alreadyQueued) {
+      if (row.kind !== 'push') continue
+      const { object_id, change_id, payload } = row.request
+      const id = object_id.slice('chapter:'.length)
+      if (knownChapterPosition(payload, scope.workId, id) !== cloud.get(id)?.position) continue
+      prepared.add(change_id)
+      const source = payload?.head
+      let revision = source && typeof source === 'object' && !Array.isArray(source) ? source.id : undefined
+      while (typeof revision === 'string') {
+        const prior = sourceSends.get(`revision:${revision}`)
+        if (!prior || prepared.has(prior.change_id)) break
+        const details = prior.payload?.revision
+        if (!details || typeof details !== 'object' || Array.isArray(details) || details.chapter_id !== id)
+          break
+        prepared.add(prior.change_id)
+        revision = details.parent_id
+      }
+    }
+  }
+  return { staged, held, snapshot, outbox: { objects: new Set(held.keys()), prepared } }
+}
+
+async function exchangeChapterDirectory(
+  project: LocalProject,
+  scope: SyncScope,
+  transport: SyncTransport,
+  deferred: Map<string, string>,
+) {
+  let plan = await prepareChapterDirectory(project, scope, deferred)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const batch = plan.staged
+    if (!batch || batch.error || !transport.applyChapterDirectory) break
+    const active = await readSyncState(scope)
+    if (!active.enabled || active.directory?.request.change_id !== batch.request.change_id) break
+    try {
+      const response = await transport.applyChapterDirectory(batch.request)
+      verifyChapterDirectoryReceipt(scope, response, batch.request)
+    } catch (error) {
+      if (!(error instanceof SyncChapterDirectoryRejected)) throw error
+      await recordChapterDirectoryRejection(scope, batch.request.change_id, error.message)
+      plan = await prepareChapterDirectory(project, scope, deferred)
+      break
+    }
+    await pull(scope, transport)
+    await acknowledgePublications(scope)
+    deferred = await reconcile(project, scope)
+    plan = await prepareChapterDirectory(project, scope, deferred)
+    if (plan.staged?.request.change_id === batch.request.change_id) break
+  }
+  return { ...plan, deferred }
+}
+
 function settingPublicationSources(object: SyncedObject | null): string[] {
   if (object?.kind === 'settings-head') return [`settings-version:${object.revision_id}`]
   if (object?.kind !== 'settings-version') return []
@@ -753,24 +974,32 @@ function assertOutlineSources(
   })
 }
 
-async function draftChanges(project: LocalProject, scope: SyncScope, deferred: Map<string, string>) {
+async function draftChanges(
+  scope: SyncScope,
+  deferred: Map<string, string>,
+  directoryHeld: Map<string, string>,
+  snapshot: Awaited<ReturnType<typeof localObjects>>,
+) {
   const unsent = new Map<string, string>()
   const state = await readSyncState(scope)
   const pending = new Set(
     state.pending.map((entry) => (entry.kind === 'push' ? entry.request.object_id : entry.object_id)),
   )
   const heads = new Map((await listSyncHeads(scope)).map((head) => [head.id, head]))
-  const snapshot = await localObjects(project)
   const { objects, publications, settings, outline, story } = snapshot
   const privacy = workflowTransferRestrictions([...objects, ...pendingPayloads(state.pending)])
   const storyHeads = new Map(story.records.map(({ version }) => [version.record_id, version]))
   for (const [id, object] of objects) {
     if (privacy.deferred.has(id)) continue
-    if (
-      object?.kind === 'revision' &&
-      heads.get(`chapter:${object.revision.chapter_id}`)?.directoryParts?.length
-    )
+    const directoryReason = directoryHeld.get(id)
+    if (directoryReason) {
+      unsent.set(id, directoryReason)
       continue
+    }
+    if (object?.kind === 'revision') {
+      const member = `chapter:${object.revision.chapter_id}`
+      if (heads.get(member)?.directoryParts?.length || directoryHeld.has(member)) continue
+    }
     if (object && new TextEncoder().encode(JSON.stringify(object)).length > 1024 * 1024 - 4096) {
       unsent.set(id, '本机对象超过单项同步限制，可导出稿件包供独立工作区检查。')
       continue
@@ -965,8 +1194,8 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
     await transport.verifyLedger?.()
     await pull(scope, transport)
     await acknowledgePublications(scope)
-    const deferred = await reconcile(project, scope)
-    let outgoing = await draftChanges(project, scope, deferred)
+    let directory = await exchangeChapterDirectory(project, scope, transport, await reconcile(project, scope))
+    let outgoing = await draftChanges(scope, directory.deferred, directory.held, directory.snapshot)
     const rejected = new Map<string, string>()
     let superseded = false
     const onRestoreRejected: NonNullable<Parameters<typeof pushSyncPending>[4]> = async (change, error) => {
@@ -991,12 +1220,26 @@ export async function syncWebManuscript(project: LocalProject, scope: SyncScope,
       rejected.set(id, error.message)
       return 'retain'
     }
-    await pushSyncPending(scope, transport, undefined, outgoing.privacy.inspectionIds, onRestoreRejected)
+    await pushSyncPending(
+      scope,
+      transport,
+      undefined,
+      outgoing.privacy.inspectionIds,
+      onRestoreRejected,
+      directory.outbox,
+    )
     if (superseded) {
       await acknowledgePublications(scope)
-      const settled = await reconcile(project, scope)
-      outgoing = await draftChanges(project, scope, settled)
-      await pushSyncPending(scope, transport, undefined, outgoing.privacy.inspectionIds, onRestoreRejected)
+      directory = await exchangeChapterDirectory(project, scope, transport, await reconcile(project, scope))
+      outgoing = await draftChanges(scope, directory.deferred, directory.held, directory.snapshot)
+      await pushSyncPending(
+        scope,
+        transport,
+        undefined,
+        outgoing.privacy.inspectionIds,
+        onRestoreRejected,
+        directory.outbox,
+      )
     }
     await pull(scope, transport)
     await acknowledgePublications(scope)

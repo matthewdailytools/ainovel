@@ -43,6 +43,20 @@ function activeOutline(pack: Package) {
   return versions.find(({ id }) => id === adopted_revision_id)
 }
 
+function chapterPositions(pack: Package) {
+  return pack.chapters.filter(({ archived }) => !archived).map(({ id, position }) => [id, position])
+}
+
+async function moveFirstChapterLater(page: Page, novelId: string) {
+  await page.reload()
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novelId)
+  await page.getByText('章节整理与归档', { exact: true }).click()
+  const move = page.getByRole('button', { name: '下移一章', exact: true })
+  await expect(move).toBeEnabled()
+  page.once('dialog', (dialog) => void dialog.accept())
+  await move.click()
+}
+
 async function exportWeb(web: Page): Promise<Package> {
   const download = web.waitForEvent('download')
   await web.getByRole('button', { name: '导出稿件交换包', exact: true }).click()
@@ -177,8 +191,7 @@ test('桌面重排分页中断后，原 Web 只取回完整目录和原章稿', 
       await openWeb(web, title, f.baseline, f.webToken, 'web')
     )()
     const confirmed = await f.checkpoint()
-    const positions = (pack: Package) =>
-      pack.chapters.filter(({ archived }) => !archived).map(({ id, position }) => [id, position])
+    const positions = chapterPositions
     const original = [
       [first.id, 1],
       [second.id, 2],
@@ -195,13 +208,7 @@ test('桌面重排分页中断后，原 Web 只取回完整目录和原章稿', 
       label: '换序前目录',
     })
 
-    await page.reload()
-    await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(f.novel.id)
-    await page.getByText('章节整理与归档', { exact: true }).click()
-    const move = page.getByRole('button', { name: '下移一章', exact: true })
-    await expect(move).toBeEnabled()
-    page.once('dialog', (dialog) => void dialog.accept())
-    await move.click()
+    await moveFirstChapterLater(page, f.novel.id)
     await expect.poll(async () => positions(await f.desktopPack())).toEqual(reordered)
     expect((await f.desktopSync()).conflicts).toHaveLength(0)
 
@@ -270,6 +277,155 @@ test('桌面重排分页中断后，原 Web 只取回完整目录和原章稿', 
     expect(positions(webRestored)).toEqual(original)
     for (const chapter of f.common)
       expect(chain(webRestored, chapter)).toEqual(chain(nativeRestored, chapter))
+  } finally {
+    await context.close()
+  }
+})
+
+test('独立 Web 原位恢复先发布整组旧章序，回执丢失后仍准确同步同文新修订', async ({ page, browser }) => {
+  const title = '独立 Web 回滚章序验收'
+  const f = await prepareDesktop(page, title)
+  const [first, second] = f.common
+  const original = [
+    [first.id, 1],
+    [second.id, 2],
+  ]
+  const reordered = [
+    [second.id, 1],
+    [first.id, 2],
+  ]
+  const quote = '有铃声'
+  const source = chain(f.baseline, first).at(-1)!
+  await f.request('/api/facts', 'POST', {
+    chapter_id: first.id,
+    source_revision: source.revision,
+    subject: first.title,
+    kind: 'event',
+    truth: 'fact',
+    evidence: quote,
+    statement: '地点有铃声。',
+  })
+  const old = await f.request<{ id: string }>(`${f.branch}/work-snapshots`, 'POST', {
+    scope: 'book',
+    scope_id: null,
+    label: '旧章序和原文选区',
+  })
+  const reply = await page.request.get(`${f.branch}/manuscript-backup`)
+  expect(reply.ok()).toBe(true)
+  const backup = await reply.body()
+  await reply.dispose()
+  await f.desktopSync()
+
+  const context = await browser.newContext({ viewport: { width: 420, height: 880 } })
+  try {
+    const web = await context.newPage()
+    await web.goto('/offline/')
+    await expect.poll(() => web.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+    await web.getByLabel('从独立备份恢复作品', { exact: true }).setInputFiles({
+      name: '旧章序.ainovel-backup',
+      mimeType: 'application/octet-stream',
+      buffer: backup,
+    })
+    await expect(web.getByText('已校验并恢复独立作品备份。', { exact: true })).toBeVisible()
+    const sync = await connectWeb(web, title, f.webToken, 'web')
+    await web.getByRole('button', { name: '启用作品同步', exact: true }).click()
+    await sync()
+    expect(chapterPositions(await exportWeb(web))).toEqual(original)
+
+    await moveFirstChapterLater(page, f.novel.id)
+    await expect.poll(async () => chapterPositions(await f.desktopPack())).toEqual(reordered)
+    expect((await f.desktopSync()).conflicts).toEqual([])
+    await sync()
+    expect(chapterPositions(await exportWeb(web))).toEqual(reordered)
+    const common = await f.checkpoint()
+
+    await context.setOffline(true)
+    const history = web.getByLabel('已导入的卷书恢复点', { exact: true })
+    await history.getByText('已导入的卷书恢复点', { exact: true }).press('Enter')
+    await history.getByRole('combobox', { name: '选择已归档恢复点', exact: true }).selectOption(old.id)
+    await history.getByRole('button', { name: '预览归档原位恢复', exact: true }).press('Enter')
+    const preview = history.getByRole('region', { name: '归档原位恢复预览', exact: true })
+    await preview.getByRole('checkbox', { name: '我已核对恢复影响', exact: true }).check()
+    await preview.getByRole('button', { name: '原位恢复为新修订', exact: true }).press('Enter')
+    await expect(history.getByRole('status').filter({ hasText: '已恢复为新的当前修订' })).toBeVisible()
+    const local = await exportWeb(web)
+    expect(chapterPositions(local)).toEqual(original)
+    const newSource = chain(local, first).at(-1)!
+    expect(newSource.id).not.toBe(source.id)
+    expect(newSource).toMatchObject({ parent_id: source.id, sha256: source.sha256, content: source.content })
+    expect(await f.checkpoint()).toEqual(common)
+
+    await context.setOffline(false)
+    await web.route(
+      (url) => url.pathname.endsWith('/chapter-order-batches'),
+      async (route) => {
+        const result = await route.fetch()
+        expect(result.ok(), await result.text()).toBe(true)
+        await route.abort('connectionreset')
+      },
+      { times: 1 },
+    )
+    await sync()
+    await expect(web.getByRole('alert')).toBeVisible()
+    const dropped = await f.checkpoint()
+    expect(dropped.cursor).toBe(common.cursor + 3)
+    await web.close()
+    const reopened = await context.newPage()
+    await reopened.goto('/offline/')
+    const resumed = await connectWeb(reopened, title, f.webToken, 'web')
+    await resumed()
+
+    const final = await f.checkpoint()
+    type Event = {
+      object_id: string
+      change_id: string
+      parent_revision: string | null
+      payload: { head?: Revision }
+    }
+    const { changes } = await checked<{ changes: Event[] }>(
+      await page.request.get(`${f.endpoint}/pull?after=${common.cursor}&limit=50`, {
+        headers: { Authorization: `Bearer ${f.desktopToken}`, 'X-Ainovel-Ledger': final.ledger_id },
+      }),
+    )
+    expect(changes.filter(({ object_id }) => object_id.startsWith('chapter-directory:'))).toHaveLength(1)
+    const parts = changes.slice(0, 2)
+    expect(parts.map(({ change_id }) => change_id)).toEqual([
+      expect.stringMatching(/^chapter-order-part-/),
+      expect.stringMatching(/^chapter-order-part-/),
+    ])
+    expect(parts.find(({ object_id }) => object_id === `chapter:${first.id}`)?.payload.head?.id).toBe(
+      source.id,
+    )
+    const formal = changes.findIndex(
+      ({ object_id, payload }) => object_id === `chapter:${first.id}` && payload.head?.id === newSource.id,
+    )
+    const immutable = changes.findIndex(({ object_id }) => object_id === `revision:${newSource.id}`)
+    expect(immutable).toBeGreaterThan(2)
+    expect(formal).toBeGreaterThan(immutable)
+    expect(changes[formal].parent_revision).toBe(
+      parts.find(({ object_id }) => object_id === `chapter:${first.id}`)?.change_id,
+    )
+
+    const native = await f.desktopSync()
+    expect(native.conflicts).toEqual([])
+    expect(native.deferred).toEqual([])
+    const desktop = await f.desktopPack()
+    expect(chapterPositions(desktop)).toEqual(original)
+    for (const chapter of f.common) expect(chain(desktop, chapter)).toEqual(chain(local, chapter))
+    expect(activeOutline(desktop)?.plan).toEqual(activeOutline(local)?.plan)
+    const facts = await f.request<unknown[]>(`${f.branch}/facts`)
+    expect(facts).toContainEqual(
+      expect.objectContaining({
+        chapter_id: first.id,
+        source_revision: newSource.revision,
+        evidence: quote,
+        evidence_start: source.content.indexOf(quote),
+        evidence_end: source.content.indexOf(quote) + quote.length,
+        stale: 0,
+      }),
+    )
+    await resumed()
+    expect(await f.checkpoint()).toEqual(final)
   } finally {
     await context.close()
   }
