@@ -54,7 +54,7 @@ import { latestArtifact, refreshArtifactList } from './artifactRefresh'
 import { checkFeedbackTarget, feedbackRevisionInstruction, type FeedbackHandoff } from './feedbackRevision'
 import type { ConceptionHandoff } from './conception'
 import { SettingReviewReport } from './SettingReviewReport'
-import { SettingUsePanel } from './SettingUsePanel'
+import { FrozenSettingReference, SettingUsePanel } from './SettingUsePanel'
 import {
   chapterCards,
   findChapterPlan,
@@ -1305,6 +1305,16 @@ export function Writing({
                     {outline?.confirmed?.setting_basis.revision}
                   </summary>
                   <p>{item.detail}</p>
+                  {chapter && outline?.confirmed?.setting_basis.confirmation_id && (
+                    <FrozenSettingReference
+                      key={`${chapter.id}/${outline.confirmed.setting_basis.confirmation_id}/${item.id}`}
+                      branchId={branch.id}
+                      chapterId={chapter.id}
+                      confirmationId={outline.confirmed.setting_basis.confirmation_id}
+                      itemId={item.id}
+                      title={item.title}
+                    />
+                  )}
                 </details>
               ))}
           </details>

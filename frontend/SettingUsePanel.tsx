@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api } from './api'
+import { api, type Artifact } from './api'
 import type { components } from './api-schema'
 import type { Selection } from './Editor'
 import { digest } from './sourceCorrection'
@@ -13,6 +13,181 @@ const proofLabels: Record<Proof['status'], string> = {
   superseded: '已由新证据接替',
   withdrawn: '已撤回',
   missing: '原稿来源待补齐',
+}
+
+function originalSettingsVersion(artifact: Artifact, branchId: string, confirmationId: string) {
+  if (
+    artifact.id !== confirmationId ||
+    artifact.branch_id !== branchId ||
+    artifact.kind !== 'conception_completion' ||
+    artifact.status !== 'accepted'
+  )
+    throw new Error('找不到本工作版本的原设定确认。')
+  const source = artifact.basis.sync_settings_source ?? artifact.basis.manuscript_settings_source
+  if (!source) return artifact.id
+  if (typeof source !== 'object' || !('revision_id' in source) || typeof source.revision_id !== 'string')
+    throw new Error('无法核验原设定确认的同步来源。')
+  return source.revision_id
+}
+
+function SettingUseProof({
+  proof: { version, status, quote },
+  title,
+  busy = false,
+  onWithdraw,
+}: {
+  proof: Proof
+  title: string
+  busy?: boolean
+  onWithdraw?: (id: string) => void
+}) {
+  return (
+    <details>
+      <summary>
+        {title} · {proofLabels[status]}
+      </summary>
+      <p>
+        设定采用版 {version.settings_version_id} · 原稿 {version.evidence.revision_id} ·{' '}
+        {version.evidence.start}–{version.evidence.end}
+      </p>
+      {quote !== null && <blockquote>{quote}</blockquote>}
+      {status === 'current' && onWithdraw && (
+        <button type="button" disabled={busy} onClick={() => onWithdraw(version.id)}>
+          撤回这条正文证据
+        </button>
+      )}
+    </details>
+  )
+}
+
+type SettingReference = {
+  branchId: string
+  chapterId: string
+  confirmationId: string
+  itemId: string
+  title: string
+}
+
+export function FrozenSettingReference(reference: SettingReference) {
+  const [open, setOpen] = useState(false)
+  const trigger = useRef<HTMLButtonElement>(null)
+  return (
+    <>
+      <button type="button" ref={trigger} aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        查看原条目与正文证据
+      </button>
+      {open && (
+        <SettingReferencePreview
+          {...reference}
+          onClose={() => {
+            setOpen(false)
+            trigger.current?.focus()
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+function SettingReferencePreview({
+  branchId,
+  chapterId,
+  confirmationId,
+  itemId,
+  title,
+  onClose,
+}: SettingReference & { onClose: () => void }) {
+  const endpoint = `/chapters/${encodeURIComponent(chapterId)}/setting-uses`
+  const [basis, setBasis] = useState('')
+  const [nextPage, setNextPage] = useState<string | null>(null)
+  const [records, setRecords] = useState<Proof[]>([])
+  const [read, setRead] = useState({ page: '', attempt: 0 })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    heading.current?.focus()
+  }, [])
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError('')
+    const path = read.page ? `${endpoint}?before_id=${encodeURIComponent(read.page)}` : endpoint
+    void Promise.all([api<Artifact>(`/artifacts/${encodeURIComponent(confirmationId)}`), api<View>(path)])
+      .then(([artifact, result]) => {
+        if (!active) return
+        if (result.chapter_id !== chapterId) throw new Error('正文证据与本章不一致。')
+        const settingVersion = originalSettingsVersion(artifact, branchId, confirmationId)
+        const exact = result.records.filter(
+          ({ version }) =>
+            version.evidence.chapter_id === chapterId &&
+            version.item_id === itemId &&
+            version.settings_version_id === settingVersion,
+        )
+        setBasis(settingVersion)
+        setNextPage(result.next_before_id)
+        setRecords((previous) => (read.page ? [...previous, ...exact] : exact))
+      })
+      .catch((failure: unknown) => {
+        if (active) setError(failure instanceof Error ? failure.message : '无法读取此设定的正文证据。')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [branchId, chapterId, confirmationId, endpoint, itemId, read])
+
+  return (
+    <section aria-label="冻结设定的正文证据" style={{ overflowWrap: 'anywhere' }}>
+      <h4 tabIndex={-1} ref={heading}>
+        「{title}」的采用来源与正文证据
+      </h4>
+      <p>
+        条目编号 <code>{itemId}</code> · 确认编号 <code>{confirmationId}</code>
+      </p>
+      {basis && basis !== confirmationId && (
+        <p>
+          交换来源版本 <code>{basis}</code>
+        </p>
+      )}
+      {loading && <p role="status">正在核对原设定及本章证据…</p>}
+      {error && <p role="alert">{error}</p>}
+      {!loading && !error && !records.length && (
+        <p>{nextPage ? '已读取范围内暂无这份确认的正文证据。' : '本章暂无这份确认的正文证据。'}</p>
+      )}
+      {!!records.length && (
+        <ul>
+          {records.map((proof) => (
+            <li key={proof.version.id}>
+              <SettingUseProof proof={proof} title={title} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && (
+        <button
+          type="button"
+          onClick={() => setRead((current) => ({ ...current, attempt: current.attempt + 1 }))}
+        >
+          重新读取原设定与证据
+        </button>
+      )}
+      {nextPage && (
+        <button
+          type="button"
+          disabled={loading || !!error}
+          onClick={() => setRead({ page: nextPage, attempt: 0 })}
+        >
+          查找更早的正文证据
+        </button>
+      )}
+      <button type="button" onClick={onClose}>
+        返回本章设定引用
+      </button>
+    </section>
+  )
 }
 
 export function SettingUsePanel({
@@ -202,25 +377,17 @@ export function SettingUsePanel({
           )}
           {!!view.records.length ? (
             <ul>
-              {view.records.map(({ version, status, quote }) => (
-                <li key={version.id} style={{ overflowWrap: 'anywhere' }}>
-                  <details>
-                    <summary>
-                      {view.options.find(({ item_id }) => item_id === version.item_id)?.title ??
-                        version.item_id}{' '}
-                      · {proofLabels[status]}
-                    </summary>
-                    <p>
-                      设定采用版 {version.settings_version_id} · 原稿 {version.evidence.revision_id} ·{' '}
-                      {version.evidence.start}–{version.evidence.end}
-                    </p>
-                    {quote !== null && <blockquote>{quote}</blockquote>}
-                    {status === 'current' && (
-                      <button type="button" disabled={busy} onClick={() => withdraw(version.id)}>
-                        撤回这条正文证据
-                      </button>
-                    )}
-                  </details>
+              {view.records.map((proof) => (
+                <li key={proof.version.id} style={{ overflowWrap: 'anywhere' }}>
+                  <SettingUseProof
+                    proof={proof}
+                    title={
+                      view.options.find(({ item_id }) => item_id === proof.version.item_id)?.title ??
+                      proof.version.item_id
+                    }
+                    busy={busy}
+                    onWithdraw={withdraw}
+                  />
                 </li>
               ))}
             </ul>
