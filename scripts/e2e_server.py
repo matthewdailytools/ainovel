@@ -260,6 +260,33 @@ class Model(ReferenceModel):
             }
         if source_instruction.get("action") == "conception.generate.category":
             title = source_instruction["category_title"]
+            if source_instruction["作者本次要求"] == "补写镜廊证人令的悬疑线索揭露边界。":
+                assert source_instruction["category_id"] == "world"
+                frozen = value["上下文"]
+                assert frozen["已确认立项"]["brief"]["genre_ids"] == ["xianxia", "mystery"]
+                assert frozen["设定框架"]["primary"]["id"] == "xianxia"
+                assert [entry["id"] for entry in frozen["设定框架"]["secondary"]] == ["mystery"]
+                return {
+                    "text": json.dumps(
+                        {
+                            "items": [
+                                {
+                                    "title": "证人令披露规则",
+                                    "detail": "谜案调查要求在镜廊隐去证人姓名，直到核对铜铃刻痕。",
+                                    "links": [],
+                                    "setting_policy": {
+                                        "strength": "hard",
+                                        "scope": "镜廊首次问询",
+                                        "exceptions": "经证人授权后可在二次问询公开",
+                                    },
+                                }
+                            ]
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "usage": {"input": 1, "output": 1},
+                    "call_id": "offline-conception-mixed-rule-conflict",
+                }
             return {
                 "text": json.dumps(
                     {

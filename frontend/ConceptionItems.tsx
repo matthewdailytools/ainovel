@@ -31,6 +31,7 @@ export function ConceptionSettingFindings({
   busy,
   onLocate,
   onReview,
+  onPrefer,
 }: {
   findings: SettingFinding[]
   categories: ConceptionCategory[]
@@ -38,6 +39,7 @@ export function ConceptionSettingFindings({
   busy: boolean
   onLocate: (categoryId: string, itemId: string) => void
   onReview?: (id: string, selected: boolean) => void
+  onPrefer?: (finding: SettingFinding, itemId: string) => void
 }) {
   const items = new Map(categories.flatMap((category) => category.items.map((item) => [item.id, item])))
   return (
@@ -45,6 +47,8 @@ export function ConceptionSettingFindings({
       {findings.map((finding) => {
         const reviewed = finding.reviewed || checked.includes(finding.id)
         const mustFix = invalidLinks.includes(finding.kind)
+        const preferredChoice =
+          finding.kind === 'same_name' || finding.kind === 'policy_link' ? onPrefer : undefined
         return (
           <li key={finding.id}>
             <details>
@@ -81,12 +85,24 @@ export function ConceptionSettingFindings({
                               {policy.exceptions || '未填写'}
                             </p>
                           )}
+                          {preferredChoice && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => preferredChoice(finding, item.id)}
+                            >
+                              采用{location.category_title}第 {location.item_number} 项，其余待定
+                            </button>
+                          )}
                         </>
                       )}
                     </li>
                   )
                 })}
               </ol>
+              {preferredChoice && (
+                <p className="small">取舍先存为草稿。也可定位条目，调整各自的适用范围或例外后重新体检。</p>
+              )}
               {finding.kind === 'skipped_link' && <p className="small">暂缓的类别不会随当前构思交接。</p>}
               {onReview && !mustFix && (
                 <label>

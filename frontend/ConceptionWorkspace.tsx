@@ -8,6 +8,7 @@ import {
   ConceptionItemEditor,
   ConceptionQuote,
   ConceptionSettingFindings,
+  type SettingFinding,
   type SettingInspection,
 } from './ConceptionItems'
 import { ConceptionWorldExtract } from './ConceptionWorldExtract'
@@ -249,6 +250,24 @@ export function ConceptionWorkspace({
   }
   function updateCategory(next: ConceptionCategory) {
     edit((rows) => rows.map((entry) => (entry.id === next.id ? next : entry)))
+  }
+  function preferSetting(finding: SettingFinding, preferredId: string) {
+    const preferred = finding.locations.find(({ item_id }) => item_id === preferredId)
+    if (draft || busy || !preferred?.category_id) return
+    const competing = new Set(finding.locations.map(({ item_id }) => item_id))
+    competing.delete(preferredId)
+    edit((rows) =>
+      rows.map((category) => ({
+        ...category,
+        items: category.items.map((item) =>
+          competing.has(item.id) ? { ...item, adoption_state: 'pending' } : item,
+        ),
+      })),
+    )
+    selectCategory(preferred.category_id)
+    setLocateItem(preferredId)
+    setFeedbackPanel('settings')
+    setStatus('其余条目已标为待定。请保存草稿，再确认采用。')
   }
   async function perform(operation: () => Promise<void>, panel: FeedbackPanel = 'settings') {
     if (running.current) return
@@ -1039,6 +1058,7 @@ export function ConceptionWorkspace({
                                   : checkedSettingFindings.filter((value) => value !== id),
                               })
                       }
+                      onPrefer={dirty ? undefined : preferSetting}
                     />
                   )}
                 </>

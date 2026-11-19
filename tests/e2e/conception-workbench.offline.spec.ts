@@ -221,6 +221,147 @@ test('设定体检可定位双方、预检草稿并冻结作者复核', async ({
   expect(saved.setting_findings.map((finding) => finding.reviewed)).toEqual([true])
 })
 
+test('仙侠叠加悬疑的规则取舍经作者确认后才供章纲引用', async ({ page }) => {
+  const { base, chapterId, headers } = await openWorkbench(
+    page,
+    '镜廊证人令 · 混合题材',
+    '镜廊问询刚刚开始。',
+  )
+  const project = await page.request.put(`${base}/project-brief`, {
+    headers,
+    data: {
+      base_revision: 0,
+      idempotency_key: 'mixed-rule-project',
+      idea: '仙门学徒追查镜廊旧案。',
+      brief: {
+        position: '兼顾仙门规约和谜案披露',
+        track: '仙侠悬疑',
+        genre_ids: ['xianxia', 'mystery'],
+        audience: '重视线索的仙侠读者',
+        distinction: '在镜廊问询中核实证人身份',
+        length: '一卷一章',
+        ending: '找到证人并查明旧案。',
+      },
+    },
+  })
+  expect(project.ok(), await project.text()).toBe(true)
+  const saved = await readWorkbench(page, base)
+  const prior = '仙门要求证人一踏入镜廊即公开姓名。'
+  const alternative = '谜案调查要求在镜廊隐去证人姓名，直到核对铜铃刻痕。'
+  saved.categories.find(({ id }) => id === 'world')!.items = [
+    {
+      id: 'sect-witness',
+      title: '证人令披露规则',
+      detail: prior,
+      setting_policy: { strength: 'hard', scope: '镜廊首次问询', exceptions: '宗门封存时须由掌门见证' },
+    },
+  ]
+  const setup = await page.request.put(base, {
+    headers,
+    data: {
+      base_revision: saved.revision,
+      base_story_revision: saved.story_revision,
+      categories: saved.categories,
+    },
+  })
+  expect(setup.ok(), await setup.text()).toBe(true)
+  const current = (await setup.json()) as ConceptionState
+  const confirmed = await page.request.post(`${base}/confirm`, {
+    headers,
+    data: {
+      base_revision: current.revision,
+      base_story_revision: current.story_revision,
+      idempotency_key: 'mixed-rule-before-ai',
+    },
+  })
+  expect(confirmed.ok(), await confirmed.text()).toBe(true)
+  await page.reload()
+  await page.getByRole('button', { name: '小说构思', exact: true }).click()
+  await page
+    .getByRole('navigation', { name: '构思类别' })
+    .getByRole('button', { name: '世界设定', exact: true })
+    .click()
+  await page
+    .getByRole('textbox', { name: '构思要求', exact: true })
+    .fill('补写镜廊证人令的悬疑线索揭露边界。')
+  await page.getByRole('button', { name: '生成当前类别', exact: true }).click()
+  await expect(page.getByText('本草案使用立项修订 1。', { exact: true })).toBeVisible()
+  const draft = page.getByRole('region', { name: '核对 AI 草案', exact: true })
+  await draft.getByRole('checkbox', { name: '选择 证人令披露规则', exact: true }).check()
+  await draft.getByRole('button', { name: '采用所选构思', exact: true }).click()
+  const panel = page.getByRole('region', { name: '设定冲突体检' })
+  await panel.getByText('同名条目的内容或约束不同 · 待核对', { exact: true }).press('Enter')
+  await expect(panel.getByText(prior, { exact: true })).toBeVisible()
+  await expect(panel.getByText(alternative, { exact: true })).toBeVisible()
+  await expect(panel.getByText(/适用范围 镜廊首次问询/)).toHaveCount(2)
+  const seeded = await readWorkbench(page, base)
+  const picked = seeded.categories
+    .find(({ id }) => id === 'world')!
+    .items.find(({ detail }) => detail === alternative)!
+  await expect(panel.getByText(new RegExp(`条目编号 ${picked.id}`))).toBeVisible()
+  await expect(panel.getByRole('checkbox', { name: '已核对此项，按当前内容保留' })).toBeVisible()
+  const confirm = page.getByRole('button', { name: '确认当前构思', exact: true })
+  await expect(confirm).toBeDisabled()
+  await page.setViewportSize({ width: 320, height: 850 })
+  const choose = panel.getByRole('button', { name: '采用世界设定第 2 项，其余待定', exact: true })
+  await choose.press('Enter')
+  await expect(page.locator(`#conception-item-${picked.id}`)).toBeFocused()
+  await expect(page.getByText('其余条目已标为待定。请保存草稿，再确认采用。')).toBeVisible()
+  expect((await readWorkbench(page, base)).revision).toBe(seeded.revision)
+  await expect(confirm).toBeDisabled()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+  await page.getByRole('button', { name: '保存构思设定', exact: true }).press('Enter')
+  await expect(confirm).toBeEnabled()
+  await confirm.press('Enter')
+  await expect(page.getByText(/当前构思已确认 · 构思修订/)).toBeVisible()
+  const adopted = await readWorkbench(page, base)
+  const rules = adopted.categories.find(({ id }) => id === 'world')!.items
+  expect(rules.find(({ id }) => id === 'sect-witness')).toMatchObject({
+    detail: prior,
+    adoption_state: 'pending',
+  })
+  expect(rules.find(({ id }) => id === picked.id)).toMatchObject({
+    detail: alternative,
+    setting_policy: { scope: '镜廊首次问询' },
+  })
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.getByRole('button', { name: '大纲与台账', exact: true }).click()
+  await page.getByLabel('总纲', { exact: true }).fill('核对镜廊证人令。')
+  await page.getByRole('combobox', { name: '采用设定', exact: true }).selectOption(adopted.confirmation!.id)
+  await page.getByRole('button', { name: '新增卷', exact: true }).click()
+  await page.getByLabel('卷名', { exact: true }).fill('镜廊卷')
+  await page.getByLabel('卷纲', { exact: true }).fill('调查镜廊旧案。')
+  await page.getByRole('button', { name: '新增单元', exact: true }).click()
+  await page.getByLabel('单元名', { exact: true }).fill('核对铜铃')
+  await page.getByLabel('单元纲', { exact: true }).fill('先核对刻痕再问询。')
+  await page.getByLabel('加入已有章节').selectOption(chapterId!)
+  for (const [name, text] of [
+    ['目标', '检查刻痕'],
+    ['阻碍', '证人暂未授权'],
+    ['转折', '发现铜铃留痕'],
+    ['结果', '获准二次问询'],
+  ]) {
+    await page.getByLabel(name, { exact: true }).fill(text)
+  }
+  const reference = page.getByRole('checkbox', { name: '证人令披露规则', exact: true })
+  await expect(reference).toHaveCount(1)
+  await reference.check()
+  await page.getByRole('button', { name: '保存大纲草稿' }).press('Enter')
+  const confirmOutline = page.getByRole('button', { name: '确认已保存大纲' })
+  await expect(confirmOutline).toBeEnabled()
+  await confirmOutline.press('Enter')
+  await expect(page.getByText('已确认大纲修订 2', { exact: true })).toBeVisible()
+  const applied = await page.request.get(base.replace('/conception', '/outline-workspace'))
+  expect(applied.ok(), await applied.text()).toBe(true)
+  const outline = (await applied.json()).confirmed
+  expect(outline.plan.volumes[0].units[0].chapters[0].setting_ids).toEqual([picked.id])
+  expect(outline.setting_basis.confirmation_id).toBe(adopted.confirmation?.id)
+  expect(outline.setting_basis.items).toEqual([
+    expect.objectContaining({ id: picked.id, detail: alternative }),
+  ])
+})
+
 test('设定条目历史对照后只恢复所选条目，并在保存版变化时要求重读', async ({ page }) => {
   const { base, novel, chapterId, headers } = await openWorkbench(
     page,
