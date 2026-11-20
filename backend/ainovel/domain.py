@@ -842,6 +842,10 @@ class Domain:
                 from .assistant import prepare_turn_tx
 
                 initial["assistant"] = prepare_turn_tx(db, branch_id, payload)
+            if kind == "novel_assistant_turn":
+                from .novel_assistant import KEY, prepare_turn_tx
+
+                initial[KEY] = prepare_turn_tx(db, branch_id, payload)
             if identifier := payload.get("conception_snapshot_id"):
                 if item_id := payload.get("setting_item_id"):
                     from .setting_review import confirmed_world_basis, freeze_rule
@@ -940,6 +944,10 @@ class Domain:
                 from .assistant import record_turn_tx
 
                 record_turn_tx(db, task_id, payload, time())
+            if kind == "novel_assistant_turn":
+                from .novel_assistant import record_turn_tx
+
+                record_turn_tx(db, branch_id, task_id, payload)
             self.db.event(db, task_id, "queued", {"kind": kind})
             self.db.event(
                 db,

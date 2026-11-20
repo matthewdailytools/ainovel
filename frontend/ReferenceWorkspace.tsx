@@ -189,7 +189,12 @@ export function ReferenceWorkspace({
   onWriting: () => void
 }) {
   const [row, setRow] = useState<ReferenceSession>()
-  useAssistantScope({ scopeId: identifier, label: row?.payload.source.title || '当前参考选段', account })
+  useAssistantScope({
+    scopeId: identifier,
+    label: row?.payload.source.title || '当前参考选段',
+    account,
+    workspaceEligible: !!branch && row?.payload.branch_id === branch.id,
+  })
   const [draft, setDraft] = useState<ReferencePayload>()
   const [base, setBase] = useState(-1)
   const [artifacts, setArtifacts] = useState<Record<string, Artifact>>({})

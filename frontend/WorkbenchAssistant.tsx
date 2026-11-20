@@ -12,6 +12,7 @@ import {
 } from 'react'
 import { ApiError, label as taskLabel } from './api'
 import { WorkbenchTabs } from './WorkbenchTabs'
+import type { NovelAssistantDelivery, NovelAssistantReference } from './novelAssistantModel'
 import {
   allowsAssistantTarget,
   assistantActions,
@@ -66,6 +67,8 @@ type AssistantView = (typeof assistantTabs)[number][0]
 
 type Scope = {
   scopeId: string | null
+  stage?: CreationBench
+  workspaceEligible?: boolean
   label: string
   account?: string
   onSource?: (source: AssistantCitation) => void
@@ -82,6 +85,7 @@ type TargetOptions<T extends AssistantValue> = {
   contextKey?: string
   quickQuestion?: string
   request?: AssistantRequestOptions
+  element?: RefObject<HTMLElement | null>
 }
 type Target = AssistantDraftBinding &
   Omit<TargetOptions<AssistantValue>, 'onApply' | 'value'> & {
@@ -126,31 +130,39 @@ type AssistantContextValue = {
   claimLaunch: (id: number) => boolean
   selectedTarget: () => Target | undefined
   findTarget: (turn: AssistantTurn) => Target | undefined
+  continueInWorkspace?: () => void
+  findDeliveryTarget: (delivery: NovelAssistantDelivery) => Target | undefined
 }
 const AssistantContext = createContext<AssistantContextValue | null>(null)
 const closedDock = { open: false, select: () => undefined, dismiss: () => undefined }
+
+export function useDeliveryTarget() {
+  return useContext(AssistantContext)?.findDeliveryTarget
+}
 
 export function useAssistantDock(): { open: boolean; select: () => void; dismiss: () => void } {
   const context = useContext(AssistantContext)
   return context ? { open: context.dockOpen, select: context.select, dismiss: context.dismiss } : closedDock
 }
 
-export function useAssistantScope({ scopeId, label, account, onSource }: Scope) {
+export function useAssistantScope({ scopeId, label, stage, workspaceEligible, account, onSource }: Scope) {
   const context = useContext(AssistantContext)
   const register = context?.registerScope
   const host = context?.host
+  const currentStage = context?.stage
   const id = useId()
   const source = useRef(onSource)
   source.current = onSource
   useLayoutEffect(() => {
-    if (!register || !host) return
+    if (!register || !host || (stage && stage !== currentStage)) return
     return register(host, id, {
       scopeId,
       label,
+      workspaceEligible,
       account,
       ...(onSource ? { onSource: (citation) => source.current?.(citation) } : {}),
     })
-  }, [register, host, id, scopeId, label, account, !!onSource])
+  }, [register, host, id, scopeId, label, stage, currentStage, workspaceEligible, account, !!onSource])
 }
 
 export function useAssistantTarget<T extends AssistantValue>(options: TargetOptions<T>) {
@@ -195,12 +207,16 @@ export function CreationAssistantLayout({
   children,
   inline = false,
   account: defaultAccount,
+  workspace,
+  onContinueInWorkspace,
 }: {
   stage: CreationBench
   branchId: string
   children: ReactNode
   inline?: boolean
   account?: string
+  workspace?: (current: NovelAssistantReference) => ReactNode
+  onContinueInWorkspace?: (current: NovelAssistantReference) => void
 }) {
   const host = JSON.stringify([branchId, stage])
   const railId = useId()
@@ -323,6 +339,30 @@ export function CreationAssistantLayout({
           allowsAssistantTarget(stage, target.field) &&
           assistantTurnMatchesTarget(turn, target),
       )
+  const findDeliveryTarget = ({ stage: targetStage, scope_id, field }: NovelAssistantDelivery) => {
+    if (targetStage !== stage) return
+    const matches = [...targets.current.values()]
+      .map(({ current }) => current)
+      .filter((target) => {
+        if (!target.apply || target.enabled === false || target.field !== field) return false
+        const bound = targetLocation(base, target)
+        return bound.scopeId === scope_id && !bound.draftKey
+      })
+    if (matches.length === 1) return matches[0]
+  }
+  const reference = (where: AssistantLocation, label?: string): NovelAssistantReference => ({
+    stage: where.stage,
+    scope_id: where.scopeId,
+    scope_label: label || '',
+  })
+  const workbench = inline ? (
+    children
+  ) : (
+    <div className={open ? 'wb-assistant-layout wb-assistant-layout-open' : 'wb-assistant-layout'}>
+      <WorkbenchAssistantRail />
+      <div className="wb-assistant-main">{children}</div>
+    </div>
+  )
 
   return (
     <AssistantContext.Provider
@@ -349,15 +389,27 @@ export function CreationAssistantLayout({
         claimLaunch,
         selectedTarget: selectionBinding,
         findTarget,
+        findDeliveryTarget,
+        continueInWorkspace:
+          onContinueInWorkspace && !location.draftKey && scope?.workspaceEligible !== false
+            ? () => {
+                dismiss()
+                onContinueInWorkspace(reference(location, selection?.label || scope?.label))
+              }
+            : undefined,
       }}
     >
-      {inline ? (
-        children
-      ) : (
-        <div className={open ? 'wb-assistant-layout wb-assistant-layout-open' : 'wb-assistant-layout'}>
-          <WorkbenchAssistantRail />
-          <div className="wb-assistant-main">{children}</div>
+      {workspace ? (
+        <div className="novel-workbench-shell">
+          <div className="novel-workbench-main">{workbench}</div>
+          {workspace(
+            scope?.workspaceEligible === false
+              ? reference({ ...base, scopeId: null })
+              : reference(base, scope?.label),
+          )}
         </div>
+      ) : (
+        workbench
       )}
     </AssistantContext.Provider>
   )
@@ -665,6 +717,11 @@ function AssistantConversationPanel({
         onChange={setView}
         className="wb-assistant-actions wb-assistant-tabs"
       />
+      {context.continueInWorkspace && view === 'conversation' && (
+        <button type="button" onClick={context.continueInWorkspace}>
+          用此对象继续作品对话
+        </button>
+      )}
       <section
         role="tabpanel"
         id={tabsId + '-panel-history'}

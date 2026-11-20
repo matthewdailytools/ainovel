@@ -66,6 +66,41 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if instruction.get("action") == "novel_assistant.turn":
+            recent = value["上下文"]["同一工作版本近期对话"]
+            question = instruction["问题"]
+            answer = "已记录这轮创作讨论。"
+            if question == "请沿用前一轮的银铃线索，给出人物设定和总纲建议。":
+                answer = (
+                    "沿用前一轮的银铃线索，已整理两份建议。"
+                    if any(row["问题"] == "记住这一轮的线索是银铃。" for row in recent)
+                    else "这轮没有读到前一轮的银铃线索。"
+                )
+            examples = {
+                "M1": ("position", "核心定位建议", "一部追查铜铃来历的短篇。"),
+                "M3": ("detail", "人物设定建议", "师姐离宗后以旧法验铃。"),
+                "M4": ("summary", "总纲建议", "学徒追着银铃的流转找到师姐。"),
+                "M5": ("text", "正文候选建议", "银铃在窗下轻轻响了一声。"),
+            }
+            cards = []
+            for destination, scope in instruction["可用去向"].items():
+                example = examples.get(scope["工作台"])
+                if example and example[0] in scope["允许字段及字符上限"]:
+                    field, title, proposed = example
+                    cards.append(
+                        {
+                            "destination": destination,
+                            "field": field,
+                            "title": title,
+                            "value": proposed,
+                            "reason": "保留提问中的线索和角色决定。",
+                        }
+                    )
+            return {
+                "text": json.dumps({"answer": answer, "cards": cards}, ensure_ascii=False),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-novel-assistant",
+            }
         if instruction.get("action") in {"assistant.turn", "assistant.opening_intro"}:
             field = instruction.get("字段")
             proposed = "悬疑短篇，围绕能够回查的铜铃记录推进。"

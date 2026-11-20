@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { useAssistantTarget } from './WorkbenchAssistant'
 
 type Target = Parameters<typeof useAssistantTarget>[0]
@@ -12,7 +13,8 @@ export function AssistantField({
   action?: 'refine' | 'review' | 'suggest'
   discussionInDetails?: boolean
 }) {
-  const { openAssistant, targetEnabled } = useAssistantTarget(target)
+  const element = useRef<HTMLDivElement>(null)
+  const { openAssistant, targetEnabled } = useAssistantTarget({ ...target, element })
   if (!targetEnabled) return null
   const discussion = (
     <button
@@ -24,7 +26,7 @@ export function AssistantField({
     </button>
   )
   return (
-    <div className="actions assistant-field-actions">
+    <div className="actions assistant-field-actions" ref={element} tabIndex={-1}>
       <button
         type="button"
         aria-label={`${quickLabel} · ${target.label}`}

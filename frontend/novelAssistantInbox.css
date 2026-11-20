@@ -1,0 +1,64 @@
+.novel-assistant-inbox {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 12px 0;
+  padding: 0 12px;
+  background: #f9fafc;
+  color: #28364b;
+  font-size: 0.875rem;
+  min-width: 0;
+}
+
+.novel-assistant-inbox summary {
+  min-height: 34px;
+  padding: 7px 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.novel-assistant-inbox article {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+
+.novel-assistant-inbox :is(h3, p, blockquote) {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.novel-assistant-inbox h3 {
+  font-size: 1rem;
+}
+
+.novel-assistant-inbox blockquote {
+  white-space: pre-wrap;
+  border-left: 2px solid #8094b8;
+  padding: 6px 12px;
+  max-block-size: 16rem;
+  overflow: auto;
+}
+
+.novel-assistant-inbox-status {
+  color: #475569;
+}
+
+.novel-assistant-inbox-compare {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 0;
+}
+
+.novel-assistant-inbox-compare button + button {
+  margin-inline-start: 8px;
+}
+
+.novel-assistant-inbox :is(summary, button, article):focus-visible {
+  outline: 2px solid #4358a7;
+  outline-offset: 2px;
+}
+
+.novel-assistant-inbox > details > .actions,
+.novel-assistant-inbox article .actions {
+  flex-wrap: wrap;
+}

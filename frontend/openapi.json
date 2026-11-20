@@ -6643,6 +6643,342 @@
           }
         }
       }
+    },
+    "/api/branches/{branch_id}/novel-assistant": {
+      "get": {
+        "summary": "Read Novel Assistant",
+        "operationId": "read_novel_assistant_api_branches__branch_id__novel_assistant_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "type": "integer", "maximum": 9223372036854776000, "minimum": 1 },
+                { "type": "null" }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "maximum": 50, "minimum": 1, "default": 20, "title": "Limit" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/NovelAssistantWorkspace" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/novel-assistant/draft": {
+      "put": {
+        "summary": "Save Novel Assistant Draft",
+        "operationId": "save_novel_assistant_draft_api_branches__branch_id__novel_assistant_draft_put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/NovelAssistantEditDraft" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/NovelAssistantDraft" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/novel-assistant/turns": {
+      "post": {
+        "summary": "Send Novel Assistant Turn",
+        "operationId": "send_novel_assistant_turn_api_branches__branch_id__novel_assistant_turns_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/NovelAssistantSendTurn" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/NovelAssistantQueuedTurn" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/novel-assistant/destinations": {
+      "get": {
+        "summary": "List Novel Assistant Destinations",
+        "operationId": "list_novel_assistant_destinations_api_branches__branch_id__novel_assistant_destinations_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"],
+              "type": "string",
+              "title": "Stage"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/DeliveryDestinations" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/novel-assistant/deliveries/preview": {
+      "post": {
+        "summary": "Preview Novel Assistant Delivery",
+        "operationId": "preview_novel_assistant_delivery_api_branches__branch_id__novel_assistant_deliveries_preview_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PreviewDelivery" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/DeliveryPreview" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/novel-assistant/deliveries": {
+      "post": {
+        "summary": "Save Novel Assistant Delivery",
+        "operationId": "save_novel_assistant_delivery_api_branches__branch_id__novel_assistant_deliveries_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaveDelivery" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Delivery" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Novel Assistant Deliveries",
+        "operationId": "list_novel_assistant_deliveries_api_branches__branch_id__novel_assistant_deliveries_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "type": "string" },
+                { "type": "null" }
+              ],
+              "title": "Stage"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Deliveries" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/novel-assistant/deliveries/{identifier}": {
+      "get": {
+        "summary": "Get Novel Assistant Delivery",
+        "operationId": "get_novel_assistant_delivery_api_branches__branch_id__novel_assistant_deliveries__identifier__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Delivery" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8414,6 +8750,122 @@
         "required": ["kind", "text", "base_story_revision"],
         "title": "DefinitionInput"
       },
+      "Deliveries": {
+        "properties": {
+          "deliveries": {
+            "items": { "$ref": "#/components/schemas/Delivery" },
+            "type": "array",
+            "title": "Deliveries"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["deliveries"],
+        "title": "Deliveries"
+      },
+      "Delivery": {
+        "properties": {
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "field": { "type": "string", "title": "Field" },
+          "target_label": { "type": "string", "title": "Target Label" },
+          "field_label": { "type": "string", "title": "Field Label" },
+          "before": { "type": "string", "title": "Before" },
+          "value": { "type": "string", "title": "Value" },
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" },
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "turn_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Turn Id"
+          },
+          "card_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Card Id"
+          },
+          "created": { "type": "number", "title": "Created" },
+          "basis_current": { "type": "boolean", "title": "Basis Current" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stage",
+          "scope_id",
+          "field",
+          "target_label",
+          "field_label",
+          "before",
+          "value",
+          "basis_sha256",
+          "id",
+          "turn_id",
+          "card_id",
+          "created",
+          "basis_current"
+        ],
+        "title": "Delivery"
+      },
+      "DeliveryDestination": {
+        "properties": {
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "label": { "type": "string", "title": "Label" },
+          "fields": {
+            "items": { "$ref": "#/components/schemas/DeliveryField" },
+            "type": "array",
+            "title": "Fields"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["scope_id", "label", "fields"],
+        "title": "DeliveryDestination"
+      },
+      "DeliveryDestinations": {
+        "properties": {
+          "options": {
+            "items": { "$ref": "#/components/schemas/DeliveryDestination" },
+            "type": "array",
+            "title": "Options"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["options"],
+        "title": "DeliveryDestinations"
+      },
+      "DeliveryField": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "label": { "type": "string", "title": "Label" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "label"],
+        "title": "DeliveryField"
+      },
       "DeliveryManifest": {
         "properties": {
           "format": {
@@ -8532,6 +8984,37 @@
           "sample_chapter_ids"
         ],
         "title": "DeliveryManifest"
+      },
+      "DeliveryPreview": {
+        "properties": {
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "field": { "type": "string", "title": "Field" },
+          "target_label": { "type": "string", "title": "Target Label" },
+          "field_label": { "type": "string", "title": "Field Label" },
+          "before": { "type": "string", "title": "Before" },
+          "value": { "type": "string", "title": "Value" },
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stage",
+          "scope_id",
+          "field",
+          "target_label",
+          "field_label",
+          "before",
+          "value",
+          "basis_sha256"
+        ],
+        "title": "DeliveryPreview"
       },
       "DeliverySetting": {
         "properties": {
@@ -9611,6 +10094,222 @@
         "required": ["plant_chapter_id", "opens_chapter_id", "closes_chapter_id", "title"],
         "title": "NewPromisePlan"
       },
+      "NovelAssistantCard": {
+        "properties": {
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "field": { "type": "string", "title": "Field" },
+          "title": { "type": "string", "title": "Title" },
+          "value": { "type": "string", "title": "Value" },
+          "reason": { "type": "string", "title": "Reason" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["stage", "id", "field", "title", "value", "reason"],
+        "title": "NovelAssistantCard"
+      },
+      "NovelAssistantDraft": {
+        "properties": {
+          "text": { "type": "string", "title": "Text" },
+          "revision": { "type": "integer", "title": "Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["text", "revision"],
+        "title": "NovelAssistantDraft"
+      },
+      "NovelAssistantEditDraft": {
+        "properties": {
+          "text": { "type": "string", "maxLength": 6000, "title": "Text" },
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["text", "base_revision"],
+        "title": "NovelAssistantEditDraft"
+      },
+      "NovelAssistantQueuedTurn": {
+        "properties": {
+          "revision": { "type": "integer", "title": "Revision" },
+          "turn": { "$ref": "#/components/schemas/NovelAssistantTurn" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["revision", "turn"],
+        "title": "NovelAssistantQueuedTurn"
+      },
+      "NovelAssistantReference": {
+        "properties": {
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "scope_label": { "type": "string", "title": "Scope Label" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["stage", "scope_label"],
+        "title": "NovelAssistantReference"
+      },
+      "NovelAssistantReply": {
+        "properties": {
+          "answer": { "type": "string", "title": "Answer" },
+          "cards": {
+            "items": { "$ref": "#/components/schemas/NovelAssistantCard" },
+            "type": "array",
+            "title": "Cards"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["answer", "cards"],
+        "title": "NovelAssistantReply"
+      },
+      "NovelAssistantScope": {
+        "properties": {
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["stage"],
+        "title": "NovelAssistantScope"
+      },
+      "NovelAssistantSendTurn": {
+        "properties": {
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "question": { "type": "string", "maxLength": 6000, "minLength": 1, "title": "Question" },
+          "account": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Account"
+          },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "include_current_scope": { "type": "boolean", "title": "Include Current Scope", "default": true },
+          "references": {
+            "items": { "$ref": "#/components/schemas/NovelAssistantScope" },
+            "type": "array",
+            "maxItems": 5,
+            "title": "References"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["stage", "base_revision", "question", "account", "client_request_id"],
+        "title": "NovelAssistantSendTurn"
+      },
+      "NovelAssistantTurn": {
+        "properties": {
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "scope_label": { "type": "string", "title": "Scope Label" },
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "sequence": { "type": "integer", "title": "Sequence" },
+          "question": { "type": "string", "title": "Question" },
+          "status": { "type": "string", "title": "Status" },
+          "error": { "type": "string", "title": "Error" },
+          "task_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Task Id"
+          },
+          "result": { "anyOf": [{ "$ref": "#/components/schemas/NovelAssistantReply" }, { "type": "null" }] },
+          "include_current_scope": { "type": "boolean", "title": "Include Current Scope" },
+          "references": {
+            "items": { "$ref": "#/components/schemas/NovelAssistantReference" },
+            "type": "array",
+            "title": "References"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stage",
+          "scope_label",
+          "id",
+          "sequence",
+          "question",
+          "status",
+          "error",
+          "task_id",
+          "result",
+          "include_current_scope",
+          "references"
+        ],
+        "title": "NovelAssistantTurn"
+      },
+      "NovelAssistantWorkspace": {
+        "properties": {
+          "revision": { "type": "integer", "title": "Revision" },
+          "draft": { "$ref": "#/components/schemas/NovelAssistantDraft" },
+          "turns": {
+            "items": { "$ref": "#/components/schemas/NovelAssistantTurn" },
+            "type": "array",
+            "title": "Turns"
+          },
+          "next_before": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Next Before" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["revision", "draft", "turns", "next_before"],
+        "title": "NovelAssistantWorkspace"
+      },
       "NovelInput": {
         "properties": {
           "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
@@ -10460,6 +11159,38 @@
         "type": "object",
         "required": ["basis_sha256", "account", "client_request_id"],
         "title": "PrepareCompletion"
+      },
+      "PreviewDelivery": {
+        "properties": {
+          "turn_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Turn Id"
+          },
+          "card_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Card Id"
+          },
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "field": { "type": "string", "maxLength": 32, "minLength": 1, "title": "Field" },
+          "value": { "type": "string", "maxLength": 20000, "minLength": 1, "title": "Value" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["turn_id", "card_id", "stage", "scope_id", "field", "value"],
+        "title": "PreviewDelivery"
       },
       "ProjectBrief": {
         "properties": {
@@ -11523,6 +12254,39 @@
         "type": "object",
         "required": ["base_revision", "base_story_revision", "categories"],
         "title": "SaveConception"
+      },
+      "SaveDelivery": {
+        "properties": {
+          "turn_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Turn Id"
+          },
+          "card_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Card Id"
+          },
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "field": { "type": "string", "maxLength": 32, "minLength": 1, "title": "Field" },
+          "value": { "type": "string", "maxLength": 20000, "minLength": 1, "title": "Value" },
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["turn_id", "card_id", "stage", "scope_id", "field", "value", "basis_sha256"],
+        "title": "SaveDelivery"
       },
       "SaveInput": {
         "properties": {

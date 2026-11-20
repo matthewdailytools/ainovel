@@ -13,6 +13,9 @@ import type { ConceptionDestination, ConceptionHandoff } from './conception'
 import { confirmLeave } from './leaveGuard'
 import type { FeedbackHandoff } from './feedbackRevision'
 import { CreationAssistantLayout } from './WorkbenchAssistant'
+import { NovelAssistant } from './NovelAssistant'
+import { NovelAssistantInbox, type DeliveryLocation } from './NovelAssistantInbox'
+import type { NovelAssistantDelivery, NovelAssistantReference } from './novelAssistantModel'
 
 export type Notify = (error: unknown) => void
 const benches = [
@@ -57,6 +60,18 @@ export function App() {
     chapterId: string
     reportId?: string
   }>()
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const [assistantReference, setAssistantReference] = useState<
+    NovelAssistantReference & { branchId: string }
+  >()
+  const [sourceTurn, setSourceTurn] = useState<{ branchId: string; turnId: string }>()
+  const sourceFocused = useCallback((turnId: string) => {
+    setSourceTurn((current) => (current?.turnId === turnId ? undefined : current))
+  }, [])
+  const [deliveryRequest, setDeliveryRequest] = useState<
+    DeliveryLocation & { branchId: string; request: number }
+  >()
+  const [deliveryRevision, setDeliveryRevision] = useState(0)
   const [account, setAccount] = useState('openai_1')
   const [title, setTitle] = useState('')
   const [creating, setCreating] = useState(false)
@@ -129,6 +144,9 @@ export function App() {
   function goToPage(id: string) {
     if (creationFlow.current) creationFlow.current.open = false
     navigationGeneration.current += 1
+    setAssistantReference(undefined)
+    setSourceTurn(undefined)
+    setDeliveryRequest(undefined)
     setPage(id)
   }
   function closeSettings() {
@@ -153,12 +171,28 @@ export function App() {
     section?.focus({ preventScroll: true })
   }, [bench, branch?.id, page])
   function showBench(id: Bench, destination: string, open = false) {
-    if ((destination !== page || quickConception) && !confirmLeave()) return
+    if ((destination !== page || quickConception) && !confirmLeave()) return false
     setQuickConception(false)
     setOutlineHandoff(undefined)
     setRunEntry(undefined)
     setBench({ id, open })
     goToPage(destination)
+    return true
+  }
+  function viewDelivery(origin: string, delivery: NovelAssistantDelivery) {
+    if (selection.current.branchId !== origin) return
+    const destination = benches.find(([, , , code]) => code === delivery.stage)
+    if (!destination || !showBench(destination[0], destination[2], delivery.stage === 'M1')) return
+    setAssistantOpen(false)
+    setSourceTurn(undefined)
+    setDeliveryRequest({
+      branchId: origin,
+      request: navigationGeneration.current,
+      id: delivery.id,
+      stage: delivery.stage,
+      scopeId: delivery.scope_id,
+      field: delivery.field,
+    })
   }
   function openNewWork(start: NewWorkStart) {
     if (creating) return
@@ -258,6 +292,22 @@ export function App() {
     benches.find(([id, , destination]) => id === bench?.id && destination === page)?.[3] ??
     benches.find(([, , destination]) => destination === page)?.[3]
   const selectedAccount = config?.accounts.find((a) => a.id === account)
+  const modelReady = !!selectedAccount?.configured && !!selectedAccount?.priced
+  const selectedDelivery =
+    deliveryRequest?.branchId === branch?.id && deliveryRequest?.stage === stage ? deliveryRequest : undefined
+  const inbox = branch && stage && (
+    <NovelAssistantInbox
+      key={branch.id + stage}
+      branchId={branch.id}
+      stage={stage}
+      revision={deliveryRevision}
+      selected={selectedDelivery}
+      onViewSource={(turnId) => {
+        setSourceTurn({ branchId: branch.id, turnId })
+        setAssistantOpen(true)
+      }}
+    />
+  )
   const selectedConception = conceptionHandoff?.branchId === branch?.id ? conceptionHandoff : undefined
   return (
     <>
@@ -411,6 +461,7 @@ export function App() {
                   setBranchId('')
                   setBench(undefined)
                   setRunEntry(undefined)
+                  setSourceTurn(undefined)
                   setNovelId(e.target.value)
                 }}
               >
@@ -436,6 +487,7 @@ export function App() {
                   }
                   setBench(undefined)
                   setRunEntry(undefined)
+                  setSourceTurn(undefined)
                   setBranchId(e.target.value)
                 }}
               >
@@ -582,6 +634,53 @@ export function App() {
                 branchId={branch?.id ?? ''}
                 account={account}
                 inline={!branch || !stage || stage === 'M5' || (page === 'ideation' && quickConception)}
+                onContinueInWorkspace={
+                  branch && stage
+                    ? (current) => {
+                        setAssistantReference({ ...current, branchId: branch.id })
+                        setSourceTurn(undefined)
+                        setAssistantOpen(true)
+                      }
+                    : undefined
+                }
+                workspace={
+                  branch && stage
+                    ? (current) => {
+                        const scope =
+                          assistantOpen &&
+                          assistantReference?.branchId === branch.id &&
+                          assistantReference?.stage === stage &&
+                          current.scope_id === null
+                            ? assistantReference
+                            : current
+                        return (
+                          <NovelAssistant
+                            key={branch.id}
+                            branchId={branch.id}
+                            novelTitle={novel?.title}
+                            branchLabel={branch.name}
+                            stage={stage}
+                            scopeId={scope.scope_id}
+                            scopeLabel={scope.scope_label}
+                            account={account}
+                            modelReady={modelReady}
+                            open={assistantOpen}
+                            onOpenChange={(open) => {
+                              if (!open) {
+                                setAssistantReference(undefined)
+                                setSourceTurn(undefined)
+                              }
+                              setAssistantOpen(open)
+                            }}
+                            focusTurnId={sourceTurn?.branchId === branch.id ? sourceTurn.turnId : undefined}
+                            onSourceFocus={sourceFocused}
+                            onViewDelivery={(delivery) => viewDelivery(branch.id, delivery)}
+                            onDeliverySaved={() => setDeliveryRevision((revision) => revision + 1)}
+                          />
+                        )
+                      }
+                    : undefined
+                }
               >
                 {page === 'ideation' && branch && (
                   <>
@@ -627,6 +726,9 @@ export function App() {
                           notify={notify}
                           onHandoff={openConceptionDestination}
                           projectEntry={bench?.id === 'project' && bench.open ? bench : undefined}
+                          projectInbox={stage === 'M1' ? inbox : undefined}
+                          settingInbox={stage === 'M3' ? inbox : undefined}
+                          settingDelivery={stage === 'M3' ? selectedDelivery : undefined}
                         />
                       </div>
                     )}
@@ -646,6 +748,8 @@ export function App() {
                     conceptionHandoff={selectedConception}
                     onConceptionSettings={openConceptionWorkspace}
                     outlineHandoff={outlineHandoff?.branchId === branch.id ? outlineHandoff : undefined}
+                    deliveryChapter={stage === 'M5' ? selectedDelivery : undefined}
+                    inbox={inbox}
                     onOutline={() => navigate('outline')}
                     onInspection={() => {
                       if (!confirmLeave()) return
@@ -662,6 +766,7 @@ export function App() {
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
+                    inbox={inbox}
                     onWriting={(chapterId, reportId) => {
                       if (!confirmLeave()) return
                       setFeedbackHandoff(undefined)
@@ -677,6 +782,8 @@ export function App() {
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
+                    inbox={inbox}
+                    deliverySession={stage === 'M2' ? selectedDelivery : undefined}
                     onWriting={() => navigate('writing')}
                   />
                 )}
@@ -708,6 +815,9 @@ export function App() {
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
+                    inspectionInbox={stage === 'M6' ? inbox : undefined}
+                    completionInbox={stage === 'M7' ? inbox : undefined}
+                    inspectionDelivery={stage === 'M6' ? selectedDelivery : undefined}
                     onReviseFeedback={(feedback) => {
                       if (!confirmLeave()) return
                       setFeedbackHandoff(feedback)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, label, type Artifact, type Branch, type Task } from './api'
 import type { Notify } from './App'
 import { AuthorIntentPanel } from './AuthorIntent'
@@ -16,6 +16,7 @@ import { GenreSettings } from './GenreProfile'
 import { ProjectBriefPanel, type ProjectDraft } from './ProjectBrief'
 import { StoryGraph } from './StoryGraph'
 import { useLeaveGuard } from './leaveGuard'
+import type { DeliveryLocation } from './NovelAssistantInbox'
 import {
   baseRevision,
   candidateCategories,
@@ -53,6 +54,9 @@ export function ConceptionWorkspace({
   account,
   modelReady,
   projectEntry,
+  projectInbox,
+  settingInbox,
+  settingDelivery,
   notify,
   onHandoff,
 }: {
@@ -60,6 +64,9 @@ export function ConceptionWorkspace({
   account: string
   modelReady: boolean
   projectEntry?: object
+  projectInbox?: ReactNode
+  settingInbox?: ReactNode
+  settingDelivery?: DeliveryLocation & { request: number }
   notify: Notify
   onHandoff: (destination: ConceptionDestination, handoff?: ConceptionHandoff) => void
 }) {
@@ -136,6 +143,18 @@ export function ConceptionWorkspace({
   const panel = useRef<HTMLElement>(null)
   const historyPanel = useRef<HTMLElement>(null)
   useLeaveGuard(dirty, '未保存的构思设定')
+  const selectedDelivery = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (!settingDelivery?.scopeId || selectedDelivery.current === settingDelivery.request) return
+    const target = categories.find((entry) => entry.items.some((item) => item.id === settingDelivery.scopeId))
+    if (!target) return
+    selectedDelivery.current = settingDelivery.request
+    if (target.id === category?.id) return
+    if (categoryTitleEdit && !window.confirm('当前类别名称还未提交。放弃这次改名并打开建议的目标类别？'))
+      return
+    setCategoryId(target.id)
+    setCategoryTitleEdit('')
+  }, [categories, category?.id, categoryTitleEdit, settingDelivery])
 
   useEffect(() => {
     if (!locateItem) return
@@ -500,6 +519,7 @@ export function ConceptionWorkspace({
   return (
     <div className="conception-workspace">
       <div id="bench-project" tabIndex={-1}>
+        {projectInbox}
         {state && (
           <ProjectBriefPanel
             key={branch.id}
@@ -518,6 +538,7 @@ export function ConceptionWorkspace({
       </div>
       <section id="bench-settings" tabIndex={-1} className="card" aria-label="按类别完善小说设定">
         <h2>构思工作台</h2>
+        {settingInbox}
         <p className="small muted">{branch.name} · 从任意类别开始，随时返回补充，也可以先跳过。</p>
         {feedback('settings')}
         {storageError && <p role="alert">{storageError}</p>}

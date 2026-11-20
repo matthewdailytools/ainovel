@@ -3138,6 +3138,126 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/novel-assistant': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Novel Assistant */
+    get: operations['read_novel_assistant_api_branches__branch_id__novel_assistant_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/novel-assistant/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Novel Assistant Draft */
+    put: operations['save_novel_assistant_draft_api_branches__branch_id__novel_assistant_draft_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/novel-assistant/turns': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Send Novel Assistant Turn */
+    post: operations['send_novel_assistant_turn_api_branches__branch_id__novel_assistant_turns_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/novel-assistant/destinations': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Novel Assistant Destinations */
+    get: operations['list_novel_assistant_destinations_api_branches__branch_id__novel_assistant_destinations_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/novel-assistant/deliveries/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Preview Novel Assistant Delivery */
+    post: operations['preview_novel_assistant_delivery_api_branches__branch_id__novel_assistant_deliveries_preview_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/novel-assistant/deliveries': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Novel Assistant Deliveries */
+    get: operations['list_novel_assistant_deliveries_api_branches__branch_id__novel_assistant_deliveries_get']
+    put?: never
+    /** Save Novel Assistant Delivery */
+    post: operations['save_novel_assistant_delivery_api_branches__branch_id__novel_assistant_deliveries_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/novel-assistant/deliveries/{identifier}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Novel Assistant Delivery */
+    get: operations['get_novel_assistant_delivery_api_branches__branch_id__novel_assistant_deliveries__identifier__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -4242,6 +4362,64 @@ export interface components {
       /** Base Story Revision */
       base_story_revision: number
     }
+    /** Deliveries */
+    Deliveries: {
+      /** Deliveries */
+      deliveries: components['schemas']['Delivery'][]
+    }
+    /** Delivery */
+    Delivery: {
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id: string | null
+      /** Field */
+      field: string
+      /** Target Label */
+      target_label: string
+      /** Field Label */
+      field_label: string
+      /** Before */
+      before: string
+      /** Value */
+      value: string
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Id */
+      id: string
+      /** Turn Id */
+      turn_id: string
+      /** Card Id */
+      card_id: string
+      /** Created */
+      created: number
+      /** Basis Current */
+      basis_current: boolean
+    }
+    /** DeliveryDestination */
+    DeliveryDestination: {
+      /** Scope Id */
+      scope_id: string | null
+      /** Label */
+      label: string
+      /** Fields */
+      fields: components['schemas']['DeliveryField'][]
+    }
+    /** DeliveryDestinations */
+    DeliveryDestinations: {
+      /** Options */
+      options: components['schemas']['DeliveryDestination'][]
+    }
+    /** DeliveryField */
+    DeliveryField: {
+      /** Id */
+      id: string
+      /** Label */
+      label: string
+    }
     /** DeliveryManifest */
     DeliveryManifest: {
       /**
@@ -4286,6 +4464,28 @@ export interface components {
       spoiler_scope: 'opening' | 'whole'
       /** Sample Chapter Ids */
       sample_chapter_ids: string[]
+    }
+    /** DeliveryPreview */
+    DeliveryPreview: {
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id: string | null
+      /** Field */
+      field: string
+      /** Target Label */
+      target_label: string
+      /** Field Label */
+      field_label: string
+      /** Before */
+      before: string
+      /** Value */
+      value: string
+      /** Basis Sha256 */
+      basis_sha256: string
     }
     /** DeliverySetting */
     DeliverySetting: {
@@ -5052,6 +5252,141 @@ export interface components {
        */
       notes: string
     }
+    /** NovelAssistantCard */
+    NovelAssistantCard: {
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id?: string | null
+      /** Id */
+      id: string
+      /** Field */
+      field: string
+      /** Title */
+      title: string
+      /** Value */
+      value: string
+      /** Reason */
+      reason: string
+    }
+    /** NovelAssistantDraft */
+    NovelAssistantDraft: {
+      /** Text */
+      text: string
+      /** Revision */
+      revision: number
+    }
+    /** NovelAssistantEditDraft */
+    NovelAssistantEditDraft: {
+      /** Text */
+      text: string
+      /** Base Revision */
+      base_revision: number
+    }
+    /** NovelAssistantQueuedTurn */
+    NovelAssistantQueuedTurn: {
+      /** Revision */
+      revision: number
+      turn: components['schemas']['NovelAssistantTurn']
+    }
+    /** NovelAssistantReference */
+    NovelAssistantReference: {
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id?: string | null
+      /** Scope Label */
+      scope_label: string
+    }
+    /** NovelAssistantReply */
+    NovelAssistantReply: {
+      /** Answer */
+      answer: string
+      /** Cards */
+      cards: components['schemas']['NovelAssistantCard'][]
+    }
+    /** NovelAssistantScope */
+    NovelAssistantScope: {
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id?: string | null
+    }
+    /** NovelAssistantSendTurn */
+    NovelAssistantSendTurn: {
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id?: string | null
+      /** Base Revision */
+      base_revision: number
+      /** Question */
+      question: string
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /**
+       * Include Current Scope
+       * @default true
+       */
+      include_current_scope: boolean
+      /** References */
+      references?: components['schemas']['NovelAssistantScope'][]
+      /** Budget Limit */
+      budget_limit?: number | null
+    }
+    /** NovelAssistantTurn */
+    NovelAssistantTurn: {
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id?: string | null
+      /** Scope Label */
+      scope_label: string
+      /** Id */
+      id: string
+      /** Sequence */
+      sequence: number
+      /** Question */
+      question: string
+      /** Status */
+      status: string
+      /** Error */
+      error: string
+      /** Task Id */
+      task_id: string
+      result: components['schemas']['NovelAssistantReply'] | null
+      /** Include Current Scope */
+      include_current_scope: boolean
+      /** References */
+      references: components['schemas']['NovelAssistantReference'][]
+    }
+    /** NovelAssistantWorkspace */
+    NovelAssistantWorkspace: {
+      /** Revision */
+      revision: number
+      draft: components['schemas']['NovelAssistantDraft']
+      /** Turns */
+      turns: components['schemas']['NovelAssistantTurn'][]
+      /** Next Before */
+      next_before: number | null
+    }
     /** NovelInput */
     NovelInput: {
       /** Title */
@@ -5522,6 +5857,24 @@ export interface components {
       client_request_id: string
       /** Budget Limit */
       budget_limit?: number | null
+    }
+    /** PreviewDelivery */
+    PreviewDelivery: {
+      /** Turn Id */
+      turn_id: string
+      /** Card Id */
+      card_id: string
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id: string | null
+      /** Field */
+      field: string
+      /** Value */
+      value: string
     }
     /** ProjectBrief */
     ProjectBrief: {
@@ -6277,6 +6630,26 @@ export interface components {
       base_story_revision: number
       /** Categories */
       categories: components['schemas']['ConceptionCategory'][]
+    }
+    /** SaveDelivery */
+    SaveDelivery: {
+      /** Turn Id */
+      turn_id: string
+      /** Card Id */
+      card_id: string
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id: string | null
+      /** Field */
+      field: string
+      /** Value */
+      value: string
+      /** Basis Sha256 */
+      basis_sha256: string
     }
     /** SaveInput */
     SaveInput: {
@@ -14176,6 +14549,278 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ApplyReceipt']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_novel_assistant_api_branches__branch_id__novel_assistant_get: {
+    parameters: {
+      query?: {
+        before?: number | null
+        limit?: number
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NovelAssistantWorkspace']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_novel_assistant_draft_api_branches__branch_id__novel_assistant_draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NovelAssistantEditDraft']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NovelAssistantDraft']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  send_novel_assistant_turn_api_branches__branch_id__novel_assistant_turns_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NovelAssistantSendTurn']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NovelAssistantQueuedTurn']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_novel_assistant_destinations_api_branches__branch_id__novel_assistant_destinations_get: {
+    parameters: {
+      query: {
+        stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeliveryDestinations']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_novel_assistant_delivery_api_branches__branch_id__novel_assistant_deliveries_preview_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PreviewDelivery']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeliveryPreview']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_novel_assistant_deliveries_api_branches__branch_id__novel_assistant_deliveries_get: {
+    parameters: {
+      query?: {
+        stage?: ('M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7') | null
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Deliveries']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_novel_assistant_delivery_api_branches__branch_id__novel_assistant_deliveries_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveDelivery']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Delivery']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_novel_assistant_delivery_api_branches__branch_id__novel_assistant_deliveries__identifier__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Delivery']
         }
       }
       /** @description Validation Error */

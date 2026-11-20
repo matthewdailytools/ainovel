@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import type { DeliveryLocation } from './NovelAssistantInbox'
 import { api, type Branch, type Chapter, type Fact } from './api'
 import type { Notify } from './App'
 import { GenreSettings } from './GenreProfile'
@@ -42,6 +43,9 @@ export function Records({
   account,
   modelReady,
   notify,
+  inspectionInbox,
+  completionInbox,
+  inspectionDelivery,
   onReviseFeedback,
   onSnapshotRestored,
 }: {
@@ -49,6 +53,9 @@ export function Records({
   account: string
   modelReady: boolean
   notify: Notify
+  inspectionInbox?: ReactNode
+  completionInbox?: ReactNode
+  inspectionDelivery?: DeliveryLocation & { request: number }
   onReviseFeedback: (feedback: FeedbackHandoff) => void
   onSnapshotRestored: (branchId: string) => Promise<void>
 }) {
@@ -540,12 +547,14 @@ export function Records({
         </section>
       )}
       <div id="bench-inspection" tabIndex={-1}>
+        {inspectionInbox}
         <InspectionPanel
           key={branch.id}
           branchId={branch.id}
           chapters={chapters}
           account={account}
           modelReady={modelReady}
+          delivery={inspectionDelivery}
         />
       </div>
       <WorkSnapshotPanel
@@ -558,6 +567,7 @@ export function Records({
         }}
       />
       <div id="bench-completion" tabIndex={-1}>
+        {completionInbox}
         <CompletionPanel
           key={`completion-${branch.id}`}
           branchId={branch.id}

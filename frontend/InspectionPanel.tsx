@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AssistantField } from './AssistantField'
 import { api, ApiError, type Chapter } from './api'
 import type { components } from './api-schema'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
+import type { DeliveryLocation } from './NovelAssistantInbox'
+import { useAssistantScope } from './WorkbenchAssistant'
 import { InspectionSemanticPanel, type InspectionSuggestion } from './InspectionSemanticPanel'
 import {
   InspectionDescendantLengths,
@@ -469,11 +471,13 @@ export function InspectionPanel({
   chapters,
   account = '',
   modelReady = false,
+  delivery,
 }: {
   branchId: string
   chapters: Pick<Chapter, 'id' | 'title'>[]
   account?: string
   modelReady?: boolean
+  delivery?: DeliveryLocation & { request: number }
 }) {
   const [scope, setScope] = useState<Scope>('book')
   const [scopeId, setScopeId] = useState('')
@@ -491,6 +495,7 @@ export function InspectionPanel({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const routedDelivery = useRef<number | undefined>(undefined)
   const route = `/branches/${branchId}/workflow-inspections`
   const target = data?.preview.length_target
   const targets = {
@@ -582,6 +587,31 @@ export function InspectionPanel({
     setMessage('')
   }
   const choices = scope === 'volume' ? volumes : chapters
+  useAssistantScope({
+    stage: 'M6',
+    scopeId: scopeId || null,
+    label: choices.find((entry) => entry.id === scopeId)?.title || '全书',
+    account,
+  })
+  useEffect(() => {
+    if (!delivery || delivery.request === routedDelivery.current || saving) return
+    const nextScope = !delivery.scopeId
+      ? 'book'
+      : chapters.some((entry) => entry.id === delivery.scopeId)
+        ? 'chapter'
+        : volumes.some((entry) => entry.id === delivery.scopeId)
+          ? 'volume'
+          : null
+    if (!nextScope) return
+    routedDelivery.current = delivery.request
+    if (nextScope !== scope || (delivery.scopeId || '') !== scopeId) {
+      if (!confirmLeave()) return
+      resetDraft()
+      setScope(nextScope)
+      setScopeId(delivery.scopeId || '')
+    }
+    setSelected(delivery.field)
+  }, [chapters, volumes, delivery, saving, scope, scopeId])
   const review = reviews[selected] ?? newReview(selected)
   const selectedCheck = data?.preview.items.find((item) => item.check_id === selected)
   const deviations = selectedCheck?.check_id === '05' ? (softDeviations(selectedCheck.basis) ?? []) : []

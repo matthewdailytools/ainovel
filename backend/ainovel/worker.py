@@ -47,6 +47,7 @@ RETAIN_UNCERTAIN_STEPS = {
     "source_interpretation_correction",
     "source_corrected_candidate_recheck",
     "conception_generate",
+    "novel_assistant_turn",
 }
 
 
@@ -369,6 +370,7 @@ class Worker:
             "对照单条已确认设定与保存稿",
             "起草完本交付简介",
             "assistant.opening_intro",
+            "novel_assistant.turn",
             "仅依据作者原话整理本场景情节",
             "逐项对照作者情节解释与本次正文",
             "只从本次正文独立提取物品与信息流向",
@@ -2082,6 +2084,10 @@ class Worker:
                 await run(self)
             elif task["kind"] == "assistant_turn":
                 from .assistant import run
+
+                await run(self)
+            elif task["kind"] == "novel_assistant_turn":
+                from .novel_assistant import run
 
                 await run(self)
             elif task["kind"] == "candidate_recheck":

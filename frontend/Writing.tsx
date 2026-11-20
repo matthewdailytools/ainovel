@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
   api,
   ApiError,
@@ -18,6 +18,7 @@ import { ChapterRestorePreview, type ChapterRestorePreviewProps } from './Chapte
 import { chapterDraftOwner, readDraft, writeDraft, type Draft } from './drafts'
 import { AssistantField } from './AssistantField'
 import { useAssistantDock, useAssistantScope, WorkbenchAssistantRail } from './WorkbenchAssistant'
+import type { DeliveryLocation } from './NovelAssistantInbox'
 import { WorkbenchTabs } from './WorkbenchTabs'
 import './writingActions.css'
 import './writingEditorFocus.css'
@@ -137,6 +138,8 @@ export function Writing({
   conceptionHandoff,
   onConceptionSettings,
   outlineHandoff,
+  deliveryChapter,
+  inbox,
   onOutline,
   onInspection,
 }: {
@@ -151,6 +154,8 @@ export function Writing({
   conceptionHandoff?: ConceptionHandoff
   onConceptionSettings: () => void
   outlineHandoff?: { chapterId: string; reportId?: string }
+  deliveryChapter?: DeliveryLocation & { request: number }
+  inbox?: ReactNode
   onOutline: () => void
   onInspection: () => void
 }) {
@@ -159,6 +164,7 @@ export function Writing({
   const [loading, setLoading] = useState(true)
   const [opening, setOpening] = useState(false)
   const loadSequence = useRef(0)
+  const routedDelivery = useRef<number | undefined>(undefined)
   const [archived, setArchived] = useState<Chapter[]>([])
   const [archiveConfirmed, setArchiveConfirmed] = useState(false)
   const [chapter, setChapter] = useState<Chapter>()
@@ -353,11 +359,12 @@ export function Writing({
         reading.current.revision = state.revision
         if (rows.length)
           await loadChapter(
-            rows.find((c) => c.id === feedbackHandoff?.chapter_id)?.id ||
+            rows.find((c) => c.id === deliveryChapter?.scopeId)?.id ||
+              rows.find((c) => c.id === feedbackHandoff?.chapter_id)?.id ||
               rows.find((c) => c.id === outlineHandoff?.chapterId)?.id ||
               rows.find((c) => c.id === state.chapter_id)?.id ||
               rows[0].id,
-            feedbackHandoff || outlineHandoff ? 0 : state.cursor,
+            deliveryChapter || feedbackHandoff || outlineHandoff ? 0 : state.cursor,
           )
         if (active && outlineHandoff?.reportId) {
           const report = await api<Artifact>(`/artifacts/${outlineHandoff.reportId}`)
@@ -376,6 +383,12 @@ export function Writing({
       active = false
     }
   }, [branch.id])
+  useEffect(() => {
+    if (loading || !deliveryChapter?.scopeId || routedDelivery.current === deliveryChapter.request) return
+    if (!chapters.some((row) => row.id === deliveryChapter.scopeId)) return
+    routedDelivery.current = deliveryChapter.request
+    if (chapter?.id !== deliveryChapter.scopeId) openChapter(deliveryChapter.scopeId)
+  }, [loading, deliveryChapter, chapters, chapter?.id])
   useEffect(() => {
     let active = true
     const refreshOutline = async () => {
@@ -1052,6 +1065,7 @@ export function Writing({
         </div>
       </aside>
       <section className="manuscript" aria-label="正文写作">
+        {inbox}
         {importOpen && (
           <ManuscriptImport
             key={branch.id}

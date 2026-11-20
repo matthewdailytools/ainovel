@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AssistantField } from './AssistantField'
+import { useAssistantTarget } from './WorkbenchAssistant'
 import type { Notify } from './App'
 import { api, ApiError } from './api'
 import type { components } from './api-schema'
@@ -160,17 +161,56 @@ export function chapterCards(outline: OutlineRevision | null | undefined, chapte
   return (outline?.setting_basis.reference_cards ?? []).filter((card) => selected.has(cardKey(card)))
 }
 
+function OutlineTitle({
+  label,
+  id,
+  known,
+  basis,
+  busy,
+  value,
+  onChange,
+}: {
+  label: string
+  id: string
+  known: boolean
+  basis: string
+  busy: boolean
+  value: string
+  onChange: (value: string) => void
+}) {
+  const element = useRef<HTMLLabelElement>(null)
+  useAssistantTarget({
+    field: 'title',
+    label,
+    value,
+    scopeId: known ? id : null,
+    objectKey: id,
+    contextKey: basis,
+    enabled: !busy,
+    onApply: onChange,
+    element,
+  })
+  return (
+    <label ref={element} tabIndex={-1}>
+      {label}
+      <input required maxLength={200} value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  )
+}
+
 export function OutlineWorkspace({
   branchId,
   account,
   modelReady,
   notify,
+  inbox,
   onWriting,
 }: {
   branchId: string
   account: string
   modelReady: boolean
   notify: Notify
+  inbox?: ReactNode
   onWriting: (chapterId: string, reportId?: string) => void
 }) {
   const root = `/branches/${branchId}/outline-workspace`
@@ -331,6 +371,7 @@ export function OutlineWorkspace({
     <div className="records" id="bench-outline" tabIndex={-1}>
       <section className="card">
         <h2>大纲与台账</h2>
+        {inbox}
         <p>{view.confirmed ? `已确认大纲修订 ${view.confirmed.revision}` : '尚无确认大纲'}</p>
         {!!view.stale.length && <p role="alert">{view.stale.join('，')}。请核对后重新确认。</p>}
         {notice && <p role="status">{notice}</p>}
@@ -436,20 +477,19 @@ export function OutlineWorkspace({
             {(editing.volumes ?? []).map((volume, volumeIndex) => (
               <fieldset key={volume.id}>
                 <legend>第 {volumeIndex + 1} 卷</legend>
-                <label>
-                  卷名
-                  <input
-                    required
-                    maxLength={200}
-                    value={volume.title}
-                    onChange={(event) => {
-                      const value = event.target.value
-                      edit((plan) => {
-                        plan.volumes![volumeIndex].title = value
-                      })
-                    }}
-                  />
-                </label>
+                <OutlineTitle
+                  label="卷名"
+                  id={volume.id}
+                  known={assistantNodes.has(volume.id)}
+                  basis={assistantBasis}
+                  busy={busy}
+                  value={volume.title}
+                  onChange={(value) =>
+                    edit((plan) => {
+                      plan.volumes![volumeIndex].title = value
+                    })
+                  }
+                />
                 <label>
                   卷纲
                   <textarea
@@ -486,20 +526,19 @@ export function OutlineWorkspace({
                   return (
                     <fieldset key={unit.id}>
                       <legend>单元 {unitIndex + 1}</legend>
-                      <label>
-                        单元名
-                        <input
-                          required
-                          maxLength={200}
-                          value={unit.title}
-                          onChange={(event) => {
-                            const value = event.target.value
-                            update((entry) => {
-                              entry.title = value
-                            })
-                          }}
-                        />
-                      </label>
+                      <OutlineTitle
+                        label="单元名"
+                        id={unit.id}
+                        known={assistantNodes.has(unit.id)}
+                        basis={assistantBasis}
+                        busy={busy}
+                        value={unit.title}
+                        onChange={(value) =>
+                          update((entry) => {
+                            entry.title = value
+                          })
+                        }
+                      />
                       <label>
                         单元纲
                         <textarea

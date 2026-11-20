@@ -669,7 +669,7 @@ def _create_app(settings, schema_only=False):
     @app.get("/api/tasks")
     def tasks(branch_id: str | None = None):
         rows = db.all(
-            "SELECT id FROM tasks WHERE kind!='assistant_turn'"
+            "SELECT id FROM tasks WHERE kind NOT IN ('assistant_turn','novel_assistant_turn')"
             + (" AND branch_id=?" if branch_id else "")
             + " ORDER BY created DESC LIMIT 50",
             (branch_id,) if branch_id else (),
@@ -751,6 +751,8 @@ def _create_app(settings, schema_only=False):
     @app.post("/api/tasks/{task_id}/resume")
     def resume(task_id: str, data: ResumeInput):
         current = domain.task(task_id)
+        if current["kind"] == "novel_assistant_turn":
+            raise DomainError("novel_assistant_resume", "请核对原失败记录和费用后，在 AI 对话另发一轮。", 409)
         if current["kind"] == "seven_stage_run":
             raise DomainError(
                 "seven_stage_resume", "请从七台自动接力的专用入口恢复，以核对同一工作版本的执行状态。", 409
@@ -1356,6 +1358,11 @@ def _create_app(settings, schema_only=False):
     from .assistant import register_routes as register_assistant_routes
 
     register_assistant_routes(app, domain, provider_ready)
+    from .novel_assistant import register_routes as register_novel_assistant_routes
+    from .novel_assistant_delivery import register_routes as register_assistant_delivery_routes
+
+    register_novel_assistant_routes(app, domain, provider_ready)
+    register_assistant_delivery_routes(app, domain)
 
     dist = ROOT / "dist"
     if dist.is_dir():

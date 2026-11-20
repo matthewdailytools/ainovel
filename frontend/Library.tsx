@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { confirmLeave } from './leaveGuard'
+import type { DeliveryLocation } from './NovelAssistantInbox'
 import { api, label, type Book, type Excerpt, type Unit, type Branch } from './api'
 import type { Notify } from './App'
 import { ReferenceCardHistory } from './ReferenceCardHistory'
@@ -22,6 +24,8 @@ export function LibraryPage({
   account,
   modelReady,
   notify,
+  inbox,
+  deliverySession,
   onWriting,
 }: {
   novelId: string
@@ -29,9 +33,18 @@ export function LibraryPage({
   account: string
   modelReady: boolean
   notify: Notify
+  inbox?: ReactNode
+  deliverySession?: DeliveryLocation & { request: number }
   onWriting: () => void
 }) {
   const [studyId, setStudyId] = useState('')
+  const routedDelivery = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    const target = deliverySession?.scopeId
+    if (!target || routedDelivery.current === deliverySession.request) return
+    routedDelivery.current = deliverySession.request
+    if (target !== studyId && confirmLeave()) setStudyId(target)
+  }, [deliverySession, studyId])
   const [studies, setStudies] = useState<ReferenceSession[]>([])
   const [studyGoal, setStudyGoal] = useState('学习这个片段怎样组织人物判断、信息和局部进展。')
   useEffect(() => {
@@ -155,19 +168,23 @@ export function LibraryPage({
   const book = books.find((b) => b.id === bookId)
   if (studyId)
     return (
-      <ReferenceWorkspace
-        key={studyId}
-        identifier={studyId}
-        branch={branch}
-        account={account}
-        modelReady={modelReady}
-        notify={notify}
-        onBack={() => setStudyId('')}
-        onWriting={onWriting}
-      />
+      <div className="reference-delivery-workspace" id="bench-reference" tabIndex={-1}>
+        {inbox}
+        <ReferenceWorkspace
+          key={studyId}
+          identifier={studyId}
+          branch={branch}
+          account={account}
+          modelReady={modelReady}
+          notify={notify}
+          onBack={() => setStudyId('')}
+          onWriting={onWriting}
+        />
+      </div>
     )
   return (
     <div className="library-page page-pad" id="bench-reference" tabIndex={-1}>
+      {inbox}
       <div className="page-heading">
         <div>
           <span className="eyebrow">资料，回到原文</span>
