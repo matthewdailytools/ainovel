@@ -8,6 +8,8 @@ import { SourceIdentityOption } from './sourceIdentity'
 import { readComparisonTarget, usePlotAuditTarget } from './plotAuditTarget'
 import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from './MemorySelection'
 import { ReferenceCardHistory, referenceFieldLabels } from './ReferenceCardHistory'
+import { AssistantField } from './AssistantField'
+import { useAssistantScope } from './WorkbenchAssistant'
 
 type Card = {
   id: string
@@ -187,6 +189,7 @@ export function ReferenceWorkspace({
   onWriting: () => void
 }) {
   const [row, setRow] = useState<ReferenceSession>()
+  useAssistantScope({ scopeId: identifier, label: row?.payload.source.title || '当前参考选段', account })
   const [draft, setDraft] = useState<ReferencePayload>()
   const [base, setBase] = useState(-1)
   const [artifacts, setArtifacts] = useState<Record<string, Artifact>>({})
@@ -623,6 +626,19 @@ export function ReferenceWorkspace({
             onChange={(e) => edit({ goal: e.target.value })}
           />
         </label>
+        <AssistantField
+          field="goal"
+          label="参考学习目标"
+          value={draft.goal}
+          scopeId={row.id}
+          scopeLabel="当前参考选段"
+          objectKey={row.id}
+          contextKey={String(base)}
+          enabled={!busy && !running}
+          onApply={(value) => {
+            if (typeof value === 'string') edit({ goal: value })
+          }}
+        />
         <p className="small muted">
           分析发送所选原文；方案和试写使用选定规则及本书上下文；对照阶段发送选段与候选。未配置模型仍可手工整理和写作。
         </p>
@@ -743,15 +759,32 @@ export function ReferenceWorkspace({
                     evidence: '逐字原文证据',
                   }) as [keyof Card, string][]
                 ).map(([key, title]) => (
-                  <label key={key}>
-                    {title}
-                    <textarea
-                      rows={2}
-                      maxLength={2000}
-                      value={card[key]}
-                      onChange={(e) => editCard({ ...card, [key]: e.target.value })}
-                    />
-                  </label>
+                  <div key={key}>
+                    <label>
+                      {title}
+                      <textarea
+                        rows={2}
+                        maxLength={2000}
+                        value={card[key]}
+                        onChange={(e) => editCard({ ...card, [key]: e.target.value })}
+                      />
+                    </label>
+                    {key !== 'id' && key !== 'evidence' && (
+                      <AssistantField
+                        field={key}
+                        label={`卡片 ${index + 1} · ${title}`}
+                        value={card[key]}
+                        scopeId={row.id}
+                        scopeLabel="当前参考选段"
+                        objectKey={card.id}
+                        contextKey={String(base)}
+                        enabled={!busy && !running}
+                        onApply={(value) => {
+                          if (typeof value === 'string') editCard({ ...card, [key]: value })
+                        }}
+                      />
+                    )}
+                  </div>
                 ))}
               </details>
             </article>

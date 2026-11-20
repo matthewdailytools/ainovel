@@ -16,7 +16,7 @@ import story from '../fixtures/original-story.json'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
 import { StoryInheritance, type InheritanceSelection } from './StoryInheritance'
-import { SevenStageRunPanel } from './SevenStageRunPanel'
+import { SevenStageRunPanel, type SevenStageEntry } from './SevenStageRunPanel'
 import { characterFieldRepairEnabled } from './characterFieldRepair'
 import { CharacterFieldRepairOption, FrozenCharacterFieldRepairPolicy } from './CharacterRepairDetails'
 import { FrozenPlotAuditPolicy, PlotAuditDetails, PlotAuditOption } from './PlotAuditDetails'
@@ -45,6 +45,8 @@ export function WorkflowPage({
   initialMode = 'assisted',
   conceptionHandoff,
   onConceptionSettings,
+  sevenStageEntry,
+  onNewIdeaWork,
 }: {
   novel: Novel
   accounts: Account[]
@@ -57,6 +59,8 @@ export function WorkflowPage({
   initialMode?: 'assisted' | 'automatic'
   conceptionHandoff?: ConceptionHandoff
   onConceptionSettings: () => void
+  sevenStageEntry?: SevenStageEntry
+  onNewIdeaWork: () => void
 }) {
   const [mode, setMode] = useState(initialMode)
   const [completionScope, setCompletionScope] = useState<'whole_book' | 'segment'>('whole_book')
@@ -341,6 +345,8 @@ export function WorkflowPage({
           account={account}
           modelReady={modelReady}
           notify={notify}
+          entry={sevenStageEntry}
+          onNewIdeaWork={onNewIdeaWork}
         />
       )}
       <div className="workflow-grid">

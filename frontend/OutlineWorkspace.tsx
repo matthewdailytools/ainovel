@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { AssistantField } from './AssistantField'
 import type { Notify } from './App'
 import { api, ApiError } from './api'
 import type { components } from './api-schema'
@@ -253,6 +254,18 @@ export function OutlineWorkspace({
     }
   }, [checkedImpact?.error, busy])
   if (!view || !editing || !settings) return <p role="status">正在读取大纲与台账…</p>
+  const assistantNodes = new Set(
+    [view.draft, view.confirmed].flatMap((revision) =>
+      (revision?.plan.volumes ?? []).flatMap((volume) => [
+        volume.id,
+        ...(volume.units ?? []).flatMap((unit) => [
+          unit.id,
+          ...(unit.chapters ?? []).map((chapter) => chapter.chapter_id),
+        ]),
+      ]),
+    ),
+  )
+  const assistantBasis = `${view.draft?.id ?? ''}/${view.confirmed?.id ?? ''}/${view.story_revision}/${settingId ?? ''}`
   const chapterName = (id: string) =>
     view.chapters.find((chapter) => chapter.id === id)?.title ?? '已移出目录'
   const chapters = [...view.chapters].sort((left, right) => left.position - right.position)
@@ -380,6 +393,20 @@ export function OutlineWorkspace({
                 }}
               />
             </label>
+            <AssistantField
+              field="summary"
+              label="总纲"
+              quickLabel="完善总纲"
+              value={editing.summary}
+              contextKey={assistantBasis}
+              enabled={!busy}
+              onApply={(value) => {
+                if (typeof value === 'string')
+                  edit((plan) => {
+                    plan.summary = value
+                  })
+              }}
+            />
             <label>
               采用设定
               <select
@@ -437,6 +464,22 @@ export function OutlineWorkspace({
                     }}
                   />
                 </label>
+                <AssistantField
+                  field="summary"
+                  label={`第 ${volumeIndex + 1} 卷 · 卷纲`}
+                  quickLabel="完善卷纲"
+                  value={volume.summary}
+                  scopeId={assistantNodes.has(volume.id) ? volume.id : null}
+                  objectKey={volume.id}
+                  contextKey={assistantBasis}
+                  enabled={!busy}
+                  onApply={(value) => {
+                    if (typeof value === 'string')
+                      edit((plan) => {
+                        plan.volumes![volumeIndex].summary = value
+                      })
+                  }}
+                />
                 {(volume.units ?? []).map((unit, unitIndex) => {
                   const update = (change: (entry: typeof unit) => void) =>
                     edit((plan) => change(plan.volumes![volumeIndex].units![unitIndex]))
@@ -471,6 +514,22 @@ export function OutlineWorkspace({
                           }}
                         />
                       </label>
+                      <AssistantField
+                        field="summary"
+                        label={`第 ${volumeIndex + 1} 卷 · 单元 ${unitIndex + 1}`}
+                        quickLabel="完善单元纲"
+                        value={unit.summary}
+                        scopeId={assistantNodes.has(unit.id) ? unit.id : null}
+                        objectKey={unit.id}
+                        contextKey={assistantBasis}
+                        enabled={!busy}
+                        onApply={(value) => {
+                          if (typeof value === 'string')
+                            update((entry) => {
+                              entry.summary = value
+                            })
+                        }}
+                      />
                       {(unit.chapters ?? []).map((chapter, chapterIndex) => {
                         const changeChapter = (change: (row: ChapterPlan) => void) =>
                           update((entry) => change(entry.chapters![chapterIndex]))
@@ -480,20 +539,40 @@ export function OutlineWorkspace({
                             {Object.entries(outlineFields).map(([name, label]) => {
                               const field = name as keyof typeof outlineFields
                               return (
-                                <label key={field}>
-                                  {label}
-                                  <textarea
-                                    required
-                                    maxLength={4000}
+                                <div key={field}>
+                                  <label>
+                                    {label}
+                                    <textarea
+                                      required
+                                      maxLength={4000}
+                                      value={chapter[field]}
+                                      onChange={(event) => {
+                                        const value = event.target.value
+                                        changeChapter((row) => {
+                                          row[field] = value
+                                        })
+                                      }}
+                                    />
+                                  </label>
+                                  <AssistantField
+                                    field={field}
+                                    label={`${chapterName(chapter.chapter_id)} · ${label}`}
+                                    quickLabel="完善章纲"
                                     value={chapter[field]}
-                                    onChange={(event) => {
-                                      const value = event.target.value
-                                      changeChapter((row) => {
-                                        row[field] = value
-                                      })
+                                    scopeId={
+                                      assistantNodes.has(chapter.chapter_id) ? chapter.chapter_id : null
+                                    }
+                                    objectKey={chapter.chapter_id}
+                                    contextKey={assistantBasis}
+                                    enabled={!busy}
+                                    onApply={(value) => {
+                                      if (typeof value === 'string')
+                                        changeChapter((row) => {
+                                          row[field] = value
+                                        })
                                     }}
                                   />
-                                </label>
+                                </div>
                               )
                             })}
                             {!!frozen?.items.length && (
@@ -669,6 +748,17 @@ export function OutlineWorkspace({
               新增卷
             </button>
             <h3>伏笔窗口</h3>
+            <AssistantField
+              field="summary"
+              label="伏笔窗口"
+              value=""
+              objectKey="promise-windows"
+              contextKey={assistantBasis}
+              enabled={!busy}
+              quickLabel="核对伏笔窗口"
+              quickQuestion="请对照大纲中的伏笔窗口，指出需要确认的埋设、推进和回收节点，并说明依据。"
+              action="review"
+            />
             {(editing.promises ?? []).map((window, index) => (
               <fieldset key={index}>
                 <legend>窗口 {index + 1}</legend>
@@ -1015,6 +1105,17 @@ export function OutlineWorkspace({
       </section>
       <section className="card">
         <h3>设定台账</h3>
+        <AssistantField
+          field="summary"
+          label="设定使用计划"
+          value=""
+          objectKey="setting-plan"
+          contextKey={assistantBasis}
+          enabled={!busy}
+          quickLabel="核对设定计划"
+          quickQuestion="请对照当前大纲挂载的设定，指出已经安排的使用节点和仍需核对的计划。"
+          action="review"
+        />
         <OutlineSettingLedger items={view.setting_ledger ?? []} onChapter={onWriting} />
         {view.confirmed && (
           <>

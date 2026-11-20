@@ -669,8 +669,8 @@ def _create_app(settings, schema_only=False):
     @app.get("/api/tasks")
     def tasks(branch_id: str | None = None):
         rows = db.all(
-            "SELECT id FROM tasks"
-            + (" WHERE branch_id=?" if branch_id else "")
+            "SELECT id FROM tasks WHERE kind!='assistant_turn'"
+            + (" AND branch_id=?" if branch_id else "")
             + " ORDER BY created DESC LIMIT 50",
             (branch_id,) if branch_id else (),
         )
@@ -1353,6 +1353,9 @@ def _create_app(settings, schema_only=False):
     from .seven_stage_run import register_routes as register_seven_stage_run_routes
 
     register_seven_stage_run_routes(app, domain, provider_ready)
+    from .assistant import register_routes as register_assistant_routes
+
+    register_assistant_routes(app, domain, provider_ready)
 
     dist = ROOT / "dist"
     if dist.is_dir():

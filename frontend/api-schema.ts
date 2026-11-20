@@ -3085,6 +3085,59 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/assistant/conversations': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Assistant Conversations */
+    get: operations['list_assistant_conversations_api_branches__branch_id__assistant_conversations_get']
+    put?: never
+    /** Create Assistant Conversation */
+    post: operations['create_assistant_conversation_api_branches__branch_id__assistant_conversations_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/assistant/conversations/{conversation_id}/turns': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Assistant Turns */
+    get: operations['read_assistant_turns_api_branches__branch_id__assistant_conversations__conversation_id__turns_get']
+    put?: never
+    /** Send Assistant Turn */
+    post: operations['send_assistant_turn_api_branches__branch_id__assistant_conversations__conversation_id__turns_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/assistant/conversations/{conversation_id}/turns/{turn_id}/apply-receipt': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Record Assistant Draft Receipt */
+    post: operations['record_assistant_draft_receipt_api_branches__branch_id__assistant_conversations__conversation_id__turns__turn_id__apply_receipt_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -3167,6 +3220,16 @@ export interface components {
       chapter_id: string
       /** Unique Readers */
       unique_readers: number | null
+    }
+    /** ApplyReceipt */
+    ApplyReceipt: {
+      /** Applied Fields */
+      applied_fields: string[]
+    }
+    /** ApplyReceiptInput */
+    ApplyReceiptInput: {
+      /** Field */
+      field: string
     }
     /** ArchiveInput */
     ArchiveInput: {
@@ -3365,6 +3428,17 @@ export interface components {
       author_overrides_candidate: boolean
       /** Soft Deviation Report Ids */
       soft_deviation_report_ids?: string[]
+    }
+    /** Basis */
+    Basis: {
+      /** Sha256 */
+      sha256: string
+      /** Scope Label */
+      scope_label: string
+      /** Versions */
+      versions: components['schemas']['SourceRef'][]
+      /** Checks */
+      checks: components['schemas']['Check'][]
     }
     /** BasisExcerpt */
     BasisExcerpt: {
@@ -3639,6 +3713,17 @@ export interface components {
        * @default
        */
       profile: string
+    }
+    /** Check */
+    Check: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Status */
+      status: string
+      /** Detail */
+      detail: string
     }
     /** CheckpointChapter */
     CheckpointChapter: {
@@ -4031,6 +4116,33 @@ export interface components {
        */
       acknowledge_unknown: boolean
     }
+    /** Conversation */
+    Conversation: {
+      /** Id */
+      id: string
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id: string | null
+      /** Draft Key */
+      draft_key: string | null
+      /** Subject */
+      subject: string
+      /** Revision */
+      revision: number
+      /** Created */
+      created: number
+      /** Updated */
+      updated: number
+    }
+    /** Conversations */
+    Conversations: {
+      /** Conversations */
+      conversations: components['schemas']['Conversation'][]
+    }
     /** CorrectionInput */
     CorrectionInput: {
       /**
@@ -4056,6 +4168,22 @@ export interface components {
        * @default
        */
       reason: string
+    }
+    /** CreateConversation */
+    CreateConversation: {
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7'
+      /** Scope Id */
+      scope_id?: string | null
+      /** Draft Key */
+      draft_key?: string | null
+      /** Subject */
+      subject: string
+      /** Client Request Id */
+      client_request_id: string
     }
     /** CreateReference */
     CreateReference: {
@@ -5615,6 +5743,11 @@ export interface components {
       /** Quote */
       quote: string
     }
+    /** QueuedTurn */
+    QueuedTurn: {
+      conversation: components['schemas']['Conversation']
+      turn: components['schemas']['Turn']
+    }
     /** ReadingDiagnosis */
     ReadingDiagnosis: {
       /** Chapter Id */
@@ -6087,6 +6220,15 @@ export interface components {
       /** Quote */
       quote: string
     }
+    /** Result */
+    Result: {
+      /** Answer */
+      answer: string
+      /** Citations */
+      citations: components['schemas']['SourceRef'][]
+      /** Suggestions */
+      suggestions: components['schemas']['Suggestion'][]
+    }
     /** ResumeInput */
     ResumeInput: {
       /**
@@ -6294,6 +6436,59 @@ export interface components {
       revision: number
       /** Version Id */
       version_id: string
+    }
+    /** Selection */
+    Selection: {
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Revision */
+      revision: number
+    }
+    /** SendTurn */
+    SendTurn: {
+      /** Base Revision */
+      base_revision: number
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Question */
+      question: string
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Budget Limit */
+      budget_limit?: number | null
+      /**
+       * Action
+       * @default discuss
+       * @enum {string}
+       */
+      action: 'discuss' | 'suggest' | 'refine' | 'review'
+      /** Target */
+      target?: string | null
+      /** Target Key */
+      target_key?: string | null
+      /** Context Key */
+      context_key?: string | null
+      /**
+       * Draft Text
+       * @default
+       */
+      draft_text: string
+      selection?: components['schemas']['Selection'] | null
+      /**
+       * Spoiler Scope
+       * @default opening
+       * @enum {string}
+       */
+      spoiler_scope: 'opening' | 'whole'
+      /**
+       * Sample Chapters
+       * @default 1
+       */
+      sample_chapters: number
     }
     /** SettingFinding */
     SettingFinding: {
@@ -6733,6 +6928,19 @@ export interface components {
       /** Quote */
       quote: string
     }
+    /** SourceRef */
+    SourceRef: {
+      /** Kind */
+      kind: string
+      /** Id */
+      id: string
+      /** Label */
+      label: string
+      /** Revision */
+      revision?: number | null
+      /** Excerpt */
+      excerpt?: string | null
+    }
     /** StartExtraction */
     StartExtraction: {
       /**
@@ -6877,6 +7085,15 @@ export interface components {
         [key: string]: string
       }
     }
+    /** Suggestion */
+    Suggestion: {
+      /** Field */
+      field: string
+      /** Value */
+      value: string | string[]
+      /** Reason */
+      reason: string
+    }
     /** TimeEvidence */
     TimeEvidence: {
       /** Chapter Id */
@@ -6889,6 +7106,60 @@ export interface components {
       end: number
       /** Quote */
       quote: string
+    }
+    /** Turn */
+    Turn: {
+      /** Id */
+      id: string
+      /** Sequence */
+      sequence: number
+      /** Task Id */
+      task_id: string
+      /** Status */
+      status: string
+      result: components['schemas']['Result'] | null
+      /** Error */
+      error: string
+      /** Created */
+      created: number
+      /** Question */
+      question: string
+      /**
+       * Action
+       * @enum {string}
+       */
+      action: 'discuss' | 'suggest' | 'refine' | 'review'
+      /** Target */
+      target: string | null
+      /** Target Key */
+      target_key: string | null
+      /** Context Key */
+      context_key: string | null
+      /** Draft Text */
+      draft_text: string
+      selection: components['schemas']['Selection'] | null
+      /**
+       * Spoiler Scope
+       * @enum {string}
+       */
+      spoiler_scope: 'opening' | 'whole'
+      /** Sample Chapters */
+      sample_chapters: number
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Basis Current */
+      basis_current: boolean
+      /** Applied Fields */
+      applied_fields: string[]
+    }
+    /** Turns */
+    Turns: {
+      conversation: components['schemas']['Conversation']
+      basis: components['schemas']['Basis'] | null
+      /** Turns */
+      turns: components['schemas']['Turn'][]
+      /** Next Before */
+      next_before: number | null
     }
     /** UnitPlan */
     UnitPlan: {
@@ -13727,6 +13998,184 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_assistant_conversations_api_branches__branch_id__assistant_conversations_get: {
+    parameters: {
+      query?: {
+        stage?: ('M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7') | null
+        scope_id?: string | null
+        draft_key?: string | null
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Conversations']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_assistant_conversation_api_branches__branch_id__assistant_conversations_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateConversation']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Conversation']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_assistant_turns_api_branches__branch_id__assistant_conversations__conversation_id__turns_get: {
+    parameters: {
+      query?: {
+        before?: number | null
+        limit?: number
+      }
+      header?: never
+      path: {
+        branch_id: string
+        conversation_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Turns']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  send_assistant_turn_api_branches__branch_id__assistant_conversations__conversation_id__turns_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        conversation_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SendTurn']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QueuedTurn']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  record_assistant_draft_receipt_api_branches__branch_id__assistant_conversations__conversation_id__turns__turn_id__apply_receipt_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        conversation_id: string
+        turn_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ApplyReceiptInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApplyReceipt']
         }
       }
       /** @description Validation Error */

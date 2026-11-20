@@ -10,6 +10,8 @@ import {
 } from './SelectedOutlineCards'
 
 type StartFrom = 'idea' | 'project' | 'settings' | 'outline' | 'writing' | 'inspection'
+export type SevenStageEntry = { mode: 'idea' | 'relay' }
+const relayPriority = ['inspection', 'writing', 'outline', 'settings', 'project'] as const
 type ReferenceMode = 'skip' | 'cards' | 'analyze'
 type ReviewSources = { writing_id: string | null; inspection_id: string | null }
 type OutlineState = {
@@ -68,11 +70,15 @@ export function SevenStageRunPanel({
   account,
   modelReady,
   notify,
+  entry,
+  onNewIdeaWork,
 }: {
   branchId: string
   account: string
   modelReady: boolean
   notify: Notify
+  entry?: SevenStageEntry
+  onNewIdeaWork: () => void
 }) {
   const prefix = `/branches/${encodeURIComponent(branchId)}`
   const endpoint = `${prefix}/seven-stage-runs`
@@ -83,7 +89,7 @@ export function SevenStageRunPanel({
   const [cardOptions, setCardOptions] = useState<CardOptions>({ state: 'loading' })
   const [runs, setRuns] = useState<Run[]>([])
   const [runId, setRunId] = useState('')
-  const [from, setFrom] = useState<StartFrom>()
+  const [from, setFrom] = useState<{ entry?: SevenStageEntry; origin: StartFrom }>()
   const [idea, setIdea] = useState('')
   const [chapters, setChapters] = useState('2')
   const [budget, setBudget] = useState('')
@@ -96,9 +102,16 @@ export function SevenStageRunPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [pollError, setPollError] = useState('')
+  const heading = useRef<HTMLHeadingElement>(null)
   const alive = useRef(true)
   const cardsRequest = useRef(0)
   const pending = useRef<{ signature: string; key: string } | undefined>(undefined)
+
+  useEffect(() => {
+    if (!entry) return
+    heading.current?.scrollIntoView({ block: 'start' })
+    heading.current?.focus({ preventScroll: true })
+  }, [entry])
 
   const refreshSources = useCallback(async () => {
     const [concept, plan, savedReferences, sources] = await Promise.all([
@@ -168,8 +181,6 @@ export function SevenStageRunPanel({
   const validOutline = outline && !outline.stale.length ? outline.confirmed : undefined
   const blank =
     settings?.revision === 0 && !settings.project && outline && !outline.chapters.length && !outline.draft
-  const origin =
-    from ?? (validOutline ? 'outline' : validSettings ? 'settings' : validProject ? 'project' : 'idea')
   const sources = {
     project: validProject?.id,
     settings: validSettings?.id,
@@ -177,6 +188,29 @@ export function SevenStageRunPanel({
     writing: reviewSources?.writing_id,
     inspection: reviewSources?.inspection_id,
   }
+  const relayOrigin = relayPriority.find((source) => sources[source])
+  const unavailableIdea = entry?.mode === 'idea' && !!settings && !!outline && !blank
+  const chosenOrigin = from?.entry === entry ? from?.origin : undefined
+  const origin =
+    entry?.mode === 'idea'
+      ? 'idea'
+      : (chosenOrigin ??
+        (entry?.mode === 'relay'
+          ? relayOrigin
+          : validOutline
+            ? 'outline'
+            : validSettings
+              ? 'settings'
+              : validProject
+                ? 'project'
+                : 'idea'))
+  const sourceOptions = [
+    ['project', `从已确认立项接力${validProject ? ` · 修订 ${validProject.revision}` : ''}`],
+    ['settings', `从已确认设定接力${validSettings ? ` · 修订 ${validSettings.revision}` : ''}`],
+    ['outline', `从已确认大纲接力${validOutline ? ` · 修订 ${validOutline.revision}` : ''}`],
+    ['writing', '从已保存的完整正文接力'],
+    ['inspection', '从已通过的全书体检接力'],
+  ] as const
   const plansRemaining = origin === 'idea' || origin === 'project' || origin === 'settings'
   const writingRemaining = plansRemaining || origin === 'outline'
   const chapterCount = plansRemaining && !outline?.chapters.length
@@ -197,7 +231,7 @@ export function SevenStageRunPanel({
       : []
   const activeRun = runs.some((entry) => unresolved.includes(entry.status))
   const status = run?.result.seven_stage_run
-  const permitted = origin === 'idea' ? !!blank && !!idea.trim() : !!sources[origin]
+  const permitted = origin === 'idea' ? !!blank && !!idea.trim() : !!origin && !!sources[origin]
   const ready =
     permitted &&
     modelReady &&
@@ -229,7 +263,7 @@ export function SevenStageRunPanel({
   }
 
   async function start() {
-    if (!ready || activeRun) return
+    if (!origin || !ready || activeRun) return
     const body = {
       start_from: origin,
       ...(origin === 'idea' ? { idea: idea.trim() } : { source_id: sources[origin] }),
@@ -276,7 +310,9 @@ export function SevenStageRunPanel({
 
   return (
     <section className="card" aria-label="七台自动接力">
-      <h2>七台自动接力</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        七台自动接力
+      </h2>
       <p>
         从创意或采用版本启动。可先拆解明确选中的资料。遇到需作者判定的体检或完本事项时，运行会在该处等待。
       </p>
@@ -291,32 +327,49 @@ export function SevenStageRunPanel({
       {error && <p role="alert">{error}</p>}
       {pollError && <p role="alert">{pollError}</p>}
       {!modelReady && <p className="small">配置可用模型账户与单价后即可启动。</p>}
-      <fieldset disabled={!settings || !outline || busy || activeRun}>
+      {unavailableIdea && (
+        <div className="notice">
+          <p>此工作版本已有创作内容。从创意开始需要一个空白工作版本。</p>
+          <button type="button" onClick={onNewIdeaWork}>
+            新建作品从创意开始
+          </button>
+        </div>
+      )}
+      <fieldset disabled={!settings || !outline || busy || activeRun || unavailableIdea}>
         <legend>启动范围与授权</legend>
         <label>
           接力起点
-          <select value={origin} onChange={(event) => setFrom(event.target.value as StartFrom)}>
-            <option value="idea" disabled={!blank}>
-              从创意开始
-            </option>
-            <option value="project" disabled={!validProject}>
-              从已确认立项接力{validProject && ` · 修订 ${validProject.revision}`}
-            </option>
-            <option value="settings" disabled={!validSettings}>
-              从已确认设定接力{validSettings && ` · 修订 ${validSettings.revision}`}
-            </option>
-            <option value="outline" disabled={!validOutline}>
-              从已确认大纲接力{validOutline && ` · 修订 ${validOutline.revision}`}
-            </option>
-            <option value="writing" disabled={!sources.writing}>
-              从已保存的完整正文接力
-            </option>
-            <option value="inspection" disabled={!sources.inspection}>
-              从已通过的全书体检接力
-            </option>
+          <select
+            value={origin ?? ''}
+            onChange={(event) => setFrom({ entry, origin: event.target.value as StartFrom })}
+          >
+            {!origin && (
+              <option value="" disabled>
+                选择已完成阶段
+              </option>
+            )}
+            {entry?.mode !== 'relay' && (
+              <option value="idea" disabled={!blank}>
+                从创意开始
+              </option>
+            )}
+            {entry?.mode !== 'idea' &&
+              sourceOptions
+                .filter(([source]) => entry?.mode !== 'relay' || !!sources[source] || source === origin)
+                .map(([source, title]) => (
+                  <option key={source} value={source} disabled={!sources[source]}>
+                    {title}
+                  </option>
+                ))}
           </select>
         </label>
-        {!blank && !Object.values(sources).some(Boolean) && (
+        {entry?.mode === 'relay' && settings && outline && reviewSources && !relayOrigin && (
+          <p>当前没有有效的接力起点。请先保存完整正文，或确认立项、设定、大纲或全书体检。</p>
+        )}
+        {entry?.mode === 'relay' && relayOrigin && origin && origin !== 'idea' && !sources[origin] && (
+          <p>所选阶段已更新，请重新选择有效的接力起点。</p>
+        )}
+        {!entry && !blank && !Object.values(sources).some(Boolean) && (
           <p>请先确认一份立项，或保存符合当前创作范围的正式版本。</p>
         )}
         {origin === 'idea' && (

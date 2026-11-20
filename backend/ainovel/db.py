@@ -109,6 +109,7 @@ class Database:
             from .runtime import SCHEMA as RUNTIME_SCHEMA
             from .story_sync import SCHEMA as STORY_SYNC_SCHEMA
             from .workflow_archive import SCHEMA as WORKFLOW_ARCHIVE_SCHEMA
+            from .assistant import SCHEMA as ASSISTANT_SCHEMA
 
             # executescript commits an existing transaction. Begin inside this single
             # script so every extension and the subsequent backfill commit together.
@@ -126,6 +127,7 @@ class Database:
                             RUNTIME_SCHEMA,
                             STORY_SYNC_SCHEMA,
                             WORKFLOW_ARCHIVE_SCHEMA,
+                            ASSISTANT_SCHEMA,
                         )
                     )
                 )

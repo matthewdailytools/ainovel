@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { AssistantField } from './AssistantField'
 import { api, ApiError, type Chapter } from './api'
 import type { components } from './api-schema'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
@@ -918,6 +919,25 @@ export function InspectionPanel({
                       onChange={(event) => change({ reason: event.target.value })}
                     />
                   </label>
+                  {selectedCheck && (
+                    <AssistantField
+                      field={selectedCheck.check_id}
+                      label={`${selectedCheck.check_id} · ${selectedCheck.title}`}
+                      value={review.reason}
+                      scopeId={scopeId || null}
+                      scopeLabel={
+                        scope === 'book' ? '全书' : choices.find((item) => item.id === scopeId)?.title
+                      }
+                      objectKey={scopeId || 'book'}
+                      contextKey={data.preview.basis_sha256}
+                      enabled={!saving}
+                      quickLabel="AI 核对依据"
+                      action="review"
+                      onApply={(value) => {
+                        if (typeof value === 'string') change({ reason: value })
+                      }}
+                    />
+                  )}
                   <EvidenceField
                     chapters={data.preview.chapters}
                     onAdd={(source) => {

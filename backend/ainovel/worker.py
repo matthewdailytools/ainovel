@@ -368,6 +368,7 @@ class Worker:
             "conception.extract.world",
             "对照单条已确认设定与保存稿",
             "起草完本交付简介",
+            "assistant.opening_intro",
             "仅依据作者原话整理本场景情节",
             "逐项对照作者情节解释与本次正文",
             "只从本次正文独立提取物品与信息流向",
@@ -2077,6 +2078,10 @@ class Worker:
                 await self.module()
             elif task["kind"] == "conception_generate":
                 from .conception_generation import run
+
+                await run(self)
+            elif task["kind"] == "assistant_turn":
+                from .assistant import run
 
                 await run(self)
             elif task["kind"] == "candidate_recheck":

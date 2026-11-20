@@ -569,15 +569,6 @@ details > label {
 .welcome form {
   max-width: 470px;
 }
-.welcome-steps {
-  display: flex;
-  gap: 24px;
-  color: #596b63;
-  font-size: 12px;
-  margin-top: 60px;
-  padding-top: 24px;
-  border-top: 1px solid var(--line);
-}
 .writing-layout {
   display: grid;
   grid-template-columns: 218px minmax(300px, 1fr) 340px;
@@ -1376,11 +1367,6 @@ summary {
   .welcome h1 {
     font-size: 34px;
   }
-  .welcome-steps {
-    flex-direction: column;
-    gap: 12px;
-    margin-top: 40px;
-  }
   .alert {
     padding: 12px 16px;
     font-size: 13px;
@@ -1489,11 +1475,21 @@ summary {
   max-width: 100%;
   overflow: auto;
 }
+.creation-starts,
 .bench-navigation {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   padding: 8px clamp(12px, 2vw, 24px);
+}
+
+.creation-starts {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.creation-starts button {
+  min-height: 44px;
 }
 
 .bench-navigation [aria-current='location'] {

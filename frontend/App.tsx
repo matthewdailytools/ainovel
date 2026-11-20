@@ -3,6 +3,7 @@ import { api, startSession, type Account, type Branch, type Config, type Novel }
 import { Writing } from './Writing'
 import { LibraryPage } from './Library'
 import { WorkflowPage } from './Workflow'
+import type { SevenStageEntry } from './SevenStageRunPanel'
 import { Records } from './Records'
 import { Ideation } from './Ideation'
 import { ConceptionWorkspace } from './ConceptionWorkspace'
@@ -11,16 +12,24 @@ import { ManuscriptExchange } from './ManuscriptExchange'
 import type { ConceptionDestination, ConceptionHandoff } from './conception'
 import { confirmLeave } from './leaveGuard'
 import type { FeedbackHandoff } from './feedbackRevision'
+import { CreationAssistantLayout } from './WorkbenchAssistant'
 
 export type Notify = (error: unknown) => void
 const benches = [
-  ['project', '立项', 'ideation'],
-  ['reference', '拆解', 'library'],
-  ['settings', '设定', 'ideation'],
-  ['outline', '大纲', 'outline'],
-  ['writing', '写作', 'writing'],
-  ['inspection', '校验', 'records'],
-  ['completion', '完本', 'records'],
+  ['project', '立项', 'ideation', 'M1'],
+  ['reference', '拆解', 'library', 'M2'],
+  ['settings', '设定', 'ideation', 'M3'],
+  ['outline', '大纲', 'outline', 'M4'],
+  ['writing', '写作', 'writing', 'M5'],
+  ['inspection', '校验', 'records', 'M6'],
+  ['completion', '完本', 'records', 'M7'],
+] as const
+type Bench = (typeof benches)[number][0]
+type NewWorkStart = 'manual' | 'idea'
+const creationStarts = [
+  ['manual', '逐台创作'],
+  ['idea', '从创意开始'],
+  ['relay', '从已完成阶段接力'],
 ] as const
 
 export function App() {
@@ -36,7 +45,9 @@ export function App() {
     selection.current = { novelId, branchId, generation: selection.current.generation + 1 }
   const selectionGeneration = selection.current.generation
   const [page, setPage] = useState('writing')
-  const [bench, setBench] = useState<{ id: string }>()
+  const navigationGeneration = useRef(0)
+  const [bench, setBench] = useState<{ id: Bench; open?: boolean }>()
+  const [runEntry, setRunEntry] = useState<SevenStageEntry & { branchId: string }>()
   const [quickConception, setQuickConception] = useState(false)
   const [conceptionHandoff, setConceptionHandoff] = useState<ConceptionHandoff>()
   const [workflowMode, setWorkflowMode] = useState<'assisted' | 'automatic'>('assisted')
@@ -49,7 +60,10 @@ export function App() {
   const [account, setAccount] = useState('openai_1')
   const [title, setTitle] = useState('')
   const [creating, setCreating] = useState(false)
+  const [newWorkStart, setNewWorkStart] = useState<NewWorkStart>()
   const createDisclosure = useRef<HTMLDetailsElement>(null)
+  const newWorkTitle = useRef<HTMLInputElement>(null)
+  const firstWorkTitle = useRef<HTMLInputElement>(null)
   const [settings, setSettings] = useState(false)
   const [dataDir, setDataDir] = useState('')
   const notify: Notify = useCallback((e) => setError(e instanceof Error ? e.message : String(e)), [])
@@ -110,33 +124,77 @@ export function App() {
     const timer = setInterval(() => void refreshConfig().catch(notify), 10_000)
     return () => clearInterval(timer)
   }, [ready, refreshConfig, notify])
+  function goToPage(id: string) {
+    navigationGeneration.current += 1
+    setPage(id)
+  }
   function navigate(id: string) {
     if (id !== page && confirmLeave()) {
       setBench(undefined)
+      setRunEntry(undefined)
       setOutlineHandoff(undefined)
-      setPage(id)
+      goToPage(id)
     }
   }
+  const novel = novels.find((n) => n.id === novelId)
+  const branch = branches.find((b) => b.id === branchId && b.novel_id === novelId)
   useEffect(() => {
-    if (!bench) return
+    if (!bench || !branch || !benches.some(([id, , destination]) => id === bench.id && destination === page))
+      return
     const section = document.getElementById('bench-' + bench.id)
     section?.scrollIntoView({ block: 'start' })
     section?.focus({ preventScroll: true })
-  }, [bench])
+  }, [bench, branch?.id, page])
+  function showBench(id: Bench, destination: string, open = false) {
+    if ((destination !== page || quickConception) && !confirmLeave()) return
+    setQuickConception(false)
+    setOutlineHandoff(undefined)
+    setRunEntry(undefined)
+    setBench({ id, open })
+    goToPage(destination)
+  }
+  function openNewWork(start: NewWorkStart) {
+    if (creating) return
+    setNewWorkStart(start)
+    if (!novel && firstWorkTitle.current) {
+      firstWorkTitle.current.focus()
+      return
+    }
+    const disclosure = createDisclosure.current
+    if (disclosure) disclosure.open = true
+    newWorkTitle.current?.focus()
+  }
+  function chooseCreationStart(start: (typeof creationStarts)[number][0]) {
+    if (!branch) {
+      if (start !== 'relay') openNewWork(start)
+      return
+    }
+    if (start === 'manual') {
+      showBench('project', 'ideation', true)
+      return
+    }
+    if (page !== 'workflow' && !confirmLeave()) return
+    setBench(undefined)
+    setOutlineHandoff(undefined)
+    setRunEntry({ mode: start, branchId: branch.id })
+    goToPage('workflow')
+  }
   function openConceptionWorkspace() {
     if (!confirmLeave()) return
     setQuickConception(false)
-    setPage('ideation')
+    setRunEntry(undefined)
+    goToPage('ideation')
   }
   function openConceptionDestination(destination: ConceptionDestination, handoff?: ConceptionHandoff) {
     if (!confirmLeave()) return
     setConceptionHandoff(handoff)
     if (destination === 'writing') {
       setFeedbackHandoff(undefined)
-      setPage('writing')
+      goToPage('writing')
     } else {
       setWorkflowMode(destination)
-      setPage('workflow')
+      setRunEntry(undefined)
+      goToPage('workflow')
     }
   }
   async function createNovel(event: React.FormEvent) {
@@ -145,24 +203,40 @@ export function App() {
     const focusWasInDisclosure = createDisclosure.current?.contains(document.activeElement)
     setCreating(true)
     const generation = selection.current.generation
+    const routeGeneration = navigationGeneration.current
     const submittedTitle = title
+    const requestedStart = newWorkStart
     try {
-      const result = await api<{ id: string }>('/novels', 'POST', { title: submittedTitle.trim(), brief: '' })
+      const result = await api<{ id: string; branch_id: string }>('/novels', 'POST', {
+        title: submittedTitle.trim(),
+        brief: '',
+      })
       setNovels(await api('/novels'))
-      if (selection.current.generation === generation && confirmLeave()) {
+      const shouldOpen =
+        selection.current.generation === generation &&
+        (!requestedStart || navigationGeneration.current === routeGeneration) &&
+        confirmLeave()
+      if (shouldOpen) {
         setBranches([])
         setBranchId('')
         setNovelId(result.id)
-        setPage('writing')
+        setQuickConception(false)
+        setOutlineHandoff(undefined)
+        setBench(requestedStart === 'manual' ? { id: 'project', open: true } : undefined)
+        setRunEntry(requestedStart === 'idea' ? { mode: 'idea', branchId: result.branch_id } : undefined)
+        goToPage(
+          requestedStart === 'idea' ? 'workflow' : requestedStart === 'manual' ? 'ideation' : 'writing',
+        )
       }
       setTitle((current) => (current === submittedTitle ? '' : current))
+      setNewWorkStart(undefined)
       const disclosure = createDisclosure.current
       if (disclosure?.open) {
         const active = document.activeElement
         // Chromium can move focus to the document as soon as the submit button is disabled.
         const returnFocus = disclosure.contains(active) || (focusWasInDisclosure && active === document.body)
         disclosure.open = false
-        if (returnFocus) disclosure.querySelector('summary')?.focus()
+        if (returnFocus && (!shouldOpen || !requestedStart)) disclosure.querySelector('summary')?.focus()
       }
     } catch (e) {
       notify(e)
@@ -170,8 +244,9 @@ export function App() {
       setCreating(false)
     }
   }
-  const novel = novels.find((n) => n.id === novelId)
-  const branch = branches.find((b) => b.id === branchId && b.novel_id === novelId)
+  const stage =
+    benches.find(([id, , destination]) => id === bench?.id && destination === page)?.[3] ??
+    benches.find(([, , destination]) => destination === page)?.[3]
   const selectedAccount = config?.accounts.find((a) => a.id === account)
   const selectedConception = conceptionHandoff?.branchId === branch?.id ? conceptionHandoff : undefined
   return (
@@ -309,6 +384,8 @@ export function App() {
                   }
                   setBranches([])
                   setBranchId('')
+                  setBench(undefined)
+                  setRunEntry(undefined)
                   setNovelId(e.target.value)
                 }}
               >
@@ -328,8 +405,13 @@ export function App() {
                 value={branchId}
                 onChange={(e) => {
                   if (e.target.value === branchId) return
-                  if (confirmLeave()) setBranchId(e.target.value)
-                  else e.target.value = branchId
+                  if (!confirmLeave()) {
+                    e.target.value = branchId
+                    return
+                  }
+                  setBench(undefined)
+                  setRunEntry(undefined)
+                  setBranchId(e.target.value)
                 }}
               >
                 <option value="" disabled>
@@ -350,19 +432,39 @@ export function App() {
                 if (!confirmLeave()) return
                 setBranches([])
                 setBranchId('')
+                setBench(undefined)
+                setRunEntry(undefined)
                 setNovelId(id)
-                setPage('writing')
+                goToPage('writing')
               }}
             />
-            <details className="new-novel" ref={createDisclosure}>
+            <details
+              className="new-novel"
+              ref={createDisclosure}
+              onToggle={(event) => {
+                if (!event.currentTarget.open) setNewWorkStart(undefined)
+              }}
+            >
               <summary>＋ 新建作品</summary>
               <form onSubmit={createNovel}>
                 <label>
                   作品名称
-                  <input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} />
+                  <input
+                    ref={newWorkTitle}
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    required
+                    maxLength={200}
+                  />
                 </label>
                 <button className="primary" disabled={creating}>
-                  {creating ? '创建中…' : '创建并开始写作'}
+                  {creating
+                    ? '创建中…'
+                    : newWorkStart === 'idea'
+                      ? '创建并进入自动接力'
+                      : newWorkStart === 'manual'
+                        ? '创建并进入立项台'
+                        : '创建并开始写作'}
                 </button>
               </form>
             </details>
@@ -379,6 +481,21 @@ export function App() {
             </label>
           </div>
           <main id="main">
+            {(branch || !novel) && (
+              <nav className="creation-starts" aria-label="创作入口">
+                {creationStarts.map(([start, name]) => (
+                  <button
+                    key={start}
+                    type="button"
+                    disabled={creating || (start === 'relay' && !branch)}
+                    onClick={() => chooseCreationStart(start)}
+                  >
+                    {name}
+                  </button>
+                ))}
+                {!novel && <span>接力需先完成并确认一个阶段。</span>}
+              </nav>
+            )}
             {branch && (
               <nav className="bench-navigation" aria-label="七台工作流">
                 {benches.map(([id, label, destination]) => (
@@ -386,13 +503,7 @@ export function App() {
                     key={id}
                     type="button"
                     aria-current={bench?.id === id && page === destination ? 'location' : undefined}
-                    onClick={() => {
-                      if ((destination !== page || quickConception) && !confirmLeave()) return
-                      setQuickConception(false)
-                      setOutlineHandoff(undefined)
-                      setBench({ id })
-                      setPage(destination)
-                    }}
+                    onClick={() => showBench(id, destination)}
                   >
                     {label}台
                   </button>
@@ -408,6 +519,7 @@ export function App() {
                   <label>
                     第一部作品的名字
                     <input
+                      ref={firstWorkTitle}
                       autoFocus
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
@@ -417,17 +529,28 @@ export function App() {
                     />
                   </label>
                   <button className="primary" disabled={creating}>
-                    {creating ? '正在创建…' : '打开写作台 →'}
+                    {creating
+                      ? '正在创建…'
+                      : newWorkStart === 'idea'
+                        ? '创建并进入自动接力'
+                        : newWorkStart === 'manual'
+                          ? '创建并进入立项台'
+                          : '打开写作台 →'}
                   </button>
+                  {newWorkStart && (
+                    <button type="button" disabled={creating} onClick={() => setNewWorkStart(undefined)}>
+                      直接写作
+                    </button>
+                  )}
                 </form>
-                <div className="welcome-steps">
-                  <span>01 亲自写作</span>
-                  <span>02 按情节补写</span>
-                  <span>03 从粗纲到整书</span>
-                </div>
               </div>
             ) : (
-              <>
+              <CreationAssistantLayout
+                stage={stage ?? 'M5'}
+                branchId={branch?.id ?? ''}
+                account={account}
+                inline={!branch || !stage || stage === 'M5' || (page === 'ideation' && quickConception)}
+              >
                 {page === 'ideation' && branch && (
                   <>
                     <nav className="conception-navigation" aria-label="构思方式">
@@ -471,6 +594,7 @@ export function App() {
                           modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                           notify={notify}
                           onHandoff={openConceptionDestination}
+                          projectEntry={bench?.id === 'project' && bench.open ? bench : undefined}
                         />
                       </div>
                     )}
@@ -495,7 +619,7 @@ export function App() {
                       if (!confirmLeave()) return
                       setOutlineHandoff(undefined)
                       setBench({ id: 'inspection' })
-                      setPage('records')
+                      goToPage('records')
                     }}
                   />
                 )}
@@ -510,7 +634,7 @@ export function App() {
                       if (!confirmLeave()) return
                       setFeedbackHandoff(undefined)
                       setOutlineHandoff({ branchId: branch.id, chapterId, reportId })
-                      setPage('writing')
+                      goToPage('writing')
                     }}
                   />
                 )}
@@ -535,6 +659,8 @@ export function App() {
                     notify={notify}
                     initialMode={workflowMode}
                     conceptionHandoff={selectedConception}
+                    sevenStageEntry={runEntry?.branchId === branch?.id ? runEntry : undefined}
+                    onNewIdeaWork={() => openNewWork('idea')}
                     onConceptionSettings={openConceptionWorkspace}
                     onStarted={async (id) => {
                       await refreshBranches(novel.id, id, selectionGeneration)
@@ -553,11 +679,11 @@ export function App() {
                     onReviseFeedback={(feedback) => {
                       if (!confirmLeave()) return
                       setFeedbackHandoff(feedback)
-                      setPage('writing')
+                      goToPage('writing')
                     }}
                   />
                 )}
-              </>
+              </CreationAssistantLayout>
             )}
           </main>
         </>

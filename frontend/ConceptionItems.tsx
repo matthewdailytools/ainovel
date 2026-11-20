@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { AssistantField } from './AssistantField'
 import type { components } from './api-schema'
 import { settingAdoptionLabels, type SettingAdoptionState } from './conception'
 import type {
@@ -149,11 +150,13 @@ export function ConceptionItemEditor({
   item,
   choices,
   worldSetting,
+  assistant,
   onChange,
 }: {
   item: ConceptionItem
   choices: ConceptionItem[]
   worldSetting?: boolean
+  assistant?: { scopeId: string | null; contextKey: string }
   onChange: (item: ConceptionItem) => void
 }) {
   const [target, setTarget] = useState('')
@@ -169,6 +172,19 @@ export function ConceptionItemEditor({
           onChange={(event) => onChange({ ...item, title: event.target.value })}
         />
       </label>
+      {assistant && (
+        <AssistantField
+          field="title"
+          label={`${item.title || '未命名设定'} · 项目名称`}
+          value={item.title}
+          scopeId={assistant.scopeId}
+          objectKey={item.id}
+          contextKey={assistant.contextKey}
+          onApply={(value) => {
+            if (typeof value === 'string') onChange({ ...item, title: value })
+          }}
+        />
+      )}
       <label>
         采用状态
         <select
@@ -234,6 +250,20 @@ export function ConceptionItemEditor({
           onChange={(event) => onChange({ ...item, detail: event.target.value })}
         />
       </label>
+      {assistant && (
+        <AssistantField
+          field="detail"
+          label={`${item.title || '未命名设定'} · 设定内容`}
+          quickLabel="完善设定"
+          value={item.detail}
+          scopeId={assistant.scopeId}
+          objectKey={item.id}
+          contextKey={assistant.contextKey}
+          onApply={(value) => {
+            if (typeof value === 'string') onChange({ ...item, detail: value })
+          }}
+        />
+      )}
       {(!!available.length || !!links.length) && (
         <details>
           <summary>关联项目 · {links.length} 项</summary>

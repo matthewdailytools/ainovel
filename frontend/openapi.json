@@ -6375,6 +6375,274 @@
           }
         }
       }
+    },
+    "/api/branches/{branch_id}/assistant/conversations": {
+      "get": {
+        "summary": "List Assistant Conversations",
+        "operationId": "list_assistant_conversations_api_branches__branch_id__assistant_conversations_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "type": "string" },
+                { "type": "null" }
+              ],
+              "title": "Stage"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+                { "type": "null" }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "name": "draft_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 512 }, { "type": "null" }],
+              "title": "Draft Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Conversations" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Assistant Conversation",
+        "operationId": "create_assistant_conversation_api_branches__branch_id__assistant_conversations_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CreateConversation" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Conversation" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/assistant/conversations/{conversation_id}/turns": {
+      "get": {
+        "summary": "Read Assistant Turns",
+        "operationId": "read_assistant_turns_api_branches__branch_id__assistant_conversations__conversation_id__turns_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "maximum": 50, "minimum": 1, "default": 20, "title": "Limit" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Turns" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Send Assistant Turn",
+        "operationId": "send_assistant_turn_api_branches__branch_id__assistant_conversations__conversation_id__turns_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendTurn" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedTurn" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/assistant/conversations/{conversation_id}/turns/{turn_id}/apply-receipt": {
+      "post": {
+        "summary": "Record Assistant Draft Receipt",
+        "operationId": "record_assistant_draft_receipt_api_branches__branch_id__assistant_conversations__conversation_id__turns__turn_id__apply_receipt_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Branch Id"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$",
+              "title": "Turn Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ApplyReceiptInput" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApplyReceipt" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6509,6 +6777,22 @@
         "type": "object",
         "required": ["chapter_id", "unique_readers"],
         "title": "AggregateCount"
+      },
+      "ApplyReceipt": {
+        "properties": {
+          "applied_fields": { "items": { "type": "string" }, "type": "array", "title": "Applied Fields" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["applied_fields"],
+        "title": "ApplyReceipt"
+      },
+      "ApplyReceiptInput": {
+        "properties": { "field": { "type": "string", "maxLength": 32, "minLength": 1, "title": "Field" } },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["field"],
+        "title": "ApplyReceiptInput"
       },
       "ArchiveInput": {
         "properties": {
@@ -6823,6 +7107,22 @@
         "type": "object",
         "required": ["check_id", "status", "basis_note", "reason"],
         "title": "AuthorReview"
+      },
+      "Basis": {
+        "properties": {
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Sha256" },
+          "scope_label": { "type": "string", "title": "Scope Label" },
+          "versions": {
+            "items": { "$ref": "#/components/schemas/SourceRef" },
+            "type": "array",
+            "title": "Versions"
+          },
+          "checks": { "items": { "$ref": "#/components/schemas/Check" }, "type": "array", "title": "Checks" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["sha256", "scope_label", "versions", "checks"],
+        "title": "Basis"
       },
       "BasisExcerpt": {
         "properties": {
@@ -7271,6 +7571,18 @@
         "type": "object",
         "required": ["title", "kind"],
         "title": "Character"
+      },
+      "Check": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "title": { "type": "string", "title": "Title" },
+          "status": { "type": "string", "title": "Status" },
+          "detail": { "type": "string", "title": "Detail" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title", "status", "detail"],
+        "title": "Check"
       },
       "CheckpointChapter": {
         "properties": {
@@ -7912,6 +8224,50 @@
         "required": ["client_request_id", "account", "reason"],
         "title": "ContinuationInput"
       },
+      "Conversation": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "draft_key": {
+            "anyOf": [{ "type": "string", "maxLength": 512, "minLength": 1 }, { "type": "null" }],
+            "title": "Draft Key"
+          },
+          "subject": { "type": "string", "title": "Subject" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "created": { "type": "number", "title": "Created" },
+          "updated": { "type": "number", "title": "Updated" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "stage", "scope_id", "draft_key", "subject", "revision", "created", "updated"],
+        "title": "Conversation"
+      },
+      "Conversations": {
+        "properties": {
+          "conversations": {
+            "items": { "$ref": "#/components/schemas/Conversation" },
+            "type": "array",
+            "title": "Conversations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["conversations"],
+        "title": "Conversations"
+      },
       "CorrectionInput": {
         "properties": {
           "source_identity_context": {
@@ -7956,6 +8312,33 @@
           "item_ids"
         ],
         "title": "CorrectionInput"
+      },
+      "CreateConversation": {
+        "properties": {
+          "stage": { "type": "string", "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], "title": "Stage" },
+          "scope_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 128, "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$" },
+              { "type": "null" }
+            ],
+            "title": "Scope Id"
+          },
+          "draft_key": {
+            "anyOf": [{ "type": "string", "maxLength": 512, "minLength": 1 }, { "type": "null" }],
+            "title": "Draft Key"
+          },
+          "subject": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Subject" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["stage", "subject", "client_request_id"],
+        "title": "CreateConversation"
       },
       "CreateReference": {
         "properties": {
@@ -10391,6 +10774,16 @@
         "required": ["start", "end", "quote"],
         "title": "PublishedTextSelection"
       },
+      "QueuedTurn": {
+        "properties": {
+          "conversation": { "$ref": "#/components/schemas/Conversation" },
+          "turn": { "$ref": "#/components/schemas/Turn" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["conversation", "turn"],
+        "title": "QueuedTurn"
+      },
       "ReadingDiagnosis": {
         "properties": {
           "chapter_id": { "type": "string", "title": "Chapter Id" },
@@ -11057,6 +11450,25 @@
         "required": ["chapter_id", "revision", "start", "end", "quote"],
         "title": "RestoreSource"
       },
+      "Result": {
+        "properties": {
+          "answer": { "type": "string", "title": "Answer" },
+          "citations": {
+            "items": { "$ref": "#/components/schemas/SourceRef" },
+            "type": "array",
+            "title": "Citations"
+          },
+          "suggestions": {
+            "items": { "$ref": "#/components/schemas/Suggestion" },
+            "type": "array",
+            "title": "Suggestions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["answer", "citations", "suggestions"],
+        "title": "Result"
+      },
       "ResumeInput": {
         "properties": {
           "acknowledge_unknown": { "type": "boolean", "title": "Acknowledge Unknown", "default": false },
@@ -11321,6 +11733,78 @@
         "type": "object",
         "required": ["session_id", "card_id", "revision", "version_id"],
         "title": "SelectedOutlineCardReference"
+      },
+      "Selection": {
+        "properties": {
+          "start": { "type": "integer", "minimum": 0, "title": "Start" },
+          "end": { "type": "integer", "exclusiveMinimum": 0, "title": "End" },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["start", "end", "revision"],
+        "title": "Selection"
+      },
+      "SendTurn": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" },
+          "question": { "type": "string", "maxLength": 6000, "minLength": 1, "title": "Question" },
+          "account": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Account"
+          },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "budget_limit": {
+            "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+            "title": "Budget Limit"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["discuss", "suggest", "refine", "review"],
+            "title": "Action",
+            "default": "discuss"
+          },
+          "target": {
+            "anyOf": [{ "type": "string", "maxLength": 32, "minLength": 1 }, { "type": "null" }],
+            "title": "Target"
+          },
+          "target_key": {
+            "anyOf": [{ "type": "string", "maxLength": 512, "minLength": 1 }, { "type": "null" }],
+            "title": "Target Key"
+          },
+          "context_key": {
+            "anyOf": [{ "type": "string", "maxLength": 512, "minLength": 1 }, { "type": "null" }],
+            "title": "Context Key"
+          },
+          "draft_text": { "type": "string", "maxLength": 20000, "title": "Draft Text", "default": "" },
+          "selection": { "anyOf": [{ "$ref": "#/components/schemas/Selection" }, { "type": "null" }] },
+          "spoiler_scope": {
+            "type": "string",
+            "enum": ["opening", "whole"],
+            "title": "Spoiler Scope",
+            "default": "opening"
+          },
+          "sample_chapters": {
+            "type": "integer",
+            "maximum": 20,
+            "minimum": 1,
+            "title": "Sample Chapters",
+            "default": 1
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "basis_sha256", "question", "account", "client_request_id"],
+        "title": "SendTurn"
       },
       "SettingFinding": {
         "properties": {
@@ -12168,6 +12652,19 @@
         "required": ["chapter_id", "revision", "start", "end", "quote"],
         "title": "Source"
       },
+      "SourceRef": {
+        "properties": {
+          "kind": { "type": "string", "title": "Kind" },
+          "id": { "type": "string", "title": "Id" },
+          "label": { "type": "string", "title": "Label" },
+          "revision": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Revision" },
+          "excerpt": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Excerpt" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "id", "label"],
+        "title": "SourceRef"
+      },
       "StartExtraction": {
         "properties": {
           "max_output_tokens": {
@@ -12362,6 +12859,20 @@
         "required": ["id", "parent_id", "record_id", "archived", "record", "evidence", "dependencies"],
         "title": "StoryVersion"
       },
+      "Suggestion": {
+        "properties": {
+          "field": { "type": "string", "maxLength": 32, "minLength": 1, "title": "Field" },
+          "value": {
+            "anyOf": [{ "type": "string" }, { "items": { "type": "string" }, "type": "array" }],
+            "title": "Value"
+          },
+          "reason": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Reason" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["field", "value", "reason"],
+        "title": "Suggestion"
+      },
       "TimeEvidence": {
         "properties": {
           "chapter_id": { "type": "string", "title": "Chapter Id" },
@@ -12374,6 +12885,87 @@
         "type": "object",
         "required": ["chapter_id", "revision", "start", "end", "quote"],
         "title": "TimeEvidence"
+      },
+      "Turn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id"
+          },
+          "sequence": { "type": "integer", "title": "Sequence" },
+          "task_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Task Id"
+          },
+          "status": { "type": "string", "title": "Status" },
+          "result": { "anyOf": [{ "$ref": "#/components/schemas/Result" }, { "type": "null" }] },
+          "error": { "type": "string", "title": "Error" },
+          "created": { "type": "number", "title": "Created" },
+          "question": { "type": "string", "title": "Question" },
+          "action": {
+            "type": "string",
+            "enum": ["discuss", "suggest", "refine", "review"],
+            "title": "Action"
+          },
+          "target": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Target" },
+          "target_key": {
+            "anyOf": [{ "type": "string", "maxLength": 512, "minLength": 1 }, { "type": "null" }],
+            "title": "Target Key"
+          },
+          "context_key": {
+            "anyOf": [{ "type": "string", "maxLength": 512, "minLength": 1 }, { "type": "null" }],
+            "title": "Context Key"
+          },
+          "draft_text": { "type": "string", "title": "Draft Text" },
+          "selection": { "anyOf": [{ "$ref": "#/components/schemas/Selection" }, { "type": "null" }] },
+          "spoiler_scope": { "type": "string", "enum": ["opening", "whole"], "title": "Spoiler Scope" },
+          "sample_chapters": { "type": "integer", "title": "Sample Chapters" },
+          "basis_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "title": "Basis Sha256" },
+          "basis_current": { "type": "boolean", "title": "Basis Current" },
+          "applied_fields": { "items": { "type": "string" }, "type": "array", "title": "Applied Fields" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "sequence",
+          "task_id",
+          "status",
+          "result",
+          "error",
+          "created",
+          "question",
+          "action",
+          "target",
+          "target_key",
+          "context_key",
+          "draft_text",
+          "selection",
+          "spoiler_scope",
+          "sample_chapters",
+          "basis_sha256",
+          "basis_current",
+          "applied_fields"
+        ],
+        "title": "Turn"
+      },
+      "Turns": {
+        "properties": {
+          "conversation": { "$ref": "#/components/schemas/Conversation" },
+          "basis": { "anyOf": [{ "$ref": "#/components/schemas/Basis" }, { "type": "null" }] },
+          "turns": { "items": { "$ref": "#/components/schemas/Turn" }, "type": "array", "title": "Turns" },
+          "next_before": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Next Before" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["conversation", "basis", "turns", "next_before"],
+        "title": "Turns"
       },
       "UnitPlan": {
         "properties": {

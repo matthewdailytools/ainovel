@@ -1,0 +1,136 @@
+.wb-assistant-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.wb-assistant-main {
+  min-width: 0;
+}
+
+.wb-assistant-layout-open {
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem);
+  align-items: start;
+}
+
+.wb-assistant-layout-open > .wb-assistant-rail {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.wb-assistant-layout-open > .wb-assistant-main {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.wb-assistant-entry {
+  display: flex;
+  justify-content: end;
+}
+
+.wb-assistant-entry[hidden],
+.wb-assistant-rail[hidden] {
+  display: none;
+}
+
+.wb-assistant-rail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  padding: 16px;
+}
+
+.wb-assistant-header,
+.wb-assistant-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wb-assistant-header {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.wb-assistant-header h2 {
+  font-size: 1.125rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.wb-assistant-header h2:focus-visible {
+  outline: 3px solid #a25b16;
+  outline-offset: 3px;
+}
+
+.wb-assistant-tabs {
+  margin-bottom: 12px;
+}
+
+.wb-assistant-tabs button[aria-selected='true'] {
+  background: var(--tint);
+  border-color: var(--green);
+  font-weight: 650;
+}
+
+.wb-assistant-turns {
+  padding: 0;
+  list-style: none;
+}
+
+.wb-assistant-turn {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+
+.wb-assistant-muted {
+  color: var(--muted);
+}
+
+.wb-assistant-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wb-assistant-comparison {
+  margin: 8px 0;
+  background: var(--tint);
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.wb-assistant-comparison dl {
+  margin: 8px 0;
+}
+
+.wb-assistant-comparison dt {
+  font-weight: 650;
+}
+
+.wb-assistant-comparison dd {
+  margin: 0 0 8px;
+}
+
+.wb-assistant-rail summary {
+  min-height: 24px;
+  cursor: pointer;
+}
+
+.wb-assistant-rail code {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 68rem) {
+  .wb-assistant-layout-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wb-assistant-layout-open > .wb-assistant-main,
+  .wb-assistant-layout-open > .wb-assistant-rail {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}

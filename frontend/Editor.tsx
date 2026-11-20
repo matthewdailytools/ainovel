@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view'
 import { history, historyKeymap, defaultKeymap } from '@codemirror/commands'
@@ -6,6 +6,7 @@ import { markdown } from '@codemirror/lang-markdown'
 import { MergeView } from '@codemirror/merge'
 
 export type Selection = { start: number; end: number; text: string }
+export type ReplaceSelection = (expected: Selection, replacement: string) => boolean
 export function Editor({
   id,
   initial,
@@ -14,6 +15,7 @@ export function Editor({
   readOnly = false,
   onChange,
   onSelection,
+  replaceSelection,
 }: {
   id: string
   initial: string
@@ -22,6 +24,7 @@ export function Editor({
   readOnly?: boolean
   onChange: (text: string) => void
   onSelection: (selection: Selection) => void
+  replaceSelection?: RefObject<ReplaceSelection | null>
 }) {
   const mount = useRef<HTMLDivElement>(null)
   const instance = useRef<EditorView | null>(null)
@@ -90,8 +93,28 @@ export function Editor({
       }),
     })
     instance.current = view
+    if (replaceSelection) {
+      replaceSelection.current = (expected, replacement) => {
+        const { from, to } = view.state.selection.main
+        if (
+          view.state.readOnly ||
+          view.compositionStarted ||
+          from !== expected.start ||
+          to !== expected.end ||
+          view.state.sliceDoc(from, to) !== expected.text
+        )
+          return false
+        view.dispatch({
+          changes: { from, to, insert: replacement },
+          selection: { anchor: from, head: from + replacement.length },
+          scrollIntoView: true,
+        })
+        return true
+      }
+    }
     return () => {
       window.clearTimeout(commitCheck)
+      if (replaceSelection) replaceSelection.current = null
       instance.current = null
       view.destroy()
     }

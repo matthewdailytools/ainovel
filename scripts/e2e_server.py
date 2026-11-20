@@ -66,6 +66,36 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if instruction.get("action") in {"assistant.turn", "assistant.opening_intro"}:
+            field = instruction.get("字段")
+            proposed = "悬疑短篇，围绕能够回查的铜铃记录推进。"
+            if field == "selection":
+                proposed = "铜铃没有响，学徒把这一点记了下来。"
+            if instruction.get("操作") == "review":
+                proposed = "按当前保存稿和正式依据逐项核对，待作者确认。"
+            suggestions = (
+                [
+                    {
+                        "field": field,
+                        "value": ["mystery"] if field == "genre_ids" else proposed,
+                        "reason": "保留作者的原意和已采用约定。",
+                    }
+                ]
+                if field and field in instruction.get("可建议字段及字符上限", {})
+                else []
+            )
+            return {
+                "text": json.dumps(
+                    {
+                        "answer": "已按本轮范围生成建议，请用当前稿复核。",
+                        "source_ids": [],
+                        "suggestions": suggestions,
+                    },
+                    ensure_ascii=False,
+                ),
+                "usage": {"input": 1, "output": 1},
+                "call_id": "offline-workbench-assistant",
+            }
         if instruction.get("动作") in {"准备完本收束核对建议", "起草完本交付简介"}:
             if "正文依据" in instruction:
                 source = instruction["正文依据"][-1]["source_id"]

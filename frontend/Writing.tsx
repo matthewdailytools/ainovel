@@ -16,6 +16,9 @@ import type { Notify } from './App'
 import { Difference, Editor, type Selection } from './Editor'
 import { ChapterRestorePreview, type ChapterRestorePreviewProps } from './ChapterRestorePreview'
 import { chapterDraftOwner, readDraft, writeDraft, type Draft } from './drafts'
+import { AssistantField } from './AssistantField'
+import { useAssistantScope, WorkbenchAssistantRail } from './WorkbenchAssistant'
+import type { ReplaceSelection } from './Editor'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
 import { ChapterContext } from './ChapterContext'
@@ -145,7 +148,9 @@ export function Writing({
   const [text, setText] = useState('')
   const [saved, setSaved] = useState('未打开章节')
   const [dirty, setDirty] = useState(0)
+  useAssistantScope({ scopeId: chapter?.id ?? null, label: chapter?.title || '写作台', account })
   const [selection, setSelection] = useState<Selection>({ start: 0, end: 0, text: '' })
+  const replaceAssistantSelection = useRef<ReplaceSelection | null>(null)
   const [cursor, setCursor] = useState(0)
   const [note, setNote] = useState('')
   const reading = useRef({ revision: 0 })
@@ -1192,6 +1197,7 @@ export function Writing({
               readOnly={busy || opening}
               onChange={change}
               onSelection={setSelection}
+              replaceSelection={replaceAssistantSelection}
             />
             <div className="editor-footer">
               <span>
@@ -1201,6 +1207,44 @@ export function Writing({
               </span>
               <button onClick={downloadDraft}>下载当前草稿</button>
             </div>
+            {selection.text ? (
+              <AssistantField
+                field="selection"
+                label={`${chapter.title} · 正文选区`}
+                quickLabel="AI 改写选区"
+                value={selection.text}
+                scopeId={chapter.id}
+                scopeLabel={chapter.title}
+                objectKey={chapter.id}
+                contextKey={`${editorKey}/${chapter.revision}/${selection.start}/${selection.end}`}
+                request={
+                  chapter.content.slice(selection.start, selection.end) === selection.text &&
+                  text === chapter.content
+                    ? {
+                        selection: { start: selection.start, end: selection.end, revision: chapter.revision },
+                      }
+                    : undefined
+                }
+                enabled={!busy && !opening && !recovery}
+                onApply={(value) =>
+                  typeof value === 'string' &&
+                  (replaceAssistantSelection.current?.(selection, value) ?? false)
+                }
+              />
+            ) : (
+              <AssistantField
+                field="text"
+                label={`${chapter.title} · 本章创作`}
+                quickLabel="讨论本章写法"
+                action="suggest"
+                value=""
+                scopeId={chapter.id}
+                scopeLabel={chapter.title}
+                objectKey={chapter.id}
+                contextKey={`${editorKey}/${chapter.revision}`}
+                enabled={!busy && !opening}
+              />
+            )}
             {(nextChapter || duePromises.length > 0 || chapter.stale) && (
               <div className="editor-footer" aria-label="今日事项">
                 {nextChapter && (
@@ -1245,6 +1289,7 @@ export function Writing({
           <h2>创作辅助</h2>
           <span className="badge">作者决定采纳</span>
         </div>
+        <WorkbenchAssistantRail />
         <AuthorContractNotice
           branchId={branch.id}
           onSettings={onGenreSettings}

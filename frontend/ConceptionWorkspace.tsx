@@ -52,12 +52,14 @@ export function ConceptionWorkspace({
   branch,
   account,
   modelReady,
+  projectEntry,
   notify,
   onHandoff,
 }: {
   branch: Branch
   account: string
   modelReady: boolean
+  projectEntry?: object
   notify: Notify
   onHandoff: (destination: ConceptionDestination, handoff?: ConceptionHandoff) => void
 }) {
@@ -507,6 +509,7 @@ export function ConceptionWorkspace({
             task={projectTasks[0]}
             busy={busy || dirty || (!!activeTask && activeTask.payload.operation !== 'project_brief')}
             modelReady={modelReady && !badBudget}
+            entry={projectEntry}
             onGenerate={(idea) => void perform(() => generateProject(idea))}
             onConfirm={confirmProject}
             onWorld={() => selectCategory('world')}
@@ -640,6 +643,14 @@ export function ConceptionWorkspace({
                       item={item}
                       choices={choices}
                       worldSetting={category.id === 'world'}
+                      assistant={{
+                        scopeId: state.categories.some((entry) =>
+                          entry.items.some((row) => row.id === item.id),
+                        )
+                          ? item.id
+                          : null,
+                        contextKey: `${state.revision}/${category.id}`,
+                      }}
                       onChange={(next) =>
                         updateCategory({
                           ...category,

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { AssistantField } from './AssistantField'
 import { api, ApiError, type Chapter } from './api'
 import type { Notify } from './App'
 import {
@@ -55,7 +56,7 @@ type Preparation = {
 type PreparedIntroduction = Pick<
   NonNullable<Preparation['candidate']>,
   'intro' | 'spoiler_scope' | 'sample_chapter_ids'
-> & { id: string }
+> & { id?: string }
 
 const pendingDecisions: AuthorDecisions = {
   reading: 'pending',
@@ -599,6 +600,17 @@ export function CompletionPanel({
       )}
       <fieldset disabled={!basisReady || !!busy}>
         <legend>作者通读与收束说明</legend>
+        <AssistantField
+          field="read_note"
+          label="六项完本判定"
+          value=""
+          objectKey="completion-checks"
+          contextKey={current?.basis_sha256}
+          enabled={basisReady && !busy}
+          quickLabel="解释六项判定"
+          quickQuestion="请解释当前六项完本判定，并说明每个待处理项接下来应核对哪项依据。"
+          action="review"
+        />
         <label>
           通读记录
           <textarea
@@ -611,6 +623,21 @@ export function CompletionPanel({
             maxLength={4000}
           />
         </label>
+        <AssistantField
+          field="read_note"
+          label="稿件通读记录"
+          value={readNote}
+          contextKey={current?.basis_sha256}
+          enabled={basisReady && !busy}
+          quickLabel="整理通读记录"
+          action="review"
+          onApply={(value) => {
+            if (typeof value === 'string') {
+              setReadNote(value)
+              changeDecisions({ reading: 'pending' })
+            }
+          }}
+        />
         <label className="check">
           <input
             type="checkbox"
@@ -630,6 +657,18 @@ export function CompletionPanel({
                 onChange={(event) => editClosure(id, (entry) => ({ ...entry, note: event.target.value }))}
               />
             </label>
+            <AssistantField
+              field={id}
+              label={`${title}说明`}
+              value={form[id].note}
+              contextKey={current?.basis_sha256}
+              enabled={basisReady && !busy}
+              quickLabel="AI 准备收束建议"
+              action="review"
+              onApply={(value) => {
+                if (typeof value === 'string') editClosure(id, (entry) => ({ ...entry, note: value }))
+              }}
+            />
             {form[id].sources.map((source, index) => (
               <blockquote key={index}>
                 {source.quote}
@@ -696,6 +735,27 @@ export function CompletionPanel({
             maxLength={4000}
           />
         </label>
+        <AssistantField
+          field="intro"
+          label="交付简介"
+          value={intro}
+          contextKey={`${current?.basis_sha256 ?? ''}/${spoilerScope}/${openingLength}`}
+          request={{ spoiler_scope: spoilerScope, sample_chapters: openingLength }}
+          enabled={basisReady && !busy && !introScopeChanged}
+          quickLabel="AI 起草简介"
+          action="suggest"
+          onApply={(value) => {
+            if (typeof value === 'string') {
+              setIntro(value)
+              setPreparedIntroduction({
+                intro: value,
+                spoiler_scope: spoilerScope,
+                sample_chapter_ids: sampleIds,
+              })
+              setReviewed(false)
+            }
+          }}
+        />
         <label>
           简介与试读的剧透范围
           <select

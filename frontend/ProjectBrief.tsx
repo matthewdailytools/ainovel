@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { AssistantField } from './AssistantField'
 import { api, label, type Artifact, type GenreCatalog, type Task } from './api'
 import type { components } from './api-schema'
 import { useLeaveGuard } from './leaveGuard'
@@ -54,6 +55,7 @@ export function ProjectBriefPanel({
   task,
   busy,
   modelReady,
+  entry,
   onGenerate,
   onConfirm,
   onWorld,
@@ -64,6 +66,7 @@ export function ProjectBriefPanel({
   task?: Task
   busy: boolean
   modelReady: boolean
+  entry?: object
   onGenerate: (idea: string) => void
   onConfirm: (draft: ProjectDraft) => Promise<boolean>
   onWorld: () => void
@@ -74,6 +77,14 @@ export function ProjectBriefPanel({
   const [catalogError, setCatalogError] = useState('')
   const [candidateError, setCandidateError] = useState('')
   const [open, setOpen] = useState(false)
+  const details = useRef<HTMLDetailsElement>(null)
+  const ideaInput = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (entry && details.current) {
+      details.current.open = true
+      ideaInput.current?.focus()
+    }
+  }, [entry])
   const [impactAttempt, setImpactAttempt] = useState(0)
   const [impactReply, setImpactReply] = useState<{
     request: string
@@ -168,7 +179,7 @@ export function ProjectBriefPanel({
   }
 
   return (
-    <details className="card" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details ref={details} className="card" onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>立项台{project ? ` · 已确认修订 ${project.revision}` : ''}</summary>
       <p className="small">确认后的定位、题材和终局作为生成设定的依据。</p>
       {stale && <p role="alert">立项已在别处确认。当前编辑仍保留，请核对最新修订后重新录入。</p>}
@@ -177,12 +188,23 @@ export function ProjectBriefPanel({
         <label>
           创作思路
           <textarea
+            ref={ideaInput}
             rows={3}
             maxLength={6000}
             value={value.idea}
             onChange={(event) => setDraft({ ...value, idea: event.target.value, candidate_id: undefined })}
           />
         </label>
+        <AssistantField
+          field="idea"
+          label="创作思路"
+          value={value.idea}
+          enabled={!stale && !busy && !generating}
+          contextKey={`${current.base_revision}/${storyRevision}`}
+          onApply={(result) => {
+            if (typeof result === 'string') setDraft({ ...value, idea: result, candidate_id: undefined })
+          }}
+        />
         <div className="actions">
           <button
             type="button"
@@ -256,17 +278,48 @@ export function ProjectBriefPanel({
               </select>
             </label>
           ))}
+        {catalog && (
+          <AssistantField
+            field="genre_ids"
+            label="主辅题材"
+            value={value.brief.genre_ids}
+            quickLabel="推荐题材"
+            action="suggest"
+            enabled={!stale && !busy && !generating}
+            contextKey={`${current.base_revision}/${storyRevision}`}
+            onApply={(result) => {
+              if (
+                Array.isArray(result) &&
+                result.every((id) => catalog.genres.some((genre) => genre.id === id))
+              )
+                editBrief({ ...value.brief, genre_ids: result })
+            }}
+          />
+        )}
         {fields.map(([key, title]) => (
-          <label key={key}>
-            {title}
-            {key === 'cadence' || key === 'final_image' ? '（可选）' : ''}
-            <textarea
+          <div key={key}>
+            <label>
+              {title}
+              {key === 'cadence' || key === 'final_image' ? '（可选）' : ''}
+              <textarea
+                value={value.brief[key] ?? ''}
+                maxLength={700}
+                rows={2}
+                onChange={(event) => editBrief({ ...value.brief, [key]: event.target.value })}
+              />
+            </label>
+            <AssistantField
+              field={key}
+              label={title}
+              quickLabel={key === 'position' ? '润色主题' : 'AI 润色'}
               value={value.brief[key] ?? ''}
-              maxLength={700}
-              rows={2}
-              onChange={(event) => editBrief({ ...value.brief, [key]: event.target.value })}
+              enabled={!stale && !busy && !generating}
+              contextKey={`${current.base_revision}/${storyRevision}`}
+              onApply={(result) => {
+                if (typeof result === 'string') editBrief({ ...value.brief, [key]: result })
+              }}
             />
-          </label>
+          </div>
         ))}
         {impactRevision !== undefined && (
           <section className="notice" aria-label="立项修订影响预览">
