@@ -136,7 +136,9 @@ test('离线大纲草稿重开恢复四层输入和冻结依据，双窗只采�
   const main = page
   const mainPanel = await openOutline(main, id)
   const summary = mainPanel.getByRole('textbox', { name: '总纲', exact: true })
-  await mainPanel.getByRole('button', { name: '继续编辑本机大纲草稿', exact: true }).press('Enter')
+  const continueOutline = mainPanel.getByRole('button', { name: '继续编辑本机大纲草稿', exact: true })
+  await expect(continueOutline).toBeEnabled()
+  await continueOutline.press('Enter')
   await expect(summary).toBeFocused()
   await expect(summary).toHaveValue(partial)
   await expect(mainPanel.getByRole('textbox', { name: '卷名称', exact: true })).toHaveValue('')
