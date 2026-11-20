@@ -71,6 +71,52 @@ test('立项快捷候选只写入所选字段，重开后回读多轮和载入�
   await reopened.close()
 })
 
+test('刷新历史后新问题仍发到新的对话', async ({ page }) => {
+  const { route } = await newWork(page, '助手验收 · 新对话刷新')
+  const project = await openProject(page)
+  await project.getByRole('textbox', { name: '核心定位', exact: true }).fill(original)
+  await project.getByRole('button', { name: '润色主题 · 核心定位', exact: true }).click()
+  const rail = page.locator('.wb-assistant-rail')
+  const answer = '已按本轮范围生成建议，请用当前稿复核。'
+  await expect(rail.getByText(answer, { exact: true })).toBeVisible()
+  const endpoint = route + '/assistant/conversations'
+  const list = async (): Promise<{ id: string }[]> => {
+    const response = await page.request.get(endpoint)
+    expect(response.ok(), await response.text()).toBeTruthy()
+    return (await response.json()).conversations
+  }
+  const [previous] = await list()
+
+  await rail.getByRole('tab', { name: '历史', exact: true }).click()
+  await rail.getByRole('button', { name: '新对话', exact: true }).click()
+  const question = '请把这一轮另开一段讨论。'
+  const composer = rail.getByRole('textbox', { name: '创作问题' })
+  await composer.fill(question)
+  const refreshed = page.waitForResponse(
+    (response) =>
+      response.ok() && response.request().method() === 'GET' && new URL(response.url()).pathname === endpoint,
+  )
+  await rail.getByRole('button', { name: '刷新历史', exact: true }).click()
+  await refreshed
+  await expect(rail.getByText(answer, { exact: true })).toHaveCount(0)
+  await expect(composer).toHaveValue(question)
+
+  const sent = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname.startsWith(endpoint + '/') &&
+      response.url().endsWith('/turns'),
+  )
+  await rail.getByRole('button', { name: '发送', exact: true }).click()
+  const receipt = await sent
+  expect(receipt.status(), await receipt.text()).toBe(202)
+  expect(new URL(receipt.url()).pathname).not.toBe(endpoint + '/' + previous.id + '/turns')
+  expect(await list()).toHaveLength(2)
+  const older = await page.request.get(endpoint + '/' + previous.id + '/turns')
+  expect(older.ok(), await older.text()).toBeTruthy()
+  expect((await older.json()).turns).toHaveLength(1)
+})
+
 test('正文选区经作者载入后保留编辑器撤销，校验台十项都有 AI 入口', async ({ page }) => {
   const { route, headers } = await newWork(page, '助手验收 · 选区与校验')
   const chapter = await page.request.post(`${route}/chapters`, { headers, data: { title: '试铃' } })

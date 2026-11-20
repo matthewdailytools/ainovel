@@ -354,7 +354,7 @@ function AssistantConversationPanel({ context }: { context: AssistantContextValu
   const [view, setView] = useState<AssistantView>('conversation')
   const [action, setAction] = useState<AssistantAction>(selection?.action ?? 'discuss')
   const [conversations, setConversations] = useState<AssistantConversation[] | null>(null)
-  const [selectedId, setSelectedId] = useState('')
+  const [sessionChoice, setSelectedId] = useState<string>()
   const [history, setHistory] = useState<AssistantHistory>()
   const [question, setQuestion] = useState('')
   const [refresh, setRefresh] = useState(0)
@@ -371,6 +371,7 @@ function AssistantConversationPanel({ context }: { context: AssistantContextValu
   latestContext.current = context
   const locationKey = assistantLocationKey(location)
   const launch = selection?.launch
+  const selectedId = sessionChoice ?? ''
   const selectedHistory = history?.conversation.id === selectedId ? history : undefined
   const running = selectedHistory?.turns.some(assistantTurnPending) ?? false
   const latestTask = selectedHistory?.turns.filter(assistantTurnPending).at(-1)?.task_id
@@ -396,7 +397,7 @@ function AssistantConversationPanel({ context }: { context: AssistantContextValu
       .then((rows) => {
         if (!active) return
         setConversations(rows)
-        setSelectedId((id) => id || rows[0]?.id || '')
+        setSelectedId((id) => id ?? rows[0]?.id ?? '')
       })
       .catch((error) => {
         if (active) setFailure(description(error))

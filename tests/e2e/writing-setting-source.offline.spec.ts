@@ -62,34 +62,59 @@ test('写作右栏定位旧章纲的正式设定和正文证据，关闭后保�
   expect(latest.confirmation.id).not.toBe(confirmation)
   await page.reload()
   await expect(editor).toHaveText(original)
+  const chapterPath = `/api/chapters/${chapter.id}`
+  const isChapterSave = (url: string, method: string) =>
+    method === 'PUT' && new URL(url).pathname === chapterPath
+  let releaseSave = () => {}
+  const holdSave = new Promise<void>((resolve) => {
+    releaseSave = resolve
+  })
+  // Keep the normal autosave in flight until the frozen evidence and the browser draft have been checked.
+  await page.route(`**${chapterPath}`, async (route) => {
+    if (isChapterSave(route.request().url(), route.request().method())) await holdSave
+    await route.continue()
+  })
+  const autosave = page.waitForRequest((request) => isChapterSave(request.url(), request.method()))
   const unsaved = '这一句仍在编辑。'
-  await editor.press('Control+End')
-  await page.keyboard.insertText(unsaved)
-  await expect(editor).toHaveText(original + unsaved)
-  await page.setViewportSize({ width: 320, height: 860 })
-  const citations = page.getByText('本章章纲引用的设定', { exact: true })
-  await citations.press('Enter')
-  const item = citations
-    .locator('..')
-    .getByText(`守铃人阿陶 · 人物 · 修订 ${frozen.confirmed.setting_basis.revision}`, { exact: true })
-  await item.press('Enter')
-  await expect(item.locator('..')).toContainText('阿陶负责收存归还的钥匙。')
-  await expect(item.locator('..')).not.toContainText(changed)
-  const open = item.locator('..').getByRole('button', { name: '查看原条目与正文证据', exact: true })
-  await open.press('Enter')
-  const reference = page.getByRole('region', { name: '冻结设定的正文证据' })
-  await expect(reference.getByRole('heading', { name: '「守铃人阿陶」的采用来源与正文证据' })).toBeFocused()
-  await expect(reference).toContainText(confirmation)
-  await expect(reference).toContainText('条目编号 keeper')
-  const proof = reference.getByText('守铃人阿陶 · 待按当前正文或设定重新核对', { exact: true })
-  await proof.press('Enter')
-  await expect(reference.locator('blockquote')).toHaveText(original)
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
-  await reference.getByRole('button', { name: '返回本章设定引用', exact: true }).press('Enter')
-  await expect(open).toBeFocused()
-  await expect(editor).toHaveText(original + unsaved)
-  const saved = await checked<{ content: string; revision: number }>(
-    await page.request.get(`/api/chapters/${chapter.id}`),
-  )
-  expect(saved).toMatchObject({ content: original, revision: 1 })
+  try {
+    await editor.press('Control+End')
+    await page.keyboard.insertText(unsaved)
+    await expect(editor).toHaveText(original + unsaved)
+    await page.setViewportSize({ width: 320, height: 860 })
+    const citations = page.getByText('本章章纲引用的设定', { exact: true })
+    await citations.press('Enter')
+    const item = citations
+      .locator('..')
+      .getByText(`守铃人阿陶 · 人物 · 修订 ${frozen.confirmed.setting_basis.revision}`, { exact: true })
+    await item.press('Enter')
+    await expect(item.locator('..')).toContainText('阿陶负责收存归还的钥匙。')
+    await expect(item.locator('..')).not.toContainText(changed)
+    const open = item.locator('..').getByRole('button', { name: '查看原条目与正文证据', exact: true })
+    await open.press('Enter')
+    const reference = page.getByRole('region', { name: '冻结设定的正文证据' })
+    await expect(reference.getByRole('heading', { name: '「守铃人阿陶」的采用来源与正文证据' })).toBeFocused()
+    await expect(reference).toContainText(confirmation)
+    await expect(reference).toContainText('条目编号 keeper')
+    const proof = reference.getByText('守铃人阿陶 · 待按当前正文或设定重新核对', { exact: true })
+    await proof.press('Enter')
+    await expect(reference.locator('blockquote')).toHaveText(original)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+    await reference.getByRole('button', { name: '返回本章设定引用', exact: true }).press('Enter')
+    await expect(open).toBeFocused()
+    await expect(editor).toHaveText(original + unsaved)
+    expect((await autosave).postDataJSON()).toEqual({ content: original + unsaved, base_revision: 1 })
+    expect(await checked(await page.request.get(chapterPath))).toMatchObject({
+      content: original,
+      revision: 1,
+    })
+  } finally {
+    releaseSave()
+  }
+  const saved = await (await autosave).response()
+  expect(saved?.ok()).toBe(true)
+  expect(await saved!.json()).toMatchObject({ content: original + unsaved, revision: 2 })
+  expect(await checked(await page.request.get(chapterPath))).toMatchObject({
+    content: original + unsaved,
+    revision: 2,
+  })
 })
