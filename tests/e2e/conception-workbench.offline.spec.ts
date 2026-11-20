@@ -126,7 +126,10 @@ test('遗铃从确认设定到正文对账并保留过期证据', async ({ page 
   await page.getByRole('textbox', { name: '保留事项说明', exact: true }).fill('先写开篇。')
   await page.getByRole('button', { name: '确认当前构思', exact: true }).click()
   await page.getByRole('button', { name: '去写作（使用构思）', exact: true }).click()
-  await page.getByRole('button', { name: /渡口暗号/ }).click()
+  await page
+    .locator('.chapter-sidebar')
+    .getByRole('button', { name: /渡口暗号/ })
+    .click()
   const editor = page.locator('.cm-content[contenteditable=true]')
   await editor.press('End')
   await editor.press('Enter')
