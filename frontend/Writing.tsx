@@ -18,6 +18,8 @@ import { ChapterRestorePreview, type ChapterRestorePreviewProps } from './Chapte
 import { chapterDraftOwner, readDraft, writeDraft, type Draft } from './drafts'
 import { AssistantField } from './AssistantField'
 import { useAssistantScope, WorkbenchAssistantRail } from './WorkbenchAssistant'
+import './writingActions.css'
+import './writingEditorFocus.css'
 import type { ReplaceSelection } from './Editor'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
@@ -77,7 +79,7 @@ import {
 } from './directionHandoff'
 
 const actions = [
-  ['writing.advise', '卡点诊断与方向'],
+  ['writing.advise', '给本章写作建议'],
   ['writing.rewrite_selection', '改写选区'],
   ['writing.expand_plot', '按情节补写整章'],
   ['review.chapter', '本章审稿'],
@@ -87,6 +89,16 @@ const actions = [
   ['character.generate', '人物设计'],
   ['world.generate', '世界设定'],
 ] as const
+const candidateKinds: Record<string, string> = {
+  advice: '写作建议',
+  text_patch: '选段改写',
+  chapter_draft: '补写正文',
+  review: '审稿',
+  world: '世界设定',
+  characters: '人物设计',
+  outline: '大纲',
+  reference_comparison: '资料对照',
+}
 const designActions = new Set<ModuleInput['action']>(['world.generate', 'character.generate', 'outline.plan'])
 const designKinds = new Set(['world', 'characters', 'outline'])
 const actionsWithConception = new Set<ModuleInput['action']>([
@@ -860,7 +872,7 @@ export function Writing({
             ? '正在读取章节…'
             : `${chapters.length} 章 · ${chapters.filter((c) => c.stale).length} 章待复检`}
         </p>
-        <nav aria-label="全书目录">
+        <nav className="writing-chapter-directory" aria-label="全书目录">
           {volumes.map((volume) => (
             <details
               className="chapter-volume"
@@ -880,15 +892,18 @@ export function Writing({
           {unplanned.length > 0 && chapterList(unplanned)}
         </nav>
         <div className="sidebar-bottom">
-          <label>
-            下次从这里继续
-            <textarea
-              rows={3}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="当前卡点、下一场景、要查的资料…"
-            />
-          </label>
+          <details className="writing-note">
+            <summary>写作备忘</summary>
+            <label>
+              下次从这里继续
+              <textarea
+                rows={3}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="当前卡点、下一场景、要查的资料…"
+              />
+            </label>
+          </details>
           <details
             onToggle={(event) => {
               if (event.currentTarget.open)
@@ -1165,30 +1180,56 @@ export function Writing({
                 ))}
               </div>
             )}
-            {plannedChapter && (
-              <details
-                className="notice"
-                key={`${plannedChapter.chapter.chapter_id}/${outline?.confirmed?.id}`}
-                open
-              >
-                <summary>本章章纲 · 修订 {outline?.confirmed?.revision}</summary>
-                <p>
-                  {plannedChapter.volume.title} / {plannedChapter.unit.title}
-                </p>
-                {!!outline?.stale.length && <p role="status">{outline.stale.join('，')}，待重新确认。</p>}
-                <dl>
-                  {Object.entries(outlineFields).map(([key, label]) => (
-                    <div key={key}>
-                      <dt>{label}</dt>
-                      <dd>{plannedChapter.chapter[key as keyof typeof outlineFields]}</dd>
-                    </div>
-                  ))}
-                </dl>
-                <button type="button" onClick={onOutline}>
-                  打开大纲与台账
-                </button>
-              </details>
-            )}
+            <div className="writing-editor-actions" role="group" aria-label="正文操作">
+              <h2>正文</h2>
+              <a className="writing-generate-link" href="#writing-task-form">
+                去生成候选
+              </a>
+              {selection.text ? (
+                <AssistantField
+                  field="selection"
+                  label={`${chapter.title} · 正文选区`}
+                  quickLabel="AI 改写选区"
+                  discussionInDetails
+                  value={selection.text}
+                  scopeId={chapter.id}
+                  scopeLabel={chapter.title}
+                  objectKey={chapter.id}
+                  contextKey={`${editorKey}/${chapter.revision}/${selection.start}/${selection.end}`}
+                  request={
+                    chapter.content.slice(selection.start, selection.end) === selection.text &&
+                    text === chapter.content
+                      ? {
+                          selection: {
+                            start: selection.start,
+                            end: selection.end,
+                            revision: chapter.revision,
+                          },
+                        }
+                      : undefined
+                  }
+                  enabled={!busy && !opening && !recovery}
+                  onApply={(value) =>
+                    typeof value === 'string' &&
+                    (replaceAssistantSelection.current?.(selection, value) ?? false)
+                  }
+                />
+              ) : (
+                <AssistantField
+                  field="text"
+                  label={`${chapter.title} · 本章创作`}
+                  quickLabel="AI 写作建议"
+                  discussionInDetails
+                  action="suggest"
+                  value=""
+                  scopeId={chapter.id}
+                  scopeLabel={chapter.title}
+                  objectKey={chapter.id}
+                  contextKey={`${editorKey}/${chapter.revision}`}
+                  enabled={!busy && !opening}
+                />
+              )}
+            </div>
             <Editor
               id={editorKey}
               initial={text}
@@ -1199,52 +1240,12 @@ export function Writing({
               onSelection={setSelection}
               replaceSelection={replaceAssistantSelection}
             />
-            <div className="editor-footer">
-              <span>
-                {selection.text
-                  ? `已选择 ${selection.end - selection.start} 个 UTF-16 单元，可局部改写`
-                  : '直接写作，无需先建大纲或配置模型'}
-              </span>
+            <div className="editor-footer writing-draft-footer">
+              {selection.text && (
+                <span>已选择 {selection.end - selection.start} 个 UTF-16 单元，可局部改写</span>
+              )}
               <button onClick={downloadDraft}>下载当前草稿</button>
             </div>
-            {selection.text ? (
-              <AssistantField
-                field="selection"
-                label={`${chapter.title} · 正文选区`}
-                quickLabel="AI 改写选区"
-                value={selection.text}
-                scopeId={chapter.id}
-                scopeLabel={chapter.title}
-                objectKey={chapter.id}
-                contextKey={`${editorKey}/${chapter.revision}/${selection.start}/${selection.end}`}
-                request={
-                  chapter.content.slice(selection.start, selection.end) === selection.text &&
-                  text === chapter.content
-                    ? {
-                        selection: { start: selection.start, end: selection.end, revision: chapter.revision },
-                      }
-                    : undefined
-                }
-                enabled={!busy && !opening && !recovery}
-                onApply={(value) =>
-                  typeof value === 'string' &&
-                  (replaceAssistantSelection.current?.(selection, value) ?? false)
-                }
-              />
-            ) : (
-              <AssistantField
-                field="text"
-                label={`${chapter.title} · 本章创作`}
-                quickLabel="讨论本章写法"
-                action="suggest"
-                value=""
-                scopeId={chapter.id}
-                scopeLabel={chapter.title}
-                objectKey={chapter.id}
-                contextKey={`${editorKey}/${chapter.revision}`}
-                enabled={!busy && !opening}
-              />
-            )}
             {(nextChapter || duePromises.length > 0 || chapter.stale) && (
               <div className="editor-footer" aria-label="今日事项">
                 {nextChapter && (
@@ -1273,6 +1274,30 @@ export function Writing({
                 )}
               </div>
             )}
+            {plannedChapter && (
+              <details
+                className="notice writing-chapter-outline"
+                key={`${plannedChapter.chapter.chapter_id}/${outline?.confirmed?.id}`}
+                open
+              >
+                <summary>本章章纲 · 修订 {outline?.confirmed?.revision}</summary>
+                <p>
+                  {plannedChapter.volume.title} / {plannedChapter.unit.title}
+                </p>
+                {!!outline?.stale.length && <p role="status">{outline.stale.join('，')}，待重新确认。</p>}
+                <dl>
+                  {Object.entries(outlineFields).map(([key, label]) => (
+                    <div key={key}>
+                      <dt>{label}</dt>
+                      <dd>{plannedChapter.chapter[key as keyof typeof outlineFields]}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <button type="button" onClick={onOutline}>
+                  打开大纲与台账
+                </button>
+              </details>
+            )}
           </>
         ) : (
           <div className="empty">
@@ -1284,145 +1309,10 @@ export function Writing({
           </div>
         )}
       </section>
-      <aside className="assistant-panel" aria-label="创作辅助">
+      <aside className="assistant-panel writing-actions" aria-label="创作辅助">
         <div className="section-title">
-          <h2>创作辅助</h2>
-          <span className="badge">作者决定采纳</span>
+          <h2>生成与候选</h2>
         </div>
-        <WorkbenchAssistantRail />
-        <AuthorContractNotice
-          branchId={branch.id}
-          onSettings={onGenreSettings}
-          onResolved={setSeenContract}
-        />
-        <ChapterContext
-          branchId={branch.id}
-          chapter={chapter}
-          artifacts={artifacts}
-          onExtract={() => {
-            setAction('memory.extract')
-            setInstruction(
-              '提取当前正文中有逐字依据的事件、人物认知、能力资源和伏笔；未知保留未知，候选先供作者核对。',
-            )
-          }}
-        />
-        {chapter && !opening && (
-          <SceneTimePanel
-            key={chapter.id}
-            branchId={branch.id}
-            chapter={chapter}
-            cursor={selection.start}
-            selection={selection}
-            notify={notify}
-          />
-        )}
-        <GenreProfileNotice branchId={branch.id} onSettings={onGenreSettings} onResolved={setSeenGenre} />
-        {!!settingRules.length && (
-          <details className="notice">
-            <summary>已确认世界设定 · 修订 {confirmedSetting?.revision}</summary>
-            {settingRules.map((rule) => (
-              <details key={rule.id}>
-                <summary>{rule.title}</summary>
-                <p>{rule.detail}</p>
-                <button
-                  type="button"
-                  disabled={!!feedbackHandoff}
-                  onClick={() => {
-                    setAction('review.chapter')
-                    setSettingItemId(`${confirmedSetting?.confirmation_id}/${rule.id}`)
-                  }}
-                >
-                  用此设定对账
-                </button>
-              </details>
-            ))}
-          </details>
-        )}
-        {!!plannedChapter?.chapter.setting_ids?.length && (
-          <details className="notice">
-            <summary>本章章纲引用的设定</summary>
-            {(outline?.confirmed?.setting_basis.items ?? [])
-              .filter(({ id }) => plannedChapter.chapter.setting_ids?.includes(id))
-              .map((item) => (
-                <details key={item.id}>
-                  <summary>
-                    {item.title}
-                    {item.category_title && ` · ${item.category_title}`} · 修订{' '}
-                    {outline?.confirmed?.setting_basis.revision}
-                  </summary>
-                  <p>{item.detail}</p>
-                  {chapter && outline?.confirmed?.setting_basis.confirmation_id && (
-                    <FrozenSettingReference
-                      key={`${chapter.id}/${outline.confirmed.setting_basis.confirmation_id}/${item.id}`}
-                      branchId={branch.id}
-                      chapterId={chapter.id}
-                      confirmationId={outline.confirmed.setting_basis.confirmation_id}
-                      itemId={item.id}
-                      title={item.title}
-                    />
-                  )}
-                </details>
-              ))}
-          </details>
-        )}
-        {chapter && outline?.confirmed && (
-          <SettingUsePanel
-            key={chapter.id}
-            chapterId={chapter.id}
-            revision={chapter.revision}
-            content={chapter.content}
-            selection={selection}
-            saved={text === chapter.content && !dirty}
-          />
-        )}
-        {!!cards.length && (
-          <details className="notice">
-            <summary>本章章纲引用的手法卡</summary>
-            {cards.map((card) => (
-              <OutlineCardSource
-                key={`${card.session_id}/${card.card_id}/${card.revision}/${card.version_id ?? ''}`}
-                card={card}
-                branchId={branch.id}
-                notify={notify}
-              />
-            ))}
-          </details>
-        )}
-        {!!chapterPromises.length && (
-          <details className="notice" key={chapter?.id}>
-            <summary>本章关联的伏笔进度与原文</summary>
-            <ul>
-              {chapterPromises.map((promise) => (
-                <li key={promise.promise_id}>
-                  <OutlinePromiseProgress
-                    promise={promise}
-                    chapterName={(id) =>
-                      outline?.chapters.find((entry) => entry.id === id)?.title ?? '历史章节'
-                    }
-                  />
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-        {conception && (
-          <div className="notice">
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={useConception}
-                onChange={(event) => setUseConception(event.target.checked)}
-              />
-              使用已确认构思（修订 {conception.revision}）
-            </label>
-            <p className="small">
-              {actionsWithConception.has(action) ? '所选任务会使用构思设定。' : '当前动作使用独立资料。'}
-            </p>
-            <button type="button" onClick={onConceptionSettings}>
-              回到构思工作台
-            </button>
-          </div>
-        )}
         {feedbackHandoff && (
           <section className="notice" aria-label="手动反馈局部修订">
             <h3>手动反馈 → 作者选区修订</h3>
@@ -1455,48 +1345,20 @@ export function Writing({
             <button onClick={onClearFeedback}>退出反馈修订，保留正文</button>
           </section>
         )}
-        <form onSubmit={generate}>
-          {tasks[0]?.payload.instruction && actions.some(([id]) => id === tasks[0].payload.action) && (
-            <button
-              type="button"
-              onClick={() => {
-                try {
-                  const previous = tasks[0].payload
-                  const restored =
-                    previous.action === 'writing.expand_plot'
-                      ? readDirectionExpansionInstruction(previous.instruction || '')
-                      : undefined
-                  if (restored) {
-                    if (!current.current) throw new Error('请先打开方向任务对应章节。')
-                    checkDirectionTarget(restored.basis, {
-                      novelId: novel.id,
-                      branchId: branch.id,
-                      chapterId: current.current.id,
-                      revision: current.current.revision,
-                    })
-                  }
-                  if (directionBasis && !confirmLeave()) return
-                  setDirectionBasis(restored?.basis)
-                  setInstruction(restored?.instruction ?? previous.instruction ?? '')
-                  setAction(previous.action || 'writing.advise')
-                  setPlotContractCheck(plotAuditEnabled(previous.action || '', previous.plot_contract_check))
-                  setSourceIdentityContext(previous.source_identity_context === true)
-                  if (previous.action && designActions.has(previous.action))
-                    setDesignScope(
-                      'chapter_id' in previous && typeof previous.chapter_id === 'string'
-                        ? 'chapter'
-                        : 'book',
-                    )
-                  setFixed(previous.fixed?.join('\n') || '')
-                  setProfile(previous.writing_profile || presets[0])
-                } catch (error) {
-                  notify(error)
-                }
-              }}
-            >
-              恢复最近任务的输入
-            </button>
-          )}
+        <form id="writing-task-form" className="writing-task-form" tabIndex={-1} onSubmit={generate}>
+          <label>
+            情节或具体要求
+            <textarea
+              ref={instructionField}
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              rows={4}
+              required={!settingRule}
+              disabled={!!settingRule}
+              maxLength={20_000}
+              placeholder="例如：两人在渡口议价，交易失败且不发生战斗。补足试探和收场。"
+            />
+          </label>
           <label>
             这次要做什么
             <select
@@ -1565,87 +1427,8 @@ export function Writing({
               </button>
             </section>
           )}
-          <label>
-            情节或具体要求
-            <textarea
-              ref={instructionField}
-              value={instruction}
-              onChange={(e) => setInstruction(e.target.value)}
-              rows={5}
-              required={!settingRule}
-              disabled={!!settingRule}
-              maxLength={20_000}
-              placeholder="例如：两人在渡口议价，交易失败且不发生战斗。补足试探和收场。"
-            />
-          </label>
-          {!settingRule && plotAuditEnabled(action, true) && (
-            <PlotAuditOption
-              checked={plotContractCheck}
-              disabled={busy}
-              onChange={setPlotContractCheck}
-              identityChecked={sourceIdentityContext}
-              onIdentityChange={setSourceIdentityContext}
-            />
-          )}
-          <details>
-            <summary>固定条件、写法与资料包</summary>
-            <label>
-              必须保持的条件（每行一条）
-              <textarea value={fixed} onChange={(e) => setFixed(e.target.value)} rows={3} />
-            </label>
-            <label>
-              常用写法
-              <select
-                onChange={(e) => setProfile(e.target.value)}
-                value={presets.includes(profile) ? profile : ''}
-              >
-                <option value="" disabled>
-                  自定义写法
-                </option>
-                {presets.map((p, i) => (
-                  <option key={p} value={p}>
-                    {['基础', '对白', '打斗', '心理', '环境', '日常', '悬念'][i]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              表达设置
-              <textarea value={profile} onChange={(e) => setProfile(e.target.value)} rows={3} />
-            </label>
-            <fieldset>
-              <legend>主动发送的摘录</legend>
-              {references.length ? (
-                references.map((r) => (
-                  <label className="check" key={r.id}>
-                    <input
-                      type="checkbox"
-                      checked={selectedRefs.includes(r.id)}
-                      onChange={(e) =>
-                        setSelectedRefs((ids) =>
-                          e.target.checked ? [...ids, r.id] : ids.filter((id) => id !== r.id),
-                        )
-                      }
-                    />
-                    <span>
-                      {r.title}：{r.quote.slice(0, 70)}
-                    </span>
-                  </label>
-                ))
-              ) : (
-                <p className="muted">在资料书库保存摘录后，可在这里选入资料包。</p>
-              )}
-            </fieldset>
-          </details>
-          <p className="small muted">
-            {settingRule
-              ? '仅核对所选设定与保存稿。'
-              : designActions.has(action) && designScope === 'book'
-                ? '发送已采用本书设定、当前工作版本的有效故事资料及最近正文、主动选入的资料；不限定在当前打开章之前。'
-                : '发送当前章、有效前文与主动选入的资料。'}
-            候选与正文分开保存。
-          </p>
           <button
+            type="submit"
             className="primary wide"
             disabled={
               busy ||
@@ -1668,129 +1451,90 @@ export function Writing({
                       ? '运行设定对账'
                       : '生成候选 →'}
           </button>
+          <p className="small muted">
+            {settingRule
+              ? '仅核对所选设定与保存稿。'
+              : designActions.has(action) && designScope === 'book'
+                ? '发送已采用本书设定、当前工作版本的有效故事资料及最近正文、主动选入的资料；不限定在当前打开章之前。'
+                : '发送当前章、有效前文与主动选入的资料。'}
+            候选与正文分开保存。
+          </p>
         </form>
-        {activeTask && (
-          <div className="notice" role="status">
-            <strong>
-              {correctionKindLabel(activeTask.kind) ||
-                (activeTask.kind === 'candidate_recheck' ? '候选复检 · ' : '')}
-              {label(activeTask.status)}
-            </strong>
-            <p>关闭浏览器不取消本机任务。</p>
-            {activeTask.kind === 'candidate_recheck' && (
-              <p>正在按原任务冻结契约复核候选，不自动改稿、采纳或继续整书。</p>
-            )}
-            <SourceCorrectionTaskNotice task={activeTask} />
-            {activeTask.kind !== SOURCE_CORRECTION_KIND && (
-              <FrozenPlotAuditPolicy
-                enabled={activeTask.kind === CORRECTED_RECHECK_KIND || activeTask.payload.plot_contract_check}
-                identityEnabled={activeTask.payload.source_identity_context}
-                identityVersion={activeTask.result.source_identity_context_version}
-                flowVersion={activeTask.result.flow_source_entailment_version}
-                version={activeTask.result.plot_contract_version}
-                mode={
-                  activeTask.kind === CORRECTED_RECHECK_KIND
-                    ? 'assisted'
-                    : candidateRecheckSourceMode(activeTask)
-                }
-              />
-            )}
-            {activeTask.result.author_contract_snapshot && (
-              <details>
-                <summary>本次任务冻结的创作约定</summary>
-                <AuthorContractDetails contract={activeTask.result.author_contract_snapshot} />
-              </details>
-            )}
-            {activeTask.result.conception_snapshot && (
-              <p className="small">
-                本次任务使用了构思修订 {activeTask.result.conception_snapshot.revision}。
-              </p>
-            )}
-            {activeTask.result.genre_profile_snapshot &&
-              !activeTask.result.genre_profile_snapshot.legacy_unconfigured && (
+        <section className="candidates writing-task-output" aria-labelledby="writing-candidates-heading">
+          <h3 id="writing-candidates-heading" className="writing-section-title">
+            候选与检查结果
+          </h3>
+          {activeTask && (
+            <div className="notice" role="status">
+              <strong>
+                {correctionKindLabel(activeTask.kind) ||
+                  (activeTask.kind === 'candidate_recheck' ? '候选复检 · ' : '')}
+                {label(activeTask.status)}
+              </strong>
+              <p>关闭浏览器不取消本机任务。</p>
+              {activeTask.kind === 'candidate_recheck' && (
+                <p>正在按原任务冻结契约复核候选，不自动改稿、采纳或继续整书。</p>
+              )}
+              <SourceCorrectionTaskNotice task={activeTask} />
+              {activeTask.kind !== SOURCE_CORRECTION_KIND && (
+                <FrozenPlotAuditPolicy
+                  enabled={
+                    activeTask.kind === CORRECTED_RECHECK_KIND || activeTask.payload.plot_contract_check
+                  }
+                  identityEnabled={activeTask.payload.source_identity_context}
+                  identityVersion={activeTask.result.source_identity_context_version}
+                  flowVersion={activeTask.result.flow_source_entailment_version}
+                  version={activeTask.result.plot_contract_version}
+                  mode={
+                    activeTask.kind === CORRECTED_RECHECK_KIND
+                      ? 'assisted'
+                      : candidateRecheckSourceMode(activeTask)
+                  }
+                />
+              )}
+              {activeTask.result.author_contract_snapshot && (
                 <details>
-                  <summary>本次任务冻结的题材配置</summary>
-                  <GenreProfileDetails profile={activeTask.result.genre_profile_snapshot} />
+                  <summary>本次任务冻结的创作约定</summary>
+                  <AuthorContractDetails contract={activeTask.result.author_contract_snapshot} />
                 </details>
               )}
-            <button
-              onClick={() =>
-                void doAction(async () => {
-                  await api(`/tasks/${activeTask.id}/cancel`, 'POST')
-                  setTasks(await api(`/tasks?branch_id=${branch.id}`))
-                })
-              }
-            >
-              {activeTask.cancel ? '正在取消…' : '取消生成'}
-            </button>
-            {stream && (
-              <details>
-                <summary>查看流式草稿（尚未采纳）</summary>
-                <pre className="stream">{stream}</pre>
-              </details>
-            )}
-          </div>
-        )}
-        {tasks[0]?.status === 'blocked_runtime' && (
-          <div className="notice">
-            <strong>最近任务已停止</strong>
-            <p>{tasks[0].error}</p>
-            <p className="small">可能已发生的费用保留在账本中。修改指令后可明确发起新任务。</p>
-          </div>
-        )}
-        <section className="candidates">
-          <details>
-            <summary>任务历史与失败产物</summary>
-            {tasks.slice(0, 10).map((task) => (
-              <div className="excerpt" key={task.id}>
-                <strong>
-                  {label(task.status)} · {task.id.slice(0, 8)}
-                </strong>
-                <p>{task.error}</p>
-                <SourceCorrectionTaskNotice task={task} />
-                {task.kind !== SOURCE_CORRECTION_KIND && (
-                  <FrozenPlotAuditPolicy
-                    enabled={task.kind === CORRECTED_RECHECK_KIND || task.payload.plot_contract_check}
-                    identityEnabled={task.payload.source_identity_context}
-                    identityVersion={task.result.source_identity_context_version}
-                    flowVersion={task.result.flow_source_entailment_version}
-                    version={task.result.plot_contract_version}
-                    mode={
-                      task.kind === CORRECTED_RECHECK_KIND ? 'assisted' : candidateRecheckSourceMode(task)
-                    }
-                  />
+              {activeTask.result.conception_snapshot && (
+                <p className="small">
+                  本次任务使用了构思修订 {activeTask.result.conception_snapshot.revision}。
+                </p>
+              )}
+              {activeTask.result.genre_profile_snapshot &&
+                !activeTask.result.genre_profile_snapshot.legacy_unconfigured && (
+                  <details>
+                    <summary>本次任务冻结的题材配置</summary>
+                    <GenreProfileDetails profile={activeTask.result.genre_profile_snapshot} />
+                  </details>
                 )}
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    void doAction(async () => {
-                      const data = await api<{
-                        steps: { fingerprint: string; result: { text: string } }[]
-                        partials: { payload: { text: string } }[]
-                        scope: string
-                      }>(`/tasks/${task.id}/transcript`)
-                      setTranscript(
-                        data.scope +
-                          '\n\n' +
-                          data.partials
-                            .map((p) => '中断输出：\n' + p.payload.text)
-                            .concat(
-                              data.steps.map(
-                                (s) => '步骤 ' + s.fingerprint.slice(0, 12) + '：\n' + s.result.text,
-                              ),
-                            )
-                            .join('\n\n'),
-                      )
-                    })
-                  }
-                >
-                  查看保存的步骤与中断输出
-                </button>
-              </div>
-            ))}
-            {transcript && <pre className="stream">{transcript}</pre>}
-          </details>
-          <h3>候选与检查结果</h3>
+              <button
+                onClick={() =>
+                  void doAction(async () => {
+                    await api(`/tasks/${activeTask.id}/cancel`, 'POST')
+                    setTasks(await api(`/tasks?branch_id=${branch.id}`))
+                  })
+                }
+              >
+                {activeTask.cancel ? '正在取消…' : '取消生成'}
+              </button>
+              {stream && (
+                <details>
+                  <summary>查看流式草稿（尚未采纳）</summary>
+                  <pre className="stream">{stream}</pre>
+                </details>
+              )}
+            </div>
+          )}
+          {tasks[0]?.status === 'blocked_runtime' && (
+            <div className="notice">
+              <strong>最近任务已停止</strong>
+              <p>{tasks[0].error}</p>
+              <p className="small">可能已发生的费用保留在账本中。修改指令后可明确发起新任务。</p>
+            </div>
+          )}
           {visibleArtifacts.length ? (
             <>
               <label>
@@ -1806,7 +1550,9 @@ export function Writing({
                       {a.kind === 'setting_review'
                         ? '设定对账'
                         : correctionKindLabel(a.kind) ||
-                          (a.kind === 'candidate_recheck' ? '候选复检报告' : a.kind)}{' '}
+                          (a.kind === 'candidate_recheck'
+                            ? '候选复检报告'
+                            : (candidateKinds[a.kind] ?? '生成结果'))}{' '}
                       · {isCorrectionReceiptKind(a.kind) ? '只读记录' : label(a.status)}
                     </option>
                   ))}
@@ -1914,7 +1660,303 @@ export function Writing({
               ) : null}
             </>
           ) : (
-            <p className="empty-note">有想法时亲自写。需要帮助时，再生成一份候选。</p>
+            <p className="empty-note">{activeTask ? '生成的候选会显示在这里。' : '暂无候选。'}</p>
+          )}
+          <details>
+            <summary>任务历史与失败产物</summary>
+            {tasks.slice(0, 10).map((task) => (
+              <div className="excerpt" key={task.id}>
+                <strong>
+                  {label(task.status)} · {task.id.slice(0, 8)}
+                </strong>
+                <p>{task.error}</p>
+                <SourceCorrectionTaskNotice task={task} />
+                {task.kind !== SOURCE_CORRECTION_KIND && (
+                  <FrozenPlotAuditPolicy
+                    enabled={task.kind === CORRECTED_RECHECK_KIND || task.payload.plot_contract_check}
+                    identityEnabled={task.payload.source_identity_context}
+                    identityVersion={task.result.source_identity_context_version}
+                    flowVersion={task.result.flow_source_entailment_version}
+                    version={task.result.plot_contract_version}
+                    mode={
+                      task.kind === CORRECTED_RECHECK_KIND ? 'assisted' : candidateRecheckSourceMode(task)
+                    }
+                  />
+                )}
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    void doAction(async () => {
+                      const data = await api<{
+                        steps: { fingerprint: string; result: { text: string } }[]
+                        partials: { payload: { text: string } }[]
+                        scope: string
+                      }>(`/tasks/${task.id}/transcript`)
+                      setTranscript(
+                        data.scope +
+                          '\n\n' +
+                          data.partials
+                            .map((p) => '中断输出：\n' + p.payload.text)
+                            .concat(
+                              data.steps.map(
+                                (s) => '步骤 ' + s.fingerprint.slice(0, 12) + '：\n' + s.result.text,
+                              ),
+                            )
+                            .join('\n\n'),
+                      )
+                    })
+                  }
+                >
+                  查看保存的步骤与中断输出
+                </button>
+              </div>
+            ))}
+            {transcript && <pre className="stream">{transcript}</pre>}
+          </details>
+        </section>
+        <h3 className="writing-section-title writing-optimization-title">AI 优化</h3>
+        <WorkbenchAssistantRail />
+        <section className="writing-advanced" aria-labelledby="writing-advanced-heading">
+          <h3 id="writing-advanced-heading" className="writing-section-title">
+            高级 AI 设置
+          </h3>
+          {tasks[0]?.payload.instruction && actions.some(([id]) => id === tasks[0].payload.action) && (
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  const previous = tasks[0].payload
+                  const restored =
+                    previous.action === 'writing.expand_plot'
+                      ? readDirectionExpansionInstruction(previous.instruction || '')
+                      : undefined
+                  if (restored) {
+                    if (!current.current) throw new Error('请先打开方向任务对应章节。')
+                    checkDirectionTarget(restored.basis, {
+                      novelId: novel.id,
+                      branchId: branch.id,
+                      chapterId: current.current.id,
+                      revision: current.current.revision,
+                    })
+                  }
+                  if (directionBasis && !confirmLeave()) return
+                  setDirectionBasis(restored?.basis)
+                  setInstruction(restored?.instruction ?? previous.instruction ?? '')
+                  setAction(previous.action || 'writing.advise')
+                  setPlotContractCheck(plotAuditEnabled(previous.action || '', previous.plot_contract_check))
+                  setSourceIdentityContext(previous.source_identity_context === true)
+                  if (previous.action && designActions.has(previous.action))
+                    setDesignScope(
+                      'chapter_id' in previous && typeof previous.chapter_id === 'string'
+                        ? 'chapter'
+                        : 'book',
+                    )
+                  setFixed(previous.fixed?.join('\n') || '')
+                  setProfile(previous.writing_profile || presets[0])
+                } catch (error) {
+                  notify(error)
+                }
+              }}
+            >
+              恢复最近任务的输入
+            </button>
+          )}
+          <details>
+            <summary>固定条件、写法与资料包</summary>
+            <label>
+              必须保持的条件（每行一条）
+              <textarea value={fixed} onChange={(e) => setFixed(e.target.value)} rows={3} />
+            </label>
+            <label>
+              常用写法
+              <select
+                onChange={(e) => setProfile(e.target.value)}
+                value={presets.includes(profile) ? profile : ''}
+              >
+                <option value="" disabled>
+                  自定义写法
+                </option>
+                {presets.map((p, i) => (
+                  <option key={p} value={p}>
+                    {['基础', '对白', '打斗', '心理', '环境', '日常', '悬念'][i]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              表达设置
+              <textarea value={profile} onChange={(e) => setProfile(e.target.value)} rows={3} />
+            </label>
+            <fieldset>
+              <legend>主动发送的摘录</legend>
+              {references.length ? (
+                references.map((r) => (
+                  <label className="check" key={r.id}>
+                    <input
+                      type="checkbox"
+                      checked={selectedRefs.includes(r.id)}
+                      onChange={(e) =>
+                        setSelectedRefs((ids) =>
+                          e.target.checked ? [...ids, r.id] : ids.filter((id) => id !== r.id),
+                        )
+                      }
+                    />
+                    <span>
+                      {r.title}：{r.quote.slice(0, 70)}
+                    </span>
+                  </label>
+                ))
+              ) : (
+                <p className="muted">在资料书库保存摘录后，可在这里选入资料包。</p>
+              )}
+            </fieldset>
+          </details>
+          {!settingRule && plotAuditEnabled(action, true) && (
+            <PlotAuditOption
+              checked={plotContractCheck}
+              disabled={busy}
+              onChange={setPlotContractCheck}
+              identityChecked={sourceIdentityContext}
+              onIdentityChange={setSourceIdentityContext}
+            />
+          )}
+        </section>
+        <section className="writing-evidence" aria-labelledby="writing-evidence-heading">
+          <h3 id="writing-evidence-heading" className="writing-section-title">
+            创作依据
+          </h3>
+          <AuthorContractNotice
+            branchId={branch.id}
+            onSettings={onGenreSettings}
+            onResolved={setSeenContract}
+          />
+          <ChapterContext
+            branchId={branch.id}
+            chapter={chapter}
+            artifacts={artifacts}
+            onExtract={() => {
+              setAction('memory.extract')
+              setInstruction(
+                '提取当前正文中有逐字依据的事件、人物认知、能力资源和伏笔；未知保留未知，候选先供作者核对。',
+              )
+            }}
+          />
+          {chapter && !opening && (
+            <SceneTimePanel
+              key={chapter.id}
+              branchId={branch.id}
+              chapter={chapter}
+              cursor={selection.start}
+              selection={selection}
+              notify={notify}
+            />
+          )}
+          <GenreProfileNotice branchId={branch.id} onSettings={onGenreSettings} onResolved={setSeenGenre} />
+          {!!settingRules.length && (
+            <details className="notice">
+              <summary>已确认世界设定 · 修订 {confirmedSetting?.revision}</summary>
+              {settingRules.map((rule) => (
+                <details key={rule.id}>
+                  <summary>{rule.title}</summary>
+                  <p>{rule.detail}</p>
+                  <button
+                    type="button"
+                    disabled={!!feedbackHandoff}
+                    onClick={() => {
+                      setAction('review.chapter')
+                      setSettingItemId(`${confirmedSetting?.confirmation_id}/${rule.id}`)
+                    }}
+                  >
+                    用此设定对账
+                  </button>
+                </details>
+              ))}
+            </details>
+          )}
+          {!!plannedChapter?.chapter.setting_ids?.length && (
+            <details className="notice">
+              <summary>本章章纲引用的设定</summary>
+              {(outline?.confirmed?.setting_basis.items ?? [])
+                .filter(({ id }) => plannedChapter.chapter.setting_ids?.includes(id))
+                .map((item) => (
+                  <details key={item.id}>
+                    <summary>
+                      {item.title}
+                      {item.category_title && ` · ${item.category_title}`} · 修订{' '}
+                      {outline?.confirmed?.setting_basis.revision}
+                    </summary>
+                    <p>{item.detail}</p>
+                    {chapter && outline?.confirmed?.setting_basis.confirmation_id && (
+                      <FrozenSettingReference
+                        key={`${chapter.id}/${outline.confirmed.setting_basis.confirmation_id}/${item.id}`}
+                        branchId={branch.id}
+                        chapterId={chapter.id}
+                        confirmationId={outline.confirmed.setting_basis.confirmation_id}
+                        itemId={item.id}
+                        title={item.title}
+                      />
+                    )}
+                  </details>
+                ))}
+            </details>
+          )}
+          {chapter && outline?.confirmed && (
+            <SettingUsePanel
+              key={chapter.id}
+              chapterId={chapter.id}
+              revision={chapter.revision}
+              content={chapter.content}
+              selection={selection}
+              saved={text === chapter.content && !dirty}
+            />
+          )}
+          {!!cards.length && (
+            <details className="notice">
+              <summary>本章章纲引用的手法卡</summary>
+              {cards.map((card) => (
+                <OutlineCardSource
+                  key={`${card.session_id}/${card.card_id}/${card.revision}/${card.version_id ?? ''}`}
+                  card={card}
+                  branchId={branch.id}
+                  notify={notify}
+                />
+              ))}
+            </details>
+          )}
+          {!!chapterPromises.length && (
+            <details className="notice" key={chapter?.id}>
+              <summary>本章关联的伏笔进度与原文</summary>
+              <ul>
+                {chapterPromises.map((promise) => (
+                  <li key={promise.promise_id}>
+                    <OutlinePromiseProgress
+                      promise={promise}
+                      chapterName={(id) =>
+                        outline?.chapters.find((entry) => entry.id === id)?.title ?? '历史章节'
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {conception && (
+            <div className="notice">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={useConception}
+                  onChange={(event) => setUseConception(event.target.checked)}
+                />
+                使用已确认构思（修订 {conception.revision}）
+              </label>
+              <p className="small">
+                {actionsWithConception.has(action) ? '所选任务会使用构思设定。' : '当前动作使用独立资料。'}
+              </p>
+              <button type="button" onClick={onConceptionSettings}>
+                回到构思工作台
+              </button>
+            </div>
           )}
         </section>
       </aside>
@@ -2071,25 +2113,6 @@ function Candidate({
           生成时篇幅核算 · {lengthWarning}
         </p>
       )}
-      {outlineBasis && (
-        <details className="notice">
-          <summary>生成时的章纲 · 修订 {outlineBasis.revision}</summary>
-          {currentOutlineId !== outlineBasis.id && <p role="status">历史大纲，请按当前章纲重新生成。</p>}
-          {Object.entries(outlineFields).map(([key, label]) => (
-            <p key={key}>
-              {label} · {outlineBasis.chapter[key as keyof typeof outlineFields]}
-            </p>
-          ))}
-          {outlineBasis.reference_cards?.map((card) => (
-            <OutlineCardSource
-              key={`${card.session_id}/${card.card_id}/${card.revision}/${card.version_id ?? ''}`}
-              card={card}
-              branchId={branchId}
-              notify={notify}
-            />
-          ))}
-        </details>
-      )}
       {candidateChanged && (
         <div className="notice" role="status">
           <p>候选已在其他窗口更新。本地编辑仍保留，可先复制，再载入已保存的候选进行比较。</p>
@@ -2163,6 +2186,25 @@ function Candidate({
         </details>
       ) : (
         <pre className="report">{JSON.stringify(artifact.payload, null, 2)}</pre>
+      )}
+      {outlineBasis && (
+        <details className="notice">
+          <summary>生成时的章纲 · 修订 {outlineBasis.revision}</summary>
+          {currentOutlineId !== outlineBasis.id && <p role="status">历史大纲，请按当前章纲重新生成。</p>}
+          {Object.entries(outlineFields).map(([key, label]) => (
+            <p key={key}>
+              {label} · {outlineBasis.chapter[key as keyof typeof outlineFields]}
+            </p>
+          ))}
+          {outlineBasis.reference_cards?.map((card) => (
+            <OutlineCardSource
+              key={`${card.session_id}/${card.card_id}/${card.revision}/${card.version_id ?? ''}`}
+              card={card}
+              branchId={branchId}
+              notify={notify}
+            />
+          ))}
+        </details>
       )}
       {(artifact.kind === 'review' || !!artifact.payload.review) && (
         <RevisionPanel

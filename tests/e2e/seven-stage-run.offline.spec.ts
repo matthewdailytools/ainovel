@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import type { ConceptionState } from '../../frontend/conception'
+import { openBench } from './helpers/creationFlow'
 
 const idea = '学徒靠铜铃的断痕寻找师姐。'
 
@@ -73,7 +74,7 @@ async function authorProject(
   ending: string,
   opening = '学徒向守闸人借尺，核对闸门上的公开刻度。',
 ) {
-  await page.getByRole('button', { name: '立项台', exact: true }).click()
+  await openBench(page, '立项台')
   const project = page.locator('#bench-project')
   await project.getByText('立项台', { exact: true }).press('Enter')
   await project.getByRole('combobox', { name: '主类型', exact: true }).selectOption('mystery')
@@ -129,7 +130,7 @@ test('从同一句创意逐台推进，经作者确认交付两章正文', async
     expect(response.ok(), await response.text()).toBe(true)
     return response.json()
   }
-  await page.getByRole('button', { name: '立项台', exact: true }).click()
+  await openBench(page, '立项台')
   await page.locator('#bench-project').getByText('立项台', { exact: true }).click()
   await page.getByRole('textbox', { name: '创作思路', exact: true }).fill(idea)
   await page.getByRole('button', { name: 'AI 分析立项', exact: true }).click()
@@ -515,7 +516,7 @@ test('从创意启动但未授权确认规划时停在立项草案', async ({ pa
   expect(state.children).toHaveLength(1)
   expect((await (await page.request.get(branch + '/conception')).json()).project).toBeNull()
   expect(await (await page.request.get(branch + '/chapters')).json()).toEqual([])
-  await page.getByRole('button', { name: '立项台', exact: true }).click()
+  await openBench(page, '立项台')
   const project = page.locator('#bench-project')
   await project.getByText('立项台', { exact: true }).click()
   await expect(project.getByRole('button', { name: '载入 AI 立项建议', exact: true })).toBeVisible()

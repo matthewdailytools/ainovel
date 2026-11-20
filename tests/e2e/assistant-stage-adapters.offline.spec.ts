@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { openBench } from './helpers/creationFlow'
 
 const proposal = '悬疑短篇，围绕能够回查的铜铃记录推进。'
 
@@ -135,8 +136,7 @@ test('拆解、设定、大纲、完本的助手绑定当前对象且只载入�
 
   await page.goto('/')
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(id)
-  const benches = page.getByRole('navigation', { name: '七台工作流' })
-  await benches.getByRole('button', { name: '拆解台', exact: true }).click()
+  await openBench(page, '拆解台')
   await page.getByRole('button', { name: /观察以身边物件收束/ }).click()
   await applyQuickSuggestion(page, route, page.getByRole('button', { name: 'AI 润色 · 参考学习目标' }), {
     stage: 'M2',
@@ -148,7 +148,7 @@ test('拆解、设定、大纲、完本的助手绑定当前对象且只载入�
   expect(await json(referencePath)).toEqual(savedReference)
 
   page.once('dialog', (dialog) => dialog.accept())
-  await benches.getByRole('button', { name: '设定台', exact: true }).click()
+  await openBench(page, '设定台')
   await page.getByRole('navigation', { name: '构思类别' }).getByRole('button', { name: '世界设定' }).click()
   await applyQuickSuggestion(
     page,
@@ -160,7 +160,7 @@ test('拆解、设定、大纲、完本的助手绑定当前对象且只载入�
   expect(await json(conceptionPath)).toEqual(savedSettings)
 
   page.once('dialog', (dialog) => dialog.accept())
-  await benches.getByRole('button', { name: '大纲台', exact: true }).click()
+  await openBench(page, '大纲台')
   await applyQuickSuggestion(page, route, page.getByRole('button', { name: '完善总纲 · 总纲' }), {
     stage: 'M4',
     scopeId: null,
@@ -171,7 +171,7 @@ test('拆解、设定、大纲、完本的助手绑定当前对象且只载入�
   expect(await json(outlinePath)).toEqual(savedOutline)
 
   page.once('dialog', (dialog) => dialog.accept())
-  await benches.getByRole('button', { name: '完本台', exact: true }).click()
+  await openBench(page, '完本台')
   const completionPath = `${route}/book-completion`
   const beforeCompletion = await json(completionPath)
   expect(beforeCompletion.checks).toHaveLength(6)

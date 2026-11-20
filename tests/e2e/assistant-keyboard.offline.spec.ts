@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request } from '@playwright/test'
+import { openBench } from './helpers/creationFlow'
 
 async function enterProjectWorkbench(page: Page, title: string) {
   await page.goto('/')
@@ -8,7 +9,7 @@ async function enterProjectWorkbench(page: Page, title: string) {
   await expect(
     page.getByRole('combobox', { name: '作品', exact: true }).locator('option:checked'),
   ).toHaveText(title)
-  await page.getByRole('button', { name: '立项台', exact: true }).click()
+  await openBench(page, '立项台')
 }
 
 test('窄屏助手用键盘切换视图并将焦点还给原入口', async ({ page }) => {
@@ -54,9 +55,9 @@ test('切换工作台后再次打开历史不会另发原快捷请求', async ({
   await expect(rail.getByText(answer, { exact: true })).toBeVisible()
   expect(sent).toHaveLength(1)
   page.on('dialog', (dialog) => void dialog.accept())
-  await page.getByRole('button', { name: '设定台', exact: true }).click()
+  await openBench(page, '设定台')
   await expect(rail.getByRole('heading', { name: '设定助手', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '立项台', exact: true }).click()
+  await openBench(page, '立项台')
   const restored = page.waitForResponse(
     (response) =>
       response.ok() &&

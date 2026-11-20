@@ -27,9 +27,9 @@ const benches = [
 type Bench = (typeof benches)[number][0]
 type NewWorkStart = 'manual' | 'idea'
 const creationStarts = [
-  ['manual', '逐台创作'],
-  ['idea', '从创意开始'],
-  ['relay', '从已完成阶段接力'],
+  ['manual', '逐台创作', '先定故事方向，再安排设定和大纲。'],
+  ['idea', '从创意开始', '输入一句想法，让 AI 分阶段起草。'],
+  ['relay', '从已完成阶段接力', '从当前作品已确认的内容继续。'],
 ] as const
 
 export function App() {
@@ -61,10 +61,12 @@ export function App() {
   const [title, setTitle] = useState('')
   const [creating, setCreating] = useState(false)
   const [newWorkStart, setNewWorkStart] = useState<NewWorkStart>()
+  const creationFlow = useRef<HTMLDetailsElement>(null)
   const createDisclosure = useRef<HTMLDetailsElement>(null)
   const newWorkTitle = useRef<HTMLInputElement>(null)
   const firstWorkTitle = useRef<HTMLInputElement>(null)
   const [settings, setSettings] = useState(false)
+  const settingsButton = useRef<HTMLButtonElement>(null)
   const [dataDir, setDataDir] = useState('')
   const notify: Notify = useCallback((e) => setError(e instanceof Error ? e.message : String(e)), [])
   const refreshConfig = useCallback(async () => setConfig(await api<Config>('/config')), [])
@@ -125,8 +127,13 @@ export function App() {
     return () => clearInterval(timer)
   }, [ready, refreshConfig, notify])
   function goToPage(id: string) {
+    if (creationFlow.current) creationFlow.current.open = false
     navigationGeneration.current += 1
     setPage(id)
+  }
+  function closeSettings() {
+    setSettings(false)
+    settingsButton.current?.focus()
   }
   function navigate(id: string) {
     if (id !== page && confirmLeave()) {
@@ -166,7 +173,10 @@ export function App() {
   }
   function chooseCreationStart(start: (typeof creationStarts)[number][0]) {
     if (!branch) {
-      if (start !== 'relay') openNewWork(start)
+      if (start !== 'relay') {
+        if (creationFlow.current) creationFlow.current.open = false
+        openNewWork(start)
+      }
       return
     }
     if (start === 'manual') {
@@ -255,7 +265,6 @@ export function App() {
         <a className="brand" href="#main" aria-label="ainovel 工作台">
           <span className="brand-mark">文</span>
           <strong>ainovel</strong>
-          <span className="local-label">本机创作</span>
         </a>
         <nav aria-label="主要页面">
           {[
@@ -276,13 +285,12 @@ export function App() {
             </button>
           ))}
         </nav>
-        <button className="budget-button" onClick={() => setSettings(!settings)} aria-expanded={settings}>
-          {config?.budget.map((b) => (
-            <span key={b.provider}>
-              {b.currency === 'USD' ? '$' : '¥'}
-              {(b.settled + b.reserved_unknown).toFixed(2)} / {b.limit}
-            </span>
-          ))}
+        <button
+          className="budget-button"
+          ref={settingsButton}
+          onClick={() => setSettings(!settings)}
+          aria-expanded={settings}
+        >
           <span>账户与预算</span>
         </button>
       </header>
@@ -301,7 +309,13 @@ export function App() {
       ) : (
         <>
           {settings && (
-            <section className="settings" aria-label="账户与预算">
+            <section
+              className="settings"
+              aria-label="账户与预算"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && !event.nativeEvent.isComposing) closeSettings()
+              }}
+            >
               <div>
                 <h2>模型账户与共享预算</h2>
                 <p>
@@ -310,6 +324,17 @@ export function App() {
                 </p>
                 <p className="muted">数据位置：{dataDir}。配置更改后重启本机服务和 Worker。</p>
               </div>
+              <label className="settings-model-select">
+                模型账户
+                <select value={account} onChange={(e) => setAccount(e.target.value)}>
+                  {config?.accounts.map((a: Account) => (
+                    <option key={a.id} value={a.id}>
+                      {a.id} · {a.model}
+                      {!a.configured ? '（未配置）' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div className="account-grid">
                 {config?.accounts.map((a) => (
                   <div className="card" key={a.id}>
@@ -368,7 +393,7 @@ export function App() {
                 ))}
               </details>
               <p>{config?.sending_scope}</p>
-              <button onClick={() => setSettings(false)}>收起设置</button>
+              <button onClick={closeSettings}>收起设置</button>
             </section>
           )}
           <div className="workspace-bar">
@@ -468,53 +493,60 @@ export function App() {
                 </button>
               </form>
             </details>
-            <label className="model-select">
-              模型账户
-              <select value={account} onChange={(e) => setAccount(e.target.value)}>
-                {config?.accounts.map((a: Account) => (
-                  <option key={a.id} value={a.id}>
-                    {a.id} · {a.model}
-                    {!a.configured ? '（未配置）' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {(branch || !novel) && (
+              <details
+                className="creation-flow"
+                ref={creationFlow}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Escape' || event.nativeEvent.isComposing || !event.currentTarget.open)
+                    return
+                  event.stopPropagation()
+                  event.currentTarget.open = false
+                  event.currentTarget.querySelector('summary')?.focus()
+                }}
+              >
+                <summary>创作流程</summary>
+                <div className="creation-flow-panel">
+                  <nav className="creation-starts" aria-label="创作入口">
+                    {creationStarts.map(([start, name, help]) => (
+                      <div className="creation-option" key={start}>
+                        <button
+                          type="button"
+                          disabled={creating || (start === 'relay' && !branch)}
+                          aria-describedby={`creation-help-${start}`}
+                          onClick={() => chooseCreationStart(start)}
+                        >
+                          {name}
+                        </button>
+                        <span id={`creation-help-${start}`}>
+                          {start === 'relay' && !branch ? '先完成并确认一个阶段。' : help}
+                        </span>
+                      </div>
+                    ))}
+                  </nav>
+                  {branch && (
+                    <nav className="bench-navigation" aria-label="七台工作流">
+                      {benches.map(([id, label, destination, code]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          aria-current={stage === code ? 'location' : undefined}
+                          onClick={() => showBench(id, destination)}
+                        >
+                          {label}台
+                        </button>
+                      ))}
+                    </nav>
+                  )}
+                </div>
+              </details>
+            )}
           </div>
           <main id="main">
-            {(branch || !novel) && (
-              <nav className="creation-starts" aria-label="创作入口">
-                {creationStarts.map(([start, name]) => (
-                  <button
-                    key={start}
-                    type="button"
-                    disabled={creating || (start === 'relay' && !branch)}
-                    onClick={() => chooseCreationStart(start)}
-                  >
-                    {name}
-                  </button>
-                ))}
-                {!novel && <span>接力需先完成并确认一个阶段。</span>}
-              </nav>
-            )}
-            {branch && (
-              <nav className="bench-navigation" aria-label="七台工作流">
-                {benches.map(([id, label, destination]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    aria-current={bench?.id === id && page === destination ? 'location' : undefined}
-                    onClick={() => showBench(id, destination)}
-                  >
-                    {label}台
-                  </button>
-                ))}
-              </nav>
-            )}
             {!novel && page !== 'library' ? (
               <div className="welcome">
-                <span className="eyebrow">写下第一句，就可以开始</span>
-                <h1>你的故事，由你决定。</h1>
-                <p>直接写作，卡住时再找一个方向。大纲、人物卡和模型配置都不是起笔的前提。</p>
+                <h1>开始写小说</h1>
+                <p>给作品起个名字，创建第一章后就能输入正文。想先规划故事，可打开「创作流程」。</p>
                 <form onSubmit={createNovel}>
                   <label>
                     第一部作品的名字

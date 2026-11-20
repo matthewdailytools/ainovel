@@ -1,0 +1,161 @@
+.writing-layout .manuscript-toolbar {
+  min-height: 56px;
+  padding-block: 10px;
+}
+
+.writing-layout .manuscript-toolbar button,
+.writing-layout .save-status {
+  font-size: 0.85rem;
+}
+
+.writing-layout .chapter-heading {
+  padding-block: 16px 8px;
+}
+
+.writing-layout .chapter-heading > span,
+.writing-layout .chapter-heading .muted {
+  font-size: 0.82rem;
+}
+
+.writing-layout .chapter-heading input {
+  min-height: 36px;
+  padding-block: 2px;
+  font-size: clamp(1.25rem, 2.2vw, 1.65rem);
+}
+
+.writing-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px clamp(14px, 3vw, 40px);
+  border-bottom: 1px solid var(--line);
+}
+
+.writing-editor-actions h2 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.writing-generate-link {
+  display: none;
+}
+
+@media (max-width: 850px) {
+  .writing-generate-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    font-size: 0.9rem;
+  }
+}
+
+.writing-editor-actions .assistant-field-actions {
+  margin: 0;
+  align-items: center;
+}
+
+.writing-editor-actions .assistant-field-actions > button {
+  min-height: 34px;
+  padding: 4px 10px;
+  background: var(--tint);
+  color: var(--green);
+}
+
+.writing-editor-actions .assistant-field-actions > button:hover {
+  border-color: var(--green);
+}
+
+.writing-assistant-discussion {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.writing-assistant-discussion summary {
+  min-height: 26px;
+  cursor: pointer;
+}
+
+.writing-layout .manuscript .editor {
+  flex: none;
+}
+
+.writing-layout .manuscript .editor .cm-content {
+  padding-top: clamp(14px, 2.5vw, 28px) !important;
+}
+
+.writing-layout .editor-footer {
+  font-size: 0.85rem;
+}
+
+.writing-layout .writing-draft-footer:has(> button:only-child) {
+  justify-content: end;
+}
+
+.writing-layout .writing-chapter-outline {
+  margin: 12px clamp(12px, 3vw, 40px) 20px;
+}
+
+@media (max-width: 650px) {
+  .writing-layout .chapter-sidebar {
+    padding: 8px 12px;
+  }
+
+  .writing-layout .chapter-sidebar .section-title {
+    margin-bottom: 3px;
+  }
+
+  .writing-chapter-directory {
+    max-height: 7.5rem;
+    overflow: auto;
+    padding: 4px;
+    margin: -4px;
+  }
+
+  .writing-chapter-directory > details {
+    margin-block: 0;
+  }
+
+  .writing-chapter-directory .chapter-unit h3 {
+    margin-block: 2px 0;
+  }
+
+  .writing-chapter-directory .chapter-list {
+    margin: 0 0 4px;
+    padding: 3px;
+    max-height: 76px;
+  }
+
+  .writing-chapter-directory .chapter-list button {
+    padding: 6px 7px;
+  }
+
+  .writing-layout .sidebar-bottom {
+    gap: 4px 10px;
+    margin-top: 4px;
+  }
+
+  .writing-layout .sidebar-bottom > details > summary {
+    min-height: 24px;
+    font-size: 0.82rem;
+  }
+
+  .writing-layout .manuscript-toolbar {
+    min-height: 0;
+    padding-inline: 14px;
+  }
+
+  .writing-layout .manuscript-toolbar .eyebrow {
+    flex-basis: auto;
+  }
+
+  .writing-layout .chapter-heading {
+    padding: 10px 14px 4px;
+  }
+
+  .writing-layout .manuscript .editor .cm-content {
+    padding-inline: 12px !important;
+  }
+}

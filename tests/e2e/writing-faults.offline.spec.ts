@@ -325,9 +325,11 @@ test('后台任务：刷新重连同一任务、取消保留片段、明确恢�
   expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content).toBe(original)
   const artifacts = await (await page.request.get(`/api/artifacts?branch_id=${novel.branch_id}`)).json()
   expect(artifacts).toEqual([])
-  await page.getByText('任务历史与失败产物', { exact: true }).click()
-  await page.getByRole('button', { name: '查看保存的步骤与中断输出', exact: true }).click()
-  await expect(page.locator('.candidates pre.stream')).toContainText('中断输出：')
+  const taskHistory = page.getByText('任务历史与失败产物', { exact: true })
+  await taskHistory.click()
+  const history = taskHistory.locator('..')
+  await history.getByRole('button', { name: '查看保存的步骤与中断输出', exact: true }).click()
+  await expect(history.locator('pre.stream')).toContainText('中断输出：')
   const refused = await page.request.post(`/api/tasks/${task.id}/resume`, {
     headers,
     data: { acknowledge_unknown: false },

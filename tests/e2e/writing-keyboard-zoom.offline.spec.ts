@@ -190,9 +190,15 @@ test('M5 正常写作可用键盘切章、编辑及保存，浏览器网页缩�
       contentType: 'application/json',
     })
 
+    const accountSettings = page.getByRole('button', { name: '账户与预算', exact: true })
+    await focusWithTab(page, accountSettings)
+    await expectVisibleFocus(accountSettings)
+    await page.keyboard.press('Enter')
     const account = page.getByRole('combobox', { name: '模型账户', exact: true })
     await focusWithTab(page, account)
     await expectVisibleFocus(account)
+    await page.keyboard.press('Escape')
+    await expect(accountSettings).toBeFocused()
     for (const title of ['渡船靠岸', '月下开启石门']) {
       const chapter = directory.getByRole('button', { name: new RegExp(title) })
       await focusWithTab(page, chapter)

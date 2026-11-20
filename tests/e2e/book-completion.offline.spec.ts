@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
+import { openBench } from './helpers/creationFlow'
 
 test('六项核对通过后确认完结，改稿后仍可离线恢复并下载原交付包', async ({
   page,
@@ -371,7 +372,7 @@ test('AI 完本建议载入空白项，作者通读仍待确认', async ({ page 
   expect(endingSaved.ok(), await endingSaved.text()).toBe(true)
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(id)
-  await page.getByRole('button', { name: '完本台', exact: true }).click()
+  await openBench(page, '完本台')
   const panel = page.getByRole('region', { name: '完本与交付', exact: true })
   await panel.getByRole('textbox', { name: '关键人物与关系说明' }).fill('保留这项作者已有的看法。')
   const spoiler = panel.getByLabel('简介与试读的剧透范围')

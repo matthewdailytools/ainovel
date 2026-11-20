@@ -1,9 +1,14 @@
 import { expect, test, type Page } from '@playwright/test'
+import { creationFlow, openBench, openCreationFlow } from './helpers/creationFlow'
 
 const idea = '学徒靠铜铃的断痕寻找师姐。'
-const startActions = (page: Page) => page.getByRole('navigation', { name: '创作入口', exact: true })
 const runPanel = (page: Page) => page.getByRole('region', { name: '七台自动接力', exact: true })
 const runButton = (page: Page) => runPanel(page).getByRole('button', { name: '启动七台接力' })
+
+async function startActions(page: Page, keyboard = false) {
+  const flow = await openCreationFlow(page, keyboard)
+  return flow.getByRole('navigation', { name: '创作入口', exact: true })
+}
 
 async function seed(page: Page, title: string, confirm = false) {
   const { csrf } = await (await page.request.get('/api/session')).json()
@@ -45,6 +50,52 @@ function observeStarts(page: Page) {
   return starts
 }
 
+test('默认直接显示正文，创作流程可用键盘打开和收起', async ({ page }) => {
+  const { id, branchId } = await seed(page, '入口测试 · 正文优先')
+  const { csrf } = await (await page.request.get('/api/session')).json()
+  const headers = { 'X-Ainovel-CSRF': csrf }
+  const chapter = await page.request.post(`/api/branches/${branchId}/chapters`, {
+    headers,
+    data: { title: '铜铃与渡口' },
+  })
+  expect(chapter.status()).toBe(201)
+  const { id: chapterId } = await chapter.json()
+  const saved = await page.request.put(`/api/chapters/${chapterId}`, {
+    headers,
+    data: { base_revision: 0, content: idea },
+  })
+  expect(saved.ok(), await saved.text()).toBe(true)
+
+  await page.setViewportSize({ width: 320, height: 780 })
+  await page.goto('/')
+  await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(id)
+  const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
+  const flow = creationFlow(page)
+  const trigger = flow.locator(':scope > summary')
+  await expect(editor).toHaveText(idea)
+  await expect(editor).toBeInViewport({ ratio: 0.12 })
+  await expect(trigger).toBeVisible()
+  await expect(flow).not.toHaveAttribute('open', '')
+  await expect(flow.getByRole('navigation')).toHaveCount(0)
+
+  const entries = await startActions(page, true)
+  await expect(trigger).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(entries.getByRole('button', { name: '逐台创作', exact: true })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(flow).not.toHaveAttribute('open', '')
+  await expect(trigger).toBeFocused()
+
+  await openBench(page, '写作台', true)
+  await expect(flow).not.toHaveAttribute('open', '')
+  await expect(editor).toHaveText(idea)
+  await page.getByRole('link', { name: '去生成候选', exact: true }).press('Enter')
+  await expect(page.locator('#writing-task-form')).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('textbox', { name: '情节或具体要求', exact: true })).toBeFocused()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
+})
+
 test('空工作台可选逐台创作，新建后直接打开可编辑的立项', async ({ page }) => {
   let ownNovel = ''
   await page.route('**/api/novels', async (route) => {
@@ -60,7 +111,7 @@ test('空工作台可选逐台创作，新建后直接打开可编辑的立项',
   await page.setViewportSize({ width: 320, height: 780 })
   const starts = observeStarts(page)
   await page.goto('/')
-  const entry = startActions(page)
+  const entry = await startActions(page, true)
   await expect(entry.getByRole('button', { name: '从已完成阶段接力' })).toBeDisabled()
   await entry.getByRole('button', { name: '逐台创作' }).press('Enter')
   const title = page.getByRole('textbox', { name: '第一部作品的名字' })
@@ -70,8 +121,9 @@ test('空工作台可选逐台创作，新建后直接打开可编辑的立项',
   const project = page.locator('#bench-project')
   await expect(project.getByRole('textbox', { name: '创作思路' })).toBeVisible()
   await expect(page.getByRole('combobox', { name: '作品', exact: true })).toHaveValue(ownNovel)
+  const flow = await openCreationFlow(page, true)
   await expect(
-    page.getByRole('navigation', { name: '七台工作流' }).getByRole('button', { name: '立项台' }),
+    flow.getByRole('navigation', { name: '七台工作流' }).getByRole('button', { name: '立项台' }),
   ).toHaveAttribute('aria-current', 'location')
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
   expect(starts).toEqual([])
@@ -83,7 +135,8 @@ test('创意入口要求空白工作版本，显式新建后才可提交一次�
   await page.goto('/')
   const works = page.getByRole('combobox', { name: '作品', exact: true })
   await works.selectOption(previous.id)
-  await startActions(page).getByRole('button', { name: '从创意开始', exact: true }).press('Enter')
+  const entry = await startActions(page, true)
+  await entry.getByRole('button', { name: '从创意开始', exact: true }).press('Enter')
   await expect(runPanel(page).getByRole('heading', { name: '七台自动接力' })).toBeFocused()
   await expect(runPanel(page).getByText(/此工作版本已有创作内容/)).toBeVisible()
   await expect(runButton(page)).toBeDisabled()
@@ -126,13 +179,16 @@ test('接力入口只给当前版本的已完成起点，切换作品不沿用�
   await page.goto('/')
   const works = page.getByRole('combobox', { name: '作品', exact: true })
   await works.selectOption(confirmed.id)
-  const relay = startActions(page).getByRole('button', { name: '从已完成阶段接力' })
+  const entry = await startActions(page, true)
+  const relay = entry.getByRole('button', { name: '从已完成阶段接力' })
+  await expect(relay).toBeEnabled()
   await relay.press('Enter')
   const panel = runPanel(page)
   await expect(panel.getByLabel('接力起点')).toHaveValue('project')
   await expect(panel.getByRole('option', { name: '从创意开始', exact: true })).toHaveCount(0)
   await expect(panel.getByRole('option', { name: /从已确认立项接力/ })).toBeEnabled()
   await works.selectOption(blank.id)
+  await openCreationFlow(page)
   await relay.click()
   await expect(panel.getByText(/当前没有有效的接力起点/)).toBeVisible()
   await expect(panel.getByLabel('接力起点')).toHaveValue('')
@@ -142,6 +198,7 @@ test('接力入口只给当前版本的已完成起点，切换作品不沿用�
   await expect(page.getByRole('radio', { name: /^全自动/ })).toBeVisible()
   expect(starts).toEqual([])
   await works.selectOption(confirmed.id)
+  await openCreationFlow(page)
   await relay.click()
   await expect(panel.getByLabel('接力起点')).toHaveValue('project')
   await panel.getByLabel('本次接力总预算（所选账户币种）').fill('1')
@@ -161,7 +218,8 @@ test('新建创意作品回执迟到时保持后来选择的页面', async ({ pa
   await page.goto('/')
   const works = page.getByRole('combobox', { name: '作品', exact: true })
   await works.selectOption(initial.id)
-  await startActions(page).getByRole('button', { name: '从创意开始', exact: true }).click()
+  const entry = await startActions(page)
+  await entry.getByRole('button', { name: '从创意开始', exact: true }).click()
   await runPanel(page).getByRole('button', { name: '新建作品从创意开始' }).click()
   const title = '入口测试 · 迟到的创意作品'
   await page.getByRole('textbox', { name: '作品名称', exact: true }).fill(title)

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openBench } from './helpers/creationFlow'
 
 const original = '学徒找到一枚不鸣铜铃。'
 const proposal = '悬疑短篇，围绕能够回查的铜铃记录推进。'
@@ -22,7 +23,7 @@ async function newWork(page: Page, title: string) {
 }
 
 async function openProject(page: Page) {
-  await page.getByRole('button', { name: '立项台', exact: true }).click()
+  await openBench(page, '立项台')
   const project = page.locator('#bench-project')
   await project
     .locator('summary')
@@ -139,7 +140,7 @@ test('正文选区经作者载入后保留编辑器撤销，校验台十项都�
   await editor.press('Control+z')
   await expect(editor).toHaveText(original)
 
-  await page.getByRole('button', { name: '校验台', exact: true }).click()
+  await openBench(page, '校验台')
   const inspection = page.getByRole('region', { name: '十处对账体检' })
   const choices = inspection.getByLabel('核对项目')
   for (let number = 1; number <= 10; number++) {

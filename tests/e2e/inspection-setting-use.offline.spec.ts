@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { authorSettingPlan } from './fixtures/authorSettingPlan'
+import { openBench } from './helpers/creationFlow'
 
 test('写作确认的非世界设定只改变第 08 项，撤回后本机与独立 Web 可打开历史选区', async ({ page, context }) => {
   const { novel, chapter, original, branch } = await authorSettingPlan(page, '体检回源 · 归还赤钥')
@@ -16,7 +17,7 @@ test('写作确认的非世界设定只改变第 08 项，撤回后本机与独�
   await writing.getByRole('button', { name: '确认该选区为正文证据', exact: true }).press('Enter')
   await expect(writing.getByText('已确认当前正文使用该设定。', { exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: '校验台', exact: true }).press('Enter')
+  await openBench(page, '校验台', true)
   const inspection = page.getByRole('region', { name: '十处对账体检', exact: true })
   const send = page.waitForResponse(
     (response) => response.request().method() === 'POST' && response.url().endsWith('/workflow-inspections'),
@@ -39,7 +40,7 @@ test('写作确认的非世界设定只改变第 08 项，撤回后本机与独�
   }
   await seeNativeOriginal()
 
-  await page.getByRole('button', { name: '写作台', exact: true }).press('Enter')
+  await openBench(page, '写作台', true)
   await summary.press('Enter')
   const proof = writing.getByText('守铃人阿陶 · 当前正文证据', { exact: true })
   await proof.press('Enter')
@@ -47,7 +48,7 @@ test('写作确认的非世界设定只改变第 08 项，撤回后本机与独�
   await proof.locator('..').getByRole('button', { name: '撤回这条正文证据', exact: true }).press('Enter')
   await expect(writing.getByText('已撤回正文使用证据。', { exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: '校验台', exact: true }).press('Enter')
+  await openBench(page, '校验台', true)
   await expect(check.getByText('过期', { exact: true })).toBeVisible()
   await expect(
     list

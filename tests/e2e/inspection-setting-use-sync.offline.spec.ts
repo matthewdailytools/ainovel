@@ -1,6 +1,7 @@
 import { expect, test, type APIResponse, type Locator, type Page, type Response } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { authorSettingPlan } from './fixtures/authorSettingPlan'
+import { openBench } from './helpers/creationFlow'
 
 async function accepted(response: APIResponse | Response) {
   expect(response.ok(), await response.text()).toBe(true)
@@ -93,7 +94,7 @@ test('M6-08 经真实云同步回读精确原文，撤回后新设备仍能查�
   const { records } = await accepted(await page.request.get(evidenceEndpoint))
   const proof = records[0].version
 
-  await page.getByRole('button', { name: '校验台', exact: true }).press('Enter')
+  await openBench(page, '校验台', true)
   const originalReport = await generateInspection()
   const check08 = (report: typeof originalReport) =>
     report.items.find(({ check_id }: { check_id: string }) => check_id === '08')
@@ -166,7 +167,7 @@ test('M6-08 经真实云同步回读精确原文，撤回后新设备仍能查�
     await first.close()
   }
 
-  await page.getByRole('button', { name: '写作台', exact: true }).press('Enter')
+  await openBench(page, '写作台', true)
   await title.press('Enter')
   const adopted = writing.getByText('守铃人阿陶 · 当前正文证据', { exact: true })
   await adopted.press('Enter')
@@ -177,7 +178,7 @@ test('M6-08 经真实云同步回读精确原文，撤回后新设备仍能查�
   expect(old.current).toBe(false)
   expect(check08(old).current_status).toBe('outdated')
 
-  await page.getByRole('button', { name: '校验台', exact: true }).press('Enter')
+  await openBench(page, '校验台', true)
   const afterWithdrawal = await generateInspection()
   expect(check08(afterWithdrawal).basis.author_setting_uses).toBeUndefined()
   await syncDesktop('run')

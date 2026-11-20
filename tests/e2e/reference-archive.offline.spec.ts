@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
+import { openBench } from './helpers/creationFlow'
 
 async function backupExcerpts(file: string) {
   const records = (await readFile(file, 'utf8'))
@@ -51,7 +52,7 @@ test('拆解台核对保存卡片，稿件包仅选带已预览的原句', async
   expect(saved.ok(), await saved.text()).toBe(true)
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(id)
-  await page.getByRole('button', { name: '拆解台', exact: true }).click()
+  await openBench(page, '拆解台')
   await page.getByText('已保存手法卡与历史', { exact: true }).press('Enter')
   const card = page.getByText('解析一层可信证据 · 1 个修订', { exact: true })
   await card.press('Enter')

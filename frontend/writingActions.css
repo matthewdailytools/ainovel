@@ -1,0 +1,61 @@
+.assistant-panel.writing-actions {
+  overflow-wrap: anywhere;
+}
+
+.writing-actions > .section-title {
+  margin-bottom: 14px;
+}
+
+.assistant-panel.writing-actions > .section-title h2 {
+  font-size: 1.2rem;
+}
+
+.assistant-panel.writing-actions label,
+.assistant-panel.writing-actions summary {
+  font-size: 0.92rem;
+}
+
+.assistant-panel.writing-actions .check,
+.assistant-panel.writing-actions .writing-task-form > .small {
+  font-size: 0.84rem;
+}
+
+.assistant-panel.writing-actions select,
+.assistant-panel.writing-actions input:not([type='checkbox'], [type='radio']),
+.assistant-panel.writing-actions textarea {
+  font-size: max(1rem, 16px);
+}
+
+.writing-actions .writing-task-form .primary {
+  min-height: 44px;
+  font-size: 1rem;
+}
+
+.writing-task-form > .small {
+  margin: 7px 0 10px;
+}
+
+.assistant-panel.writing-actions .writing-task-output,
+.writing-actions > .writing-optimization-title,
+.writing-actions > .writing-advanced,
+.writing-actions > .writing-evidence {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.writing-actions .writing-section-title {
+  margin-bottom: 8px;
+  font-size: 1rem;
+}
+
+.writing-task-output > .empty-note {
+  margin: 0 0 8px;
+  padding: 6px 0;
+}
+
+@media (max-width: 850px) {
+  .assistant-panel.writing-actions {
+    display: block;
+  }
+}
