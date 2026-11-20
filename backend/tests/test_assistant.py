@@ -664,7 +664,10 @@ def test_existing_assistant_task_keeps_its_frozen_prompt(client, domain, setting
     route, baseline = turn_path(client, story, thread)
     task = verify(
         client.post(
-            route, json=turn_request(baseline, "核对定位", "frozen-old-contract", action="suggest", target="position"),
+            route,
+            json=turn_request(
+                baseline, "核对定位", "frozen-old-contract", action="suggest", target="position"
+            ),
         ),
         202,
     )["turn"]["task_id"]
