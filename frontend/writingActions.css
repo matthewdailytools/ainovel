@@ -1,29 +1,100 @@
 .assistant-panel.writing-actions {
+  background: #fff;
+  border-color: var(--workbench-line);
+  color: var(--workbench-ink);
+  font-family: var(--workbench-ui-font);
   overflow-wrap: anywhere;
 }
 
-.writing-actions > .section-title {
-  margin-bottom: 14px;
+.assistant-panel.writing-actions > .section-title {
+  margin-bottom: 16px;
 }
 
 .assistant-panel.writing-actions > .section-title h2 {
   font-size: 1.2rem;
+  font-weight: 650;
+  line-height: 1.4;
 }
 
 .assistant-panel.writing-actions label,
 .assistant-panel.writing-actions summary {
-  font-size: 0.92rem;
+  font-size: 0.94rem;
+  font-weight: 500;
+}
+
+.writing-actions summary {
+  color: var(--workbench-ink);
+}
+
+.assistant-panel.writing-actions label {
+  gap: 5px;
+  margin-bottom: 12px;
 }
 
 .assistant-panel.writing-actions .check,
-.assistant-panel.writing-actions .writing-task-form > .small {
-  font-size: 0.84rem;
+.assistant-panel.writing-actions .small {
+  font-size: 0.86rem;
 }
 
 .assistant-panel.writing-actions select,
 .assistant-panel.writing-actions input:not([type='checkbox'], [type='radio']),
 .assistant-panel.writing-actions textarea {
+  background: #fff;
+  border-color: var(--workbench-control);
+  border-radius: 8px;
+  color: var(--workbench-ink);
   font-size: max(1rem, 16px);
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.writing-actions textarea::placeholder,
+.writing-actions input::placeholder {
+  color: var(--workbench-muted);
+  opacity: 1;
+}
+
+.writing-actions .candidate textarea {
+  line-height: 1.7;
+}
+
+.writing-actions :is(.muted, .empty-note, .wb-assistant-muted) {
+  color: var(--workbench-muted);
+}
+
+.writing-actions :is(button, .button):not(.primary) {
+  background: #fff;
+  border-color: var(--workbench-control);
+  border-radius: 8px;
+  color: var(--workbench-ink);
+  font-weight: 500;
+}
+
+.writing-actions :is(button, .button):not(.primary):not(:disabled):hover,
+.writing-actions .wb-assistant-tabs button[aria-selected='true'] {
+  background: var(--workbench-accent-soft);
+  border-color: var(--workbench-accent);
+  color: var(--workbench-accent);
+}
+
+.writing-actions :is(a, button, input, select, summary, textarea):focus-visible,
+.writing-actions .wb-assistant-header h2:focus-visible {
+  outline-color: var(--workbench-accent);
+}
+
+.writing-actions a:not(.button) {
+  color: var(--workbench-accent);
+}
+
+.assistant-panel.writing-actions .primary {
+  background: var(--workbench-accent);
+  border-color: var(--workbench-accent);
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.assistant-panel.writing-actions .primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--workbench-accent) 88%, #000);
 }
 
 .writing-actions .writing-task-form .primary {
@@ -32,30 +103,57 @@
 }
 
 .writing-task-form > .small {
-  margin: 7px 0 10px;
+  margin: 8px 0;
 }
 
 .assistant-panel.writing-actions .writing-task-output,
 .writing-actions > .writing-optimization-title,
 .writing-actions > .writing-advanced,
 .writing-actions > .writing-evidence {
-  margin-top: 18px;
+  margin-top: 16px;
   padding-top: 12px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--workbench-line);
 }
 
 .writing-actions .writing-section-title {
   margin-bottom: 8px;
   font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.45;
 }
 
 .writing-task-output > .empty-note {
   margin: 0 0 8px;
-  padding: 6px 0;
+  padding: 4px 0;
+}
+
+.writing-actions :is(.notice, .stream, .report) {
+  background: var(--workbench-shell);
+  border-color: var(--workbench-line);
+  border-radius: 8px;
+}
+
+.writing-actions .wb-assistant-entry {
+  justify-content: flex-start;
+}
+
+.writing-actions .wb-assistant-rail {
+  background: #fff;
+  border-color: var(--workbench-line);
+}
+
+.writing-actions .wb-assistant-comparison {
+  background: var(--workbench-accent-soft);
 }
 
 @media (max-width: 850px) {
   .assistant-panel.writing-actions {
     display: block;
+  }
+}
+
+@media (max-width: 650px) {
+  .assistant-panel.writing-actions {
+    padding: 20px 16px;
   }
 }

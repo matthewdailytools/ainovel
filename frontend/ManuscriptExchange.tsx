@@ -206,7 +206,13 @@ export function ManuscriptExchange({
   }
   return (
     <details className="new-novel">
-      <summary>离线写作与交换</summary>
+      <summary aria-label="离线写作与交换">
+        <span className="workspace-summary-label">
+          <span>离线写作</span>
+          <wbr />
+          <span>与交换</span>
+        </span>
+      </summary>
       <p>
         作品文件保留章节、修订和手法卡引用地址。原句可按版本选带。JSON 稿件包上限 24 MiB，独立备份上限 128
         MiB。
