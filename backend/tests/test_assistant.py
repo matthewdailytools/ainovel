@@ -58,11 +58,13 @@ def turn_request(page, question, key, **extra):
 class Model:
     def __init__(self, replies=None, during_call=None):
         self.calls = []
+        self.requests = []
         self.replies = list(replies or [])
         self.during_call = during_call
 
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         self.calls.append(prompt)
+        self.requests.append((task_id, kwargs["run_limit"], kwargs["schema"]))
         if self.during_call:
             self.during_call()
         result = self.replies.pop(0) if self.replies else {"answer": "按当前依据继续。"}
@@ -605,6 +607,79 @@ def test_assistant_m6_and_m7_read_current_rules_without_signing_or_leaking_intro
     assert verify(client.get(f"/api/branches/{story['branch_id']}/book-completion"))["latest"] is None
 
 
+def test_assistant_target_is_exact_in_the_provider_schema_and_repaired_once(client, domain, settings, story):
+    chapter = story["chapter_id"]
+    saved = domain.save(chapter, 0, "用铜铃作证。")
+    thread = conversation(client, story, "M5", chapter)
+    route, baseline = turn_path(client, story, thread)
+    task = verify(
+        client.post(
+            route,
+            json=turn_request(
+                baseline,
+                "把选区中的物件写得更清晰。",
+                "repair-exact-selection",
+                action="refine",
+                target="selection",
+                draft_text="铜铃",
+                selection={"start": 1, "end": 3, "revision": saved["revision"]},
+                budget_limit=0.12,
+            ),
+        ),
+        202,
+    )["turn"]["task_id"]
+    model = Model(
+        [
+            {
+                "answer": "越界结果",
+                "suggestions": [
+                    {"field": "text", "value": "UNTRUSTED_OUTSIDE_FIELD_TEXT", "reason": "范围过大"}
+                ],
+            },
+            {
+                "answer": "选区改写已经准备。",
+                "suggestions": [{"field": "selection", "value": "旧铜铃", "reason": "补充物件状态。"}],
+            },
+        ]
+    )
+    assert asyncio.run(Worker(settings, model).run_once())
+    assert len(model.calls) == 2
+    for (task_id, limit, schema), prompt in zip(model.requests, model.calls, strict=True):
+        assert task_id == task and limit == 0.12
+        assert schema["$defs"]["Suggestion"]["properties"]["field"]["enum"] == ["selection"]
+        assert "只返回符合以下 JSON Schema" in prompt and '"enum":["selection"]' in prompt
+        assert "suggestions[].field 只能逐字输出列出的编号" in prompt
+    assert "修正要求" not in model.calls[0] and "修正要求" in model.calls[1]
+    assert "UNTRUSTED_OUTSIDE_FIELD_TEXT" not in model.calls[1]
+    [reply] = verify(client.get(route))["turns"]
+    assert reply["status"] == "succeeded"
+    assert reply["result"]["suggestions"] == [
+        {"field": "selection", "value": "旧铜铃", "reason": "补充物件状态。"}
+    ]
+    assert domain.chapter(chapter)["content"] == saved["content"]
+
+
+def test_existing_assistant_task_keeps_its_frozen_prompt(client, domain, settings, story):
+    thread = conversation(client, story, "M1")
+    route, baseline = turn_path(client, story, thread)
+    task = verify(
+        client.post(
+            route, json=turn_request(baseline, "核对定位", "frozen-old-contract", action="suggest", target="position"),
+        ),
+        202,
+    )["turn"]["task_id"]
+    with domain.db.connect(True) as tx:
+        tx.execute(
+            "UPDATE tasks SET result=json_set(result,'$.assistant.version','workbench-assistant/1') WHERE id=?",
+            (task,),
+        )
+    model = Model([{"answer": "围绕寻找铜铃定位。"}])
+    assert asyncio.run(Worker(settings, model).run_once())
+    assert "workbench-assistant/1" in model.calls[0] and "字段输出契约" not in model.calls[0]
+    assert "enum" not in model.requests[0][2]["$defs"]["Suggestion"]["properties"]["field"]
+    assert verify(client.get(route))["turns"][0]["status"] == "succeeded"
+
+
 @pytest.mark.parametrize(
     "untrusted_reply",
     [
@@ -629,6 +704,8 @@ def test_assistant_rejects_invented_source_and_invalid_field_values(client, sett
         ),
         202,
     )
-    assert asyncio.run(Worker(settings, Model([untrusted_reply])).run_once())
+    model = Model([untrusted_reply, untrusted_reply, {"answer": "第三次请求不应执行。"}])
+    assert asyncio.run(Worker(settings, model).run_once())
+    assert len(model.calls) == 2
     [reply] = verify(client.get(route))["turns"]
     assert reply["status"] == "blocked_runtime" and reply["result"] is None

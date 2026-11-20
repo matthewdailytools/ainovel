@@ -24,6 +24,7 @@ from ainovel.worker import Worker
 
 ORIGINAL = "修钟人把账簿推到桌心，只翻开有印记的一页。学徒记下印记所在的位置，合上簿子，按先前约定去查门栓。"
 IDEA = "学徒拿着一枚无声铜铃寻找师姐，靠可以回查的线索辨认同一枚铃，最后在旧屋归还。"
+TITLE = "七台助手试写 · 遗铃"
 BODY = (
     "学徒在西门外摇了摇铜铃，铃没有响。他从旧簿里抄下断口的记号，沿着石坎下到山坳。",
     "师姐把匣中半片铜贴到铃身，断口严丝合缝。学徒把铃递回她掌心。师姐接过铜铃，仍旧没有摇响它。",
@@ -148,7 +149,7 @@ class Trial:
         return value
 
     def run(self):
-        branch = self.http("POST", "/api/novels", json={"title": "七台助手试写 · 遗铃"})["branch_id"]
+        branch = self.http("POST", "/api/novels", json={"title": TITLE})["branch_id"]
         self.base = base = f"/api/branches/{branch}"
         subject = "一个关于遗失和归还的短篇。"
         thread, _ = self.turn("M1", "position", subject, "保留原意，润色核心定位并返回一条修改候选。")
@@ -286,32 +287,76 @@ class Trial:
 
         for chapter, body in zip(chapters, BODY, strict=True):
             self.http("PUT", f"/api/chapters/{chapter['id']}", json={"base_revision": 0, "content": body})
+        self.finish(branch, chapters)
+
+    def resume(self):
+        previous = json.loads((self.evidence / "assistant-trial.json").read_text(encoding="utf-8"))
+        works = self.http("GET", "/api/novels")
+        if len(works) != 1 or works[0]["title"] != TITLE:
+            raise RuntimeError("只有本验收创建的隔离合成作品可续跑。")
+        branches = self.http("GET", f"/api/novels/{works[0]['id']}/branches")
+        if len(branches) != 1:
+            raise RuntimeError("无法确定原试写工作版本。")
+        branch = branches[0]["id"]
+        self.base = f"/api/branches/{branch}"
+        previous_turns = previous["turns"]
+        if not any(
+            entry.get("stage") == "M4" and entry.get("status") == "succeeded" for entry in previous_turns
+        ):
+            raise RuntimeError("已有验收必须先完成大纲再从正文续跑。")
+        for entry in previous_turns:
+            task = self.http("GET", f"/api/tasks/{entry['task_id']}")
+            if (
+                task["branch_id"] != branch
+                or task["kind"] != "assistant_turn"
+                or task["status"] in {"queued", "running"}
+            ):
+                raise RuntimeError("已有任务尚未结清或目标不符，无法安全续跑。")
+        self.turns[:] = previous_turns
+        self.tasks[:] = list(dict.fromkeys(entry["task_id"] for entry in previous_turns))
+        chapters = self.http("GET", self.base + "/chapters")
+        if len(chapters) != len(BODY):
+            raise RuntimeError("原验收两章必须都存在。")
+        self.finish(branch, chapters)
+
+    def finish(self, branch, chapters):
         selection = "铃没有响。"
         start = BODY[0].index(selection)
-        thread, candidate = self.turn(
-            "M5",
-            "selection",
-            selection,
-            "润色所选文字。只描写这一刻，保留铜铃无声。",
-            scope=chapters[0]["id"],
-            selection={"start": start, "end": start + len(selection), "revision": 1},
-        )
+        completed = {
+            (item["stage"], item["field"]): item for item in self.turns if item.get("status") == "succeeded"
+        }
+        if saved := completed.get(("M5", "selection")):
+            thread = saved["thread"]
+            candidate = next(
+                item
+                for item in self.http("GET", f"{self.base}/assistant/conversations/{thread}/turns")["turns"]
+                if item["id"] == saved["turn_id"]
+            )
+        else:
+            thread, candidate = self.turn(
+                "M5",
+                "selection",
+                selection,
+                "润色所选文字。只描写这一刻，保留铜铃无声，在 suggestions 中返回 selection 字段候选。",
+                scope=chapters[0]["id"],
+                selection={"start": start, "end": start + len(selection), "revision": 1},
+            )
         replacement = self.use(thread, candidate, "selection")
-        self.http(
-            "PUT",
-            f"/api/chapters/{chapters[0]['id']}",
-            json={
-                "base_revision": 1,
-                "content": BODY[0][:start] + replacement + BODY[0][start + len(selection) :],
-            },
-        )
+        chapter_path = f"/api/chapters/{chapters[0]['id']}"
+        chapter = self.http("GET", chapter_path)
+        revised = BODY[0][:start] + replacement + BODY[0][start + len(selection) :]
+        if chapter["revision"] == 1 and chapter["content"] == BODY[0]:
+            self.http("PUT", chapter_path, json={"base_revision": 1, "content": revised})
+        elif chapter["content"] != revised:
+            raise RuntimeError("试写正文已另行修改，当前选区需要重新核对。")
 
         for check in range(1, 11):
-            self.turn(
-                "M6", f"{check:02d}", "", "按本项规则说明依据、证据缺口和下一步核对建议，保留正式判定。"
-            )
-        self.turn("M7", "intro", "", "只根据开篇有效章稿起草交付简介，保留后续归还的悬念。")
-        completion = self.http("GET", base + "/book-completion")
+            key = f"{check:02d}"
+            if ("M6", key) not in completed:
+                self.turn("M6", key, "", "按本项规则说明依据、证据缺口和下一步核对建议，保留正式判定。")
+        if ("M7", "intro") not in completed:
+            self.turn("M7", "intro", "", "只根据开篇有效章稿起草交付简介，保留后续归还的悬念。")
+        completion = self.http("GET", self.base + "/book-completion")
         if completion["latest"] or all(item["status"] == "green" for item in completion["checks"]):
             raise RuntimeError("试写意外触发了正式完本。")
         self.log(
@@ -325,6 +370,7 @@ def main():
     parser.add_argument("--dotenv", type=Path, required=True)
     parser.add_argument("--account", default="deepseek")
     parser.add_argument("--budget", type=Decimal, required=True)
+    parser.add_argument("--resume-evidence", type=Path)
     parser.add_argument("--execute-live", action="store_true", required=True)
     args = parser.parse_args()
     if not args.budget.is_finite() or not 0 < args.budget <= 8:
@@ -349,21 +395,30 @@ def main():
         parser.error("需要现有共享费用账本。")
     parent = live.data_dir / "acceptance" / "workbench-assistant"
     parent.mkdir(parents=True, exist_ok=True)
-    evidence = Path(mkdtemp(prefix="yiling-", dir=parent))
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    if args.resume_evidence:
+        evidence = args.resume_evidence.resolve()
+        if evidence.parent != parent.resolve() or not (evidence / "manuscripts.sqlite").is_file():
+            parser.error("续跑须指定现有的隔离试写验收目录。")
+        basis = json.loads((evidence / "basis.json").read_text(encoding="utf-8"))
+        if (
+            basis["account"] != args.account
+            or basis["model"] != provider.model
+            or Decimal(basis["budget_cny"]) != args.budget
+        ):
+            parser.error("续跑须沿用原模型账户及总预算。")
+        basis.setdefault("resume_commits", []).append(commit)
+    else:
+        evidence = Path(mkdtemp(prefix="yiling-", dir=parent))
+        basis = {
+            "commit": commit,
+            "account": args.account,
+            "model": provider.model,
+            "budget_cny": str(args.budget),
+        }
     print(f"验收目录 {evidence}", flush=True)
     (evidence / "basis.json").write_text(
-        json.dumps(
-            {
-                "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-                "account": args.account,
-                "model": provider.model,
-                "budget_cny": str(args.budget),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+        json.dumps(basis, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     isolated = replace(live, data_dir=evidence, providers={args.account: provider}, test_mode=True)
     shared = Budget(live)
@@ -375,7 +430,7 @@ def main():
         client.headers["X-Ainovel-CSRF"] = request(client, "GET", "/api/session")["csrf"]
         trial = Trial(client, worker, args.account, evidence, args.budget)
         try:
-            trial.run()
+            trial.resume() if args.resume_evidence else trial.run()
         except Exception as error:
             trial.log(failed=str(error))
             raise
