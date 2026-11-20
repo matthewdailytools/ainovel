@@ -123,6 +123,25 @@
   overflow-wrap: anywhere;
 }
 
+.assistant-panel > .wb-assistant-rail:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  max-block-size: clamp(16rem, 44dvh, 22rem);
+}
+
+.assistant-panel > .wb-assistant-rail > .wb-assistant-header,
+.assistant-panel > .wb-assistant-rail > .wb-assistant-tabs {
+  flex: none;
+}
+
+.assistant-panel > .wb-assistant-rail > [role='tabpanel']:not([hidden]) {
+  min-block-size: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 4px;
+  scroll-padding-block: 4px;
+}
+
 @media (max-width: 68rem) {
   .wb-assistant-layout-open {
     grid-template-columns: minmax(0, 1fr);
