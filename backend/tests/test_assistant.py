@@ -631,9 +631,11 @@ def test_assistant_target_is_exact_in_the_provider_schema_and_repaired_once(clie
     model = Model(
         [
             {
-                "answer": "越界结果",
+                "answer": "给出三个备选方案。",
                 "suggestions": [
-                    {"field": "text", "value": "UNTRUSTED_OUTSIDE_FIELD_TEXT", "reason": "范围过大"}
+                    {"field": "selection", "value": "古旧铜铃", "reason": "候选一"},
+                    {"field": "selection", "value": "UNTRUSTED_DUPLICATE_FIELD_TEXT", "reason": "候选二"},
+                    {"field": "selection", "value": "静默的古铃", "reason": "候选三"},
                 ],
             },
             {
@@ -647,10 +649,15 @@ def test_assistant_target_is_exact_in_the_provider_schema_and_repaired_once(clie
     for (task_id, limit, schema), prompt in zip(model.requests, model.calls, strict=True):
         assert task_id == task and limit == 0.12
         assert schema["$defs"]["Suggestion"]["properties"]["field"]["enum"] == ["selection"]
-        assert "只返回符合以下 JSON Schema" in prompt and '"enum":["selection"]' in prompt
+        assert schema["properties"]["suggestions"]["maxItems"] == 1
+        wire = json.loads(prompt.split("只返回符合以下 JSON Schema 的对象：\n", 1)[1])
+        assert wire["$defs"]["Suggestion"]["properties"]["field"]["enum"] == ["selection"]
+        assert wire["properties"]["suggestions"]["maxItems"] == 1
         assert "suggestions[].field 只能逐字输出列出的编号" in prompt
+        assert "唯一建议的 value 必须是一段可以直接替换整段选区的连续完整文字" in prompt
     assert "修正要求" not in model.calls[0] and "修正要求" in model.calls[1]
-    assert "UNTRUSTED_OUTSIDE_FIELD_TEXT" not in model.calls[1]
+    assert "同一字段不得重复" in model.calls[1]
+    assert "候选一" not in model.calls[1] and "UNTRUSTED_DUPLICATE_FIELD_TEXT" not in model.calls[1]
     [reply] = verify(client.get(route))["turns"]
     assert reply["status"] == "succeeded"
     assert reply["result"]["suggestions"] == [
@@ -659,7 +666,8 @@ def test_assistant_target_is_exact_in_the_provider_schema_and_repaired_once(clie
     assert domain.chapter(chapter)["content"] == saved["content"]
 
 
-def test_existing_assistant_task_keeps_its_frozen_prompt(client, domain, settings, story):
+@pytest.mark.parametrize("version", [1, 2])
+def test_existing_assistant_task_keeps_its_frozen_prompt(client, domain, settings, story, version):
     thread = conversation(client, story, "M1")
     route, baseline = turn_path(client, story, thread)
     task = verify(
@@ -673,25 +681,56 @@ def test_existing_assistant_task_keeps_its_frozen_prompt(client, domain, setting
     )["turn"]["task_id"]
     with domain.db.connect(True) as tx:
         tx.execute(
-            "UPDATE tasks SET result=json_set(result,'$.assistant.version','workbench-assistant/1') WHERE id=?",
-            (task,),
+            "UPDATE tasks SET result=json_set(result,'$.assistant.version',?) WHERE id=?",
+            (f"workbench-assistant/{version}", task),
         )
     model = Model([{"answer": "围绕寻找铜铃定位。"}])
     assert asyncio.run(Worker(settings, model).run_once())
-    assert "workbench-assistant/1" in model.calls[0] and "字段输出契约" not in model.calls[0]
-    assert "enum" not in model.requests[0][2]["$defs"]["Suggestion"]["properties"]["field"]
+    assert f"workbench-assistant/{version}" in model.calls[0] and "建议数量" not in model.calls[0]
+    schema = model.requests[0][2]
+    assert schema["properties"]["suggestions"]["maxItems"] == 10
+    assert schema["$defs"]["Suggestion"]["properties"]["field"].get("enum") == (
+        ["position"] if version == 2 else None
+    )
     assert verify(client.get(route))["turns"][0]["status"] == "succeeded"
 
 
 @pytest.mark.parametrize(
-    "untrusted_reply",
+    "untrusted_reply, expected_error",
     [
-        {"answer": "错引", "source_ids": ["S666"]},
-        {"answer": "越界修改", "suggestions": [{"field": "ending", "value": "误改结尾", "reason": "越界"}]},
-        {"answer": "字段过长", "suggestions": [{"field": "position", "value": "甲" * 701, "reason": "超长"}]},
+        ({"answer": "错引", "source_ids": ["S666"]}, "助手回答引用了本轮范围外的依据。"),
+        (
+            {
+                "answer": "越界修改",
+                "suggestions": [{"field": "ending", "value": "误改结尾", "reason": "越界"}],
+            },
+            "助手提出了本轮范围外的字段修改。",
+        ),
+        (
+            {
+                "answer": "字段过长",
+                "suggestions": [{"field": "position", "value": "甲" * 701, "reason": "超长"}],
+            },
+            "助手建议的字段文字缺失或超出该字段长度。",
+        ),
+        (
+            {
+                "answer": "重复备选",
+                "suggestions": [
+                    {"field": "position", "value": value, "reason": "备选"} for value in ("定位一", "定位二")
+                ],
+            },
+            "同一字段只能返回一条完整建议。",
+        ),
     ],
 )
-def test_assistant_rejects_invented_source_and_invalid_field_values(client, settings, story, untrusted_reply):
+def test_assistant_rejects_invented_source_and_invalid_field_values(
+    client,
+    settings,
+    story,
+    untrusted_reply,
+    expected_error,
+):
     thread = conversation(client, story, "M1")
     route, baseline = turn_path(client, story, thread)
     verify(
@@ -712,3 +751,4 @@ def test_assistant_rejects_invented_source_and_invalid_field_values(client, sett
     assert len(model.calls) == 2
     [reply] = verify(client.get(route))["turns"]
     assert reply["status"] == "blocked_runtime" and reply["result"] is None
+    assert reply["error"] == expected_error

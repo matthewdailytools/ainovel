@@ -15,7 +15,8 @@ from .project_portability import Identifier
 
 KIND = "assistant_turn"
 LEGACY_VERSION = "workbench-assistant/1"
-VERSION = "workbench-assistant/2"
+FIELD_ENUM_VERSION = "workbench-assistant/2"
+VERSION = "workbench-assistant/3"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS assistant_conversations(
  id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),stage TEXT NOT NULL,
@@ -367,13 +368,15 @@ def _citation(source):
     )
 
 
-def _validated_reply(value, stage, payload, sources):
+def _validated_reply(value, stage, payload, sources, *, exact_cardinality=False):
     reply = ProposedReply.model_validate(value)
     referenced = reply.source_ids
     if len(set(referenced)) != len(referenced) or any(identifier not in sources for identifier in referenced):
         raise DomainError("assistant_sources", "助手回答引用了本轮范围外的依据。")
     fields = set()
     for item in reply.suggestions:
+        if exact_cardinality and item.field in fields:
+            raise DomainError("assistant_duplicate_field", "同一字段只能返回一条完整建议。")
         if (
             item.field in fields
             or item.field not in TARGETS[stage]
@@ -404,13 +407,15 @@ def _validated_reply(value, stage, payload, sources):
     ).model_dump()
 
 
-def _reply_contract(fields, sources):
+def _reply_contract(fields, sources, *, single_suggestion=False):
     contract = ProposedReply.model_json_schema()
     suggestions = contract["properties"]["suggestions"]
     if fields:
         field = contract["$defs"]["Suggestion"]["properties"]["field"]
         field["enum"] = list(fields)
         field["description"] = "逐字使用允许的内部字段编号，不翻译或另取名称。"
+        if single_suggestion:
+            suggestions["maxItems"] = 1
     else:
         suggestions["maxItems"] = 0
     references = contract["properties"]["source_ids"]
@@ -426,7 +431,7 @@ async def run(worker):
     branch = worker.task["branch_id"]
     frozen = worker.task["result"]["assistant"]
     template = frozen["version"]
-    if template not in {VERSION, LEGACY_VERSION}:
+    if template not in {VERSION, FIELD_ENUM_VERSION, LEGACY_VERSION}:
         raise DomainError("assistant_version", "本轮助手契约已变化，请在当前会话另发一轮。", 409)
     with worker.db.connect() as tx:
         tx.execute("BEGIN")
@@ -501,7 +506,16 @@ async def run(worker):
             if suggestion_fields
             else "本轮只讨论，suggestions 必须为空数组。"
         )
-        contract = _reply_contract(suggestion_fields, sources)
+        exact_cardinality = template == VERSION
+        single_suggestion = exact_cardinality and payload["target"] is not None
+        if single_suggestion and suggestion_fields:
+            instruction["建议数量"] = "suggestions 数组最多一项。给出一条完整建议；其余想法在 answer 说明。"
+            if stage == "M5" and payload["target"] == "selection":
+                instruction["完整选区替换"] = (
+                    "唯一建议的 value 必须是一段可以直接替换整段选区的连续完整文字。"
+                    "多句或多行也放在同一个字符串中。不要写成多个替代版本，不要把片段拆到多个 suggestion。"
+                )
+        contract = _reply_contract(suggestion_fields, sources, single_suggestion=single_suggestion)
         max_output = 4096
         for attempt in range(2):
             try:
@@ -513,7 +527,7 @@ async def run(worker):
                     structure_repairs=0,
                     contract=contract,
                 )
-                result = _validated_reply(reply, stage, payload, sources)
+                result = _validated_reply(reply, stage, payload, sources, exact_cardinality=exact_cardinality)
                 break
             except DomainError as error:
                 output_limit = (
@@ -521,7 +535,12 @@ async def run(worker):
                     and getattr(error, "repairable", False)
                     and getattr(error, "known_usage", False)
                 )
-                invalid_reply = error.code in {"invalid_structure", "assistant_sources", "assistant_result"}
+                invalid_reply = error.code in {
+                    "invalid_structure",
+                    "assistant_sources",
+                    "assistant_result",
+                    "assistant_duplicate_field",
+                }
                 if attempt or not (invalid_reply or output_limit):
                     raise
                 with worker.db.connect() as tx:
@@ -537,6 +556,10 @@ async def run(worker):
                     "修正要求": "上一次回复无法按契约使用。重新生成完整回复，逐字使用当前字段和来源编号，"
                     "不要添加未允许的字段；没有可提交的建议或引证可留空。",
                 }
+                if exact_cardinality and error.code == "assistant_duplicate_field":
+                    instruction["修正要求"] += (
+                        " 同一字段不得重复；输出一条可以直接使用的完整建议，不提供多个方案或片段。"
+                    )
                 if output_limit:
                     max_output = 8192
     checkpoint = {**worker.task["result"], "assistant_result": result}
