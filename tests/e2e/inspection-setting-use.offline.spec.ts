@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { authorSettingPlan } from './fixtures/authorSettingPlan'
 import { openBench } from './helpers/creationFlow'
+import { openWritingSources } from './helpers/writingTools'
 
 test('写作确认的非世界设定只改变第 08 项，撤回后本机与独立 Web 可打开历史选区', async ({ page, context }) => {
   const { novel, chapter, original, branch } = await authorSettingPlan(page, '体检回源 · 归还赤钥')
@@ -8,6 +9,7 @@ test('写作确认的非世界设定只改变第 08 项，撤回后本机与独�
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
   await expect(editor).toHaveText(original)
+  await openWritingSources(page)
   const summary = page.getByText('设定的正文使用证据', { exact: true })
   await summary.press('Enter')
   const writing = summary.locator('..')
@@ -41,6 +43,7 @@ test('写作确认的非世界设定只改变第 08 项，撤回后本机与独�
   await seeNativeOriginal()
 
   await openBench(page, '写作台', true)
+  await openWritingSources(page)
   await summary.press('Enter')
   const proof = writing.getByText('守铃人阿陶 · 当前正文证据', { exact: true })
   await proof.press('Enter')

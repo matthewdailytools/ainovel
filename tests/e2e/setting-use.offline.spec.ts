@@ -2,6 +2,7 @@ import { expect, test, type APIResponse, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 
 import { authorSettingPlan } from './fixtures/authorSettingPlan'
+import { openWritingSources } from './helpers/writingTools'
 
 test('章纲中的人物条目经作者选取正式原文后才成为实际使用证据', async ({ page }) => {
   const { novel, chapter, original, readPlan } = await authorSettingPlan(page, '检视设定正文证据')
@@ -13,6 +14,7 @@ test('章纲中的人物条目经作者选取正式原文后才成为实际使�
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
   await expect(editor).toHaveText(original)
+  await openWritingSources(page)
   const title = page.getByText('设定的正文使用证据', { exact: true })
   await title.press('Enter')
   const panel = title.locator('..')
@@ -50,6 +52,7 @@ test('章纲中的人物条目经作者选取正式原文后才成为实际使�
   await expect(actual).toContainText(original)
 
   await page.getByRole('button', { name: '写作', exact: true }).press('Enter')
+  await openWritingSources(page)
   await title.press('Enter')
   await proof.press('Enter')
   page.once('dialog', (confirmation) => void confirmation.accept())
@@ -90,6 +93,7 @@ test('单章恢复遇到另一窗口签认设定原文时要求重读，恢复�
     await another.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
     const editor = another.getByRole('textbox', { name: '章节正文', exact: true })
     await expect(editor).toHaveText(current)
+    await openWritingSources(another)
     const trigger = another.getByText('设定的正文使用证据', { exact: true })
     await trigger.press('Enter')
     const evidence = trigger.locator('..')
@@ -164,6 +168,7 @@ test('大纲台账区分已采用的各类设定、章纲计划、正文证据�
   await page.getByRole('button', { name: '写作', exact: true }).press('Enter')
   const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
   await expect(editor).toHaveText(original)
+  await openWritingSources(page)
   const details = page.getByText('设定的正文使用证据', { exact: true })
   await details.press('Enter')
   const panel = details.locator('..')

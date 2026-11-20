@@ -11,6 +11,7 @@ import {
   type RefObject,
 } from 'react'
 import { ApiError, label as taskLabel } from './api'
+import { WorkbenchTabs } from './WorkbenchTabs'
 import {
   allowsAssistantTarget,
   assistantActions,
@@ -105,9 +106,13 @@ type Selection = {
 type AssistantContextValue = {
   host: string
   open: boolean
+  dockOpen: boolean
   activated: boolean
+  revealRequest: number
   show: () => void
-  close: () => void
+  select: () => void
+  dismiss: () => void
+  close: (onReturnFocus?: () => void) => void
   resetTarget: () => void
   railId: string
   stage: CreationBench
@@ -123,6 +128,12 @@ type AssistantContextValue = {
   findTarget: (turn: AssistantTurn) => Target | undefined
 }
 const AssistantContext = createContext<AssistantContextValue | null>(null)
+const closedDock = { open: false, select: () => undefined, dismiss: () => undefined }
+
+export function useAssistantDock(): { open: boolean; select: () => void; dismiss: () => void } {
+  const context = useContext(AssistantContext)
+  return context ? { open: context.dockOpen, select: context.select, dismiss: context.dismiss } : closedDock
+}
 
 export function useAssistantScope({ scopeId, label, account, onSource }: Scope) {
   const context = useContext(AssistantContext)
@@ -194,7 +205,9 @@ export function CreationAssistantLayout({
   const host = JSON.stringify([branchId, stage])
   const railId = useId()
   const [open, setOpen] = useState(false)
+  const [openHost, setOpenHost] = useState<string>()
   const [activated, setActivated] = useState(false)
+  const [revealRequest, setRevealRequest] = useState(0)
   const [registeredScope, setRegisteredScope] = useState<{ host: string; id: string; value: Scope }>()
   const [chosen, setChosen] = useState<Selection>()
   const targets = useRef(new Map<string, RefObject<Target>>())
@@ -230,13 +243,28 @@ export function CreationAssistantLayout({
     if (active instanceof HTMLElement && !document.getElementById(railId)?.contains(active))
       origin.current = active
     setActivated(true)
+    setOpenHost(host)
     setOpen(true)
+    setRevealRequest((request) => request + 1)
   }
-  function close() {
+  const select = useCallback(() => {
+    origin.current = null
+    setActivated(true)
+    setOpenHost(host)
+    setOpen(true)
+  }, [host])
+  const dismiss = useCallback(() => setOpen(false), [])
+  function close(onReturnFocus?: () => void) {
+    const previous = origin.current
+    origin.current = null
     setOpen(false)
     requestAnimationFrame(() => {
-      const target = origin.current?.isConnected ? origin.current : document.getElementById(railId + '-open')
-      target?.focus()
+      if (previous?.isConnected && previous.getClientRects().length) {
+        previous.focus()
+        if (document.activeElement === previous) return
+      }
+      if (onReturnFocus) onReturnFocus()
+      else document.getElementById(railId + '-open')?.focus()
     })
   }
   function openTarget(id: string, action: AssistantAction) {
@@ -301,8 +329,12 @@ export function CreationAssistantLayout({
       value={{
         host,
         open,
+        dockOpen: open && openHost === host,
         activated,
+        revealRequest,
         show: reveal,
+        select,
+        dismiss,
         close,
         resetTarget: () => setChosen(undefined),
         railId,
@@ -349,7 +381,13 @@ function mergeTurns(older: AssistantTurn[], fresh: AssistantTurn[]) {
   )
 }
 
-function AssistantConversationPanel({ context }: { context: AssistantContextValue }) {
+function AssistantConversationPanel({
+  context,
+  onClose,
+}: {
+  context: AssistantContextValue
+  onClose: () => void
+}) {
   const { location, selection, account } = context
   const [view, setView] = useState<AssistantView>('conversation')
   const [action, setAction] = useState<AssistantAction>(selection?.action ?? 'discuss')
@@ -619,40 +657,14 @@ function AssistantConversationPanel({ context }: { context: AssistantContextValu
 
   return (
     <>
-      <div
+      <WorkbenchTabs
+        id={tabsId}
+        label="助手视图"
+        items={assistantTabs}
+        value={view}
+        onChange={setView}
         className="wb-assistant-actions wb-assistant-tabs"
-        role="tablist"
-        aria-label="助手视图"
-        onKeyDown={(event) => {
-          const names = assistantTabs.map(([name]) => name)
-          const index = names.indexOf(view)
-          const next = {
-            ArrowLeft: names[(index + names.length - 1) % names.length],
-            ArrowRight: names[(index + 1) % names.length],
-            Home: names[0],
-            End: names.at(-1),
-          }[event.key]
-          if (!next) return
-          event.preventDefault()
-          setView(next)
-          document.getElementById(tabsId + '-' + next)?.focus()
-        }}
-      >
-        {assistantTabs.map(([name, title]) => (
-          <button
-            key={name}
-            id={tabsId + '-' + name}
-            type="button"
-            role="tab"
-            aria-controls={tabsId + '-panel-' + name}
-            aria-selected={view === name}
-            tabIndex={view === name ? 0 : -1}
-            onClick={() => setView(name)}
-          >
-            {title}
-          </button>
-        ))}
-      </div>
+      />
       <section
         role="tabpanel"
         id={tabsId + '-panel-history'}
@@ -701,7 +713,7 @@ function AssistantConversationPanel({ context }: { context: AssistantContextValu
         aria-labelledby={tabsId + '-tools'}
         hidden={view !== 'tools'}
       >
-        <button type="button" onClick={context.close}>
+        <button type="button" onClick={onClose}>
           返回本台工具
         </button>
       </section>
@@ -972,30 +984,45 @@ function AssistantConversationPanel({ context }: { context: AssistantContextValu
   )
 }
 
-export function WorkbenchAssistantRail({ embedded }: { embedded?: boolean } = {}) {
+export function WorkbenchAssistantRail({
+  embedded,
+  docked = false,
+  onReturnFocus,
+}: {
+  embedded?: boolean
+  docked?: boolean
+  onReturnFocus?: () => void
+} = {}) {
   const context = useContext(AssistantContext)
   const heading = useRef<HTMLHeadingElement>(null)
-  const open = context?.open
+  const open = docked ? context?.dockOpen : context?.open
+  const revealRequest = context?.revealRequest ?? 0
+  const focusedReveal = useRef(revealRequest)
   const locationKey = context && assistantLocationKey(context.location)
   useEffect(() => {
-    if (open) heading.current?.focus()
-  }, [open, locationKey])
+    const explicitlyRevealed = revealRequest !== focusedReveal.current
+    focusedReveal.current = revealRequest
+    if (open && (!docked || explicitlyRevealed)) heading.current?.focus()
+  }, [open, docked, revealRequest, locationKey])
   if (!context) return null
   const Region = (embedded ?? context.stage === 'M5') ? 'div' : 'aside'
   const title = specialists[context.stage]
+  const close = () => context.close(onReturnFocus)
   return (
     <>
-      <div className="wb-assistant-entry" hidden={open}>
-        <button
-          type="button"
-          id={context.railId + '-open'}
-          aria-expanded={false}
-          aria-controls={context.railId}
-          onClick={context.show}
-        >
-          {title}
-        </button>
-      </div>
+      {!docked && (
+        <div className="wb-assistant-entry" hidden={open}>
+          <button
+            type="button"
+            id={context.railId + '-open'}
+            aria-expanded={false}
+            aria-controls={context.railId}
+            onClick={context.show}
+          >
+            {title}
+          </button>
+        </div>
+      )}
       <Region
         className="wb-assistant-rail"
         role={Region === 'div' ? 'region' : undefined}
@@ -1005,7 +1032,7 @@ export function WorkbenchAssistantRail({ embedded }: { embedded?: boolean } = {}
         onKeyDown={(event) => {
           if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
             event.stopPropagation()
-            context.close()
+            close()
           }
         }}
       >
@@ -1013,11 +1040,15 @@ export function WorkbenchAssistantRail({ embedded }: { embedded?: boolean } = {}
           <h2 id={context.railId + '-heading'} ref={heading} tabIndex={-1}>
             {title}
           </h2>
-          <button type="button" onClick={context.close}>
-            收起助手
-          </button>
+          {!docked && (
+            <button type="button" onClick={close}>
+              收起助手
+            </button>
+          )}
         </header>
-        {context.activated && <AssistantConversationPanel key={locationKey} context={context} />}
+        {context.activated && (
+          <AssistantConversationPanel key={locationKey} context={context} onClose={close} />
+        )}
       </Region>
     </>
   )

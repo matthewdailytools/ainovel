@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { ConceptionState } from '../../frontend/conception'
+import { openWritingSources } from './helpers/writingTools'
 
 type Novel = { id: string; branch_id: string }
 
@@ -134,6 +135,7 @@ test('遗铃从确认设定到正文对账并保留过期证据', async ({ page 
   await editor.press('End')
   await editor.press('Enter')
   await page.keyboard.insertText('铜铃在门外响了。')
+  await openWritingSources(page)
   await page.getByText(/已确认世界设定 · 修订/).click()
   await page.getByText('铃声规则', { exact: true }).click()
   await page.getByRole('button', { name: '用此设定对账' }).click()

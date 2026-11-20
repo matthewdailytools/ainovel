@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { openWritingSources } from './helpers/writingTools'
 
 test('场景候选：原文核对、明确归档作者旧绑定、历史与正文保留', async ({ page }) => {
   await page.goto('/')
@@ -116,6 +117,7 @@ test('场景候选：原文核对、明确归档作者旧绑定、历史与正�
 
   await page.getByRole('button', { name: '写作', exact: true }).click()
   await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue('渡口问话')
+  await openWritingSources(page)
   await page.getByText('场景时点与人物当前状态', { exact: true }).click()
   await page.getByRole('button', { name: /^本章场景 · 范围已保存，时点未知/ }).click()
   await expect(

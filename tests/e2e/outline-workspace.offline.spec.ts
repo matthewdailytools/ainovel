@@ -1,4 +1,5 @@
 import { errors, expect, test } from '@playwright/test'
+import { openWritingSources } from './helpers/writingTools'
 
 test('新作可确认四级章纲，并从台账跳到对应章节', async ({ page }) => {
   await page.goto('/')
@@ -161,6 +162,7 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   const directory = page.getByRole('navigation', { name: '全书目录' })
   await expect(directory.getByText('拾铃卷', { exact: true })).toBeVisible()
   await expect(directory.getByRole('region', { name: '辨铃', exact: true })).toBeVisible()
+  await openWritingSources(page)
   await page.getByText('本章章纲引用的设定', { exact: true }).press('Enter')
   await page.getByText(`油灯库存 · 资源台账 · 修订 ${confirmation.revision}`, { exact: true }).press('Enter')
   await expect(page.getByText(inventory, { exact: true })).toBeVisible()
@@ -242,6 +244,7 @@ test('新作可确认四级章纲，并从台账跳到对应章节', async ({ pa
   await editor.press('ControlOrMeta+A')
   await page.keyboard.insertText(rewritten)
   await expect.poll(async () => (await (await page.request.get(chapterPath)).json()).content).toBe(rewritten)
+  await openWritingSources(page)
   await writingPromises.press('Enter')
   await expect(promiseRow()).toContainText('铃声为何消失 · 证据待复核')
   await openProof(promiseRow())

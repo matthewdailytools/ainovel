@@ -1,6 +1,7 @@
 import { expect, test, type APIResponse } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { authorSettingPlan } from './fixtures/authorSettingPlan'
+import { openWritingSources } from './helpers/writingTools'
 
 async function checked<T>(response: APIResponse): Promise<T> {
   expect(response.ok(), await response.text()).toBe(true)
@@ -18,6 +19,7 @@ test('写作右栏定位旧章纲的正式设定和正文证据，关闭后保�
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
   await expect(editor).toHaveText(original)
+  await openWritingSources(page)
   const usageTitle = page.getByText('设定的正文使用证据', { exact: true })
   await usageTitle.press('Enter')
   const usage = usageTitle.locator('..')
@@ -81,6 +83,7 @@ test('写作右栏定位旧章纲的正式设定和正文证据，关闭后保�
     await page.keyboard.insertText(unsaved)
     await expect(editor).toHaveText(original + unsaved)
     await page.setViewportSize({ width: 320, height: 860 })
+    await openWritingSources(page)
     const citations = page.getByText('本章章纲引用的设定', { exact: true })
     await citations.press('Enter')
     const item = citations

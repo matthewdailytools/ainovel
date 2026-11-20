@@ -6,14 +6,22 @@
   overflow-wrap: anywhere;
 }
 
-.assistant-panel.writing-actions > .section-title {
-  margin-bottom: 16px;
+.writing-workspace-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--workbench-control);
+  border-radius: 10px;
+  background: var(--workbench-shell);
 }
 
-.assistant-panel.writing-actions > .section-title h2 {
-  font-size: 1.2rem;
-  font-weight: 650;
-  line-height: 1.4;
+.writing-actions > [role='tabpanel'] {
+  margin-top: 16px;
+}
+
+.writing-actions > [role='tabpanel'][hidden] {
+  display: none;
 }
 
 .assistant-panel.writing-actions label,
@@ -77,6 +85,30 @@
   color: var(--workbench-accent);
 }
 
+.writing-actions .writing-workspace-tabs [role='tab'] {
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--workbench-muted);
+  font-size: 0.9rem;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.writing-actions .writing-workspace-tabs [role='tab']:hover {
+  color: var(--workbench-accent);
+  background: var(--workbench-accent-soft);
+}
+
+.writing-actions .writing-workspace-tabs [role='tab'][aria-selected='true'] {
+  border-color: var(--workbench-control);
+  background: var(--workbench-paper);
+  color: var(--workbench-accent);
+  font-weight: 650;
+}
+
 .writing-actions :is(a, button, input, select, summary, textarea):focus-visible,
 .writing-actions .wb-assistant-header h2:focus-visible {
   outline-color: var(--workbench-accent);
@@ -107,9 +139,7 @@
 }
 
 .assistant-panel.writing-actions .writing-task-output,
-.writing-actions > .writing-optimization-title,
-.writing-actions > .writing-advanced,
-.writing-actions > .writing-evidence {
+.writing-actions .writing-advanced {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--workbench-line);
@@ -133,13 +163,10 @@
   border-radius: 8px;
 }
 
-.writing-actions .wb-assistant-entry {
-  justify-content: flex-start;
-}
-
 .writing-actions .wb-assistant-rail {
-  background: #fff;
-  border-color: var(--workbench-line);
+  padding: 0;
+  border: 0;
+  background: var(--workbench-paper);
 }
 
 .writing-actions .wb-assistant-comparison {

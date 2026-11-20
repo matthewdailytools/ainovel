@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
+import { openWritingSources } from './helpers/writingTools'
 
 type Fixture = {
   id: string
@@ -145,6 +146,7 @@ test.describe.serial('提取场景重核：隔离离线真实API', () => {
     await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue(
       '回铺章——保留长中文标题及原文范围',
     )
+    await openWritingSources(page)
     await page.getByText('场景时点与人物当前状态', { exact: true }).click()
     const editor = page.getByRole('region', {
       name: '场景时点绑定',

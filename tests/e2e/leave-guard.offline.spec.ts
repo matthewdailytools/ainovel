@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { openWritingSources } from './helpers/writingTools'
 
 async function openScenePanelForChapter(page: Page, chapterTitle: string) {
   // A chapter-button click finishes before the asynchronous document load. Wait
@@ -7,6 +8,7 @@ async function openScenePanelForChapter(page: Page, chapterTitle: string) {
   const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
   await expect(editor).toHaveText(`${chapterTitle}正文😀。`)
   await expect(editor).toHaveAttribute('contenteditable', 'true')
+  await openWritingSources(page)
   const summary = page.getByText('场景时点与人物当前状态', { exact: true })
   await expect(summary).toBeVisible()
   const panel = summary.locator('xpath=..')

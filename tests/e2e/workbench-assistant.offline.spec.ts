@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { openBench } from './helpers/creationFlow'
+import { writingTools } from './helpers/writingTools'
 
 const original = '学徒找到一枚不鸣铜铃。'
 const proposal = '悬疑短篇，围绕能够回查的铜铃记录推进。'
@@ -30,6 +31,22 @@ async function openProject(page: Page) {
     .filter({ hasText: /^立项台/ })
     .click()
   return project
+}
+
+async function newWritingChapter(page: Page, title: string) {
+  const { route, headers } = await newWork(page, title)
+  const chapter = await page.request.post(`${route}/chapters`, { headers, data: { title: '试铃' } })
+  expect(chapter.ok(), await chapter.text()).toBeTruthy()
+  const { id } = (await chapter.json()) as { id: string }
+  const saved = await page.request.put(`/api/chapters/${id}`, {
+    headers,
+    data: { base_revision: 0, content: original },
+  })
+  expect(saved.ok(), await saved.text()).toBeTruthy()
+  await page.reload()
+  const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
+  await expect(editor).toHaveText(original)
+  return { route, editor }
 }
 
 test('立项快捷候选只写入所选字段，重开后回读多轮和载入记录', async ({ page }) => {
@@ -118,23 +135,81 @@ test('刷新历史后新问题仍发到新的对话', async ({ page }) => {
   expect((await older.json()).turns).toHaveLength(1)
 })
 
-test('正文选区经作者载入后保留编辑器撤销，校验台十项都有 AI 入口', async ({ page }) => {
-  const { route, headers } = await newWork(page, '助手验收 · 选区与校验')
-  const chapter = await page.request.post(`${route}/chapters`, { headers, data: { title: '试铃' } })
-  expect(chapter.ok(), await chapter.text()).toBeTruthy()
-  const { id } = (await chapter.json()) as { id: string }
-  const saved = await page.request.put(`/api/chapters/${id}`, {
-    headers,
-    data: { base_revision: 0, content: original },
+test('写作工具可并列切换，保留未提交要求，读资料和准备提取时不运行模型', async ({ page }) => {
+  const { editor } = await newWritingChapter(page, '助手验收 · 写作工具')
+  const tools = writingTools(page)
+  const generation = tools.getByRole('tab', { name: '生成与候选', exact: true })
+  const assistant = tools.getByRole('tab', { name: 'AI 助手', exact: true })
+  const sources = tools.getByRole('tab', { name: '资料与依据', exact: true })
+  await expect(tools.getByRole('tab')).toHaveText(['生成与候选', 'AI 助手', '资料与依据'])
+  await expect(generation).toHaveAttribute('aria-selected', 'true')
+  const modelRequests: string[] = []
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname
+    if (
+      request.method() === 'POST' &&
+      (path === '/api/modules' || /\/assistant\/conversations(?:\/|$)/.test(path))
+    )
+      modelRequests.push(path)
   })
-  expect(saved.ok(), await saved.text()).toBeTruthy()
-  await page.reload()
-  const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
+  const prompt = page.getByRole('textbox', { name: '情节或具体要求', exact: true })
+  const pending = '查清旧铃在哪里丢失，先保留这段要求。'
+  await prompt.fill(pending)
+
+  await generation.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(assistant).toBeFocused()
+  await assistant.press('Enter')
+  await expect(assistant).toHaveAttribute('aria-selected', 'true')
+  const question = page.getByRole('textbox', { name: '创作问题' })
+  await expect(question).toBeVisible()
+  await question.fill('这一段的悬念是否清楚？')
+  await expect(prompt).toBeHidden()
+
+  await assistant.focus()
+  await page.keyboard.press('End')
+  await expect(sources).toBeFocused()
+  await sources.press('Enter')
+  await expect(sources).toHaveAttribute('aria-selected', 'true')
+  await expect(question).toBeHidden()
+  await page.setViewportSize({ width: 320, height: 860 })
+  const generateLink = page.getByRole('link', { name: '去生成候选', exact: true })
+  await expect(generateLink).toBeVisible()
+  await generateLink.press('Enter')
+  await expect(generation).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('#writing-task-form')).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(prompt).toBeFocused()
+  await expect(prompt).toHaveValue(pending)
+
+  await assistant.click()
+  await expect(question).toHaveValue('这一段的悬念是否清楚？')
+  await sources.click()
+  await page.getByText(/^写到这里的故事记录 ·/).click()
+  await page.getByRole('button', { name: '准备提取本章故事记录', exact: true }).click()
+  await expect(generation).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('combobox', { name: '这次要做什么', exact: true })).toHaveValue(
+    'memory.extract',
+  )
+  await expect(prompt).toHaveValue(/提取当前正文中有逐字依据/)
   await expect(editor).toHaveText(original)
+  expect(modelRequests).toEqual([])
+})
+
+test('正文选区经作者载入后保留编辑器撤销，校验台十项都有 AI 入口', async ({ page }) => {
+  const { route, editor } = await newWritingChapter(page, '助手验收 · 选区与校验')
   await editor.press('Control+a')
-  await page.getByRole('button', { name: 'AI 改写选区 · 试铃 · 正文选区', exact: true }).click()
+  const inline = page.getByRole('button', { name: 'AI 改写选区 · 试铃 · 正文选区', exact: true })
+  const assistant = writingTools(page).getByRole('tab', { name: 'AI 助手', exact: true })
+  await inline.click()
+  await expect(assistant).toHaveAttribute('aria-selected', 'true')
   const rail = page.locator('.wb-assistant-rail')
-  await rail.getByText('比较建议', { exact: true }).click()
+  const compare = rail.getByText('比较建议', { exact: true })
+  await compare.click()
+  await page.keyboard.press('Escape')
+  await expect(inline).toBeFocused()
+  await assistant.click()
+  await expect(compare).toBeVisible()
   await rail.getByRole('button', { name: '写入当前草稿', exact: true }).click()
   await expect(editor).toContainText('铜铃没有响，学徒把这一点记了下来。')
   await editor.press('Control+z')

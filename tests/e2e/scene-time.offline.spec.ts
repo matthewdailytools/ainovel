@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { openWritingSources } from './helpers/writingTools'
 
 test('场景时点：绑定人物视角、隔离未来能力、保留绑定历史', async ({ page }) => {
   await page.goto('/')
@@ -58,6 +59,7 @@ test('场景时点：绑定人物视角、隔离未来能力、保留绑定历�
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(n.id)
   await page.getByRole('button', { name: /02 倒叙与以后/ }).click()
   await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue('倒叙与以后')
+  await openWritingSources(page)
   await page.getByText('场景时点与人物当前状态', { exact: true }).click()
   const panel = page.getByRole('region', { name: '场景时点绑定', exact: true })
   await panel.getByRole('textbox', { name: '场景名称', exact: true }).fill('回忆之前')

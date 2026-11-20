@@ -2,6 +2,7 @@ import { expect, test, type APIResponse, type Locator, type Page, type Response 
 import { createHash } from 'node:crypto'
 import { authorSettingPlan } from './fixtures/authorSettingPlan'
 import { openBench } from './helpers/creationFlow'
+import { openWritingSources } from './helpers/writingTools'
 
 async function accepted(response: APIResponse | Response) {
   expect(response.ok(), await response.text()).toBe(true)
@@ -82,6 +83,7 @@ test('M6-08 经真实云同步回读精确原文，撤回后新设备仍能查�
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
   await expect(editor).toHaveText(original)
+  await openWritingSources(page)
   const title = page.getByText('设定的正文使用证据', { exact: true })
   await title.press('Enter')
   const writing = title.locator('..')
@@ -168,6 +170,7 @@ test('M6-08 经真实云同步回读精确原文，撤回后新设备仍能查�
   }
 
   await openBench(page, '写作台', true)
+  await openWritingSources(page)
   await title.press('Enter')
   const adopted = writing.getByText('守铃人阿陶 · 当前正文证据', { exact: true })
   await adopted.press('Enter')
