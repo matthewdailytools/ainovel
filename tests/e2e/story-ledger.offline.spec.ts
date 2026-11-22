@@ -285,6 +285,7 @@ test('跨章台账：计划窗口、设定生效、伏笔全过程和单项复�
   const effectiveReminder = today.getByRole('button', { name: /青灯规则首次生效.*生效待复检.*第 1 章/ })
   await expect(effectiveReminder).toBeVisible()
   await effectiveReminder.click()
+  await expect(stage(settingPlanTitle, '生效')).toBeVisible()
   await record(settingPlanTitle, '生效', revisedRule, true, true)
   await expect(effectiveReminder).toHaveCount(0)
   await expect(today.getByRole('button', { name: /半片铜叶的来历.*埋设待复检.*第 1 章/ })).toBeVisible()

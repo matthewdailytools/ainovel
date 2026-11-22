@@ -69,6 +69,15 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if instruction.get("action") == "workspace.chat":
+            context = value["上下文"]
+            assert "author_contract" not in context and "genre_profile" not in context
+            count = len(context["同版本此前对话"])
+            return {
+                "text": f"序号 {count + 1} · 按当前{context['当前对象']}回答：{instruction['问题']}",
+                "usage": {"input": 1, "output": 1},
+                "reason": "stop",
+            }
         if instruction.get("action") == "review.chapter.item":
             condition = instruction["condition"]
             sources = instruction["sources"]

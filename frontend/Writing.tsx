@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import {
   api,
   label,
@@ -13,6 +13,9 @@ import {
 } from './api'
 import type { Notify } from './App'
 import { Difference, Editor, type Selection } from './Editor'
+import { ManuscriptTree } from './ManuscriptTree'
+import type { SettingKind } from './workspaceSettingsKinds'
+import { readWorkspacePosition, rememberWorkspacePosition, type ReadingPosition } from './workspacePosition'
 import { readDraft, writeDraft, type Draft } from './drafts'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
@@ -76,6 +79,13 @@ const actions = [
 ] as const
 const designActions = new Set<ModuleInput['action']>(['world.generate', 'character.generate', 'outline.plan'])
 const designKinds = new Set(['world', 'characters', 'outline'])
+const workspaceScopes = ['workspace-setting', 'workspace-chat']
+const WorkspaceChat = lazy(() =>
+  import('./WorkspaceChat').then(({ WorkspaceChat }) => ({ default: WorkspaceChat })),
+)
+const WorkspaceSettings = lazy(() =>
+  import('./WorkspaceSettings').then(({ WorkspaceSettings }) => ({ default: WorkspaceSettings })),
+)
 const actionsWithConception = new Set<ModuleInput['action']>([
   'writing.advise',
   'writing.rewrite_selection',
@@ -99,7 +109,6 @@ export function Writing({
   account,
   modelReady,
   notify,
-  onGenreSettings,
   feedbackHandoff,
   onClearFeedback,
   conceptionHandoff,
@@ -110,7 +119,6 @@ export function Writing({
   account: string
   modelReady: boolean
   notify: Notify
-  onGenreSettings: () => void
   feedbackHandoff?: FeedbackHandoff
   onClearFeedback: () => void
   conceptionHandoff?: ConceptionHandoff
@@ -124,6 +132,16 @@ export function Writing({
   const [archived, setArchived] = useState<Chapter[]>([])
   const [archiveConfirmed, setArchiveConfirmed] = useState(false)
   const [chapter, setChapter] = useState<Chapter>()
+  const [setting, setSetting] = useState<SettingKind>()
+  const [settingsVersion, setSettingsVersion] = useState(0)
+  const settingPane = useRef<HTMLElement>(null)
+  const chapterPane = useRef<HTMLElement>(null)
+  const lastPaneWasSetting = useRef(false)
+  useEffect(() => {
+    if (setting) settingPane.current?.focus()
+    else if (lastPaneWasSetting.current) chapterPane.current?.focus()
+    lastPaneWasSetting.current = !!setting
+  }, [setting])
   const [editorKey, setEditorKey] = useState('')
   const [text, setText] = useState('')
   const [saved, setSaved] = useState('未打开章节')
@@ -133,7 +151,13 @@ export function Writing({
   const [editorScroll, setEditorScroll] = useState<number>()
   const chapterViews = useRef(new Map<string, { revision: number; cursor: number; scrollTop: number }>())
   const [note, setNote] = useState('')
-  const reading = useRef({ revision: 0 })
+  const reading = useRef({
+    revision: 0,
+    cursor: 0,
+    note: '',
+    pending: undefined as ReadingPosition | undefined,
+  })
+  const pendingReading = useRef<Promise<void> | null>(null)
   const [recovery, setRecovery] = useState<Draft>()
   const writingContext = useWritingContext(branch.id, chapter)
   const ledger = useContinuityLedger(branch.id, chapter)
@@ -205,8 +229,8 @@ export function Writing({
     }
   }, [])
   const refresh = async () => setChapters(await api(`/branches/${branch.id}/chapters`))
-  async function loadChapter(id: string, at?: number, authoritative = false) {
-    if (current.current && current.current.id !== id && !confirmLeave()) return
+  async function loadChapter(id: string, at?: number, authoritative = false, leaveConfirmed = false) {
+    if (current.current && current.current.id !== id && !leaveConfirmed && !confirmLeave()) return
     const token = ++loadSequence.current
     ++historyRequest.current
     setHistoryLoading(false)
@@ -241,6 +265,7 @@ export function Writing({
       const view = chapterViews.current.get(id)
       const sameDraft = !authoritative && view?.revision === row.revision
       const start = Math.min(draftText.current.length, at ?? (sameDraft ? view.cursor : 0))
+      reading.current.cursor = start
       setSelection({ start, end: start, text: '' })
       setCursor(start)
       setEditorScroll(at === undefined && sameDraft ? view.scrollTop : undefined)
@@ -268,21 +293,25 @@ export function Writing({
       try {
         const [rows, state] = await Promise.all([
           api<Chapter[]>(`/branches/${branch.id}/chapters`),
-          api<{ chapter_id: string | null; cursor: number; note: string; revision: number }>(
-            `/branches/${branch.id}/reading-state`,
-          ),
+          api<ReadingPosition>(`/branches/${branch.id}/reading-state`),
         ])
         if (!active) return
         setChapters(rows)
-        setNote(state.note)
+        const cached = readWorkspacePosition(branch.id, rows, state)
+        const handoff = rows.find((c) => c.id === feedbackHandoff?.chapter_id)
+        const remembered = rows.find((c) => c.id === state.chapter_id)
+        reading.current.note = cached?.note ?? state.note
+        setNote(reading.current.note)
         reading.current.revision = state.revision
-        if (rows.length)
-          await loadChapter(
-            rows.find((c) => c.id === feedbackHandoff?.chapter_id)?.id ||
-              rows.find((c) => c.id === state.chapter_id)?.id ||
-              rows[0].id,
-            feedbackHandoff ? 0 : state.cursor,
-          )
+        if (handoff) await loadChapter(handoff.id, 0)
+        else if (cached) {
+          chapterViews.current.set(cached.chapterId, {
+            revision: cached.chapterRevision,
+            cursor: cached.cursor,
+            scrollTop: cached.scrollTop ?? 0,
+          })
+          await loadChapter(cached.chapterId, cached.scrollTop === undefined ? cached.cursor : undefined)
+        } else if (rows.length) await loadChapter(remembered?.id ?? rows[0].id, remembered ? state.cursor : 0)
       } catch (e) {
         if (active) notify(e)
       } finally {
@@ -345,6 +374,28 @@ export function Writing({
       })
   }
   useEffect(() => {
+    function remember() {
+      const chapter = current.current
+      if (!chapter || draftText.current !== chapter.content) return
+      const { cursor, note, revision, pending } = reading.current
+      const view = chapterViews.current.get(chapter.id)
+      rememberWorkspacePosition(branch.id, {
+        chapterId: chapter.id,
+        chapterRevision: chapter.revision,
+        readingRevision: revision,
+        cursor,
+        note,
+        pending,
+        scrollTop: view?.revision === chapter.revision ? view.scrollTop : undefined,
+      })
+    }
+    window.addEventListener('pagehide', remember)
+    return () => {
+      window.removeEventListener('pagehide', remember)
+      remember()
+    }
+  }, [branch.id])
+  useEffect(() => {
     if (!dirty || recovery) return
     const timer = setTimeout(() => void save().catch(notify), 900)
     return () => clearTimeout(timer)
@@ -361,21 +412,48 @@ export function Writing({
   }, [])
   useEffect(() => {
     if (!chapter || !editorKey) return
-    const timer = setTimeout(() => {
-      if (!current.current || draftText.current !== current.current.content) return
-      void api<{ revision: number }>(`/branches/${branch.id}/reading-state`, 'PUT', {
-        chapter_id: current.current.id,
-        cursor: Math.min(selection.end, current.current.content.length),
-        note,
-        base_revision: reading.current.revision,
+    let active = true
+    async function sync() {
+      await pendingReading.current
+      const row = current.current
+      if (
+        !active ||
+        !row ||
+        row.id !== chapter?.id ||
+        row.revision !== chapter.revision ||
+        draftText.current !== row.content
+      )
+        return
+      const position = {
+        chapter_id: row.id,
+        cursor: Math.min(reading.current.cursor, row.content.length),
+        note: reading.current.note,
+        revision: reading.current.revision,
+      }
+      reading.current.pending = position
+      pendingReading.current = api<{ revision: number }>(`/branches/${branch.id}/reading-state`, 'PUT', {
+        chapter_id: position.chapter_id,
+        cursor: position.cursor,
+        note: position.note,
+        base_revision: position.revision,
       })
         .then((row) => {
           reading.current.revision = row.revision
         })
-        .catch(notify)
-    }, 1200)
-    return () => clearTimeout(timer)
-  }, [chapter?.id, selection.end, note])
+        .catch((error) => {
+          if (alive.current) notify(error)
+        })
+        .finally(() => {
+          reading.current.pending = undefined
+          pendingReading.current = null
+        })
+    }
+    const timer = setTimeout(() => void sync(), 1200)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [chapter?.id, chapter?.revision, selection.end, note])
   useEffect(() => {
     let active = true
     const poll = async () => {
@@ -387,7 +465,7 @@ export function Writing({
         ])
         if (active) {
           setArtifacts((rows) => refreshArtifactList(rows, a))
-          setTasks(t)
+          setTasks(t.filter((task) => task.kind !== 'workspace_chat'))
           setReferences(r)
         }
       } catch (e) {
@@ -477,14 +555,42 @@ export function Writing({
       if (alive.current && historyRequest.current === request) setHistoryLoading(false)
     }
   }
+  function chooseSetting(kind: SettingKind) {
+    if (busy || opening || loading || setting === kind || !confirmLeave(workspaceScopes)) return
+    void doAction(async () => {
+      if (current.current && draftText.current !== current.current.content) await save()
+      setSetting(kind)
+    })
+  }
+  function chooseChapter(id: string) {
+    if (busy || opening || loading) return
+    if (current.current?.id === id) {
+      if (setting && confirmLeave(workspaceScopes)) setSetting(undefined)
+      return
+    }
+    if (!(setting ? confirmLeave(workspaceScopes) : confirmLeave())) return
+    void doAction(async () => {
+      if (current.current && draftText.current !== current.current.content) await save()
+      await loadChapter(id, undefined, false, true)
+      if (current.current?.id === id) setSetting(undefined)
+    })
+  }
+  function settingsSaved() {
+    writingContext.reload()
+    setSeenGenre(undefined)
+    setSeenContract(undefined)
+    setSettingsVersion((value) => value + 1)
+  }
   async function createChapter() {
+    if (!confirmLeave(setting ? workspaceScopes : undefined)) return
     await doAction(async () => {
       if (current.current) await save()
       const row = await api<Chapter>(`/branches/${branch.id}/chapters`, 'POST', {
         title: `第${chapters.length + 1}章`,
       })
       await refresh()
-      await loadChapter(row.id)
+      await loadChapter(row.id, undefined, false, true)
+      if (current.current?.id === row.id) setSetting(undefined)
     })
   }
   async function loadAdviceDirection(source: Artifact, selected: string): Promise<boolean> {
@@ -636,7 +742,7 @@ export function Writing({
   function visitLedger(target: LedgerTarget) {
     void doAction(async () => {
       if (!current.current || ledger.busy) return
-      await save()
+      if (draftText.current !== current.current.content) await save()
       if (target.chapter_id !== current.current.id || target.source) await loadChapter(target.chapter_id)
       const row = current.current
       if (row?.id !== target.chapter_id) return
@@ -653,7 +759,7 @@ export function Writing({
   }
   return (
     <div className="writing-layout">
-      <aside className="chapter-sidebar">
+      <aside className="chapter-sidebar" aria-label="作品目录">
         <div className="section-title">
           <span className="eyebrow">作品目录</span>
           <button onClick={createChapter} disabled={busy || loading}>
@@ -666,36 +772,27 @@ export function Writing({
             ? '正在读取章节…'
             : `${chapters.length} 章 · ${chapters.filter((c) => c.stale).length} 章待复检`}
         </p>
-        <ol className="chapter-list">
-          {chapters.map((c) => (
-            <li key={c.id}>
-              <button
-                aria-current={c.id === chapter?.id ? 'true' : undefined}
-                onClick={() =>
-                  void doAction(async () => {
-                    if (current.current) await save()
-                    await loadChapter(c.id)
-                  })
-                }
-              >
-                <span className="chapter-number">{String(c.position).padStart(2, '0')}</span>
-                <span>
-                  {c.title}
-                  <small>
-                    {c.chars || 0} 字符（含空白）{c.stale ? ' · 前文变更，待复检' : ''}
-                  </small>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ol>
-        <div className="sidebar-bottom">
+        <ManuscriptTree
+          branch={branch}
+          chapters={chapters}
+          activeChapterId={chapter?.id}
+          setting={setting}
+          disabled={busy || opening || loading}
+          chooseChapter={chooseChapter}
+          chooseSetting={chooseSetting}
+          notify={notify}
+        />
+        <div className="sidebar-bottom" hidden={!!setting}>
           <label>
             下次从这里继续
             <textarea
               rows={3}
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              maxLength={5000}
+              onChange={(e) => {
+                reading.current.note = e.target.value
+                setNote(e.target.value)
+              }}
               placeholder="当前卡点、下一场景、要查的资料…"
             />
           </label>
@@ -819,7 +916,28 @@ export function Writing({
           </details>
         </div>
       </aside>
-      <section className="manuscript" aria-label="正文写作">
+      {setting && (
+        <section ref={settingPane} className="workspace-setting-pane" aria-label="设定编辑" tabIndex={-1}>
+          <Suspense fallback={<p role="status">正在打开设定…</p>}>
+            <WorkspaceSettings
+              key={setting}
+              branch={branch}
+              kind={setting}
+              account={account}
+              modelReady={modelReady}
+              notify={notify}
+              onSaved={settingsSaved}
+            />
+          </Suspense>
+        </section>
+      )}
+      <section
+        ref={chapterPane}
+        className="manuscript"
+        aria-label="正文写作"
+        tabIndex={-1}
+        hidden={!!setting}
+      >
         {importOpen && (
           <ManuscriptImport
             key={branch.id}
@@ -956,10 +1074,13 @@ export function Writing({
               revealSelection={ledgerSelection}
               readOnly={busy || opening}
               onChange={change}
-              onSelection={setSelection}
+              onSelection={(selected) => {
+                reading.current.cursor = selected.end
+                setSelection(selected)
+              }}
               onViewPosition={(cursor, scrollTop) => {
                 const row = current.current
-                if (row?.id === chapter.id)
+                if (!setting && row?.id === chapter.id)
                   chapterViews.current.set(row.id, { revision: row.revision, cursor, scrollTop })
               }}
             />
@@ -983,566 +1104,590 @@ export function Writing({
         )}
       </section>
       <aside className="assistant-panel" aria-label="创作辅助">
-        <div className="section-title">
-          <h2>创作辅助</h2>
-          <span className="badge">作者决定采纳</span>
-        </div>
-        {chapter && !opening && (
-          <>
-            <ChapterSettings
-              key={chapter.id}
-              context={writingContext}
-              branchId={branch.id}
-              chapterId={chapter.id}
-            />
-            <ChapterTechniqueReferences
-              key={chapter.id}
-              branchId={branch.id}
-              chapterId={chapter.id}
-              selected={selectedTechniques}
-              enabled={techniqueEnabled}
-              disabled={busy || !!activeTask}
-              onChange={setSelectedTechniques}
-            />
-            <ChapterChecks
-              key={chapter.id}
-              chapter={chapter}
-              settings={writingContext.data?.settings}
-              saved={text === chapter.content && !recovery}
-              disabled={busy || !!activeTask}
-              account={account}
-              modelReady={modelReady}
-              tasks={tasks}
-              onTask={(task) => setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])}
-            />
-            <ContinuityLedger
-              ledger={ledger}
-              chapter={chapter}
-              selection={selection}
-              saved={text === chapter.content && !recovery}
-              disabled={busy}
-              settings={writingContext.data?.settings}
-              target={ledgerTarget}
-              visit={visitLedger}
-            />
-          </>
-        )}
-        <AuthorContractNotice
-          branchId={branch.id}
-          onSettings={onGenreSettings}
-          onResolved={setSeenContract}
-        />
-        <ChapterContext
-          branchId={branch.id}
-          chapter={chapter}
-          artifacts={artifacts}
-          onExtract={() => {
-            setAction('memory.extract')
-            setInstruction(
-              '提取当前正文中有逐字依据的事件、人物认知、能力资源和伏笔；未知保留未知，候选先供作者核对。',
-            )
-          }}
-        />
-        {chapter && !opening && (
-          <SceneTimePanel
-            key={chapter.id}
+        <Suspense fallback={<p role="status">正在打开 AI 对话…</p>}>
+          <WorkspaceChat
+            key={setting || chapter?.id || 'empty'}
+            branch={branch}
+            setting={setting}
+            chapter={setting ? undefined : chapter}
+            account={account}
+            modelReady={modelReady}
+            notify={notify}
+            refreshKey={settingsVersion}
+            draftDirty={!setting && (!!recovery || opening || text !== chapter?.content)}
+          />
+        </Suspense>
+        <div className="writing-chapter-tools" hidden={!!setting}>
+          <h2>本章工具与设置</h2>
+          {chapter && !opening && (
+            <>
+              <ChapterSettings
+                key={chapter.id}
+                context={writingContext}
+                branchId={branch.id}
+                chapterId={chapter.id}
+              />
+              <ChapterTechniqueReferences
+                key={chapter.id}
+                branchId={branch.id}
+                chapterId={chapter.id}
+                selected={selectedTechniques}
+                enabled={techniqueEnabled}
+                disabled={busy || !!activeTask}
+                onChange={setSelectedTechniques}
+              />
+              <ChapterChecks
+                key={chapter.id}
+                chapter={chapter}
+                settings={writingContext.data?.settings}
+                saved={text === chapter.content && !recovery}
+                disabled={busy || !!activeTask}
+                account={account}
+                modelReady={modelReady}
+                tasks={tasks}
+                onTask={(task) => setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])}
+              />
+              <ContinuityLedger
+                ledger={ledger}
+                chapter={chapter}
+                selection={selection}
+                saved={text === chapter.content && !recovery}
+                disabled={busy}
+                settings={writingContext.data?.settings}
+                target={ledgerTarget}
+                visit={visitLedger}
+              />
+            </>
+          )}
+          <AuthorContractNotice
+            key={`intent-${settingsVersion}`}
+            branchId={branch.id}
+            onSettings={() => chooseSetting('intent')}
+            onResolved={setSeenContract}
+          />
+          <ChapterContext
             branchId={branch.id}
             chapter={chapter}
-            cursor={selection.start}
-            selection={selection}
-            notify={notify}
+            artifacts={artifacts}
+            onExtract={() => {
+              setAction('memory.extract')
+              setInstruction(
+                '提取当前正文中有逐字依据的事件、人物认知、能力资源和伏笔；未知保留未知，候选先供作者核对。',
+              )
+            }}
           />
-        )}
-        <GenreProfileNotice branchId={branch.id} onSettings={onGenreSettings} onResolved={setSeenGenre} />
-        {conception && (
-          <div className="notice">
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={useConception}
-                onChange={(event) => setUseConception(event.target.checked)}
-              />
-              使用已确认构思（修订 {conception.revision}）
-            </label>
-            <p className="small">
-              {actionsWithConception.has(action) ? '所选任务会使用构思设定。' : '当前动作使用独立资料。'}
-            </p>
-            <button type="button" onClick={onConceptionSettings}>
-              回到构思工作台
-            </button>
-          </div>
-        )}
-        {feedbackHandoff && (
-          <section className="notice" aria-label="手动反馈局部修订">
-            <h3>手动反馈 → 作者选区修订</h3>
-            <p>
-              {feedbackHandoff.category} · {feedbackHandoff.title} · 来源修订{' '}
-              {feedbackHandoff.source_revision}
-            </p>
-            <p>
-              这是人工意见，未作为独立模型审稿结论。请核对原反馈，亲自在正文选择修订范围并确认要求；生成结果仍是待采用候选。
-            </p>
-            <p>{feedbackHandoff.text}</p>
-            <blockquote>{feedbackHandoff.source_quote || '原反馈没有引用，请自行定位。'}</blockquote>
-            {chapter?.id !== feedbackHandoff.chapter_id ? (
-              <p role="alert">当前不是反馈对应章节，请从目录回到“{feedbackHandoff.title}”。</p>
-            ) : chapter.revision !== feedbackHandoff.source_revision ? (
+          {chapter && !opening && (
+            <SceneTimePanel
+              key={chapter.id}
+              branchId={branch.id}
+              chapter={chapter}
+              cursor={selection.start}
+              selection={selection}
+              notify={notify}
+            />
+          )}
+          <GenreProfileNotice
+            key={`reader-${settingsVersion}`}
+            branchId={branch.id}
+            onSettings={() => chooseSetting('reader')}
+            onResolved={setSeenGenre}
+          />
+          {conception && (
+            <div className="notice">
               <label className="check">
                 <input
                   type="checkbox"
-                  checked={confirmedFeedbackRevision === chapter.revision}
-                  onChange={(e) => setConfirmedFeedbackRevision(e.target.checked ? chapter.revision : null)}
+                  checked={useConception}
+                  onChange={(event) => setUseConception(event.target.checked)}
                 />
-                我已核对当前保存稿修订 {chapter.revision}，并将重新选择范围；旧反馈引用不代表当前正文
+                使用已确认构思（修订 {conception.revision}）
               </label>
-            ) : (
-              <p>当前稿与反馈来源修订一致，仍需亲自选择范围。</p>
-            )}
-            <p>
-              当前选区：{selection.start}—{selection.end}（UTF-16）。仅所选文字可被候选替换。
-            </p>
-            <button onClick={onClearFeedback}>退出反馈修订，保留正文</button>
-          </section>
-        )}
-        <form onSubmit={generate}>
-          {tasks[0]?.payload.instruction && actions.some(([id]) => id === tasks[0].payload.action) && (
-            <button
-              type="button"
-              onClick={() => {
-                try {
-                  const previous = tasks[0].payload
-                  const restored =
-                    previous.action === 'writing.expand_plot'
-                      ? readDirectionExpansionInstruction(previous.instruction || '')
-                      : undefined
-                  if (restored) {
-                    if (!current.current) throw new Error('请先打开方向任务对应章节。')
-                    checkDirectionTarget(restored.basis, {
-                      novelId: novel.id,
-                      branchId: branch.id,
-                      chapterId: current.current.id,
-                      revision: current.current.revision,
-                    })
-                  }
-                  if (directionBasis && !confirmLeave()) return
-                  setDirectionBasis(restored?.basis)
-                  setInstruction(restored?.instruction ?? previous.instruction ?? '')
-                  setAction(previous.action || 'writing.advise')
-                  setPlotContractCheck(plotAuditEnabled(previous.action || '', previous.plot_contract_check))
-                  setSourceIdentityContext(previous.source_identity_context === true)
-                  if (previous.action && designActions.has(previous.action))
-                    setDesignScope(
-                      'chapter_id' in previous && typeof previous.chapter_id === 'string'
-                        ? 'chapter'
-                        : 'book',
-                    )
-                  setFixed(previous.fixed?.join('\n') || '')
-                  setProfile(previous.writing_profile || presets[0])
-                } catch (error) {
-                  notify(error)
-                }
-              }}
-            >
-              恢复最近任务的输入
-            </button>
-          )}
-          <label>
-            这次要做什么
-            <select
-              value={action}
-              onChange={(e) => {
-                const next = e.target.value as ModuleInput['action']
-                if (designActions.has(next)) setDesignScope('book')
-                if (!plotAuditEnabled(next, true)) setPlotContractCheck(false)
-                setAction(next)
-              }}
-            >
-              {actions.map(([id, title]) => (
-                <option key={id} value={id}>
-                  {title}
-                </option>
-              ))}
-            </select>
-          </label>
-          {designActions.has(action) && (
-            <>
-              <label>
-                设定作用范围
-                <select
-                  value={designScope}
-                  onChange={(e) => setDesignScope(e.target.value as 'book' | 'chapter')}
-                >
-                  <option value="book">本书设定（采用后供后续任务使用）</option>
-                  <option value="chapter">本章资料（仅保存参考）</option>
-                </select>
-              </label>
-              <p className="small muted">
-                {designScope === 'book'
-                  ? '生成独立的本书设定候选，作者采用后才供当前工作版本的后续任务使用。'
-                  : `生成${chapter ? `“${chapter.title}”的` : '当前章的'}参考资料，采用仅保存在本章，不进入全书设定。`}
-                世界、人物和粗纲都是创作安排，不自动成为已发生的故事事实；已有章级资料不会自动升级为本书设定。
+              <p className="small">
+                {actionsWithConception.has(action) ? '所选任务会使用构思设定。' : '当前动作使用独立资料。'}
               </p>
-            </>
-          )}
-          {directionBasis && (
-            <section className="notice" aria-label="作者选定方向来源">
-              <p role="status">方向已载入本章补写表单；载入操作本身未生成或改动正文。可继续编辑情节要求。</p>
-              <p className="small muted">
-                来源建议 {directionBasis.advice_id} · 候选版本 {directionBasis.candidate_revision} · 原稿修订{' '}
-                {directionBasis.source_revision ?? '未绑定'}；目标章 {chapter?.title}（
-                {directionBasis.chapter_id}），载入时保存稿修订 {directionBasis.loaded_revision}
-                。建议是启发记录，不是本书设定。
-              </p>
-              <button type="button" onClick={() => setDirectionBasis(undefined)}>
-                清除方向来源，保留当前要求
+              <button type="button" onClick={onConceptionSettings}>
+                回到构思工作台
               </button>
+            </div>
+          )}
+          {feedbackHandoff && (
+            <section className="notice" aria-label="手动反馈局部修订">
+              <h3>手动反馈 → 作者选区修订</h3>
+              <p>
+                {feedbackHandoff.category} · {feedbackHandoff.title} · 来源修订{' '}
+                {feedbackHandoff.source_revision}
+              </p>
+              <p>
+                这是人工意见，未作为独立模型审稿结论。请核对原反馈，亲自在正文选择修订范围并确认要求；生成结果仍是待采用候选。
+              </p>
+              <p>{feedbackHandoff.text}</p>
+              <blockquote>{feedbackHandoff.source_quote || '原反馈没有引用，请自行定位。'}</blockquote>
+              {chapter?.id !== feedbackHandoff.chapter_id ? (
+                <p role="alert">当前不是反馈对应章节，请从目录回到“{feedbackHandoff.title}”。</p>
+              ) : chapter.revision !== feedbackHandoff.source_revision ? (
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={confirmedFeedbackRevision === chapter.revision}
+                    onChange={(e) => setConfirmedFeedbackRevision(e.target.checked ? chapter.revision : null)}
+                  />
+                  我已核对当前保存稿修订 {chapter.revision}，并将重新选择范围；旧反馈引用不代表当前正文
+                </label>
+              ) : (
+                <p>当前稿与反馈来源修订一致，仍需亲自选择范围。</p>
+              )}
+              <p>
+                当前选区：{selection.start}—{selection.end}（UTF-16）。仅所选文字可被候选替换。
+              </p>
+              <button onClick={onClearFeedback}>退出反馈修订，保留正文</button>
             </section>
           )}
-          <label>
-            情节或具体要求
-            <textarea
-              ref={instructionField}
-              value={instruction}
-              onChange={(e) => setInstruction(e.target.value)}
-              rows={5}
-              required
-              maxLength={20_000}
-              placeholder="例如：两人在渡口议价，交易失败且不发生战斗。补足试探和收场。"
-            />
-          </label>
-          {plotAuditEnabled(action, true) && (
-            <PlotAuditOption
-              checked={plotContractCheck}
-              disabled={busy}
-              onChange={setPlotContractCheck}
-              identityChecked={sourceIdentityContext}
-              onIdentityChange={setSourceIdentityContext}
-            />
-          )}
-          <details>
-            <summary>固定条件、写法与资料包</summary>
-            <label>
-              必须保持的条件（每行一条）
-              <textarea value={fixed} onChange={(e) => setFixed(e.target.value)} rows={3} />
-            </label>
-            <label>
-              常用写法
-              <select
-                onChange={(e) => setProfile(e.target.value)}
-                value={presets.includes(profile) ? profile : ''}
+          <form onSubmit={generate}>
+            {tasks[0]?.payload.instruction && actions.some(([id]) => id === tasks[0].payload.action) && (
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    const previous = tasks[0].payload
+                    const restored =
+                      previous.action === 'writing.expand_plot'
+                        ? readDirectionExpansionInstruction(previous.instruction || '')
+                        : undefined
+                    if (restored) {
+                      if (!current.current) throw new Error('请先打开方向任务对应章节。')
+                      checkDirectionTarget(restored.basis, {
+                        novelId: novel.id,
+                        branchId: branch.id,
+                        chapterId: current.current.id,
+                        revision: current.current.revision,
+                      })
+                    }
+                    if (directionBasis && !confirmLeave()) return
+                    setDirectionBasis(restored?.basis)
+                    setInstruction(restored?.instruction ?? previous.instruction ?? '')
+                    setAction(previous.action || 'writing.advise')
+                    setPlotContractCheck(
+                      plotAuditEnabled(previous.action || '', previous.plot_contract_check),
+                    )
+                    setSourceIdentityContext(previous.source_identity_context === true)
+                    if (previous.action && designActions.has(previous.action))
+                      setDesignScope(
+                        'chapter_id' in previous && typeof previous.chapter_id === 'string'
+                          ? 'chapter'
+                          : 'book',
+                      )
+                    setFixed(previous.fixed?.join('\n') || '')
+                    setProfile(previous.writing_profile || presets[0])
+                  } catch (error) {
+                    notify(error)
+                  }
+                }}
               >
-                <option value="" disabled>
-                  自定义写法
-                </option>
-                {presets.map((p, i) => (
-                  <option key={p} value={p}>
-                    {['基础', '对白', '打斗', '心理', '环境', '日常', '悬念'][i]}
+                恢复最近任务的输入
+              </button>
+            )}
+            <label>
+              这次要做什么
+              <select
+                value={action}
+                onChange={(e) => {
+                  const next = e.target.value as ModuleInput['action']
+                  if (designActions.has(next)) setDesignScope('book')
+                  if (!plotAuditEnabled(next, true)) setPlotContractCheck(false)
+                  setAction(next)
+                }}
+              >
+                {actions.map(([id, title]) => (
+                  <option key={id} value={id}>
+                    {title}
                   </option>
                 ))}
               </select>
             </label>
-            <label>
-              表达设置
-              <textarea value={profile} onChange={(e) => setProfile(e.target.value)} rows={3} />
-            </label>
-            <fieldset>
-              <legend>主动发送的摘录</legend>
-              {references.length ? (
-                references.map((r) => (
-                  <label className="check" key={r.id}>
-                    <input
-                      type="checkbox"
-                      checked={selectedRefs.includes(r.id)}
-                      onChange={(e) =>
-                        setSelectedRefs((ids) =>
-                          e.target.checked ? [...ids, r.id] : ids.filter((id) => id !== r.id),
-                        )
-                      }
-                    />
-                    <span>
-                      {r.title}：{r.quote.slice(0, 70)}
-                    </span>
-                  </label>
-                ))
-              ) : (
-                <p className="muted">在资料书库保存摘录后，可在这里选入资料包。</p>
-              )}
-            </fieldset>
-          </details>
-          <p className="small muted">
-            {designActions.has(action) && designScope === 'book'
-              ? '发送已采用本书设定、当前工作版本的有效故事资料及最近正文、主动选入的资料；不限定在当前打开章之前。'
-              : '发送当前章、有效前文与主动选入的资料。'}
-            候选与正文分开保存。
-          </p>
-          <button
-            className="primary wide"
-            disabled={
-              busy ||
-              loading ||
-              !modelReady ||
-              !!activeTask ||
-              seenGenre?.branch_id !== branch.id ||
-              seenContract?.branch_id !== branch.id
-            }
-          >
-            {!modelReady
-              ? '请先配置模型账户和单价'
-              : busy
-                ? '正在提交…'
-                : activeTask
-                  ? '本版本有任务执行中'
-                  : seenGenre?.branch_id !== branch.id || seenContract?.branch_id !== branch.id
-                    ? '正在读取本书约定…'
-                    : '生成候选 →'}
-          </button>
-        </form>
-        {activeTask && (
-          <div className="notice" role="status">
-            <strong>
-              {correctionKindLabel(activeTask.kind) ||
-                (activeTask.kind === chapterCheckKind ? '单项校验 · ' : '') ||
-                (activeTask.kind === 'candidate_recheck' ? '候选复检 · ' : '')}
-              {label(activeTask.status)}
-            </strong>
-            <p>关闭浏览器不取消本机任务。</p>
-            {activeTask.kind === 'candidate_recheck' && (
-              <p>正在按原任务冻结契约复核候选，不自动改稿、采纳或继续整书。</p>
+            {designActions.has(action) && (
+              <>
+                <label>
+                  设定作用范围
+                  <select
+                    value={designScope}
+                    onChange={(e) => setDesignScope(e.target.value as 'book' | 'chapter')}
+                  >
+                    <option value="book">本书设定（采用后供后续任务使用）</option>
+                    <option value="chapter">本章资料（仅保存参考）</option>
+                  </select>
+                </label>
+                <p className="small muted">
+                  {designScope === 'book'
+                    ? '生成独立的本书设定候选，作者采用后才供当前工作版本的后续任务使用。'
+                    : `生成${chapter ? `“${chapter.title}”的` : '当前章的'}参考资料，采用仅保存在本章，不进入全书设定。`}
+                  世界、人物和粗纲都是创作安排，不自动成为已发生的故事事实；已有章级资料不会自动升级为本书设定。
+                </p>
+              </>
             )}
-            <SourceCorrectionTaskNotice task={activeTask} />
-            {activeTask.kind !== SOURCE_CORRECTION_KIND && (
-              <FrozenPlotAuditPolicy
-                enabled={activeTask.kind === CORRECTED_RECHECK_KIND || activeTask.payload.plot_contract_check}
-                identityEnabled={activeTask.payload.source_identity_context}
-                identityVersion={activeTask.result.source_identity_context_version}
-                flowVersion={activeTask.result.flow_source_entailment_version}
-                version={activeTask.result.plot_contract_version}
-                mode={
-                  activeTask.kind === CORRECTED_RECHECK_KIND
-                    ? 'assisted'
-                    : candidateRecheckSourceMode(activeTask)
-                }
+            {directionBasis && (
+              <section className="notice" aria-label="作者选定方向来源">
+                <p role="status">
+                  方向已载入本章补写表单；载入操作本身未生成或改动正文。可继续编辑情节要求。
+                </p>
+                <p className="small muted">
+                  来源建议 {directionBasis.advice_id} · 候选版本 {directionBasis.candidate_revision} ·
+                  原稿修订 {directionBasis.source_revision ?? '未绑定'}；目标章 {chapter?.title}（
+                  {directionBasis.chapter_id}），载入时保存稿修订 {directionBasis.loaded_revision}
+                  。建议是启发记录，不是本书设定。
+                </p>
+                <button type="button" onClick={() => setDirectionBasis(undefined)}>
+                  清除方向来源，保留当前要求
+                </button>
+              </section>
+            )}
+            <label>
+              情节或具体要求
+              <textarea
+                ref={instructionField}
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                rows={5}
+                required
+                maxLength={20_000}
+                placeholder="例如：两人在渡口议价，交易失败且不发生战斗。补足试探和收场。"
+              />
+            </label>
+            {plotAuditEnabled(action, true) && (
+              <PlotAuditOption
+                checked={plotContractCheck}
+                disabled={busy}
+                onChange={setPlotContractCheck}
+                identityChecked={sourceIdentityContext}
+                onIdentityChange={setSourceIdentityContext}
               />
             )}
-            {activeTask.result.author_contract_snapshot && (
-              <details>
-                <summary>本次任务冻结的创作约定</summary>
-                <AuthorContractDetails contract={activeTask.result.author_contract_snapshot} />
-              </details>
-            )}
-            {activeTask.result.conception_snapshot && (
-              <p className="small">
-                本次任务使用了构思修订 {activeTask.result.conception_snapshot.revision}。
-              </p>
-            )}
-            {activeTask.result.genre_profile_snapshot &&
-              !activeTask.result.genre_profile_snapshot.legacy_unconfigured && (
-                <details>
-                  <summary>本次任务冻结的题材配置</summary>
-                  <GenreProfileDetails profile={activeTask.result.genre_profile_snapshot} />
-                </details>
-              )}
-            <button
-              onClick={() =>
-                void doAction(async () => {
-                  await api(`/tasks/${activeTask.id}/cancel`, 'POST')
-                  setTasks(await api(`/tasks?branch_id=${branch.id}`))
-                })
-              }
-            >
-              {activeTask.cancel ? '正在取消…' : '取消生成'}
-            </button>
-            {stream && (
-              <details>
-                <summary>查看流式草稿（尚未采纳）</summary>
-                <pre className="stream">{stream}</pre>
-              </details>
-            )}
-          </div>
-        )}
-        {tasks[0]?.status === 'blocked_runtime' && (
-          <div className="notice">
-            <strong>最近任务已停止</strong>
-            <p>{tasks[0].error}</p>
-            <p className="small">可能已发生的费用保留在账本中。修改指令后可明确发起新任务。</p>
-          </div>
-        )}
-        <section className="candidates">
-          <details>
-            <summary>任务历史与失败产物</summary>
-            {tasks.slice(0, 10).map((task) => (
-              <div className="excerpt" key={task.id}>
-                <strong>
-                  {label(task.status)} · {task.id.slice(0, 8)}
-                </strong>
-                <p>{task.error}</p>
-                <SourceCorrectionTaskNotice task={task} />
-                {task.kind !== SOURCE_CORRECTION_KIND && (
-                  <FrozenPlotAuditPolicy
-                    enabled={task.kind === CORRECTED_RECHECK_KIND || task.payload.plot_contract_check}
-                    identityEnabled={task.payload.source_identity_context}
-                    identityVersion={task.result.source_identity_context_version}
-                    flowVersion={task.result.flow_source_entailment_version}
-                    version={task.result.plot_contract_version}
-                    mode={
-                      task.kind === CORRECTED_RECHECK_KIND ? 'assisted' : candidateRecheckSourceMode(task)
-                    }
-                  />
-                )}
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    void doAction(async () => {
-                      const data = await api<{
-                        steps: { fingerprint: string; result: { text: string } }[]
-                        partials: { payload: { text: string } }[]
-                        scope: string
-                      }>(`/tasks/${task.id}/transcript`)
-                      setTranscript(
-                        data.scope +
-                          '\n\n' +
-                          data.partials
-                            .map((p) => '中断输出：\n' + p.payload.text)
-                            .concat(
-                              data.steps.map(
-                                (s) => '步骤 ' + s.fingerprint.slice(0, 12) + '：\n' + s.result.text,
-                              ),
-                            )
-                            .join('\n\n'),
-                      )
-                    })
-                  }
-                >
-                  查看保存的步骤与中断输出
-                </button>
-              </div>
-            ))}
-            {transcript && <pre className="stream">{transcript}</pre>}
-          </details>
-          <h3>候选与检查结果</h3>
-          {visibleArtifacts.length ? (
-            <>
+            <details>
+              <summary>固定条件、写法与资料包</summary>
               <label>
-                比较候选
+                必须保持的条件（每行一条）
+                <textarea value={fixed} onChange={(e) => setFixed(e.target.value)} rows={3} />
+              </label>
+              <label>
+                常用写法
                 <select
-                  value={candidate?.id || ''}
-                  disabled={busy || opening}
-                  onChange={(e) => openCandidate(e.target.value)}
+                  onChange={(e) => setProfile(e.target.value)}
+                  value={presets.includes(profile) ? profile : ''}
                 >
-                  {visibleArtifacts.map((a, i) => (
-                    <option key={a.id} value={a.id}>
-                      候选 {visibleArtifacts.length - i} ·{' '}
-                      {correctionKindLabel(a.kind) ||
-                        (a.kind === 'candidate_recheck' ? '候选复检报告' : a.kind)}{' '}
-                      · {isCorrectionReceiptKind(a.kind) ? '只读记录' : label(a.status)}
+                  <option value="" disabled>
+                    自定义写法
+                  </option>
+                  {presets.map((p, i) => (
+                    <option key={p} value={p}>
+                      {['基础', '对白', '打斗', '心理', '环境', '日常', '悬念'][i]}
                     </option>
                   ))}
                 </select>
               </label>
-              {candidate && isCorrectionReceiptKind(candidate.kind) ? (
-                <SourceCorrectionArtifact
-                  key={candidate.id}
-                  artifact={candidate}
-                  branchId={branch.id}
-                  disabled={busy || opening}
-                  onTarget={visitSourceCandidate}
+              <label>
+                表达设置
+                <textarea value={profile} onChange={(e) => setProfile(e.target.value)} rows={3} />
+              </label>
+              <fieldset>
+                <legend>主动发送的摘录</legend>
+                {references.length ? (
+                  references.map((r) => (
+                    <label className="check" key={r.id}>
+                      <input
+                        type="checkbox"
+                        checked={selectedRefs.includes(r.id)}
+                        onChange={(e) =>
+                          setSelectedRefs((ids) =>
+                            e.target.checked ? [...ids, r.id] : ids.filter((id) => id !== r.id),
+                          )
+                        }
+                      />
+                      <span>
+                        {r.title}：{r.quote.slice(0, 70)}
+                      </span>
+                    </label>
+                  ))
+                ) : (
+                  <p className="muted">在资料书库保存摘录后，可在这里选入资料包。</p>
+                )}
+              </fieldset>
+            </details>
+            <p className="small muted">
+              {designActions.has(action) && designScope === 'book'
+                ? '发送已采用本书设定、当前工作版本的有效故事资料及最近正文、主动选入的资料；不限定在当前打开章之前。'
+                : '发送当前章、有效前文与主动选入的资料。'}
+              候选与正文分开保存。
+            </p>
+            <button
+              className="primary wide"
+              disabled={
+                busy ||
+                loading ||
+                !modelReady ||
+                !!activeTask ||
+                seenGenre?.branch_id !== branch.id ||
+                seenContract?.branch_id !== branch.id
+              }
+            >
+              {!modelReady
+                ? '请先配置模型账户和单价'
+                : busy
+                  ? '正在提交…'
+                  : activeTask
+                    ? '本版本有任务执行中'
+                    : seenGenre?.branch_id !== branch.id || seenContract?.branch_id !== branch.id
+                      ? '正在读取本书约定…'
+                      : '生成候选 →'}
+            </button>
+          </form>
+          {activeTask && (
+            <div className="notice" role="status">
+              <strong>
+                {correctionKindLabel(activeTask.kind) ||
+                  (activeTask.kind === chapterCheckKind ? '单项校验 · ' : '') ||
+                  (activeTask.kind === 'candidate_recheck' ? '候选复检 · ' : '')}
+                {label(activeTask.status)}
+              </strong>
+              <p>关闭浏览器不取消本机任务。</p>
+              {activeTask.kind === 'candidate_recheck' && (
+                <p>正在按原任务冻结契约复核候选，不自动改稿、采纳或继续整书。</p>
+              )}
+              <SourceCorrectionTaskNotice task={activeTask} />
+              {activeTask.kind !== SOURCE_CORRECTION_KIND && (
+                <FrozenPlotAuditPolicy
+                  enabled={
+                    activeTask.kind === CORRECTED_RECHECK_KIND || activeTask.payload.plot_contract_check
+                  }
+                  identityEnabled={activeTask.payload.source_identity_context}
+                  identityVersion={activeTask.result.source_identity_context_version}
+                  flowVersion={activeTask.result.flow_source_entailment_version}
+                  version={activeTask.result.plot_contract_version}
+                  mode={
+                    activeTask.kind === CORRECTED_RECHECK_KIND
+                      ? 'assisted'
+                      : candidateRecheckSourceMode(activeTask)
+                  }
                 />
-              ) : candidate?.kind === 'candidate_recheck' ? (
-                <CandidateRecheckReport
-                  key={candidate.id}
-                  artifact={candidate}
-                  branchId={branch.id}
-                  disabled={busy || opening}
-                  onTarget={(target) => {
-                    void doAction(async () => {
-                      if (!confirmLeave() || !target.chapter_id) return
-                      if (current.current?.id !== target.chapter_id) {
-                        if (current.current) await save()
-                        await loadChapter(target.chapter_id)
-                      }
-                      if (current.current?.id !== target.chapter_id) return
-                      setArtifacts((rows) =>
-                        rows.some((row) => row.id === target.id)
-                          ? rows.map((row) => (row.id === target.id ? latestArtifact(row, target) : row))
-                          : [target, ...rows],
-                      )
-                      setCandidateId(target.id)
-                    })
-                  }}
-                />
-              ) : candidate ? (
-                <Candidate
-                  key={candidate.id}
-                  artifact={candidate}
-                  onIntentSettings={onGenreSettings}
-                  novelId={novel.id}
-                  branchId={branch.id}
-                  chapter={chapter}
-                  account={account}
-                  modelReady={modelReady}
-                  revisionDisabled={!!activeTask || busy}
-                  recheckDisabled={!!activeTask || opening}
-                  sourceArtifacts={artifacts}
-                  onSourceStarted={(task) => {
-                    setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])
-                    setCandidateId(candidate.id)
-                  }}
-                  onSourceRefresh={async () => {
-                    const target = current.current?.id
-                    const load = loadSequence.current
-                    const comparison = candidateRequest.current
-                    const latest = await api<Artifact[]>(`/artifacts?branch_id=${branch.id}`)
-                    if (
-                      alive.current &&
-                      current.current?.id === target &&
-                      loadSequence.current === load &&
-                      candidateRequest.current === comparison
-                    )
-                      setArtifacts((rows) => refreshArtifactList(rows, latest))
-                  }}
-                  manuscriptUnsaved={text !== chapter?.content || !!recovery}
-                  directionDisabled={!!activeTask || busy || opening || !!feedbackHandoff}
-                  onDirection={loadAdviceDirection}
-                  notify={notify}
-                  beforeRun={save}
-                  onStarted={(task) => {
-                    setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])
-                    setCandidateId('')
-                  }}
-                  busy={busy}
-                  perform={doAction}
-                  onAccept={async (request) => {
-                    const target = current.current?.id
-                    const load = loadSequence.current
-                    const comparison = candidateRequest.current
-                    const matches = () =>
-                      alive.current &&
-                      current.current?.id === target &&
-                      loadSequence.current === load &&
-                      candidateRequest.current === comparison
-                    if (current.current) await save()
-                    if (!matches()) return
-                    await api(`/artifacts/${candidate.id}/accept`, 'POST', request)
-                    if (!matches()) return
-                    if (chapter) await loadChapter(chapter.id, 0, true)
-                    if (!alive.current || current.current?.id !== target) return
-                    const latest = await api<Artifact[]>(`/artifacts?branch_id=${branch.id}`)
-                    setArtifacts((rows) => refreshArtifactList(rows, latest))
-                    await refresh()
-                  }}
-                  onUpdate={async () => {
-                    const latest = await api<Artifact[]>(`/artifacts?branch_id=${branch.id}`)
-                    setArtifacts((rows) => refreshArtifactList(rows, latest))
-                  }}
-                />
-              ) : null}
-            </>
-          ) : (
-            <p className="empty-note">有想法时亲自写。需要帮助时，再生成一份候选。</p>
+              )}
+              {activeTask.result.author_contract_snapshot && (
+                <details>
+                  <summary>本次任务冻结的创作约定</summary>
+                  <AuthorContractDetails contract={activeTask.result.author_contract_snapshot} />
+                </details>
+              )}
+              {activeTask.result.conception_snapshot && (
+                <p className="small">
+                  本次任务使用了构思修订 {activeTask.result.conception_snapshot.revision}。
+                </p>
+              )}
+              {activeTask.result.genre_profile_snapshot &&
+                !activeTask.result.genre_profile_snapshot.legacy_unconfigured && (
+                  <details>
+                    <summary>本次任务冻结的题材配置</summary>
+                    <GenreProfileDetails profile={activeTask.result.genre_profile_snapshot} />
+                  </details>
+                )}
+              <button
+                onClick={() =>
+                  void doAction(async () => {
+                    await api(`/tasks/${activeTask.id}/cancel`, 'POST')
+                    setTasks(await api(`/tasks?branch_id=${branch.id}`))
+                  })
+                }
+              >
+                {activeTask.cancel ? '正在取消…' : '取消生成'}
+              </button>
+              {stream && (
+                <details>
+                  <summary>查看流式草稿（尚未采纳）</summary>
+                  <pre className="stream">{stream}</pre>
+                </details>
+              )}
+            </div>
           )}
-        </section>
+          {tasks[0]?.status === 'blocked_runtime' && (
+            <div className="notice">
+              <strong>最近任务已停止</strong>
+              <p>{tasks[0].error}</p>
+              <p className="small">可能已发生的费用保留在账本中。修改指令后可明确发起新任务。</p>
+            </div>
+          )}
+          <section className="candidates">
+            <details>
+              <summary>任务历史与失败产物</summary>
+              {tasks.slice(0, 10).map((task) => (
+                <div className="excerpt" key={task.id}>
+                  <strong>
+                    {label(task.status)} · {task.id.slice(0, 8)}
+                  </strong>
+                  <p>{task.error}</p>
+                  <SourceCorrectionTaskNotice task={task} />
+                  {task.kind !== SOURCE_CORRECTION_KIND && (
+                    <FrozenPlotAuditPolicy
+                      enabled={task.kind === CORRECTED_RECHECK_KIND || task.payload.plot_contract_check}
+                      identityEnabled={task.payload.source_identity_context}
+                      identityVersion={task.result.source_identity_context_version}
+                      flowVersion={task.result.flow_source_entailment_version}
+                      version={task.result.plot_contract_version}
+                      mode={
+                        task.kind === CORRECTED_RECHECK_KIND ? 'assisted' : candidateRecheckSourceMode(task)
+                      }
+                    />
+                  )}
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      void doAction(async () => {
+                        const data = await api<{
+                          steps: { fingerprint: string; result: { text: string } }[]
+                          partials: { payload: { text: string } }[]
+                          scope: string
+                        }>(`/tasks/${task.id}/transcript`)
+                        setTranscript(
+                          data.scope +
+                            '\n\n' +
+                            data.partials
+                              .map((p) => '中断输出：\n' + p.payload.text)
+                              .concat(
+                                data.steps.map(
+                                  (s) => '步骤 ' + s.fingerprint.slice(0, 12) + '：\n' + s.result.text,
+                                ),
+                              )
+                              .join('\n\n'),
+                        )
+                      })
+                    }
+                  >
+                    查看保存的步骤与中断输出
+                  </button>
+                </div>
+              ))}
+              {transcript && <pre className="stream">{transcript}</pre>}
+            </details>
+            <h3>候选与检查结果</h3>
+            {visibleArtifacts.length ? (
+              <>
+                <label>
+                  比较候选
+                  <select
+                    value={candidate?.id || ''}
+                    disabled={busy || opening}
+                    onChange={(e) => openCandidate(e.target.value)}
+                  >
+                    {visibleArtifacts.map((a, i) => (
+                      <option key={a.id} value={a.id}>
+                        候选 {visibleArtifacts.length - i} ·{' '}
+                        {correctionKindLabel(a.kind) ||
+                          (a.kind === 'candidate_recheck' ? '候选复检报告' : a.kind)}{' '}
+                        · {isCorrectionReceiptKind(a.kind) ? '只读记录' : label(a.status)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {candidate && isCorrectionReceiptKind(candidate.kind) ? (
+                  <SourceCorrectionArtifact
+                    key={candidate.id}
+                    artifact={candidate}
+                    branchId={branch.id}
+                    disabled={busy || opening}
+                    onTarget={visitSourceCandidate}
+                  />
+                ) : candidate?.kind === 'candidate_recheck' ? (
+                  <CandidateRecheckReport
+                    key={candidate.id}
+                    artifact={candidate}
+                    branchId={branch.id}
+                    disabled={busy || opening}
+                    onTarget={(target) => {
+                      void doAction(async () => {
+                        if (!confirmLeave() || !target.chapter_id) return
+                        if (current.current?.id !== target.chapter_id) {
+                          if (current.current) await save()
+                          await loadChapter(target.chapter_id)
+                        }
+                        if (current.current?.id !== target.chapter_id) return
+                        setArtifacts((rows) =>
+                          rows.some((row) => row.id === target.id)
+                            ? rows.map((row) => (row.id === target.id ? latestArtifact(row, target) : row))
+                            : [target, ...rows],
+                        )
+                        setCandidateId(target.id)
+                      })
+                    }}
+                  />
+                ) : candidate ? (
+                  <Candidate
+                    key={candidate.id}
+                    artifact={candidate}
+                    onIntentSettings={() => chooseSetting('intent')}
+                    novelId={novel.id}
+                    branchId={branch.id}
+                    chapter={chapter}
+                    account={account}
+                    modelReady={modelReady}
+                    revisionDisabled={!!activeTask || busy}
+                    recheckDisabled={!!activeTask || opening}
+                    sourceArtifacts={artifacts}
+                    onSourceStarted={(task) => {
+                      setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])
+                      setCandidateId(candidate.id)
+                    }}
+                    onSourceRefresh={async () => {
+                      const target = current.current?.id
+                      const load = loadSequence.current
+                      const comparison = candidateRequest.current
+                      const latest = await api<Artifact[]>(`/artifacts?branch_id=${branch.id}`)
+                      if (
+                        alive.current &&
+                        current.current?.id === target &&
+                        loadSequence.current === load &&
+                        candidateRequest.current === comparison
+                      )
+                        setArtifacts((rows) => refreshArtifactList(rows, latest))
+                    }}
+                    manuscriptUnsaved={text !== chapter?.content || !!recovery}
+                    directionDisabled={!!activeTask || busy || opening || !!feedbackHandoff}
+                    onDirection={loadAdviceDirection}
+                    notify={notify}
+                    beforeRun={save}
+                    onStarted={(task) => {
+                      setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])
+                      setCandidateId('')
+                    }}
+                    busy={busy}
+                    perform={doAction}
+                    onAccept={async (request) => {
+                      const target = current.current?.id
+                      const load = loadSequence.current
+                      const comparison = candidateRequest.current
+                      const matches = () =>
+                        alive.current &&
+                        current.current?.id === target &&
+                        loadSequence.current === load &&
+                        candidateRequest.current === comparison
+                      if (current.current) await save()
+                      if (!matches()) return
+                      await api(`/artifacts/${candidate.id}/accept`, 'POST', request)
+                      if (!matches()) return
+                      if (chapter) await loadChapter(chapter.id, 0, true)
+                      if (!alive.current || current.current?.id !== target) return
+                      const latest = await api<Artifact[]>(`/artifacts?branch_id=${branch.id}`)
+                      setArtifacts((rows) => refreshArtifactList(rows, latest))
+                      await refresh()
+                    }}
+                    onUpdate={async () => {
+                      const latest = await api<Artifact[]>(`/artifacts?branch_id=${branch.id}`)
+                      setArtifacts((rows) => refreshArtifactList(rows, latest))
+                    }}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <p className="empty-note">有想法时亲自写。需要帮助时，再生成一份候选。</p>
+            )}
+          </section>
+        </div>
       </aside>
-      <TodayBar ledger={ledger} disabled={busy || opening || ledger.busy} visit={visitLedger} />
+      {!setting && <TodayBar ledger={ledger} disabled={busy || opening || ledger.busy} visit={visitLedger} />}
     </div>
   )
 }

@@ -413,7 +413,6 @@ export function App() {
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}
-                    onGenreSettings={() => navigate('records')}
                     feedbackHandoff={feedbackHandoff?.branch_id === branch.id ? feedbackHandoff : undefined}
                     onClearFeedback={() => setFeedbackHandoff(undefined)}
                     conceptionHandoff={selectedConception}

@@ -8,6 +8,7 @@ import {
   type AuthorContract,
 } from './api'
 import type { Notify } from './App'
+import { useLeaveGuard } from './leaveGuard'
 
 export type { IntentFields, AuthorContract } from './api'
 const emptyFields: IntentFields = {
@@ -161,6 +162,7 @@ export function AuthorIntentPanel({
   modelReady,
   notify,
   onSaved,
+  inWorkspace = false,
 }: {
   branchId: string
   novelId: string
@@ -168,6 +170,7 @@ export function AuthorIntentPanel({
   modelReady: boolean
   notify: Notify
   onSaved: () => Promise<void>
+  inWorkspace?: boolean
 }) {
   const [adopted, setAdopted] = useState<AuthorContract>()
   const [authorText, setAuthorText] = useState('')
@@ -182,12 +185,20 @@ export function AuthorIntentPanel({
   const [reload, setReload] = useState(0)
   const pending = useRef<{ signature: string; key: string } | null>(null)
   const alive = useRef(true)
+  const dirty =
+    !!adopted &&
+    (authorText !== adopted.author_text ||
+      (Object.keys(names) as (keyof IntentFields)[]).some(
+        (key) =>
+          JSON.stringify(fields[key]) !== JSON.stringify(adopted.intent_contract?.[key] ?? emptyFields[key]),
+      ))
+  useLeaveGuard(inWorkspace && (dirty || busy), '创作约定草稿', 'workspace-setting')
   useEffect(() => {
     alive.current = true
     let active = true
     void Promise.all([
       api<AuthorContract>(`/branches/${branchId}/author-contract`),
-      api<Artifact[]>(`/artifacts?branch_id=${branchId}`),
+      inWorkspace ? Promise.resolve([]) : api<Artifact[]>(`/artifacts?branch_id=${branchId}`),
     ])
       .then(([value, artifacts]) => {
         if (!active) return
@@ -208,7 +219,7 @@ export function AuthorIntentPanel({
       active = false
       alive.current = false
     }
-  }, [branchId, reload])
+  }, [branchId, reload, inWorkspace])
   const activeTask = task && ['queued', 'running'].includes(task.status)
   useEffect(() => {
     if (!activeTask || !task) return
@@ -307,6 +318,10 @@ export function AuthorIntentPanel({
     const value = await api<AuthorContract>(`/branches/${branchId}/author-contract`)
     if (!alive.current) return
     setAdopted(value)
+    if (inWorkspace) {
+      setAuthorText(value.author_text)
+      setFields(value.intent_contract || emptyFields)
+    }
     const remaining = proposals.filter((row) => row.id !== sourceCandidate)
     setProposals(remaining)
     setProposal(remaining[0])
@@ -320,10 +335,12 @@ export function AuthorIntentPanel({
   }
   return (
     <section className="card" id="author-intent">
-      <h2>创作约定：情绪、钩子与方向</h2>
-      <p>
-        写一句想法也可以开始。按需区分锁定条件与开放空间，整理提案后由你确认；无需先填写人物百科或完整大纲。
-      </p>
+      <h2>{inWorkspace ? '创作约定' : '创作约定：情绪、钩子与方向'}</h2>
+      {!inWorkspace && (
+        <p>
+          写一句想法也可以开始。按需区分锁定条件与开放空间，整理提案后由你确认；无需先填写人物百科或完整大纲。
+        </p>
+      )}
       {adopted && (
         <details key="adopted-contract">
           <summary>查看当前采用的创作约定</summary>
@@ -335,7 +352,7 @@ export function AuthorIntentPanel({
           {error}
         </p>
       )}
-      <details key="contract-editor">
+      <details key="contract-editor" open={inWorkspace || undefined}>
         <summary>编写或整理创作约定（确认后生效）</summary>
         <form
           onSubmit={(e) => {
@@ -357,19 +374,25 @@ export function AuthorIntentPanel({
                 required
               />
             </label>
-            <div className="actions">
-              <button
-                type="button"
-                disabled={!modelReady || !!activeTask || !authorText.trim()}
-                onClick={() => void perform(compile)}
-              >
-                用当前模型整理为待确认提案
-              </button>
-            </div>
-            <p className="small muted">
-              {modelReady ? `使用账户 ${account}，遵守已配置的累计预算。` : '未配置模型仍可手动填写并采用。'}{' '}
-              AI 补出的情绪、钩子、方向属于提案；锁定结果和禁止项须由作者明确确认。
-            </p>
+            {!inWorkspace && (
+              <>
+                <div className="actions">
+                  <button
+                    type="button"
+                    disabled={!modelReady || !!activeTask || !authorText.trim()}
+                    onClick={() => void perform(compile)}
+                  >
+                    用当前模型整理为待确认提案
+                  </button>
+                </div>
+                <p className="small muted">
+                  {modelReady
+                    ? `使用账户 ${account}，遵守已配置的累计预算。`
+                    : '未配置模型仍可手动填写并采用。'}{' '}
+                  AI 补出的情绪、钩子、方向属于提案；锁定结果和禁止项须由作者明确确认。
+                </p>
+              </>
+            )}
             {(Object.keys(names) as (keyof IntentFields)[]).map((key) => (
               <label key={key}>
                 {names[key]}

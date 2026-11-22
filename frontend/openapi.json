@@ -353,6 +353,144 @@
         }
       }
     },
+    "/api/branches/{branch_id}/volumes": {
+      "get": {
+        "summary": "Manuscript Volumes",
+        "operationId": "manuscript_volumes_api_branches__branch_id__volumes_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ManuscriptVolume" },
+                  "title": "Response Manuscript Volumes Api Branches  Branch Id  Volumes Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Volume",
+        "operationId": "create_volume_api_branches__branch_id__volumes_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VolumeInput" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ManuscriptVolume" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/volumes/{volume_id}": {
+      "put": {
+        "summary": "Update Volume",
+        "operationId": "update_volume_api_branches__branch_id__volumes__volume_id__put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "volume_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Volume Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VolumeUpdate" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ManuscriptVolume" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Volume",
+        "operationId": "remove_volume_api_branches__branch_id__volumes__volume_id__delete",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "volume_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Volume Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VolumeRevision" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ManuscriptVolume" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/chapters": {
       "get": {
         "summary": "Chapters",
@@ -2329,6 +2467,40 @@
         }
       }
     },
+    "/api/branches/{branch_id}/definitions/{kind}": {
+      "get": {
+        "summary": "Read Definition",
+        "operationId": "read_definition_api_branches__branch_id__definitions__kind__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": { "enum": ["world", "characters", "outline"], "type": "string", "title": "Kind" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/DefinitionSummary" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/definitions": {
       "post": {
         "summary": "Save Definition",
@@ -4227,6 +4399,84 @@
           }
         }
       }
+    },
+    "/api/branches/{branch_id}/workspace-chat": {
+      "get": {
+        "summary": "Conversation",
+        "operationId": "conversation_api_branches__branch_id__workspace_chat_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Chapter Id" }
+          },
+          {
+            "name": "setting_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "enum": ["world", "characters", "outline", "intent", "reader"], "type": "string" },
+                { "type": "null" }
+              ],
+              "title": "Setting Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WorkspaceChatConversation" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Send",
+        "operationId": "send_api_branches__branch_id__workspace_chat_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/WorkspaceChatInput" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WorkspaceChatTurn" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5393,6 +5643,17 @@
         "required": ["kind", "text", "base_story_revision"],
         "title": "DefinitionInput"
       },
+      "DefinitionSummary": {
+        "properties": {
+          "story_revision": { "type": "integer", "title": "Story Revision" },
+          "artifact_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Artifact Id" },
+          "text": { "type": "string", "title": "Text" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["story_revision", "artifact_id", "text"],
+        "title": "DefinitionSummary"
+      },
       "DeliveryInput": {
         "properties": {
           "synopsis": { "type": "string", "maxLength": 6000, "title": "Synopsis", "default": "" },
@@ -5977,6 +6238,18 @@
         "type": "object",
         "required": ["base_story_revision", "base_manifest_sha256", "idempotency_key", "checklist", "note"],
         "title": "ManualFinalizationInput"
+      },
+      "ManuscriptVolume": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "title": { "type": "string", "title": "Title" },
+          "start_chapter_id": { "type": "string", "title": "Start Chapter Id" },
+          "revision": { "type": "integer", "title": "Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title", "start_chapter_id", "revision"],
+        "title": "ManuscriptVolume"
       },
       "Mapping": {
         "properties": {
@@ -7124,6 +7397,44 @@
         "required": ["loc", "msg", "type"],
         "title": "ValidationError"
       },
+      "VolumeInput": {
+        "properties": {
+          "title": { "type": "string", "maxLength": 120, "minLength": 1, "title": "Title" },
+          "start_chapter_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Start Chapter Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title", "start_chapter_id"],
+        "title": "VolumeInput"
+      },
+      "VolumeRevision": {
+        "properties": { "base_revision": { "type": "integer", "minimum": 1, "title": "Base Revision" } },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision"],
+        "title": "VolumeRevision"
+      },
+      "VolumeUpdate": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 1, "title": "Base Revision" },
+          "title": { "type": "string", "maxLength": 120, "minLength": 1, "title": "Title" },
+          "start_chapter_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Start Chapter Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "title", "start_chapter_id"],
+        "title": "VolumeUpdate"
+      },
       "Window": {
         "properties": {
           "start_chapter_id": {
@@ -7252,6 +7563,92 @@
         "type": "object",
         "required": ["novel_id", "mode", "brief", "account"],
         "title": "WorkflowInput"
+      },
+      "WorkspaceChatConversation": {
+        "properties": {
+          "source": { "$ref": "#/components/schemas/WorkspaceChatSource" },
+          "turns": {
+            "items": { "$ref": "#/components/schemas/WorkspaceChatTurn" },
+            "type": "array",
+            "title": "Turns"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["source", "turns"],
+        "title": "WorkspaceChatConversation"
+      },
+      "WorkspaceChatInput": {
+        "properties": {
+          "chapter_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Chapter Id"
+          },
+          "setting_kind": {
+            "anyOf": [
+              { "type": "string", "enum": ["world", "characters", "outline", "intent", "reader"] },
+              { "type": "null" }
+            ],
+            "title": "Setting Kind"
+          },
+          "base_revision": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Base Revision"
+          },
+          "base_artifact_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Base Artifact Id"
+          },
+          "account": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Account" },
+          "question": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Question" },
+          "reply_length": {
+            "type": "string",
+            "enum": ["concise", "standard"],
+            "title": "Reply Length",
+            "default": "standard"
+          },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["account", "question", "client_request_id"],
+        "title": "WorkspaceChatInput"
+      },
+      "WorkspaceChatSource": {
+        "properties": {
+          "title": { "type": "string", "title": "Title" },
+          "chapter_revision": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Chapter Revision"
+          },
+          "artifact_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Artifact Id" },
+          "chars": { "type": "integer", "title": "Chars" },
+          "sent_chars": { "type": "integer", "title": "Sent Chars" },
+          "sha256": { "type": "string", "title": "Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["title", "chapter_revision", "artifact_id", "chars", "sent_chars", "sha256"],
+        "title": "WorkspaceChatSource"
+      },
+      "WorkspaceChatTurn": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "status": { "type": "string", "title": "Status" },
+          "error": { "type": "string", "title": "Error" },
+          "question": { "type": "string", "title": "Question" },
+          "reply": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Reply" },
+          "source": { "$ref": "#/components/schemas/WorkspaceChatSource" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "status", "error", "question", "reply", "source"],
+        "title": "WorkspaceChatTurn"
       },
       "WritingContext": {
         "properties": {

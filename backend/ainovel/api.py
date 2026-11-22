@@ -16,6 +16,7 @@ from pydantic import Field
 
 from . import chapter_item_check
 from . import outline_relay
+from . import workspace_chat
 from .budget import Budget
 from .author_contract import assemble_contract, authored_payload
 from .db import Database, DomainError, dumps, uid
@@ -30,6 +31,7 @@ from .models import (
     ChapterInput,
     FactInput,
     DefinitionInput,
+    DefinitionSummary,
     FeedbackInput,
     Input,
     ModuleInput,
@@ -210,6 +212,10 @@ def create_app(settings=None, schema_only=False):
     @app.get("/api/novels/{novel_id}/branches")
     def branches(novel_id: str):
         return db.all("SELECT * FROM branches WHERE novel_id=? ORDER BY created", (novel_id,))
+
+    from .manuscript_volumes import register_routes as register_volume_routes
+
+    register_volume_routes(app, domain)
 
     @app.get("/api/branches/{branch_id}/chapters")
     def chapters(branch_id: str):
@@ -592,6 +598,22 @@ def create_app(settings=None, schema_only=False):
                 )
         return domain.queue("workflow", payload, branch_id, outline_relay=relay)
 
+    @app.get("/api/branches/{branch_id}/definitions/{kind}", response_model=DefinitionSummary)
+    def read_definition(branch_id: str, kind: Literal["world", "characters", "outline"]):
+        row = db.one(
+            """SELECT b.story_revision, a.id AS artifact_id, a.payload
+            FROM branches b LEFT JOIN artifacts a ON a.id = (
+                SELECT id FROM artifacts WHERE branch_id=b.id AND kind=?
+                AND chapter_id IS NULL AND status='accepted' ORDER BY created DESC,id DESC LIMIT 1
+            ) WHERE b.id=?""",
+            (kind, branch_id),
+        )
+        return {
+            "story_revision": row["story_revision"],
+            "artifact_id": row["artifact_id"],
+            "text": json.loads(row["payload"]).get("text", "") if row["payload"] else "",
+        }
+
     @app.post("/api/branches/{branch_id}/definitions", status_code=201)
     def save_definition(branch_id: str, data: DefinitionInput):
         branch = domain.branch(branch_id)
@@ -628,11 +650,12 @@ def create_app(settings=None, schema_only=False):
 
     @app.get("/api/tasks")
     def tasks(branch_id: str | None = None):
+        # Dialogue has a per-target history and must not consume the writing task window.
         rows = db.all(
-            "SELECT id FROM tasks"
-            + (" WHERE branch_id=?" if branch_id else "")
+            "SELECT id FROM tasks WHERE kind!=?"
+            + (" AND branch_id=?" if branch_id else "")
             + " ORDER BY created DESC LIMIT 50",
-            (branch_id,) if branch_id else (),
+            (workspace_chat.KIND, branch_id) if branch_id else (workspace_chat.KIND,),
         )
         return [domain.task(row["id"]) for row in rows]
 
@@ -1305,6 +1328,7 @@ def create_app(settings=None, schema_only=False):
     register_extraction_routes(app, domain, provider_ready)
     chapter_item_check.register_routes(app, domain, provider_ready)
     outline_relay.register_routes(app, domain)
+    workspace_chat.register_routes(app, domain, provider_ready)
 
     dist = ROOT / "dist"
     if dist.is_dir():

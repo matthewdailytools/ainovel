@@ -3,6 +3,7 @@ import json
 from time import time
 
 from . import chapter_item_check
+from . import workspace_chat
 from .db import DomainError, dumps, uid
 from .genre_catalog import assemble_profile
 from .author_contract import assemble_contract
@@ -815,6 +816,8 @@ class Domain:
                 validate_basis_tx(db, branch_id, payload)
             if kind == chapter_item_check.KIND:
                 initial["chapter_item_check_snapshot"] = chapter_item_check.freeze(db, payload)
+            if kind == workspace_chat.KIND:
+                initial["workspace_chat_snapshot"] = workspace_chat.freeze(db, payload)
             if kind == "module" and payload.get("technique_reference_ids"):
                 from .technique_references import writing_rules
 

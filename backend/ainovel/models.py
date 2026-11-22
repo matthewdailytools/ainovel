@@ -299,3 +299,9 @@ class DefinitionInput(Input):
     intent_contract: AuthorIntentFields | None = None
     intent_source_candidate_id: str | None = Field(default=None, min_length=1, max_length=128)
     base_story_revision: int = Field(ge=0)
+
+
+class DefinitionSummary(Input):
+    story_revision: int
+    artifact_id: str | None
+    text: str

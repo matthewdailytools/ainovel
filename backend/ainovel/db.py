@@ -80,6 +80,7 @@ class Database:
             from .reference import SCHEMA as REFERENCE_SCHEMA
             from .story_graph import SCHEMA as STORY_SCHEMA
             from .manuscript_import import SCHEMA as IMPORT_SCHEMA
+            from .manuscript_volumes import SCHEMA as VOLUME_SCHEMA
             from .scene_time import SCHEMA as SCENE_SCHEMA
             from .runtime import SCHEMA as RUNTIME_SCHEMA
 
@@ -89,7 +90,15 @@ class Database:
                 db.executescript(
                     "BEGIN IMMEDIATE;\n"
                     + "\n".join(
-                        (SCHEMA, REFERENCE_SCHEMA, STORY_SCHEMA, IMPORT_SCHEMA, SCENE_SCHEMA, RUNTIME_SCHEMA)
+                        (
+                            SCHEMA,
+                            REFERENCE_SCHEMA,
+                            STORY_SCHEMA,
+                            IMPORT_SCHEMA,
+                            VOLUME_SCHEMA,
+                            SCENE_SCHEMA,
+                            RUNTIME_SCHEMA,
+                        )
                     )
                 )
                 db.execute(

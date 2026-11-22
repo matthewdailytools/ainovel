@@ -205,6 +205,42 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/volumes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Manuscript Volumes */
+    get: operations['manuscript_volumes_api_branches__branch_id__volumes_get']
+    put?: never
+    /** Create Volume */
+    post: operations['create_volume_api_branches__branch_id__volumes_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/volumes/{volume_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Update Volume */
+    put: operations['update_volume_api_branches__branch_id__volumes__volume_id__put']
+    post?: never
+    /** Remove Volume */
+    delete: operations['remove_volume_api_branches__branch_id__volumes__volume_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/chapters': {
     parameters: {
       query?: never
@@ -1093,6 +1129,23 @@ export interface paths {
     put?: never
     /** Start Workflow */
     post: operations['start_workflow_api_workflows_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/definitions/{kind}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Definition */
+    get: operations['read_definition_api_branches__branch_id__definitions__kind__get']
+    put?: never
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -2162,6 +2215,24 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/workspace-chat': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Conversation */
+    get: operations['conversation_api_branches__branch_id__workspace_chat_get']
+    put?: never
+    /** Send */
+    post: operations['send_api_branches__branch_id__workspace_chat_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -2962,6 +3033,15 @@ export interface components {
       /** Base Story Revision */
       base_story_revision: number
     }
+    /** DefinitionSummary */
+    DefinitionSummary: {
+      /** Story Revision */
+      story_revision: number
+      /** Artifact Id */
+      artifact_id: string | null
+      /** Text */
+      text: string
+    }
     /** DeliveryInput */
     DeliveryInput: {
       /**
@@ -3431,6 +3511,17 @@ export interface components {
       note: string
       /** Dispositions */
       dispositions?: components['schemas']['FinalizationDisposition'][]
+    }
+    /** ManuscriptVolume */
+    ManuscriptVolume: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Start Chapter Id */
+      start_chapter_id: string
+      /** Revision */
+      revision: number
     }
     /** Mapping */
     Mapping: {
@@ -4391,6 +4482,27 @@ export interface components {
       /** Context */
       ctx?: Record<string, never>
     }
+    /** VolumeInput */
+    VolumeInput: {
+      /** Title */
+      title: string
+      /** Start Chapter Id */
+      start_chapter_id: string
+    }
+    /** VolumeRevision */
+    VolumeRevision: {
+      /** Base Revision */
+      base_revision: number
+    }
+    /** VolumeUpdate */
+    VolumeUpdate: {
+      /** Base Revision */
+      base_revision: number
+      /** Title */
+      title: string
+      /** Start Chapter Id */
+      start_chapter_id: string
+    }
     /** Window */
     Window: {
       /** Start Chapter Id */
@@ -4493,6 +4605,64 @@ export interface components {
       budget_limit?: number | null
       genre_profile_basis?: components['schemas']['GenreProfileBasis'] | null
       author_contract_basis?: components['schemas']['AuthorContractBasis'] | null
+    }
+    /** WorkspaceChatConversation */
+    WorkspaceChatConversation: {
+      source: components['schemas']['WorkspaceChatSource']
+      /** Turns */
+      turns: components['schemas']['WorkspaceChatTurn'][]
+    }
+    /** WorkspaceChatInput */
+    WorkspaceChatInput: {
+      /** Chapter Id */
+      chapter_id?: string | null
+      /** Setting Kind */
+      setting_kind?: ('world' | 'characters' | 'outline' | 'intent' | 'reader') | null
+      /** Base Revision */
+      base_revision?: number | null
+      /** Base Artifact Id */
+      base_artifact_id?: string | null
+      /** Account */
+      account: string
+      /** Question */
+      question: string
+      /**
+       * Reply Length
+       * @default standard
+       * @enum {string}
+       */
+      reply_length: 'concise' | 'standard'
+      /** Client Request Id */
+      client_request_id: string
+    }
+    /** WorkspaceChatSource */
+    WorkspaceChatSource: {
+      /** Title */
+      title: string
+      /** Chapter Revision */
+      chapter_revision: number | null
+      /** Artifact Id */
+      artifact_id: string | null
+      /** Chars */
+      chars: number
+      /** Sent Chars */
+      sent_chars: number
+      /** Sha256 */
+      sha256: string
+    }
+    /** WorkspaceChatTurn */
+    WorkspaceChatTurn: {
+      /** Id */
+      id: string
+      /** Status */
+      status: string
+      /** Error */
+      error: string
+      /** Question */
+      question: string
+      /** Reply */
+      reply: string | null
+      source: components['schemas']['WorkspaceChatSource']
     }
     /** WritingContext */
     WritingContext: {
@@ -4920,6 +5090,144 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  manuscript_volumes_api_branches__branch_id__volumes_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ManuscriptVolume'][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_volume_api_branches__branch_id__volumes_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VolumeInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ManuscriptVolume']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_volume_api_branches__branch_id__volumes__volume_id__put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        volume_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VolumeUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ManuscriptVolume']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  remove_volume_api_branches__branch_id__volumes__volume_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        volume_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VolumeRevision']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ManuscriptVolume']
         }
       }
       /** @description Validation Error */
@@ -6990,6 +7298,38 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_definition_api_branches__branch_id__definitions__kind__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        kind: 'world' | 'characters' | 'outline'
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DefinitionSummary']
         }
       }
       /** @description Validation Error */
@@ -9206,6 +9546,75 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  conversation_api_branches__branch_id__workspace_chat_get: {
+    parameters: {
+      query?: {
+        chapter_id?: string | null
+        setting_kind?: ('world' | 'characters' | 'outline' | 'intent' | 'reader') | null
+      }
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceChatConversation']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  send_api_branches__branch_id__workspace_chat_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkspaceChatInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceChatTurn']
         }
       }
       /** @description Validation Error */

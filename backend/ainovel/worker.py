@@ -11,6 +11,7 @@ from time import time
 
 from . import chapter_item_check
 from . import outline_relay
+from . import workspace_chat
 from .budget import Budget
 from .author_contract import compile_contract, legacy_contract
 from .db import Database, DomainError, dumps, uid
@@ -47,6 +48,7 @@ REVIEW_CHECK_VERSION = "fixed-check-shape/2"
 REVISION_LENGTH_VERSION = "replacement-length-diagnostics/1"
 RETAIN_UNCERTAIN_STEPS = {
     chapter_item_check.KIND,
+    workspace_chat.KIND,
     "source_interpretation_correction",
     "source_corrected_candidate_recheck",
     "conception_generate",
@@ -357,6 +359,7 @@ class Worker:
         if action in {
             "conception.extract.world",
             chapter_item_check.ACTION,
+            workspace_chat.ACTION,
             "仅依据作者原话整理本场景情节",
             "逐项对照作者情节解释与本次正文",
             "只从本次正文独立提取物品与信息流向",
@@ -2049,6 +2052,8 @@ class Worker:
                 await run(self)
             elif task["kind"] == chapter_item_check.KIND:
                 await chapter_item_check.run(self)
+            elif task["kind"] == workspace_chat.KIND:
+                await workspace_chat.run(self)
             elif task["kind"] == "candidate_recheck":
                 from .candidate_recheck import run
 

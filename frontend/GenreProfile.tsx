@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type GenreCatalog, type GenreProfile, type GenreTopic } from './api'
 import type { Notify } from './App'
+import { useLeaveGuard } from './leaveGuard'
 import {
   emptyGenreDraft,
   genreDraftFromAdopted,
@@ -153,10 +154,12 @@ export function GenreSettings({
   branchId,
   notify,
   onSaved,
+  inWorkspace = false,
 }: {
   branchId: string
   notify: Notify
   onSaved: () => Promise<void>
+  inWorkspace?: boolean
 }) {
   const [catalog, setCatalog] = useState<GenreCatalog>()
   const [adopted, setAdopted] = useState<GenreProfile>()
@@ -168,6 +171,9 @@ export function GenreSettings({
   const [status, setStatus] = useState('')
   const [reload, setReload] = useState(0)
   const alive = useRef(true)
+  const savedDraft = inWorkspace && catalog && adopted ? genreDraftFromAdopted(adopted, catalog) : undefined
+  const dirty = savedDraft !== undefined && JSON.stringify(draft) !== JSON.stringify(savedDraft)
+  useLeaveGuard(inWorkspace && (dirty || busy), '题材配置草稿', 'workspace-setting')
   useEffect(() => {
     alive.current = true
     let active = true
@@ -248,8 +254,10 @@ export function GenreSettings({
     : '尚未采用，可直接写作'
   return (
     <section className="card genre-settings" id="genre-settings">
-      <h2>频道、36题材与作者例外</h2>
-      <p>从同一题材选择不同阅读重点，组合主辅题材及附加机制。女频不自动增加恋爱，男频不自动增加后宫。</p>
+      <h2>{inWorkspace ? '读者与题材' : '频道、36题材与作者例外'}</h2>
+      {!inWorkspace && (
+        <p>从同一题材选择不同阅读重点，组合主辅题材及附加机制。女频不自动增加恋爱，男频不自动增加后宫。</p>
+      )}
       <p className="genre-adopted">
         <strong>当前采用：</strong>
         {loading ? '正在读取…' : !adopted && error ? '尚未读取，请重试' : title}
@@ -268,7 +276,7 @@ export function GenreSettings({
       {loading ? (
         <p role="status">正在读取题材目录与本版本配置…</p>
       ) : catalog && adopted ? (
-        <details>
+        <details open={inWorkspace || undefined}>
           <summary>编辑本书配置（保存后生效）</summary>
           <form
             onSubmit={(event) => {
