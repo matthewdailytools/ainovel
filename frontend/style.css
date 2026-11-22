@@ -747,6 +747,77 @@ details > label {
   gap: 8px;
   margin-top: 8px;
 }
+.ledger-stage,
+.ledger-related {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.ledger-stage h5,
+.ledger-related h5 {
+  margin: 0;
+  font-size: 13px;
+}
+.ledger-stage h5:focus-visible {
+  outline: 2px solid #327260;
+  outline-offset: 3px;
+}
+.ledger-stage .ledger-adjust {
+  margin-top: 8px;
+}
+.ledger-window-fields,
+.ledger-related fieldset {
+  margin-top: 12px;
+}
+.ledger-related fieldset {
+  min-width: 0;
+}
+.ledger-related ul,
+.ledger-today ul {
+  list-style: none;
+  padding: 0;
+}
+.ledger-related ul li {
+  margin: 6px 0;
+}
+.ledger-today {
+  grid-column: 1 / -1;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px clamp(12px, 3vw, 36px);
+  background: #f1f3ee;
+  border-top: 1px solid var(--line);
+  max-height: 22vh;
+  overflow: auto;
+}
+.ledger-today h2 {
+  margin: 0;
+  font-size: 13px;
+}
+.ledger-today ul {
+  display: flex;
+  flex: 1 1 260px;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+.ledger-today li,
+.ledger-related button {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.ledger-today button {
+  width: 100%;
+  justify-content: flex-start;
+  font-size: 12px;
+  text-align: left;
+  white-space: normal;
+}
 .editor {
   flex: 1;
   min-height: 460px;

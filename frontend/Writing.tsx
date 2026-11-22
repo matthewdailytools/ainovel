@@ -19,6 +19,7 @@ import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from
 import { ChapterContext } from './ChapterContext'
 import { ChapterOutline, ChapterSettings, useWritingContext } from './WritingContext'
 import { ChapterChecks, chapterCheckKind } from './ChapterChecks'
+import { ContinuityLedger, TodayBar, useContinuityLedger, type LedgerTarget } from './ContinuityLedger'
 import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
@@ -134,6 +135,9 @@ export function Writing({
   const reading = useRef({ revision: 0 })
   const [recovery, setRecovery] = useState<Draft>()
   const writingContext = useWritingContext(branch.id, chapter)
+  const ledger = useContinuityLedger(branch.id, chapter)
+  const [ledgerTarget, setLedgerTarget] = useState<LedgerTarget>()
+  const [ledgerSelection, setLedgerSelection] = useState<{ start: number; end: number }>()
   const [action, setAction] = useState<ModuleInput['action']>(
     feedbackHandoff ? 'writing.rewrite_selection' : 'writing.advise',
   )
@@ -214,6 +218,8 @@ export function Writing({
       }
       current.current = row
       setChapter(row)
+      setLedgerTarget(undefined)
+      setLedgerSelection(undefined)
       setRename(row.title)
       setHistory([])
       setShowHistory(false)
@@ -613,6 +619,24 @@ export function Writing({
       setCandidateId(target.id)
     })
   }
+  function visitLedger(target: LedgerTarget) {
+    void doAction(async () => {
+      if (!current.current || ledger.busy) return
+      await save()
+      if (target.chapter_id !== current.current.id || target.source) await loadChapter(target.chapter_id)
+      const row = current.current
+      if (row?.id !== target.chapter_id) return
+      setLedgerTarget({ ...target })
+      if (!target.source) return
+      const { start, end, quote, revision } = target.source
+      if (row.revision !== revision || row.content.slice(start, end) !== quote) {
+        ledger.reload()
+        throw new Error('来源已改变。旧引文仍可在台账中查看。')
+      }
+      const editorOffset = (position: number) => row.content.slice(0, position).replace(/\r\n?/g, '\n').length
+      setLedgerSelection({ start: editorOffset(start), end: editorOffset(end) })
+    })
+  }
   return (
     <div className="writing-layout">
       <aside className="chapter-sidebar">
@@ -915,6 +939,7 @@ export function Writing({
               initial={text}
               cursor={cursor}
               scrollTop={editorScroll}
+              revealSelection={ledgerSelection}
               readOnly={busy || opening}
               onChange={change}
               onSelection={setSelection}
@@ -966,6 +991,16 @@ export function Writing({
               modelReady={modelReady}
               tasks={tasks}
               onTask={(task) => setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])}
+            />
+            <ContinuityLedger
+              ledger={ledger}
+              chapter={chapter}
+              selection={selection}
+              saved={text === chapter.content && !recovery}
+              disabled={busy}
+              settings={writingContext.data?.settings}
+              target={ledgerTarget}
+              visit={visitLedger}
             />
           </>
         )}
@@ -1484,6 +1519,7 @@ export function Writing({
           )}
         </section>
       </aside>
+      <TodayBar ledger={ledger} disabled={busy || opening || ledger.busy} visit={visitLedger} />
     </div>
   )
 }

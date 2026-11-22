@@ -180,7 +180,7 @@ def graph(domain, branch_id):
         return graph_snapshot(conn, branch_id)
 
 
-def graph_snapshot(conn, branch_id):
+def graph_snapshot(conn, branch_id, *, include_chapter_stale=True):
     branch = conn.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
     if not branch:
         raise DomainError("not_found", "工作版本不存在。", 404)
@@ -205,7 +205,12 @@ def graph_snapshot(conn, branch_id):
         invalid = []
         for source in sources(row["payload"]):
             c = chapters.get(source["chapter_id"])
-            if not c or c["revision"] != source["revision"] or c["archived"] or c["stale"]:
+            if (
+                not c
+                or c["revision"] != source["revision"]
+                or c["archived"]
+                or (include_chapter_stale and c["stale"])
+            ):
                 invalid.append("来源正文版本已改变或待复检")
         row["invalid_reasons"] = invalid
     for dep in dependencies:
@@ -246,9 +251,21 @@ def graph_snapshot(conn, branch_id):
     }
 
 
-def validate_record(tx, branch_id, identifier, payload):
+def validate_source(tx, branch_id, source):
     from .domain import utf16_slice
 
+    chapter = tx.execute(
+        "SELECT * FROM chapters WHERE id=? AND branch_id=? AND archived=0",
+        (source["chapter_id"], branch_id),
+    ).fetchone()
+    if not chapter or chapter["revision"] != source["revision"]:
+        raise DomainError("revision_conflict", "来源章节已改变或不属于当前版本。", 409)
+    if utf16_slice(chapter["content"], source["start"], source["end"])[1] != source["quote"]:
+        raise DomainError("evidence", "来源选区必须逐字对应保存稿。", 409)
+    return chapter
+
+
+def validate_record(tx, branch_id, identifier, payload):
     if not payload["title"].strip():
         raise DomainError("story_record", "请填写记录名称。")
     rows = {
@@ -261,14 +278,7 @@ def validate_record(tx, branch_id, identifier, payload):
         if ref not in rows:
             raise DomainError("ownership", "关联须属于当前工作版本且尚未归档。", 409)
     for source in sources(payload):
-        chapter = tx.execute(
-            "SELECT * FROM chapters WHERE id=? AND branch_id=? AND archived=0",
-            (source["chapter_id"], branch_id),
-        ).fetchone()
-        if not chapter or chapter["revision"] != source["revision"]:
-            raise DomainError("revision_conflict", "来源章节已改变或不属于当前版本。", 409)
-        if utf16_slice(chapter["content"], source["start"], source["end"])[1] != source["quote"]:
-            raise DomainError("evidence", "来源选区必须逐字对应保存稿。", 409)
+        validate_source(tx, branch_id, source)
 
     def require_kind(ref, kind):
         if rows[ref]["kind"] != kind:
@@ -353,6 +363,31 @@ def validate_record(tx, branch_id, identifier, payload):
     visit(identifier, set(), set())
 
 
+def persist_record_tx(tx, branch_id, identifier, payload, old, archived=False, *, refresh_dependencies=True):
+    revision = old["revision"] + 1 if old else 0
+    now = time()
+    tx.execute(
+        "INSERT INTO story_records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+        "revision=excluded.revision,payload=excluded.payload,archived=excluded.archived,updated=excluded.updated",
+        (identifier, branch_id, payload["kind"], revision, dumps(payload), int(archived), now, now),
+    )
+    tx.execute(
+        "INSERT INTO story_record_history VALUES(?,?,?,?,?)",
+        (identifier, revision, dumps(payload), int(archived), now),
+    )
+    if refresh_dependencies:
+        tx.execute("DELETE FROM story_record_dependencies WHERE record_id=?", (identifier,))
+        for parent in references(payload):
+            parent_revision = tx.execute(
+                "SELECT revision FROM story_records WHERE id=?", (parent,)
+            ).fetchone()[0]
+            tx.execute(
+                "INSERT INTO story_record_dependencies VALUES(?,?,?)", (identifier, parent, parent_revision)
+            )
+    tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
+    return revision
+
+
 def save_record(domain, branch_id, data, identifier=None):
     domain.branch(branch_id)
     creating = identifier is None
@@ -372,34 +407,7 @@ def save_record(domain, branch_id, data, identifier=None):
         if old and old["kind"] != payload["kind"]:
             raise DomainError("story_record", "记录类型不可改变，请新建对应记录。")
         validate_record(tx, branch_id, identifier, payload)
-        revision = old["revision"] + 1 if old else 0
-        tx.execute(
-            "INSERT INTO story_records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
-            "revision=excluded.revision,payload=excluded.payload,archived=excluded.archived,updated=excluded.updated",
-            (
-                identifier,
-                branch_id,
-                payload["kind"],
-                revision,
-                dumps(payload),
-                int(data.archived),
-                time(),
-                time(),
-            ),
-        )
-        tx.execute(
-            "INSERT INTO story_record_history VALUES(?,?,?,?,?)",
-            (identifier, revision, dumps(payload), int(data.archived), time()),
-        )
-        tx.execute("DELETE FROM story_record_dependencies WHERE record_id=?", (identifier,))
-        for parent in references(payload):
-            parent_revision = tx.execute(
-                "SELECT revision FROM story_records WHERE id=?", (parent,)
-            ).fetchone()[0]
-            tx.execute(
-                "INSERT INTO story_record_dependencies VALUES(?,?,?)", (identifier, parent, parent_revision)
-            )
-        tx.execute("UPDATE branches SET story_revision=story_revision+1 WHERE id=?", (branch_id,))
+        persist_record_tx(tx, branch_id, identifier, payload, old, data.archived)
     return graph(domain, branch_id)
 
 

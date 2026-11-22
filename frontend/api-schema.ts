@@ -397,6 +397,91 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/continuity-ledger': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Ledger */
+    get: operations['read_ledger_api_branches__branch_id__continuity_ledger_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/continuity-ledger/entries': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Create Entry */
+    post: operations['create_entry_api_branches__branch_id__continuity_ledger_entries_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/continuity-ledger/entries/{identifier}/plan': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Change Plan */
+    put: operations['change_plan_api_branches__branch_id__continuity_ledger_entries__identifier__plan_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/continuity-ledger/entries/{identifier}/evidence': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Confirm Evidence */
+    put: operations['confirm_evidence_api_branches__branch_id__continuity_ledger_entries__identifier__evidence_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/continuity-ledger/entries/{identifier}/history': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** History */
+    get: operations['history_api_branches__branch_id__continuity_ledger_entries__identifier__history_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/ideas/adopt': {
     parameters: {
       query?: never
@@ -2407,6 +2492,19 @@ export interface components {
        */
       acknowledge_unknown: boolean
     }
+    /** ContinuityLedger */
+    ContinuityLedger: {
+      /** Story Revision */
+      story_revision: number
+      /** Progress Position */
+      progress_position: number
+      /** Chapters */
+      chapters: components['schemas']['LedgerChapter'][]
+      /** Entries */
+      entries: components['schemas']['LedgerEntry'][]
+      /** Reminders */
+      reminders: components['schemas']['LedgerReminder'][]
+    }
     /** CorrectionInput */
     CorrectionInput: {
       /**
@@ -2619,6 +2717,23 @@ export interface components {
       /** Record Sha256 */
       record_sha256: string
     }
+    /** EvidenceInput */
+    EvidenceInput: {
+      /** Base Revision */
+      base_revision: number
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'effective' | 'planted' | 'reinforced' | 'resolved'
+      source: components['schemas']['Source']
+      /**
+       * Note
+       * @default
+       */
+      note: string
+      expected_setting?: components['schemas']['LedgerSetting'] | null
+    }
     /** ExcerptInput */
     ExcerptInput: {
       /** Unit Id */
@@ -2738,6 +2853,130 @@ export interface components {
       base_story_revision: number
       /** Idempotency Key */
       idempotency_key: string
+    }
+    /** LedgerChapter */
+    LedgerChapter: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Position */
+      position: number
+      /** Revision */
+      revision: number
+    }
+    /** LedgerEntry */
+    LedgerEntry: {
+      /** Id */
+      id: string
+      /** Revision */
+      revision: number
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'setting' | 'foreshadow'
+      /** Title */
+      title: string
+      /** Detail */
+      detail: string
+      /** Setting Id */
+      setting_id: string | null
+      /** Setting Chapter Id */
+      setting_chapter_id: string | null
+      /** Affected Chapter Ids */
+      affected_chapter_ids: string[]
+      /** Affected Chapters */
+      affected_chapters: components['schemas']['LedgerChapter'][]
+      /** Impacted Chapters */
+      impacted_chapters: components['schemas']['LedgerChapter'][]
+      /** Stages */
+      stages: components['schemas']['LedgerStage'][]
+      /** Closed */
+      closed: boolean
+      /** Author Closed */
+      author_closed: boolean
+      setting_basis: components['schemas']['LedgerSetting'] | null
+      /** Graph Warning */
+      graph_warning: string
+    }
+    /** LedgerReminder */
+    LedgerReminder: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'recheck' | 'window_open' | 'window_due' | 'window_overdue'
+      /** Entry Id */
+      entry_id: string
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'effective' | 'planted' | 'reinforced' | 'resolved'
+      /** Title */
+      title: string
+      /** Chapter Id */
+      chapter_id: string
+    }
+    /** LedgerSetting */
+    LedgerSetting: {
+      /** Id */
+      id: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'fact' | 'world' | 'conception'
+      /** Text */
+      text: string
+      source: components['schemas']['Source'] | null
+    }
+    /** LedgerSource */
+    LedgerSource: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Revision */
+      revision: number
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Quote */
+      quote: string
+      /** Source Current */
+      source_current: boolean
+    }
+    /** LedgerStage */
+    LedgerStage: {
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: 'effective' | 'planted' | 'reinforced' | 'resolved'
+      window: components['schemas']['Window'] | null
+      /**
+       * Window Status
+       * @enum {string}
+       */
+      window_status: 'none' | 'future' | 'open' | 'due' | 'overdue' | 'invalid'
+      source: components['schemas']['Source'] | null
+      /** Source Current */
+      source_current: boolean
+      /** Additional Sources */
+      additional_sources: components['schemas']['LedgerSource'][]
+      setting_basis: components['schemas']['LedgerSetting'] | null
+      /**
+       * Review Status
+       * @enum {string}
+       */
+      review_status: 'unrecorded' | 'current' | 'stale' | 'outside_window'
+      /** Review Reason */
+      review_reason: string
+      /** Note */
+      note: string
+      /** Repair Blocked */
+      repair_blocked: boolean
     }
     /** ManualFinalizationInput */
     ManualFinalizationInput: {
@@ -2892,6 +3131,33 @@ export interface components {
        */
       brief: string
     }
+    /** PlanCreate */
+    PlanCreate: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'setting' | 'foreshadow'
+      /** Title */
+      title: string
+      /**
+       * Detail
+       * @default
+       */
+      detail: string
+      /** Setting Id */
+      setting_id?: string | null
+      /** Setting Chapter Id */
+      setting_chapter_id?: string | null
+      /** Affected Chapter Ids */
+      affected_chapter_ids?: string[]
+      /** Windows */
+      windows?: {
+        [key: string]: components['schemas']['Window'] | null
+      }
+      /** Client Request Id */
+      client_request_id?: string | null
+    }
     /** PlanRestartInput */
     PlanRestartInput: {
       /** Client Request Id */
@@ -2904,6 +3170,33 @@ export interface components {
       base_story_revision: number
       /** Base Progress Sha256 */
       base_progress_sha256: string
+    }
+    /** PlanUpdate */
+    PlanUpdate: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'setting' | 'foreshadow'
+      /** Title */
+      title: string
+      /**
+       * Detail
+       * @default
+       */
+      detail: string
+      /** Setting Id */
+      setting_id?: string | null
+      /** Setting Chapter Id */
+      setting_chapter_id?: string | null
+      /** Affected Chapter Ids */
+      affected_chapter_ids?: string[]
+      /** Windows */
+      windows?: {
+        [key: string]: components['schemas']['Window'] | null
+      }
+      /** Base Revision */
+      base_revision: number
     }
     /** Plot */
     Plot: {
@@ -3464,6 +3757,13 @@ export interface components {
       input?: unknown
       /** Context */
       ctx?: Record<string, never>
+    }
+    /** Window */
+    Window: {
+      /** Start Chapter Id */
+      start_chapter_id: string
+      /** End Chapter Id */
+      end_chapter_id: string
     }
     /** WorkflowInput */
     WorkflowInput: {
@@ -4521,6 +4821,176 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ChapterOutline']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_ledger_api_branches__branch_id__continuity_ledger_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ContinuityLedger']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_entry_api_branches__branch_id__continuity_ledger_entries_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PlanCreate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LedgerEntry']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  change_plan_api_branches__branch_id__continuity_ledger_entries__identifier__plan_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PlanUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LedgerEntry']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_evidence_api_branches__branch_id__continuity_ledger_entries__identifier__evidence_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['EvidenceInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LedgerEntry']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  history_api_branches__branch_id__continuity_ledger_entries__identifier__history_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LedgerEntry'][]
         }
       }
       /** @description Validation Error */

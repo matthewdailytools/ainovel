@@ -391,6 +391,9 @@ def create_app(settings=None, schema_only=False):
     from .writing_context import register_routes as register_writing_context_routes
 
     register_writing_context_routes(app, domain)
+    from .continuity_ledger import register_routes as register_ledger_routes
+
+    register_ledger_routes(app, domain)
     from .ideation import register_routes as register_ideation_routes
 
     register_ideation_routes(app, domain)
@@ -889,7 +892,7 @@ def create_app(settings=None, schema_only=False):
         rows = db.all(
             "SELECT id FROM artifacts WHERE branch_id=?"
             " AND kind NOT IN ('conception_workspace','conception_completion','conception_handoff','conception_bundle',"
-            "'chapter_outline','chapter_item_check')"
+            "'chapter_outline','chapter_item_check','continuity_ledger')"
             + (" AND chapter_id=?" if chapter_id else "")
             + " ORDER BY created DESC LIMIT 50",
             (branch_id, chapter_id) if chapter_id else (branch_id,),

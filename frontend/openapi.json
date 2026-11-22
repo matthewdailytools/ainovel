@@ -854,6 +854,176 @@
         }
       }
     },
+    "/api/branches/{branch_id}/continuity-ledger": {
+      "get": {
+        "summary": "Read Ledger",
+        "operationId": "read_ledger_api_branches__branch_id__continuity_ledger_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContinuityLedger" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/continuity-ledger/entries": {
+      "post": {
+        "summary": "Create Entry",
+        "operationId": "create_entry_api_branches__branch_id__continuity_ledger_entries_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PlanCreate" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LedgerEntry" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/continuity-ledger/entries/{identifier}/plan": {
+      "put": {
+        "summary": "Change Plan",
+        "operationId": "change_plan_api_branches__branch_id__continuity_ledger_entries__identifier__plan_put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PlanUpdate" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LedgerEntry" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/continuity-ledger/entries/{identifier}/evidence": {
+      "put": {
+        "summary": "Confirm Evidence",
+        "operationId": "confirm_evidence_api_branches__branch_id__continuity_ledger_entries__identifier__evidence_put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EvidenceInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LedgerEntry" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/continuity-ledger/entries/{identifier}/history": {
+      "get": {
+        "summary": "History",
+        "operationId": "history_api_branches__branch_id__continuity_ledger_entries__identifier__history_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/LedgerEntry" },
+                  "title": "Response History Api Branches  Branch Id  Continuity Ledger Entries  Identifier  History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/ideas/adopt": {
       "post": {
         "summary": "Adopt",
@@ -4404,6 +4574,31 @@
         "required": ["client_request_id", "account", "reason"],
         "title": "ContinuationInput"
       },
+      "ContinuityLedger": {
+        "properties": {
+          "story_revision": { "type": "integer", "title": "Story Revision" },
+          "progress_position": { "type": "integer", "title": "Progress Position" },
+          "chapters": {
+            "items": { "$ref": "#/components/schemas/LedgerChapter" },
+            "type": "array",
+            "title": "Chapters"
+          },
+          "entries": {
+            "items": { "$ref": "#/components/schemas/LedgerEntry" },
+            "type": "array",
+            "title": "Entries"
+          },
+          "reminders": {
+            "items": { "$ref": "#/components/schemas/LedgerReminder" },
+            "type": "array",
+            "title": "Reminders"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["story_revision", "progress_position", "chapters", "entries", "reminders"],
+        "title": "ContinuityLedger"
+      },
       "CorrectionInput": {
         "properties": {
           "source_identity_context": {
@@ -4674,6 +4869,25 @@
         "required": ["ref", "event_id", "record_sha256"],
         "title": "EventWitness"
       },
+      "EvidenceInput": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "stage": {
+            "type": "string",
+            "enum": ["effective", "planted", "reinforced", "resolved"],
+            "title": "Stage"
+          },
+          "source": { "$ref": "#/components/schemas/Source" },
+          "note": { "type": "string", "maxLength": 2000, "title": "Note", "default": "" },
+          "expected_setting": {
+            "anyOf": [{ "$ref": "#/components/schemas/LedgerSetting" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "stage", "source"],
+        "title": "EvidenceInput"
+      },
       "ExcerptInput": {
         "properties": {
           "unit_id": { "type": "string", "title": "Unit Id" },
@@ -4828,6 +5042,174 @@
         "type": "object",
         "required": ["text", "author_idea", "base_story_revision", "idempotency_key"],
         "title": "IdeaAdoptInput"
+      },
+      "LedgerChapter": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "title": { "type": "string", "title": "Title" },
+          "position": { "type": "integer", "title": "Position" },
+          "revision": { "type": "integer", "title": "Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title", "position", "revision"],
+        "title": "LedgerChapter"
+      },
+      "LedgerEntry": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "kind": { "type": "string", "enum": ["setting", "foreshadow"], "title": "Kind" },
+          "title": { "type": "string", "title": "Title" },
+          "detail": { "type": "string", "title": "Detail" },
+          "setting_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Setting Id" },
+          "setting_chapter_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Setting Chapter Id"
+          },
+          "affected_chapter_ids": {
+            "items": { "type": "string" },
+            "type": "array",
+            "title": "Affected Chapter Ids"
+          },
+          "affected_chapters": {
+            "items": { "$ref": "#/components/schemas/LedgerChapter" },
+            "type": "array",
+            "title": "Affected Chapters"
+          },
+          "impacted_chapters": {
+            "items": { "$ref": "#/components/schemas/LedgerChapter" },
+            "type": "array",
+            "title": "Impacted Chapters"
+          },
+          "stages": {
+            "items": { "$ref": "#/components/schemas/LedgerStage" },
+            "type": "array",
+            "title": "Stages"
+          },
+          "closed": { "type": "boolean", "title": "Closed" },
+          "author_closed": { "type": "boolean", "title": "Author Closed" },
+          "setting_basis": {
+            "anyOf": [{ "$ref": "#/components/schemas/LedgerSetting" }, { "type": "null" }]
+          },
+          "graph_warning": { "type": "string", "title": "Graph Warning" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "kind",
+          "title",
+          "detail",
+          "setting_id",
+          "setting_chapter_id",
+          "affected_chapter_ids",
+          "affected_chapters",
+          "impacted_chapters",
+          "stages",
+          "closed",
+          "author_closed",
+          "setting_basis",
+          "graph_warning"
+        ],
+        "title": "LedgerEntry"
+      },
+      "LedgerReminder": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["recheck", "window_open", "window_due", "window_overdue"],
+            "title": "Kind"
+          },
+          "entry_id": { "type": "string", "title": "Entry Id" },
+          "stage": {
+            "type": "string",
+            "enum": ["effective", "planted", "reinforced", "resolved"],
+            "title": "Stage"
+          },
+          "title": { "type": "string", "title": "Title" },
+          "chapter_id": { "type": "string", "title": "Chapter Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "entry_id", "stage", "title", "chapter_id"],
+        "title": "LedgerReminder"
+      },
+      "LedgerSetting": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "kind": { "type": "string", "enum": ["fact", "world", "conception"], "title": "Kind" },
+          "text": { "type": "string", "title": "Text" },
+          "source": { "anyOf": [{ "$ref": "#/components/schemas/Source" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "kind", "text", "source"],
+        "title": "LedgerSetting"
+      },
+      "LedgerSource": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "revision": { "type": "integer", "minimum": 0, "title": "Revision" },
+          "start": { "type": "integer", "minimum": 0, "title": "Start" },
+          "end": { "type": "integer", "exclusiveMinimum": 0, "title": "End" },
+          "quote": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Quote" },
+          "source_current": { "type": "boolean", "title": "Source Current" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "revision", "start", "end", "quote", "source_current"],
+        "title": "LedgerSource"
+      },
+      "LedgerStage": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "enum": ["effective", "planted", "reinforced", "resolved"],
+            "title": "Stage"
+          },
+          "window": { "anyOf": [{ "$ref": "#/components/schemas/Window" }, { "type": "null" }] },
+          "window_status": {
+            "type": "string",
+            "enum": ["none", "future", "open", "due", "overdue", "invalid"],
+            "title": "Window Status"
+          },
+          "source": { "anyOf": [{ "$ref": "#/components/schemas/Source" }, { "type": "null" }] },
+          "source_current": { "type": "boolean", "title": "Source Current" },
+          "additional_sources": {
+            "items": { "$ref": "#/components/schemas/LedgerSource" },
+            "type": "array",
+            "title": "Additional Sources"
+          },
+          "setting_basis": {
+            "anyOf": [{ "$ref": "#/components/schemas/LedgerSetting" }, { "type": "null" }]
+          },
+          "review_status": {
+            "type": "string",
+            "enum": ["unrecorded", "current", "stale", "outside_window"],
+            "title": "Review Status"
+          },
+          "review_reason": { "type": "string", "title": "Review Reason" },
+          "note": { "type": "string", "title": "Note" },
+          "repair_blocked": { "type": "boolean", "title": "Repair Blocked" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stage",
+          "window",
+          "window_status",
+          "source",
+          "source_current",
+          "additional_sources",
+          "setting_basis",
+          "review_status",
+          "review_reason",
+          "note",
+          "repair_blocked"
+        ],
+        "title": "LedgerStage"
       },
       "ManualFinalizationInput": {
         "properties": {
@@ -5021,6 +5403,43 @@
         "required": ["title"],
         "title": "NovelInput"
       },
+      "PlanCreate": {
+        "properties": {
+          "kind": { "type": "string", "enum": ["setting", "foreshadow"], "title": "Kind" },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "detail": { "type": "string", "maxLength": 4000, "title": "Detail", "default": "" },
+          "setting_id": {
+            "anyOf": [{ "type": "string", "maxLength": 200, "minLength": 1 }, { "type": "null" }],
+            "title": "Setting Id"
+          },
+          "setting_chapter_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Setting Chapter Id"
+          },
+          "affected_chapter_ids": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Affected Chapter Ids"
+          },
+          "windows": {
+            "additionalProperties": {
+              "anyOf": [{ "$ref": "#/components/schemas/Window" }, { "type": "null" }]
+            },
+            "propertyNames": { "enum": ["effective", "planted", "reinforced", "resolved"] },
+            "type": "object",
+            "title": "Windows"
+          },
+          "client_request_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 8 }, { "type": "null" }],
+            "title": "Client Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "title"],
+        "title": "PlanCreate"
+      },
       "PlanRestartInput": {
         "properties": {
           "client_request_id": {
@@ -5042,6 +5461,40 @@
         "type": "object",
         "required": ["client_request_id", "reason", "chapter", "base_story_revision", "base_progress_sha256"],
         "title": "PlanRestartInput"
+      },
+      "PlanUpdate": {
+        "properties": {
+          "kind": { "type": "string", "enum": ["setting", "foreshadow"], "title": "Kind" },
+          "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
+          "detail": { "type": "string", "maxLength": 4000, "title": "Detail", "default": "" },
+          "setting_id": {
+            "anyOf": [{ "type": "string", "maxLength": 200, "minLength": 1 }, { "type": "null" }],
+            "title": "Setting Id"
+          },
+          "setting_chapter_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Setting Chapter Id"
+          },
+          "affected_chapter_ids": {
+            "items": { "type": "string" },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Affected Chapter Ids"
+          },
+          "windows": {
+            "additionalProperties": {
+              "anyOf": [{ "$ref": "#/components/schemas/Window" }, { "type": "null" }]
+            },
+            "propertyNames": { "enum": ["effective", "planted", "reinforced", "resolved"] },
+            "type": "object",
+            "title": "Windows"
+          },
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "title", "base_revision"],
+        "title": "PlanUpdate"
       },
       "Plot": {
         "properties": {
@@ -5680,6 +6133,21 @@
         "type": "object",
         "required": ["loc", "msg", "type"],
         "title": "ValidationError"
+      },
+      "Window": {
+        "properties": {
+          "start_chapter_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Start Chapter Id"
+          },
+          "end_chapter_id": { "type": "string", "maxLength": 128, "minLength": 1, "title": "End Chapter Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["start_chapter_id", "end_chapter_id"],
+        "title": "Window"
       },
       "WorkflowInput": {
         "properties": {

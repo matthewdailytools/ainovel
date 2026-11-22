@@ -11,6 +11,7 @@ export function Editor({
   initial,
   cursor = 0,
   scrollTop,
+  revealSelection,
   readOnly = false,
   onChange,
   onSelection,
@@ -20,6 +21,7 @@ export function Editor({
   initial: string
   cursor?: number
   scrollTop?: number
+  revealSelection?: { start: number; end: number }
   readOnly?: boolean
   onChange: (text: string) => void
   onSelection: (selection: Selection) => void
@@ -99,6 +101,16 @@ export function Editor({
       ]),
     })
   }, [readOnly, id])
+  useEffect(() => {
+    const view = instance.current
+    if (!view || !revealSelection || revealSelection.end > view.state.doc.length) return
+    const { start, end } = revealSelection
+    view.dispatch({
+      selection: { anchor: start, head: end },
+      effects: EditorView.scrollIntoView(start, { y: 'center' }),
+    })
+    view.focus()
+  }, [id, revealSelection])
   return <div className="editor" ref={mount} />
 }
 
