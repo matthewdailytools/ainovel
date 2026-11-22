@@ -375,18 +375,23 @@ def create_app(settings=None, schema_only=False):
             "source_review_id",
             "reference_session_id",
             "reference_revision",
+            "technique_reference_ids",
         ):
             if payload[key] is None:
                 payload.pop(key)
         if not payload["finding_indices"]:
             payload.pop("finding_indices")
+        if not payload.get("technique_reference_ids"):
+            payload.pop("technique_reference_ids", None)
         if data.action == "revision.targeted":
             validate_targeted_revision(domain, payload, domain.context(data.branch_id, data.chapter_id))
         return domain.queue("module", {**payload, "module_version": MODULES[data.action].version})
 
     from .reference import register_routes as register_reference_routes
+    from .technique_references import register_routes as register_technique_routes
     from .story_graph import register_routes as register_story_routes
 
+    register_technique_routes(app, domain)
     register_story_routes(app, domain)
     from .writing_context import register_routes as register_writing_context_routes
 
@@ -395,8 +400,10 @@ def create_app(settings=None, schema_only=False):
 
     register_ledger_routes(app, domain)
     from .ideation import register_routes as register_ideation_routes
+    from .project_brief import register_routes as register_project_brief_routes
 
     register_ideation_routes(app, domain)
+    register_project_brief_routes(app, domain)
     from .story_inheritance import register_routes as register_inheritance_routes
 
     register_inheritance_routes(app, domain)
@@ -892,7 +899,7 @@ def create_app(settings=None, schema_only=False):
         rows = db.all(
             "SELECT id FROM artifacts WHERE branch_id=?"
             " AND kind NOT IN ('conception_workspace','conception_completion','conception_handoff','conception_bundle',"
-            "'chapter_outline','chapter_item_check','continuity_ledger')"
+            "'chapter_outline','chapter_item_check','continuity_ledger','chapter_technique_reference','project_brief')"
             + (" AND chapter_id=?" if chapter_id else "")
             + " ORDER BY created DESC LIMIT 50",
             (branch_id, chapter_id) if chapter_id else (branch_id,),

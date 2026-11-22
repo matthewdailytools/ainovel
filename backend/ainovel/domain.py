@@ -807,6 +807,10 @@ class Domain:
                 validate_basis_tx(db, branch_id, payload)
             if kind == chapter_item_check.KIND:
                 initial["chapter_item_check_snapshot"] = chapter_item_check.freeze(db, payload)
+            if kind == "module" and payload.get("technique_reference_ids"):
+                from .technique_references import writing_rules
+
+                initial["technique_reference_snapshot"] = writing_rules(db, branch_id, payload)
             if identifier := payload.get("conception_snapshot_id"):
                 from .conception import queued_handoff_tx
 

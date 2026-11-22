@@ -7,6 +7,7 @@ import { PlotAuditDetails } from './PlotAuditDetails'
 import { SourceIdentityOption } from './sourceIdentity'
 import { readComparisonTarget, usePlotAuditTarget } from './plotAuditTarget'
 import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from './MemorySelection'
+import { TechniqueCardPin } from './TechniqueReferences'
 
 type Card = {
   id: string
@@ -15,6 +16,7 @@ type Card = {
   technique: string
   conditions: string
   exceptions: string
+  replacement?: string
   evidence: string
 }
 type ReferencePayload = {
@@ -248,11 +250,12 @@ export function ReferenceWorkspace({
       active = false
     }
   }, [resultsKey, notify])
+  const chapterBranchId = draft?.branch_id ?? branch?.id
   useEffect(() => {
     let active = true
     setChapters([])
-    if (draft?.branch_id)
-      void api<Chapter[]>(`/branches/${draft.branch_id}/chapters`)
+    if (chapterBranchId)
+      void api<Chapter[]>(`/branches/${chapterBranchId}/chapters`)
         .then((value) => {
           if (active) setChapters(value)
         })
@@ -260,7 +263,7 @@ export function ReferenceWorkspace({
     return () => {
       active = false
     }
-  }, [draft?.branch_id, notify])
+  }, [chapterBranchId, notify])
   const candidate = artifacts.draft
   const memorySelection = useMemorySelection(
     candidate,
@@ -547,6 +550,7 @@ export function ReferenceWorkspace({
                   technique: '可迁移写法',
                   conditions: '适用条件',
                   exceptions: '例外',
+                  replacement: '须替换的内容',
                   evidence: '逐字原文证据',
                 }) as [keyof Card, string][]
               ).map(([key, title]) => (
@@ -555,7 +559,7 @@ export function ReferenceWorkspace({
                   <textarea
                     rows={2}
                     maxLength={2000}
-                    value={card[key]}
+                    value={card[key] ?? ''}
                     onChange={(e) =>
                       edit({
                         cards: draft.cards.map((c) =>
@@ -567,6 +571,17 @@ export function ReferenceWorkspace({
                 </label>
               ))}
             </details>
+            <TechniqueCardPin
+              key={`${card.id}:${base}:${chapterBranchId ?? ''}`}
+              sessionId={identifier}
+              revision={base}
+              cardId={card.id}
+              branchId={chapterBranchId}
+              branchLabel={chapterBranchId === branch?.id ? branch?.name : chapterBranchId}
+              chapters={chapters}
+              ready={!busy && !running && !dirty && !stale}
+              replacement={card.replacement ?? ''}
+            />
           </article>
         ))}
         <button
@@ -582,6 +597,7 @@ export function ReferenceWorkspace({
                   technique: '请填写可执行写法',
                   conditions: '请填写适用场景',
                   exceptions: '',
+                  replacement: '',
                   evidence: row.payload.source.quote.slice(0, 800),
                 },
               ],
@@ -610,7 +626,7 @@ export function ReferenceWorkspace({
             onChange={(e) => edit({ chapter_id: e.target.value || null })}
           >
             <option value="">请选择章节</option>
-            {chapters.map((c) => (
+            {(draft.branch_id ? chapters : []).map((c) => (
               <option key={c.id} value={c.id}>
                 {c.position} · {c.title}
               </option>

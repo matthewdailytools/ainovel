@@ -261,6 +261,58 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/reference-sessions/{session_id}/cards/{card_id}/source': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Source */
+    get: operations['source_api_reference_sessions__session_id__cards__card_id__source_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/technique-references': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Chapter References */
+    get: operations['chapter_references_api_branches__branch_id__chapters__chapter_id__technique_references_get']
+    put?: never
+    /** Cite Card */
+    post: operations['cite_card_api_branches__branch_id__chapters__chapter_id__technique_references_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/technique-references/{identifier}/source': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Cited Source */
+    get: operations['cited_source_api_branches__branch_id__chapters__chapter_id__technique_references__identifier__source_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/story-graph': {
     parameters: {
       query?: never
@@ -493,6 +545,41 @@ export interface paths {
     put?: never
     /** Adopt */
     post: operations['adopt_api_branches__branch_id__ideas_adopt_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/project-brief': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Project Brief */
+    get: operations['get_project_brief_api_branches__branch_id__project_brief_get']
+    /** Update Project Brief */
+    put: operations['update_project_brief_api_branches__branch_id__project_brief_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/project-brief/adopt': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Adopt Project Brief */
+    post: operations['adopt_project_brief_api_branches__branch_id__project_brief_adopt_post']
     delete?: never
     options?: never
     head?: never
@@ -1978,6 +2065,19 @@ export interface components {
       /** Id */
       id: string
     }
+    /** AdoptBrief */
+    AdoptBrief: {
+      /** Draft Id */
+      draft_id: string
+      /** Base Adoption Id */
+      base_adoption_id: string | null
+      /** Base Author Contract Id */
+      base_author_contract_id: string | null
+      /** Update Fields */
+      update_fields?: ('direction' | 'ending')[]
+      /** Idempotency Key */
+      idempotency_key: string
+    }
     /** AdoptConception */
     AdoptConception: {
       /** Base Revision */
@@ -2127,6 +2227,15 @@ export interface components {
       /** Time Evidence */
       time_evidence?: components['schemas']['Source'][]
     }
+    /** AuthorSummary */
+    AuthorSummary: {
+      /** Id */
+      id: string | null
+      /** Direction */
+      direction: string
+      /** Ending */
+      ending: string
+    }
     /** Body_import_book_api_library_import_post */
     Body_import_book_api_library_import_post: {
       /** File */
@@ -2151,6 +2260,70 @@ export interface components {
        * @default utf-8-sig
        */
       encoding: string
+    }
+    /** BriefFields */
+    BriefFields: {
+      /**
+       * Concept
+       * @default
+       */
+      concept: string
+      /**
+       * Positioning
+       * @default
+       */
+      positioning: string
+      /**
+       * Audience
+       * @default
+       */
+      audience: string
+      /**
+       * Scope
+       * @default
+       */
+      scope: string
+      /**
+       * Direction
+       * @default
+       */
+      direction: string
+      /**
+       * Ending
+       * @default
+       */
+      ending: string
+      /**
+       * Last Image
+       * @default
+       */
+      last_image: string
+    }
+    /** BriefState */
+    BriefState: {
+      draft: components['schemas']['BriefVersion'] | null
+      adopted: components['schemas']['BriefVersion'] | null
+      author_contract: components['schemas']['AuthorSummary']
+      /** Referencing Tasks */
+      referencing_tasks: components['schemas']['ReferencingTask'][]
+      /** Referencing Task Count */
+      referencing_task_count: number
+    }
+    /** BriefVersion */
+    BriefVersion: {
+      /** Id */
+      id: string
+      fields: components['schemas']['BriefFields']
+      /** Created */
+      created: number
+      /** Draft Id */
+      draft_id?: string | null
+      /** Intent Id */
+      intent_id?: string | null
+      /** Previous Intent Id */
+      previous_intent_id?: string | null
+      /** Applied Fields */
+      applied_fields?: ('direction' | 'ending')[]
     }
     /** CandidateEdit */
     CandidateEdit: {
@@ -2192,6 +2365,17 @@ export interface components {
        * @default 0
        */
       candidate_revision: number
+    }
+    /** CardSource */
+    CardSource: {
+      unit: components['schemas']['SourceUnit']
+      /** Passages */
+      passages: components['schemas']['Passage'][]
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated: boolean
     }
     /** ChapterBasis */
     ChapterBasis: {
@@ -3015,6 +3199,10 @@ export interface components {
        * @default false
        */
       allow_duplicate: boolean
+      /** Append Order */
+      append_order?: number | null
+      /** Expected Title */
+      expected_title?: string | null
     }
     /** ModuleInput */
     ModuleInput: {
@@ -3082,6 +3270,8 @@ export interface components {
       writing_profile: string
       /** Reference Ids */
       reference_ids?: string[]
+      /** Technique Reference Ids */
+      technique_reference_ids?: string[] | null
       /** Account */
       account: string
       /**
@@ -3130,6 +3320,19 @@ export interface components {
        * @default
        */
       brief: string
+    }
+    /** Passage */
+    Passage: {
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Before */
+      before: string
+      /** Quote */
+      quote: string
+      /** After */
+      after: string
     }
     /** PlanCreate */
     PlanCreate: {
@@ -3383,6 +3586,11 @@ export interface components {
        * @default
        */
       exceptions: string
+      /**
+       * Replacement
+       * @default
+       */
+      replacement: string
       /** Evidence */
       evidence: string
     }
@@ -3394,6 +3602,15 @@ export interface components {
       text: string
       /** Candidate Id */
       candidate_id?: string | null
+    }
+    /** ReferencingTask */
+    ReferencingTask: {
+      /** Id */
+      id: string
+      /** Kind */
+      kind: string
+      /** Status */
+      status: string
     }
     /** Relationship */
     Relationship: {
@@ -3477,6 +3694,12 @@ export interface components {
        * @default false
        */
       pause_after_maintenance: boolean
+    }
+    /** SaveBrief */
+    SaveBrief: {
+      /** Base Draft Id */
+      base_draft_id: string | null
+      fields: components['schemas']['BriefFields']
     }
     /** SaveConception */
     SaveConception: {
@@ -3653,6 +3876,19 @@ export interface components {
       /** Quote */
       quote: string
     }
+    /** SourceUnit */
+    SourceUnit: {
+      /** Unit Id */
+      unit_id: string
+      /** Unit Title */
+      unit_title: string
+      /** Book Id */
+      book_id: string
+      /** Title */
+      title: string
+      /** File Hash */
+      file_hash: string
+    }
     /** Sources */
     Sources: {
       chapter: components['schemas']['ChapterBasis']
@@ -3731,6 +3967,43 @@ export interface components {
       truth: 'actual' | 'planned' | 'unknown' | 'conflict'
       /** Until Event Id */
       until_event_id?: string | null
+    }
+    /** TechniqueReference */
+    TechniqueReference: {
+      /** Id */
+      id: string
+      /** Chapter Id */
+      chapter_id: string
+      /** Session Id */
+      session_id: string
+      /** Session Revision */
+      session_revision: number
+      /** Current Session Revision */
+      current_session_revision: number | null
+      card: components['schemas']['ReferenceCard']
+      unit: components['schemas']['SourceUnit']
+      /** Evidence Start */
+      evidence_start: number
+      /** Evidence End */
+      evidence_end: number
+      /** Application Note */
+      application_note: string
+    }
+    /** TechniqueReferenceInput */
+    TechniqueReferenceInput: {
+      /** Session Id */
+      session_id: string
+      /** Session Revision */
+      session_revision: number
+      /** Card Id */
+      card_id: string
+      /** Evidence Start */
+      evidence_start?: number | null
+      /**
+       * Application Note
+       * @default
+       */
+      application_note: string
     }
     /** TimeEvidence */
     TimeEvidence: {
@@ -4556,6 +4829,141 @@ export interface operations {
       }
     }
   }
+  source_api_reference_sessions__session_id__cards__card_id__source_get: {
+    parameters: {
+      query: {
+        revision: number
+      }
+      header?: never
+      path: {
+        session_id: string
+        card_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CardSource']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  chapter_references_api_branches__branch_id__chapters__chapter_id__technique_references_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TechniqueReference'][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  cite_card_api_branches__branch_id__chapters__chapter_id__technique_references_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TechniqueReferenceInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TechniqueReference']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  cited_source_api_branches__branch_id__chapters__chapter_id__technique_references__identifier__source_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+        identifier: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CardSource']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_graph_api_branches__branch_id__story_graph_get: {
     parameters: {
       query?: never
@@ -5026,6 +5434,107 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_project_brief_api_branches__branch_id__project_brief_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BriefState']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_project_brief_api_branches__branch_id__project_brief_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveBrief']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BriefState']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  adopt_project_brief_api_branches__branch_id__project_brief_adopt_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AdoptBrief']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BriefState']
         }
       }
       /** @description Validation Error */

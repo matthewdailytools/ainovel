@@ -10,6 +10,7 @@ import {
   type Task,
 } from './api'
 import { confirmLeave, useLeaveGuard } from './leaveGuard'
+import { ProjectBrief } from './ProjectBrief'
 
 const profile =
   '小说构思工具/2.0.0。一个结构完整、因果连贯的小说方案，保留作者约定；补充细节与建议结局可由作者修改，不生成正文。'
@@ -130,6 +131,7 @@ export function Ideation({
           value.contract.provenance && typeof value.contract.provenance === 'object'
             ? (value.contract.provenance as Record<string, unknown>)
             : {}
+        const briefDirection = provenance.origin === 'author_project_brief'
         if (adoptedText && !draftRef.current.dirty && !restored.dirty && restored.text === adoptedText)
           setAdopted(true)
         if (
@@ -137,18 +139,20 @@ export function Ideation({
           !restored.idea &&
           !restored.text &&
           adoptedText &&
-          provenance.origin === 'author_adopted_idea'
+          (provenance.origin === 'author_adopted_idea' || briefDirection)
         ) {
           setDraft({
             idea:
               typeof provenance.author_idea === 'string'
                 ? provenance.author_idea
-                : value.contract.author_text,
+                : value.contract.author_text || (briefDirection ? adoptedText : ''),
             text: adoptedText,
             sourceId:
-              typeof provenance.source_candidate_id === 'string' ? provenance.source_candidate_id : null,
+              !briefDirection && typeof provenance.source_candidate_id === 'string'
+                ? provenance.source_candidate_id
+                : null,
             revision:
-              typeof provenance.source_candidate_revision === 'number'
+              !briefDirection && typeof provenance.source_candidate_revision === 'number'
                 ? provenance.source_candidate_revision
                 : 0,
             dirty: false,
@@ -542,6 +546,17 @@ export function Ideation({
           </label>
         </details>
       )}
+      <ProjectBrief
+        branchId={branch.id}
+        idea={draft.idea}
+        observedContractId={snapshot?.contract.source_artifact_id}
+        onContractChanged={async () => {
+          const next = await readSnapshot()
+          if (!mounted.current) return
+          setSnapshot(next)
+          if (next.contract.intent_contract?.direction !== draftRef.current.text) setAdopted(false)
+        }}
+      />
       <p className="small muted">
         想法和编辑暂存在本窗口，采用后保存到本机工作台。AI 候选会自动保留，可随时回来查看。
       </p>

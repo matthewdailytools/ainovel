@@ -9,11 +9,22 @@ type Mapping = Segment & {
   chapter_id: string | null
   base_revision: number | null
   allow_duplicate: boolean
+  append_order?: number
+  expected_title?: string
 }
 type Receipt = {
   id: string
   story_revision: number
-  results: { action: string; title: string; revision?: number; start: number; end: number }[]
+  results: {
+    action: string
+    title: string
+    revision?: number
+    position?: number
+    previous_title?: string
+    previous_revision?: number
+    start: number
+    end: number
+  }[]
   note: string
 }
 type Preview = {
@@ -37,9 +48,9 @@ const mapping = (s: Segment): Mapping => ({
   base_revision: null,
   allow_duplicate: false,
 })
-function mappingSignature(rows: Mapping[]) {
-  return JSON.stringify(
-    rows.map(({ title, start, end, action, chapter_id, base_revision, allow_duplicate }) => ({
+function wireMappings(rows: Mapping[]) {
+  return rows.map(
+    ({
       title,
       start,
       end,
@@ -47,8 +58,41 @@ function mappingSignature(rows: Mapping[]) {
       chapter_id,
       base_revision,
       allow_duplicate,
-    })),
+      append_order,
+      expected_title,
+    }) => ({
+      title,
+      start,
+      end,
+      action,
+      chapter_id,
+      base_revision,
+      allow_duplicate,
+      append_order,
+      expected_title,
+    }),
   )
+}
+
+function mappingSignature(rows: Mapping[]) {
+  return JSON.stringify(wireMappings(rows))
+}
+
+function appendSequence(rows: Mapping[]) {
+  return rows
+    .filter((row) => row.action === 'append')
+    .sort((left, right) => (left.append_order ?? 1001) - (right.append_order ?? 1001))
+}
+
+function applyAppendSequence(rows: Mapping[], sequence: Mapping[]) {
+  const positions = new Map(sequence.map((row, index) => [row, index + 1]))
+  return rows.map((row) => ({ ...row, append_order: positions.get(row) }))
+}
+
+function normalizeAppendSequence(rows: Mapping[]) {
+  return rows.some((row) => row.append_order !== undefined)
+    ? applyAppendSequence(rows, appendSequence(rows))
+    : rows
 }
 const actions = { append: '追加', replace: '替换', skip: '跳过' }
 
@@ -103,7 +147,12 @@ export function ManuscriptImport({
   }
   function load(row: Preview) {
     setPreview(row)
-    const values = row.draft?.mappings || row.segments.map(mapping)
+    const values =
+      row.draft?.mappings.map((item) =>
+        item.action === 'replace' && item.expected_title === undefined
+          ? { ...item, expected_title: row.existing.find((chapter) => chapter.id === item.chapter_id)?.title }
+          : item,
+      ) || row.segments.map(mapping)
     setMappings(values)
     setBaseline(mappingSignature(values))
     setReceipt(row.receipt || undefined)
@@ -113,6 +162,8 @@ export function ManuscriptImport({
     setMessage('请核对编码、章界和每段操作。确认前不改变稿件。')
   }
   const current = mappings[selected]
+  const sequence = appendSequence(mappings)
+  const appendIndex = current ? sequence.indexOf(current) : -1
   useEffect(() => {
     let active = true
     setContent('')
@@ -132,7 +183,17 @@ export function ManuscriptImport({
     }
   }, [preview?.id, selected, current?.start, current?.end, branchId, notify])
   function edit(values: Partial<Mapping>) {
-    setMappings((old) => old.map((m, i) => (i === selected ? { ...m, ...values } : m)))
+    setMappings((old) =>
+      normalizeAppendSequence(old.map((m, i) => (i === selected ? { ...m, ...values } : m))),
+    )
+  }
+  function moveAppend(delta: -1 | 1) {
+    const destination = appendIndex + delta
+    if (appendIndex < 0 || destination < 0 || destination >= sequence.length) return
+    const reordered = [...sequence]
+    reordered[appendIndex] = sequence[destination]
+    reordered[destination] = sequence[appendIndex]
+    setMappings(applyAppendSequence(mappings, reordered))
   }
   return (
     <section className="card manuscript-import" aria-label="长篇拆章导入">
@@ -266,13 +327,22 @@ export function ManuscriptImport({
               onClick={() => {
                 if (splitAt === undefined) return
                 setMappings((old) =>
-                  old.flatMap((m, i) =>
-                    i === selected
-                      ? [
-                          { ...m, end: splitAt },
-                          mapping({ title: m.title + '（续）', start: splitAt, end: m.end }),
-                        ]
-                      : [m],
+                  normalizeAppendSequence(
+                    old.flatMap((m, i) =>
+                      i === selected
+                        ? [
+                            { ...m, end: splitAt },
+                            {
+                              ...mapping({
+                                title: Array.from(m.title).slice(0, 197).join('') + '（续）',
+                                start: splitAt,
+                                end: m.end,
+                              }),
+                              append_order: m.append_order === undefined ? undefined : m.append_order + 0.5,
+                            },
+                          ]
+                        : [m],
+                    ),
                   ),
                 )
               }}
@@ -283,8 +353,10 @@ export function ManuscriptImport({
               disabled={selected === mappings.length - 1}
               onClick={() =>
                 setMappings((old) =>
-                  old.flatMap((m, i) =>
-                    i === selected ? [{ ...m, end: old[i + 1].end }] : i === selected + 1 ? [] : [m],
+                  normalizeAppendSequence(
+                    old.flatMap((m, i) =>
+                      i === selected ? [{ ...m, end: old[i + 1].end }] : i === selected + 1 ? [] : [m],
+                    ),
                   ),
                 )
               }
@@ -303,7 +375,13 @@ export function ManuscriptImport({
             <select
               value={current.action}
               onChange={(e) =>
-                edit({ action: e.target.value as Mapping['action'], chapter_id: null, base_revision: null })
+                edit({
+                  action: e.target.value as Mapping['action'],
+                  chapter_id: null,
+                  base_revision: null,
+                  expected_title: undefined,
+                  append_order: undefined,
+                })
               }
             >
               <option value="append">追加新章节</option>
@@ -318,7 +396,11 @@ export function ManuscriptImport({
                 value={current.chapter_id || ''}
                 onChange={(e) => {
                   const target = preview.existing.find((c) => c.id === e.target.value)
-                  edit({ chapter_id: target?.id || null, base_revision: target?.revision ?? null })
+                  edit({
+                    chapter_id: target?.id || null,
+                    base_revision: target?.revision ?? null,
+                    expected_title: target?.title,
+                  })
                 }}
               >
                 <option value="">请明确选择替换目标</option>
@@ -329,6 +411,31 @@ export function ManuscriptImport({
                 ))}
               </select>
             </label>
+          )}
+          {!!sequence.length && (
+            <section aria-label="追加顺序">
+              <h3>追加顺序</h3>
+              <ol className="manuscript-order-list" tabIndex={0} aria-label="新章节的导入顺序">
+                {sequence.map((row, index) => (
+                  <li key={index} aria-current={index === appendIndex ? 'true' : undefined}>
+                    {row.title.trim() || '未填写标题'}
+                  </li>
+                ))}
+              </ol>
+              {appendIndex >= 0 && sequence.length > 1 && (
+                <div className="actions">
+                  <button disabled={busy || appendIndex === 0} onClick={() => moveAppend(-1)}>
+                    本段在追加顺序前移
+                  </button>
+                  <button
+                    disabled={busy || appendIndex === sequence.length - 1}
+                    onClick={() => moveAppend(1)}
+                  >
+                    本段在追加顺序后移
+                  </button>
+                </div>
+              )}
+            </section>
           )}
           <label className="check">
             <input
@@ -347,17 +454,7 @@ export function ManuscriptImport({
             disabled={busy}
             onClick={() =>
               void perform(async () => {
-                const values = mappings.map(
-                  ({ title, start, end, action, chapter_id, base_revision, allow_duplicate }) => ({
-                    title,
-                    start,
-                    end,
-                    action,
-                    chapter_id,
-                    base_revision,
-                    allow_duplicate,
-                  }),
-                )
+                const values = wireMappings(mappings)
                 const value = await api<Preview>(
                   `/branches/${branchId}/import-previews/${preview.id}/draft`,
                   'PATCH',
@@ -385,17 +482,7 @@ export function ManuscriptImport({
                 const values = {
                   base_story_revision: preview.base_story_revision,
                   draft_revision: preview.draft?.revision || 0,
-                  mappings: mappings.map(
-                    ({ title, start, end, action, chapter_id, base_revision, allow_duplicate }) => ({
-                      title,
-                      start,
-                      end,
-                      action,
-                      chapter_id,
-                      base_revision,
-                      allow_duplicate,
-                    }),
-                  ),
+                  mappings: wireMappings(mappings),
                 }
                 const signature = JSON.stringify(values)
                 if (pending.current?.signature !== signature)
@@ -431,7 +518,11 @@ export function ManuscriptImport({
             {receipt.results.map((r, i) => (
               <li key={i}>
                 {actions[r.action as keyof typeof actions] || r.action} · {r.title} · {r.start}—{r.end}
+                {r.position !== undefined ? ` · 第${r.position}章` : ''}
                 {r.revision !== undefined ? ` · 正文修订${r.revision}` : ''}
+                {r.previous_title !== undefined
+                  ? ` · 替换前《${r.previous_title}》修订${r.previous_revision}`
+                  : ''}
               </li>
             ))}
           </ol>

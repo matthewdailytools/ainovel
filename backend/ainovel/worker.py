@@ -950,6 +950,19 @@ class Worker:
             "表达预设": request["writing_profile"],
             "情节保持": "作者明确给出的行动者、动作对象、给出与取得的方向、前提和结果均须保持，不能仅保留结局而反转过程。指令有歧义时保留待核对，不自行把另一种解释写成既定安排。",
         }
+        techniques = self.task["result"].get("technique_reference_snapshot")
+        if techniques:
+            instruction["作者本次选用的手法"] = [
+                {
+                    key: rule[key]
+                    for key in ("technique", "conditions", "exceptions", "replacement", "application_note")
+                }
+                for rule in techniques
+            ]
+            instruction["手法使用范围"] = (
+                "仅借鉴通用写法，服从作者情节、锁定结果和设定。"
+                "须替换的内容不得沿用，不复用专名、表达和独特事件照搬。"
+            )
         kind = "advice"
         if action == "ideation.structure":
             from .ideation_structure import generate_structure
@@ -1065,6 +1078,7 @@ class Worker:
                 "author_contract": self.author_snapshot(),
                 "targeted_revision": self.task["result"].get("targeted_revision_snapshot"),
                 "reference_session": self.task["result"].get("reference_snapshot"),
+                **({"technique_references": techniques} if techniques else {}),
                 "scene_binding": context["longform"].get("scene_binding"),
                 "chapter_scenes": context.get("chapter_scenes"),
             },

@@ -522,6 +522,160 @@
         }
       }
     },
+    "/api/reference-sessions/{session_id}/cards/{card_id}/source": {
+      "get": {
+        "summary": "Source",
+        "operationId": "source_api_reference_sessions__session_id__cards__card_id__source_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Session Id" }
+          },
+          {
+            "name": "card_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Card Id" }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 0, "title": "Revision" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CardSource" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/technique-references": {
+      "get": {
+        "summary": "Chapter References",
+        "operationId": "chapter_references_api_branches__branch_id__chapters__chapter_id__technique_references_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/TechniqueReference" },
+                  "title": "Response Chapter References Api Branches  Branch Id  Chapters  Chapter Id  Technique References Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Cite Card",
+        "operationId": "cite_card_api_branches__branch_id__chapters__chapter_id__technique_references_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/TechniqueReferenceInput" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/TechniqueReference" } }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/technique-references/{identifier}/source": {
+      "get": {
+        "summary": "Cited Source",
+        "operationId": "cited_source_api_branches__branch_id__chapters__chapter_id__technique_references__identifier__source_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Identifier" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CardSource" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/story-graph": {
       "get": {
         "summary": "Get Graph",
@@ -1044,6 +1198,90 @@
           "200": {
             "description": "Successful Response",
             "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/project-brief": {
+      "get": {
+        "summary": "Get Project Brief",
+        "operationId": "get_project_brief_api_branches__branch_id__project_brief_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BriefState" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update Project Brief",
+        "operationId": "update_project_brief_api_branches__branch_id__project_brief_put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaveBrief" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BriefState" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/project-brief/adopt": {
+      "post": {
+        "summary": "Adopt Project Brief",
+        "operationId": "adopt_project_brief_api_branches__branch_id__project_brief_adopt_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdoptBrief" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BriefState" } } }
           },
           "422": {
             "description": "Validation Error",
@@ -3796,6 +4034,35 @@
         "required": ["chapter_id", "title", "position", "revision", "id"],
         "title": "AdjacentChapter"
       },
+      "AdoptBrief": {
+        "properties": {
+          "draft_id": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Draft Id" },
+          "base_adoption_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }],
+            "title": "Base Adoption Id"
+          },
+          "base_author_contract_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }],
+            "title": "Base Author Contract Id"
+          },
+          "update_fields": {
+            "items": { "type": "string", "enum": ["direction", "ending"] },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Update Fields"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["draft_id", "base_adoption_id", "base_author_contract_id", "idempotency_key"],
+        "title": "AdoptBrief"
+      },
       "AdoptConception": {
         "properties": {
           "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
@@ -4028,6 +4295,17 @@
         ],
         "title": "AuthorReconfirmation"
       },
+      "AuthorSummary": {
+        "properties": {
+          "id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Id" },
+          "direction": { "type": "string", "title": "Direction" },
+          "ending": { "type": "string", "title": "Ending" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "direction", "ending"],
+        "title": "AuthorSummary"
+      },
       "Body_import_book_api_library_import_post": {
         "properties": {
           "file": { "type": "string", "contentMediaType": "application/octet-stream", "title": "File" },
@@ -4053,6 +4331,59 @@
         "type": "object",
         "required": ["file"],
         "title": "Body_preview_api_branches__branch_id__import_previews_post"
+      },
+      "BriefFields": {
+        "properties": {
+          "concept": { "type": "string", "maxLength": 6000, "title": "Concept", "default": "" },
+          "positioning": { "type": "string", "maxLength": 2000, "title": "Positioning", "default": "" },
+          "audience": { "type": "string", "maxLength": 2000, "title": "Audience", "default": "" },
+          "scope": { "type": "string", "maxLength": 2000, "title": "Scope", "default": "" },
+          "direction": { "type": "string", "maxLength": 6000, "title": "Direction", "default": "" },
+          "ending": { "type": "string", "maxLength": 4000, "title": "Ending", "default": "" },
+          "last_image": { "type": "string", "maxLength": 2000, "title": "Last Image", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "BriefFields"
+      },
+      "BriefState": {
+        "properties": {
+          "draft": { "anyOf": [{ "$ref": "#/components/schemas/BriefVersion" }, { "type": "null" }] },
+          "adopted": { "anyOf": [{ "$ref": "#/components/schemas/BriefVersion" }, { "type": "null" }] },
+          "author_contract": { "$ref": "#/components/schemas/AuthorSummary" },
+          "referencing_tasks": {
+            "items": { "$ref": "#/components/schemas/ReferencingTask" },
+            "type": "array",
+            "title": "Referencing Tasks"
+          },
+          "referencing_task_count": { "type": "integer", "title": "Referencing Task Count" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["draft", "adopted", "author_contract", "referencing_tasks", "referencing_task_count"],
+        "title": "BriefState"
+      },
+      "BriefVersion": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "fields": { "$ref": "#/components/schemas/BriefFields" },
+          "created": { "type": "number", "title": "Created" },
+          "draft_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Draft Id" },
+          "intent_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Intent Id" },
+          "previous_intent_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Previous Intent Id"
+          },
+          "applied_fields": {
+            "items": { "type": "string", "enum": ["direction", "ending"] },
+            "type": "array",
+            "title": "Applied Fields"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "fields", "created"],
+        "title": "BriefVersion"
       },
       "CandidateEdit": {
         "properties": {
@@ -4128,6 +4459,21 @@
         "additionalProperties": false,
         "type": "object",
         "title": "CandidateVersionInput"
+      },
+      "CardSource": {
+        "properties": {
+          "unit": { "$ref": "#/components/schemas/SourceUnit" },
+          "passages": {
+            "items": { "$ref": "#/components/schemas/Passage" },
+            "type": "array",
+            "title": "Passages"
+          },
+          "truncated": { "type": "boolean", "title": "Truncated", "default": false }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["unit", "passages"],
+        "title": "CardSource"
       },
       "ChapterBasis": {
         "properties": {
@@ -5257,7 +5603,15 @@
             "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
             "title": "Base Revision"
           },
-          "allow_duplicate": { "type": "boolean", "title": "Allow Duplicate", "default": false }
+          "allow_duplicate": { "type": "boolean", "title": "Allow Duplicate", "default": false },
+          "append_order": {
+            "anyOf": [{ "type": "integer", "maximum": 1000, "minimum": 1 }, { "type": "null" }],
+            "title": "Append Order"
+          },
+          "expected_title": {
+            "anyOf": [{ "type": "string", "maxLength": 200 }, { "type": "null" }],
+            "title": "Expected Title"
+          }
         },
         "additionalProperties": false,
         "type": "object",
@@ -5329,6 +5683,17 @@
             "type": "array",
             "maxItems": 20,
             "title": "Reference Ids"
+          },
+          "technique_reference_ids": {
+            "anyOf": [
+              {
+                "items": { "type": "string", "maxLength": 128, "minLength": 1 },
+                "type": "array",
+                "maxItems": 8
+              },
+              { "type": "null" }
+            ],
+            "title": "Technique Reference Ids"
           },
           "account": { "type": "string", "title": "Account" },
           "max_output_tokens": {
@@ -5402,6 +5767,19 @@
         "type": "object",
         "required": ["title"],
         "title": "NovelInput"
+      },
+      "Passage": {
+        "properties": {
+          "start": { "type": "integer", "title": "Start" },
+          "end": { "type": "integer", "title": "End" },
+          "before": { "type": "string", "title": "Before" },
+          "quote": { "type": "string", "title": "Quote" },
+          "after": { "type": "string", "title": "After" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["start", "end", "before", "quote", "after"],
+        "title": "Passage"
       },
       "PlanCreate": {
         "properties": {
@@ -5731,6 +6109,7 @@
           "technique": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Technique" },
           "conditions": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Conditions" },
           "exceptions": { "type": "string", "maxLength": 2000, "title": "Exceptions", "default": "" },
+          "replacement": { "type": "string", "maxLength": 2000, "title": "Replacement", "default": "" },
           "evidence": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Evidence" }
         },
         "additionalProperties": false,
@@ -5748,6 +6127,17 @@
         "type": "object",
         "required": ["base_revision", "text"],
         "title": "ReferenceFeedback"
+      },
+      "ReferencingTask": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "kind": { "type": "string", "title": "Kind" },
+          "status": { "type": "string", "title": "Status" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "kind", "status"],
+        "title": "ReferencingTask"
       },
       "Relationship": {
         "properties": {
@@ -5821,6 +6211,19 @@
         "additionalProperties": false,
         "type": "object",
         "title": "ResumeInput"
+      },
+      "SaveBrief": {
+        "properties": {
+          "base_draft_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }],
+            "title": "Base Draft Id"
+          },
+          "fields": { "$ref": "#/components/schemas/BriefFields" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_draft_id", "fields"],
+        "title": "SaveBrief"
       },
       "SaveConception": {
         "properties": {
@@ -6018,6 +6421,19 @@
         "required": ["chapter_id", "revision", "start", "end", "quote"],
         "title": "Source"
       },
+      "SourceUnit": {
+        "properties": {
+          "unit_id": { "type": "string", "title": "Unit Id" },
+          "unit_title": { "type": "string", "title": "Unit Title" },
+          "book_id": { "type": "string", "title": "Book Id" },
+          "title": { "type": "string", "title": "Title" },
+          "file_hash": { "type": "string", "title": "File Hash" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["unit_id", "unit_title", "book_id", "title", "file_hash"],
+        "title": "SourceUnit"
+      },
       "Sources": {
         "properties": {
           "chapter": { "$ref": "#/components/schemas/ChapterBasis" },
@@ -6104,6 +6520,59 @@
         "type": "object",
         "required": ["title", "kind", "character_id", "event_id", "category", "key", "value", "audience"],
         "title": "State"
+      },
+      "TechniqueReference": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "session_id": { "type": "string", "title": "Session Id" },
+          "session_revision": { "type": "integer", "title": "Session Revision" },
+          "current_session_revision": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Current Session Revision"
+          },
+          "card": { "$ref": "#/components/schemas/ReferenceCard" },
+          "unit": { "$ref": "#/components/schemas/SourceUnit" },
+          "evidence_start": { "type": "integer", "title": "Evidence Start" },
+          "evidence_end": { "type": "integer", "title": "Evidence End" },
+          "application_note": { "type": "string", "title": "Application Note" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "chapter_id",
+          "session_id",
+          "session_revision",
+          "current_session_revision",
+          "card",
+          "unit",
+          "evidence_start",
+          "evidence_end",
+          "application_note"
+        ],
+        "title": "TechniqueReference"
+      },
+      "TechniqueReferenceInput": {
+        "properties": {
+          "session_id": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Session Id" },
+          "session_revision": { "type": "integer", "minimum": 0, "title": "Session Revision" },
+          "card_id": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Card Id" },
+          "evidence_start": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Evidence Start"
+          },
+          "application_note": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Application Note",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["session_id", "session_revision", "card_id"],
+        "title": "TechniqueReferenceInput"
       },
       "TimeEvidence": {
         "properties": {

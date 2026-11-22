@@ -375,6 +375,10 @@ th {
 .manuscript-import {
   overflow-wrap: anywhere;
 }
+.manuscript-order-list {
+  max-block-size: 12rem;
+  overflow-y: auto;
+}
 details {
   margin: 14px 0;
 }
@@ -724,6 +728,16 @@ details > label {
 .writing-outline-text {
   max-height: 12rem;
   overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.technique-pin {
+  margin-top: 12px;
+}
+.technique-pin fieldset {
+  min-width: 0;
+}
+.technique-source {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

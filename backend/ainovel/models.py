@@ -74,6 +74,9 @@ class ModuleInput(Input):
         default="第三人称限定视角，现代白话，动作有因果，避免重复解释。", max_length=5000
     )
     reference_ids: list[str] = Field(default_factory=list, max_length=20)
+    technique_reference_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] | None = Field(
+        default=None, max_length=8
+    )
     account: str
     max_output_tokens: int = Field(default=8192, ge=64, le=16_384)
     budget_limit: float | None = Field(default=None, gt=0, allow_inf_nan=False)

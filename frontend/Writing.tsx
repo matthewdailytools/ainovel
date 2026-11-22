@@ -20,6 +20,7 @@ import { ChapterContext } from './ChapterContext'
 import { ChapterOutline, ChapterSettings, useWritingContext } from './WritingContext'
 import { ChapterChecks, chapterCheckKind } from './ChapterChecks'
 import { ContinuityLedger, TodayBar, useContinuityLedger, type LedgerTarget } from './ContinuityLedger'
+import { ChapterTechniqueReferences, supportsTechniqueReferences } from './TechniqueReferences'
 import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
@@ -160,6 +161,11 @@ export function Writing({
   const [seenGenre, setSeenGenre] = useState<GenreProfile>()
   const [references, setReferences] = useState<Excerpt[]>([])
   const [selectedRefs, setSelectedRefs] = useState<string[]>([])
+  const [selectedTechniques, setSelectedTechniques] = useState<string[]>([])
+  const [submittedTechniques, setSubmittedTechniques] = useState('')
+  const techniqueEnabled = supportsTechniqueReferences(action)
+  const techniqueSignature = selectedTechniques.join(',')
+  useLeaveGuard(techniqueEnabled && techniqueSignature !== submittedTechniques, '未提交的本章手法选用')
   const assistantFormSignature = JSON.stringify([
     action,
     instruction,
@@ -215,6 +221,10 @@ export function Writing({
         setDirectionBasis(undefined)
         setInstruction('')
         setAction('writing.advise')
+      }
+      if (row.id !== current.current?.id) {
+        setSelectedTechniques([])
+        setSubmittedTechniques('')
       }
       current.current = row
       setChapter(row)
@@ -572,6 +582,9 @@ export function Writing({
           contract_version: seenContract.contract_version,
         },
         reference_ids: selectedRefs,
+        ...(techniqueEnabled && row && selectedTechniques.length
+          ? { technique_reference_ids: selectedTechniques }
+          : {}),
         account,
         max_output_tokens: 8192,
         context_position: bookDesign ? 0 : selection.start,
@@ -585,6 +598,7 @@ export function Writing({
       data.client_request_id = pendingRequest.current.key
       const task = await api<Task>('/modules', 'POST', data)
       setSubmittedAssistantForm(assistantFormSignature)
+      if (techniqueEnabled) setSubmittedTechniques(techniqueSignature)
       setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])
       pendingRequest.current = null
       setStream('')
@@ -980,6 +994,15 @@ export function Writing({
               context={writingContext}
               branchId={branch.id}
               chapterId={chapter.id}
+            />
+            <ChapterTechniqueReferences
+              key={chapter.id}
+              branchId={branch.id}
+              chapterId={chapter.id}
+              selected={selectedTechniques}
+              enabled={techniqueEnabled}
+              disabled={busy || !!activeTask}
+              onChange={setSelectedTechniques}
             />
             <ChapterChecks
               key={chapter.id}

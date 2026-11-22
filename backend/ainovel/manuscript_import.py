@@ -8,7 +8,7 @@ from time import time
 from typing import Annotated, Literal
 
 from fastapi import File, Form, UploadFile
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_serializer
 
 from .db import DomainError, dumps, uid
 
@@ -51,6 +51,16 @@ class Mapping(Segment):
     chapter_id: str | None = None
     base_revision: int | None = Field(default=None, ge=0)
     allow_duplicate: bool = False
+    append_order: StrictInt | None = Field(default=None, ge=1, le=1000)
+    expected_title: str | None = Field(default=None, max_length=200)
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_mapping(self, serialize):
+        result = serialize(self)
+        for key in ("append_order", "expected_title"):
+            if result.get(key) is None:
+                result.pop(key, None)
+        return result
 
 
 class Confirm(Strict):
@@ -164,11 +174,18 @@ def confirm_import(domain, branch_id, identifier, data):
                 old = by_id.get(mapping.chapter_id)
                 if not old or old["revision"] != mapping.base_revision:
                     raise DomainError("revision_conflict", "替换目标已改变或不属于当前工作版本。", 409)
+                if mapping.expected_title is not None and old["title"] != mapping.expected_title:
+                    raise DomainError("revision_conflict", "替换目标标题已改变，请重新核对目录。", 409)
                 if old["id"] in targets:
                     raise DomainError("import_mapping", "同一章节只能映射一个导入段。")
                 targets.add(old["id"])
-            elif mapping.chapter_id is not None or mapping.base_revision is not None:
+            elif any(
+                value is not None
+                for value in (mapping.chapter_id, mapping.base_revision, mapping.expected_title)
+            ):
                 raise DomainError("import_mapping", "仅替换操作可指定目标章节和修订。")
+            if mapping.action != "append" and mapping.append_order is not None:
+                raise DomainError("import_order", "只有追加的新章节可以调整追加顺序。")
             if mapping.action != "skip":
                 unchanged_target = (
                     mapping.action == "replace" and by_id[mapping.chapter_id]["content"] == text
@@ -181,15 +198,30 @@ def confirm_import(domain, branch_id, identifier, data):
             raise DomainError("import_range", "映射未覆盖完整原文；请保留显式跳过范围。")
         if all(m.action == "skip" for m, _ in prepared):
             raise DomainError("import_empty", "未选择任何待导入段。")
-        position = tx.execute(
+        appended = [m for m, _ in prepared if m.action == "append"]
+        explicit_order = [m.append_order for m in appended if m.append_order is not None]
+        if explicit_order and sorted(explicit_order) != list(range(1, len(appended) + 1)):
+            raise DomainError("import_order", "追加顺序必须连续且唯一，请检查每个新增章节的位置。")
+        final_position = tx.execute(
             "SELECT COALESCE(MAX(position),0) FROM chapters WHERE branch_id=?", (branch_id,)
         ).fetchone()[0]
-        results = []
-        for mapping, text in prepared:
+        positions = {
+            m.start: final_position + (m.append_order or index) for index, m in enumerate(appended, start=1)
+        }
+        positions.update(
+            {m.start: by_id[m.chapter_id]["position"] for m, _ in prepared if m.action == "replace"}
+        )
+        # Write from earlier to later chapters so ordinary dependency marking
+        # cannot mark text just imported by the same transaction stale.
+        results = {}
+        for mapping, text in sorted(prepared, key=lambda pair: positions.get(pair[0].start, 0)):
             if mapping.action == "skip":
-                results.append(
-                    {"action": "skip", "title": mapping.title, "start": mapping.start, "end": mapping.end}
-                )
+                results[mapping.start] = {
+                    "action": "skip",
+                    "title": mapping.title,
+                    "start": mapping.start,
+                    "end": mapping.end,
+                }
                 continue
             if mapping.action == "replace":
                 chapter = by_id[mapping.chapter_id]
@@ -197,11 +229,10 @@ def confirm_import(domain, branch_id, identifier, data):
                 tx.execute("UPDATE chapters SET title=? WHERE id=?", (mapping.title, chapter["id"]))
                 chapter_id = chapter["id"]
             else:
-                position += 1
                 chapter_id = uid()
                 tx.execute(
                     "INSERT INTO chapters(id,branch_id,position,title) VALUES(?,?,?,?)",
-                    (chapter_id, branch_id, position, mapping.title),
+                    (chapter_id, branch_id, positions[mapping.start], mapping.title),
                 )
                 tx.execute(
                     "INSERT INTO revisions VALUES(?,?,?,?,?,?)",
@@ -209,22 +240,24 @@ def confirm_import(domain, branch_id, identifier, data):
                 )
                 chapter = dict(tx.execute("SELECT * FROM chapters WHERE id=?", (chapter_id,)).fetchone())
                 revision = domain.revise_tx(tx, chapter, text, "长篇导入追加")
-            results.append(
-                {
-                    "action": mapping.action,
-                    "chapter_id": chapter_id,
-                    "revision": revision,
-                    "title": mapping.title,
-                    "start": mapping.start,
-                    "end": mapping.end,
-                    "content_sha256": hashlib.sha256(text.encode()).hexdigest(),
-                }
-            )
+            result = {
+                "action": mapping.action,
+                "chapter_id": chapter_id,
+                "revision": revision,
+                "position": positions[mapping.start],
+                "title": mapping.title,
+                "start": mapping.start,
+                "end": mapping.end,
+                "content_sha256": hashlib.sha256(text.encode()).hexdigest(),
+            }
+            if mapping.action == "replace":
+                result.update(previous_title=chapter["title"], previous_revision=chapter["revision"])
+            results[mapping.start] = result
         receipt = {
             "id": identifier,
             "request": data.model_dump(),
             "raw_hash": row["raw_hash"],
-            "results": results,
+            "results": [results[m.start] for m, _ in prepared],
             "story_revision": tx.execute(
                 "SELECT story_revision FROM branches WHERE id=?", (branch_id,)
             ).fetchone()[0],
