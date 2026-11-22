@@ -346,6 +346,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/writing-context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Context */
+    get: operations['read_context_api_branches__branch_id__chapters__chapter_id__writing_context_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/writing-context/settings/{setting_id}/source': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Setting Source */
+    get: operations['setting_source_api_branches__branch_id__chapters__chapter_id__writing_context_settings__setting_id__source_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/chapters/{chapter_id}/writing-context/outline': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Outline */
+    put: operations['save_outline_api_branches__branch_id__chapters__chapter_id__writing_context_outline_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/branches/{branch_id}/ideas/adopt': {
     parameters: {
       query?: never
@@ -1768,6 +1819,41 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/chapters/{chapter_id}/checks': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Checks */
+    get: operations['checks_api_chapters__chapter_id__checks_get']
+    put?: never
+    /** Create Check */
+    post: operations['create_check_api_chapters__chapter_id__checks_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/chapters/{chapter_id}/checks/{check_id}/recheck': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Recheck */
+    post: operations['recheck_api_chapters__chapter_id__checks__check_id__recheck_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1793,6 +1879,19 @@ export interface components {
       memory_selection_reason: string
       /** Memory Facts Sha256 */
       memory_facts_sha256?: string | null
+    }
+    /** AdjacentChapter */
+    AdjacentChapter: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Title */
+      title: string
+      /** Position */
+      position: number
+      /** Revision */
+      revision: number
+      /** Id */
+      id: string
     }
     /** AdoptConception */
     AdoptConception: {
@@ -1888,6 +1987,13 @@ export interface components {
        * @default
        */
       ending: string
+    }
+    /** AuthorOutlineInput */
+    AuthorOutlineInput: {
+      /** Base Version */
+      base_version: string | null
+      /** Text */
+      text: string
     }
     /** AuthorReconfirmation */
     AuthorReconfirmation: {
@@ -2002,10 +2108,43 @@ export interface components {
        */
       candidate_revision: number
     }
+    /** ChapterBasis */
+    ChapterBasis: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Title */
+      title: string
+      /** Position */
+      position: number
+      /** Revision */
+      revision: number
+    }
+    /** ChapterChecks */
+    ChapterChecks: {
+      /** Chapter Revision */
+      chapter_revision: number
+      /** Items */
+      items: components['schemas']['CheckItem'][]
+      previous: components['schemas']['AdjacentChapter'] | null
+    }
     /** ChapterInput */
     ChapterInput: {
       /** Title */
       title: string
+    }
+    /** ChapterOutline */
+    ChapterOutline: {
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: 'author' | 'frozen_ai'
+      /** Text */
+      text: string
+      /** Version */
+      version: string
+      /** Task Id */
+      task_id: string | null
     }
     /** Character */
     Character: {
@@ -2037,6 +2176,64 @@ export interface components {
        * @default
        */
       profile: string
+    }
+    /** CheckEvidence */
+    CheckEvidence: {
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: 'chapter' | 'previous'
+      /** Quote */
+      quote: string
+      /** Start */
+      start: number
+      /** End */
+      end: number
+    }
+    /** CheckItem */
+    CheckItem: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Condition */
+      condition: string
+      /** Include Previous */
+      include_previous: boolean
+      /** Previous Chapter Id */
+      previous_chapter_id: string | null
+      /** Setting Id */
+      setting_id: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'current' | 'stale'
+      /** Changed Sources */
+      changed_sources: ('chapter' | 'previous' | 'setting')[]
+      latest: components['schemas']['CheckResult']
+      /** History */
+      history: components['schemas']['CheckResult'][]
+    }
+    /** CheckResult */
+    CheckResult: {
+      /** Id */
+      id: string
+      /** Created */
+      created: number
+      /** Base Revision */
+      base_revision: number
+      /**
+       * Result
+       * @enum {string}
+       */
+      result: 'pass' | 'fail' | 'unknown'
+      /** Reason */
+      reason: string
+      /** Evidence */
+      evidence: components['schemas']['CheckEvidence'][]
+      sources: components['schemas']['Sources']
     }
     /** ConceptionCategory */
     ConceptionCategory: {
@@ -2235,6 +2432,31 @@ export interface components {
        * @default
        */
       reason: string
+    }
+    /** CreateCheck */
+    CreateCheck: {
+      /** Base Revision */
+      base_revision: number
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Previous Base Revision */
+      previous_base_revision?: number | null
+      /** Previous Chapter Id */
+      previous_chapter_id?: string | null
+      /** Condition */
+      condition: string
+      /** Title */
+      title?: string | null
+      /**
+       * Include Previous
+       * @default false
+       */
+      include_previous: boolean
+      /** Setting Id */
+      setting_id?: string | null
+      expected_setting?: components['schemas']['SettingBasis'] | null
     }
     /** CreateReference */
     CreateReference: {
@@ -2756,6 +2978,21 @@ export interface components {
       /** Base Revision */
       base_revision: number
     }
+    /** Recheck */
+    Recheck: {
+      /** Base Revision */
+      base_revision: number
+      /** Account */
+      account: string
+      /** Client Request Id */
+      client_request_id: string
+      /** Previous Base Revision */
+      previous_base_revision?: number | null
+      /** Previous Chapter Id */
+      previous_chapter_id?: string | null
+      /** Previous Result Id */
+      previous_result_id: string
+    }
     /** RecheckCorrectionInput */
     RecheckCorrectionInput: {
       /**
@@ -3067,6 +3304,49 @@ export interface components {
       /** End */
       end: number
     }
+    /** SettingBasis */
+    SettingBasis: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Text */
+      text: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'fact' | 'world' | 'conception'
+      source: components['schemas']['SettingEvidence'] | null
+      /** Source Current */
+      source_current: boolean
+    }
+    /** SettingEvidence */
+    SettingEvidence: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Title */
+      title: string
+      /** Position */
+      position: number
+      /** Revision */
+      revision: number
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Quote */
+      quote: string
+    }
+    /** SettingPassage */
+    SettingPassage: {
+      /** Before */
+      before: string
+      /** Quote */
+      quote: string
+      /** After */
+      after: string
+    }
     /** Source */
     Source: {
       /** Chapter Id */
@@ -3079,6 +3359,12 @@ export interface components {
       end: number
       /** Quote */
       quote: string
+    }
+    /** Sources */
+    Sources: {
+      chapter: components['schemas']['ChapterBasis']
+      previous: components['schemas']['ChapterBasis'] | null
+      setting: components['schemas']['SettingBasis'] | null
     }
     /** StartExtraction */
     StartExtraction: {
@@ -3272,6 +3558,16 @@ export interface components {
       budget_limit?: number | null
       genre_profile_basis?: components['schemas']['GenreProfileBasis'] | null
       author_contract_basis?: components['schemas']['AuthorContractBasis'] | null
+    }
+    /** WritingContext */
+    WritingContext: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Chapter Revision */
+      chapter_revision: number
+      outline: components['schemas']['ChapterOutline'] | null
+      /** Settings */
+      settings: components['schemas']['SettingBasis'][]
     }
   }
   responses: never
@@ -4121,6 +4417,110 @@ export interface operations {
         }
         content: {
           'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_context_api_branches__branch_id__chapters__chapter_id__writing_context_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WritingContext']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  setting_source_api_branches__branch_id__chapters__chapter_id__writing_context_settings__setting_id__source_get: {
+    parameters: {
+      query: {
+        revision: number
+        start: number
+      }
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+        setting_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SettingPassage']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_outline_api_branches__branch_id__chapters__chapter_id__writing_context_outline_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AuthorOutlineInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ChapterOutline']
         }
       }
       /** @description Validation Error */
@@ -7097,6 +7497,108 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  checks_api_chapters__chapter_id__checks_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ChapterChecks']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_check_api_chapters__chapter_id__checks_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        chapter_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateCheck']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  recheck_api_chapters__chapter_id__checks__check_id__recheck_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        chapter_id: string
+        check_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['Recheck']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
         headers: {
           [name: string]: unknown
         }

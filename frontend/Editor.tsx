@@ -10,22 +10,26 @@ export function Editor({
   id,
   initial,
   cursor = 0,
+  scrollTop,
   readOnly = false,
   onChange,
   onSelection,
+  onViewPosition,
 }: {
   id: string
   initial: string
   cursor?: number
+  scrollTop?: number
   readOnly?: boolean
   onChange: (text: string) => void
   onSelection: (selection: Selection) => void
+  onViewPosition?: (cursor: number, scrollTop: number) => void
 }) {
   const mount = useRef<HTMLDivElement>(null)
   const instance = useRef<EditorView | null>(null)
   const permission = useRef(new Compartment())
-  const callbacks = useRef({ onChange, onSelection })
-  callbacks.current = { onChange, onSelection }
+  const callbacks = useRef({ onChange, onSelection, onViewPosition })
+  callbacks.current = { onChange, onSelection, onViewPosition }
   useEffect(() => {
     const view = new EditorView({
       parent: mount.current!,
@@ -51,6 +55,7 @@ export function Editor({
                 end: range.to,
                 text: update.state.sliceDoc(range.from, range.to),
               })
+              callbacks.current.onViewPosition?.(range.head, update.view.scrollDOM.scrollTop)
             }
           }),
           EditorView.theme({
@@ -64,9 +69,23 @@ export function Editor({
         ],
       }),
     })
+    const savePosition = () =>
+      callbacks.current.onViewPosition?.(view.state.selection.main.head, view.scrollDOM.scrollTop)
+    view.scrollDOM.addEventListener('scroll', savePosition)
+    if (cursor && scrollTop === undefined) {
+      view.dispatch({ effects: EditorView.scrollIntoView(Math.min(cursor, initial.length)) })
+    } else if (scrollTop !== undefined) {
+      view.requestMeasure({
+        read: () => scrollTop,
+        write: (position) => {
+          view.scrollDOM.scrollTop = position
+        },
+      })
+    }
     instance.current = view
     return () => {
       instance.current = null
+      view.scrollDOM.removeEventListener('scroll', savePosition)
       view.destroy()
     }
     // Recreate only when a confirmed document identity/version changes.

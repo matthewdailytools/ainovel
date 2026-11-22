@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 
+from . import chapter_item_check
 from .budget import Budget
 from .author_contract import assemble_contract, authored_payload
 from .db import Database, DomainError, dumps, uid
@@ -387,6 +388,9 @@ def create_app(settings=None, schema_only=False):
     from .story_graph import register_routes as register_story_routes
 
     register_story_routes(app, domain)
+    from .writing_context import register_routes as register_writing_context_routes
+
+    register_writing_context_routes(app, domain)
     from .ideation import register_routes as register_ideation_routes
 
     register_ideation_routes(app, domain)
@@ -884,7 +888,8 @@ def create_app(settings=None, schema_only=False):
     def artifacts(branch_id: str, chapter_id: str | None = None):
         rows = db.all(
             "SELECT id FROM artifacts WHERE branch_id=?"
-            " AND kind NOT IN ('conception_workspace','conception_completion','conception_handoff','conception_bundle')"
+            " AND kind NOT IN ('conception_workspace','conception_completion','conception_handoff','conception_bundle',"
+            "'chapter_outline','chapter_item_check')"
             + (" AND chapter_id=?" if chapter_id else "")
             + " ORDER BY created DESC LIMIT 50",
             (branch_id, chapter_id) if chapter_id else (branch_id,),
@@ -991,7 +996,10 @@ def create_app(settings=None, schema_only=False):
 
     @app.post("/api/artifacts/{artifact_id}/reject")
     def reject(artifact_id: str, data: CandidateVersionInput | None = None):
-        if domain.artifact(artifact_id)["kind"] in {
+        artifact = domain.artifact(artifact_id)
+        if artifact["kind"] == chapter_item_check.ARTIFACT:
+            raise DomainError("check_readonly", "章节单项校验是只读记录。", 409)
+        if artifact["kind"] in {
             "candidate_recheck",
             "source_interpretation_correction",
             "source_corrected_candidate_recheck",
@@ -1274,6 +1282,7 @@ def create_app(settings=None, schema_only=False):
 
     register_reference_routes(app, domain, provider_ready)
     register_extraction_routes(app, domain, provider_ready)
+    chapter_item_check.register_routes(app, domain, provider_ready)
 
     dist = ROOT / "dist"
     if dist.is_dir():

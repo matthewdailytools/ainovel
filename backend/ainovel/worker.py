@@ -9,6 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 from time import time
 
+from . import chapter_item_check
 from .budget import Budget
 from .author_contract import compile_contract, legacy_contract
 from .db import Database, DomainError, dumps, uid
@@ -44,6 +45,7 @@ STRUCTURE_REPAIR_VERSION = "3"
 REVIEW_CHECK_VERSION = "fixed-check-shape/2"
 REVISION_LENGTH_VERSION = "replacement-length-diagnostics/1"
 RETAIN_UNCERTAIN_STEPS = {
+    chapter_item_check.KIND,
     "source_interpretation_correction",
     "source_corrected_candidate_recheck",
     "conception_generate",
@@ -293,6 +295,8 @@ class Worker:
             from .candidate_recheck import validate
 
             validate(self)
+        if self.task["kind"] == chapter_item_check.KIND:
+            chapter_item_check.validate(self)
         run_limit = payload.get("budget_limit")
         if self.task["kind"] in {"source_interpretation_correction", "source_corrected_candidate_recheck"}:
             from . import source_interpretation_correction as source_correction
@@ -351,6 +355,7 @@ class Worker:
             context = self.whole_chapter_context(context)
         if action in {
             "conception.extract.world",
+            chapter_item_check.ACTION,
             "仅依据作者原话整理本场景情节",
             "逐项对照作者情节解释与本次正文",
             "只从本次正文独立提取物品与信息流向",
@@ -2022,6 +2027,8 @@ class Worker:
                 from .conception_generation import run
 
                 await run(self)
+            elif task["kind"] == chapter_item_check.KIND:
+                await chapter_item_check.run(self)
             elif task["kind"] == "candidate_recheck":
                 from .candidate_recheck import run
 

@@ -715,6 +715,38 @@ details > label {
 .chapter-heading .muted {
   font-size: 10px;
 }
+.writing-outline {
+  margin: 0 clamp(16px, 4vw, 40px) 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.writing-outline-text {
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.writing-workbench-section h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.writing-workbench-section .section-title {
+  flex-wrap: wrap;
+}
+.writing-workbench-section figure {
+  margin: 8px 0;
+}
+.writing-workbench-section blockquote {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.writing-workbench-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
 .editor {
   flex: 1;
   min-height: 460px;

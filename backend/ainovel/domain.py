@@ -2,6 +2,7 @@ import hashlib
 import json
 from time import time
 
+from . import chapter_item_check
 from .db import DomainError, dumps, uid
 from .genre_catalog import assemble_profile
 from .author_contract import assemble_contract
@@ -387,6 +388,8 @@ class Domain:
                     "参考分析和方案请在参考工作区核对后保存为本次采用内容；此动作不采纳正文。",
                     409,
                 )
+            if artifact["kind"] == chapter_item_check.ARTIFACT:
+                raise DomainError("check_readonly", "章节单项校验是只读记录。", 409)
             if artifact["kind"] in {
                 "candidate_recheck",
                 "source_interpretation_correction",
@@ -802,6 +805,8 @@ class Domain:
                 from .conception_generation import validate_basis_tx
 
                 validate_basis_tx(db, branch_id, payload)
+            if kind == chapter_item_check.KIND:
+                initial["chapter_item_check_snapshot"] = chapter_item_check.freeze(db, payload)
             if identifier := payload.get("conception_snapshot_id"):
                 from .conception import queued_handoff_tx
 

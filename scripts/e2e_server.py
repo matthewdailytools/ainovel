@@ -66,6 +66,38 @@ class Model(ReferenceModel):
     async def generate(self, account, task_id, system, prompt, max_output, **kwargs):
         value = json.loads(prompt.split("\n只返回")[0])
         instruction = value["任务"]
+        if instruction.get("action") == "review.chapter.item":
+            condition = instruction["condition"]
+            sources = instruction["sources"]
+            assert sources["chapter"]["position"] == 2
+            if condition == "本章和上一章所写的寿元扣减都应为十年。":
+                assert sources["previous"]["position"] == 1
+                assert sources["setting"]["text"] == "施术固定扣减十年寿元。"
+                matches_cost = "施术后，宁禾折损了十年寿元。" in sources["previous"]["text"]
+                previous = (
+                    "施术后，宁禾折损了十年寿元。" if matches_cost else "施术后，宁禾折损了十二年寿元。"
+                )
+                result = {
+                    "result": "pass" if matches_cost else "fail",
+                    "reason": "两章均记录十年。" if matches_cost else "上一章记录十二年，第二章仍为十年。",
+                    "evidence": [
+                        {"source": "previous", "quote": previous},
+                        {"source": "chapter", "quote": "宁禾仍记得昨夜折损了十年寿元。"},
+                    ],
+                }
+            else:
+                assert condition == "本章应在天亮后打开竹匣。"
+                assert sources["previous"] is None and sources["setting"] is None
+                result = {
+                    "result": "pass",
+                    "reason": "开匣时点符合要求。",
+                    "evidence": [{"source": "chapter", "quote": "她在天亮后才打开竹匣。"}],
+                }
+            return {
+                "text": json.dumps(result, ensure_ascii=False),
+                "usage": {"input": 1, "output": 1},
+                "call_id": f"offline-chapter-item-{task_id}",
+            }
         source_result = source_correction_output(instruction)
         if source_result is None:
             source_result = source_correction_body_output(instruction)
@@ -395,6 +427,12 @@ class Model(ReferenceModel):
                 "call_id": "offline",
             }
         if instruction.get("action") == "writing.rewrite_selection":
+            if instruction.get("作者要求") == "后台验证 · 只调整藏青石的动作":
+                return {
+                    "text": "她把来历未明的青石藏进左袖。",
+                    "usage": {"input": 1, "output": 1},
+                    "call_id": "offline-chapter-workbench-rewrite",
+                }
             if "后台故障演练：慢速可取消" in instruction.get("作者要求", ""):
                 partial = "等待核查的未采纳片段。" * 15
                 if kwargs.get("on_text"):

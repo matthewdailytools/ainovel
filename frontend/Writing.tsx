@@ -17,6 +17,8 @@ import { readDraft, writeDraft, type Draft } from './drafts'
 import { GenreProfileDetails, GenreProfileNotice } from './GenreProfile'
 import { AuthorContractDetails, AuthorContractNotice, type AuthorContract } from './AuthorIntent'
 import { ChapterContext } from './ChapterContext'
+import { ChapterOutline, ChapterSettings, useWritingContext } from './WritingContext'
+import { ChapterChecks, chapterCheckKind } from './ChapterChecks'
 import { RevisionPanel, RevisionTraceDetails } from './RevisionPanel'
 import { ReferenceComparison } from './ReferenceWorkspace'
 import { ManuscriptImport } from './ManuscriptImport'
@@ -126,9 +128,12 @@ export function Writing({
   const [dirty, setDirty] = useState(0)
   const [selection, setSelection] = useState<Selection>({ start: 0, end: 0, text: '' })
   const [cursor, setCursor] = useState(0)
+  const [editorScroll, setEditorScroll] = useState<number>()
+  const chapterViews = useRef(new Map<string, { revision: number; cursor: number; scrollTop: number }>())
   const [note, setNote] = useState('')
   const reading = useRef({ revision: 0 })
   const [recovery, setRecovery] = useState<Draft>()
+  const writingContext = useWritingContext(branch.id, chapter)
   const [action, setAction] = useState<ModuleInput['action']>(
     feedbackHandoff ? 'writing.rewrite_selection' : 'writing.advise',
   )
@@ -190,7 +195,7 @@ export function Writing({
     }
   }, [])
   const refresh = async () => setChapters(await api(`/branches/${branch.id}/chapters`))
-  async function loadChapter(id: string, at = 0, authoritative = false) {
+  async function loadChapter(id: string, at?: number, authoritative = false) {
     if (current.current && current.current.id !== id && !confirmLeave()) return
     const token = ++loadSequence.current
     ++historyRequest.current
@@ -212,13 +217,17 @@ export function Writing({
       setRename(row.title)
       setHistory([])
       setShowHistory(false)
-      setSelection({ start: at, end: at, text: '' })
-      setCursor(at)
       setCandidateId('')
       setRecovery(undefined)
       const recoverable =
         draft && !draft.fromOtherWindow && draft.text !== row.content && draft.base === row.revision
       draftText.current = recoverable ? draft.text : row.content
+      const view = chapterViews.current.get(id)
+      const sameDraft = !authoritative && view?.revision === row.revision
+      const start = Math.min(draftText.current.length, at ?? (sameDraft ? view.cursor : 0))
+      setSelection({ start, end: start, text: '' })
+      setCursor(start)
+      setEditorScroll(at === undefined && sameDraft ? view.scrollTop : undefined)
       setText(draftText.current)
       setEditorKey(id + ':' + row.revision + ':' + Date.now())
       if (recoverable) {
@@ -281,6 +290,9 @@ export function Writing({
           base_revision: snapshot.revision,
           content,
         })
+        const view = chapterViews.current.get(row.id)
+        if (view?.revision === snapshot.revision)
+          chapterViews.current.set(row.id, { ...view, revision: row.revision })
         current.current = row
         await writeDraft({ id: row.id, base: row.revision, text: draftText.current, updated: Date.now() })
         if (alive.current) setChapter(row)
@@ -827,6 +839,13 @@ export function Writing({
                 {chapter.stale ? ' · 受前文修改影响，需重新审阅' : ''}
               </div>
             </div>
+            <ChapterOutline
+              key={chapter.id}
+              branchId={branch.id}
+              chapterId={chapter.id}
+              context={writingContext}
+              disabled={busy || opening}
+            />
             {recovery && (
               <div className="notice">
                 <strong>浏览器草稿与服务中的修订不同。</strong>
@@ -895,9 +914,15 @@ export function Writing({
               id={editorKey}
               initial={text}
               cursor={cursor}
+              scrollTop={editorScroll}
               readOnly={busy || opening}
               onChange={change}
               onSelection={setSelection}
+              onViewPosition={(cursor, scrollTop) => {
+                const row = current.current
+                if (row?.id === chapter.id)
+                  chapterViews.current.set(row.id, { revision: row.revision, cursor, scrollTop })
+              }}
             />
             <div className="editor-footer">
               <span>
@@ -923,6 +948,27 @@ export function Writing({
           <h2>创作辅助</h2>
           <span className="badge">作者决定采纳</span>
         </div>
+        {chapter && !opening && (
+          <>
+            <ChapterSettings
+              key={chapter.id}
+              context={writingContext}
+              branchId={branch.id}
+              chapterId={chapter.id}
+            />
+            <ChapterChecks
+              key={chapter.id}
+              chapter={chapter}
+              settings={writingContext.data?.settings}
+              saved={text === chapter.content && !recovery}
+              disabled={busy || !!activeTask}
+              account={account}
+              modelReady={modelReady}
+              tasks={tasks}
+              onTask={(task) => setTasks((rows) => [task, ...rows.filter((row) => row.id !== task.id)])}
+            />
+          </>
+        )}
         <AuthorContractNotice
           branchId={branch.id}
           onSettings={onGenreSettings}
@@ -1197,6 +1243,7 @@ export function Writing({
           <div className="notice" role="status">
             <strong>
               {correctionKindLabel(activeTask.kind) ||
+                (activeTask.kind === chapterCheckKind ? '单项校验 · ' : '') ||
                 (activeTask.kind === 'candidate_recheck' ? '候选复检 · ' : '')}
               {label(activeTask.status)}
             </strong>

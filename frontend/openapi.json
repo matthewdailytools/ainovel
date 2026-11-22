@@ -734,6 +734,126 @@
         }
       }
     },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/writing-context": {
+      "get": {
+        "summary": "Read Context",
+        "operationId": "read_context_api_branches__branch_id__chapters__chapter_id__writing_context_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WritingContext" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/writing-context/settings/{setting_id}/source": {
+      "get": {
+        "summary": "Setting Source",
+        "operationId": "setting_source_api_branches__branch_id__chapters__chapter_id__writing_context_settings__setting_id__source_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "setting_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Setting Id" }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer", "title": "Revision" }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer", "title": "Start" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SettingPassage" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/chapters/{chapter_id}/writing-context/outline": {
+      "put": {
+        "summary": "Save Outline",
+        "operationId": "save_outline_api_branches__branch_id__chapters__chapter_id__writing_context_outline_put",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/AuthorOutlineInput" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChapterOutline" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/branches/{branch_id}/ideas/adopt": {
       "post": {
         "summary": "Adopt",
@@ -3361,6 +3481,96 @@
           }
         }
       }
+    },
+    "/api/chapters/{chapter_id}/checks": {
+      "get": {
+        "summary": "Checks",
+        "operationId": "checks_api_chapters__chapter_id__checks_get",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChapterChecks" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Check",
+        "operationId": "create_check_api_chapters__chapter_id__checks_post",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateCheck" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapters/{chapter_id}/checks/{check_id}/recheck": {
+      "post": {
+        "summary": "Recheck",
+        "operationId": "recheck_api_chapters__chapter_id__checks__check_id__recheck_post",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Chapter Id" }
+          },
+          {
+            "name": "check_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Check Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Recheck" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3402,6 +3612,19 @@
         "type": "object",
         "required": ["idempotency_key"],
         "title": "AcceptInput"
+      },
+      "AdjacentChapter": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "title": { "type": "string", "title": "Title" },
+          "position": { "type": "integer", "title": "Position" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "id": { "type": "string", "title": "Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "title", "position", "revision", "id"],
+        "title": "AdjacentChapter"
       },
       "AdoptConception": {
         "properties": {
@@ -3539,6 +3762,19 @@
         "additionalProperties": false,
         "type": "object",
         "title": "AuthorIntentFields"
+      },
+      "AuthorOutlineInput": {
+        "properties": {
+          "base_version": {
+            "anyOf": [{ "type": "string", "maxLength": 200 }, { "type": "null" }],
+            "title": "Base Version"
+          },
+          "text": { "type": "string", "maxLength": 5000, "minLength": 1, "title": "Text" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_version", "text"],
+        "title": "AuthorOutlineInput"
       },
       "AuthorReconfirmation": {
         "properties": {
@@ -3723,12 +3959,51 @@
         "type": "object",
         "title": "CandidateVersionInput"
       },
+      "ChapterBasis": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "title": { "type": "string", "title": "Title" },
+          "position": { "type": "integer", "title": "Position" },
+          "revision": { "type": "integer", "title": "Revision" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "title", "position", "revision"],
+        "title": "ChapterBasis"
+      },
+      "ChapterChecks": {
+        "properties": {
+          "chapter_revision": { "type": "integer", "title": "Chapter Revision" },
+          "items": {
+            "items": { "$ref": "#/components/schemas/CheckItem" },
+            "type": "array",
+            "title": "Items"
+          },
+          "previous": { "anyOf": [{ "$ref": "#/components/schemas/AdjacentChapter" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_revision", "items", "previous"],
+        "title": "ChapterChecks"
+      },
       "ChapterInput": {
         "properties": { "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" } },
         "additionalProperties": false,
         "type": "object",
         "required": ["title"],
         "title": "ChapterInput"
+      },
+      "ChapterOutline": {
+        "properties": {
+          "source": { "type": "string", "enum": ["author", "frozen_ai"], "title": "Source" },
+          "text": { "type": "string", "title": "Text" },
+          "version": { "type": "string", "title": "Version" },
+          "task_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Task Id" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["source", "text", "version", "task_id"],
+        "title": "ChapterOutline"
       },
       "Character": {
         "properties": {
@@ -3755,6 +4030,77 @@
         "type": "object",
         "required": ["title", "kind"],
         "title": "Character"
+      },
+      "CheckEvidence": {
+        "properties": {
+          "source": { "type": "string", "enum": ["chapter", "previous"], "title": "Source" },
+          "quote": { "type": "string", "maxLength": 800, "minLength": 1, "title": "Quote" },
+          "start": { "type": "integer", "title": "Start" },
+          "end": { "type": "integer", "title": "End" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["source", "quote", "start", "end"],
+        "title": "CheckEvidence"
+      },
+      "CheckItem": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "title": { "type": "string", "title": "Title" },
+          "condition": { "type": "string", "title": "Condition" },
+          "include_previous": { "type": "boolean", "title": "Include Previous" },
+          "previous_chapter_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Previous Chapter Id"
+          },
+          "setting_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Setting Id" },
+          "status": { "type": "string", "enum": ["current", "stale"], "title": "Status" },
+          "changed_sources": {
+            "items": { "type": "string", "enum": ["chapter", "previous", "setting"] },
+            "type": "array",
+            "title": "Changed Sources"
+          },
+          "latest": { "$ref": "#/components/schemas/CheckResult" },
+          "history": {
+            "items": { "$ref": "#/components/schemas/CheckResult" },
+            "type": "array",
+            "title": "History"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "condition",
+          "include_previous",
+          "previous_chapter_id",
+          "setting_id",
+          "status",
+          "changed_sources",
+          "latest",
+          "history"
+        ],
+        "title": "CheckItem"
+      },
+      "CheckResult": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "created": { "type": "number", "title": "Created" },
+          "base_revision": { "type": "integer", "title": "Base Revision" },
+          "result": { "type": "string", "enum": ["pass", "fail", "unknown"], "title": "Result" },
+          "reason": { "type": "string", "title": "Reason" },
+          "evidence": {
+            "items": { "$ref": "#/components/schemas/CheckEvidence" },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "sources": { "$ref": "#/components/schemas/Sources" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "created", "base_revision", "result", "reason", "evidence", "sources"],
+        "title": "CheckResult"
       },
       "ConceptionCategory": {
         "properties": {
@@ -4102,6 +4448,43 @@
           "item_ids"
         ],
         "title": "CorrectionInput"
+      },
+      "CreateCheck": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "account": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "previous_base_revision": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Previous Base Revision"
+          },
+          "previous_chapter_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Previous Chapter Id"
+          },
+          "condition": { "type": "string", "maxLength": 2000, "minLength": 1, "title": "Condition" },
+          "title": {
+            "anyOf": [{ "type": "string", "maxLength": 120 }, { "type": "null" }],
+            "title": "Title"
+          },
+          "include_previous": { "type": "boolean", "title": "Include Previous", "default": false },
+          "setting_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Setting Id"
+          },
+          "expected_setting": {
+            "anyOf": [{ "$ref": "#/components/schemas/SettingBasis" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "account", "client_request_id", "condition"],
+        "title": "CreateCheck"
       },
       "CreateReference": {
         "properties": {
@@ -4737,6 +5120,36 @@
         "required": ["chapter_id", "cursor", "base_revision"],
         "title": "ReadingInput"
       },
+      "Recheck": {
+        "properties": {
+          "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
+          "account": { "type": "string", "maxLength": 100, "minLength": 1, "title": "Account" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          },
+          "previous_base_revision": {
+            "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }],
+            "title": "Previous Base Revision"
+          },
+          "previous_chapter_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128, "minLength": 1 }, { "type": "null" }],
+            "title": "Previous Chapter Id"
+          },
+          "previous_result_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Previous Result Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_revision", "account", "client_request_id", "previous_result_id"],
+        "title": "Recheck"
+      },
       "RecheckCorrectionInput": {
         "properties": {
           "source_identity_context": {
@@ -5099,6 +5512,46 @@
         "required": ["title", "start", "end"],
         "title": "Segment"
       },
+      "SettingBasis": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "title": { "type": "string", "title": "Title" },
+          "text": { "type": "string", "title": "Text" },
+          "kind": { "type": "string", "enum": ["fact", "world", "conception"], "title": "Kind" },
+          "source": { "anyOf": [{ "$ref": "#/components/schemas/SettingEvidence" }, { "type": "null" }] },
+          "source_current": { "type": "boolean", "title": "Source Current" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title", "text", "kind", "source", "source_current"],
+        "title": "SettingBasis"
+      },
+      "SettingEvidence": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "title": { "type": "string", "title": "Title" },
+          "position": { "type": "integer", "title": "Position" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "start": { "type": "integer", "title": "Start" },
+          "end": { "type": "integer", "title": "End" },
+          "quote": { "type": "string", "title": "Quote" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "title", "position", "revision", "start", "end", "quote"],
+        "title": "SettingEvidence"
+      },
+      "SettingPassage": {
+        "properties": {
+          "before": { "type": "string", "title": "Before" },
+          "quote": { "type": "string", "title": "Quote" },
+          "after": { "type": "string", "title": "After" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["before", "quote", "after"],
+        "title": "SettingPassage"
+      },
       "Source": {
         "properties": {
           "chapter_id": { "type": "string", "title": "Chapter Id" },
@@ -5111,6 +5564,17 @@
         "type": "object",
         "required": ["chapter_id", "revision", "start", "end", "quote"],
         "title": "Source"
+      },
+      "Sources": {
+        "properties": {
+          "chapter": { "$ref": "#/components/schemas/ChapterBasis" },
+          "previous": { "anyOf": [{ "$ref": "#/components/schemas/ChapterBasis" }, { "type": "null" }] },
+          "setting": { "anyOf": [{ "$ref": "#/components/schemas/SettingBasis" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter", "previous", "setting"],
+        "title": "Sources"
       },
       "StartExtraction": {
         "properties": {
@@ -5324,6 +5788,22 @@
         "type": "object",
         "required": ["novel_id", "mode", "brief", "account"],
         "title": "WorkflowInput"
+      },
+      "WritingContext": {
+        "properties": {
+          "chapter_id": { "type": "string", "title": "Chapter Id" },
+          "chapter_revision": { "type": "integer", "title": "Chapter Revision" },
+          "outline": { "anyOf": [{ "$ref": "#/components/schemas/ChapterOutline" }, { "type": "null" }] },
+          "settings": {
+            "items": { "$ref": "#/components/schemas/SettingBasis" },
+            "type": "array",
+            "title": "Settings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "chapter_revision", "outline", "settings"],
+        "title": "WritingContext"
       }
     }
   }
