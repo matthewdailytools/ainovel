@@ -12,7 +12,9 @@ from tempfile import TemporaryDirectory
 import uvicorn
 
 from ainovel.api import create_app
+from ainovel.budget import Budget
 from ainovel.db import DomainError
+from ainovel.providers import RequestNotSent
 from ainovel.settings import Provider, Settings
 from ainovel.worker import Worker
 
@@ -51,8 +53,9 @@ EXCLUSIVE_BODY = (
 
 
 class Model(ReferenceModel):
-    def __init__(self):
+    def __init__(self, settings=None):
         super().__init__()
+        self.relay_budget = Budget(settings) if settings is not None else None
         self.flow_review_calls = 0
         self.source_correction_calls = 0
         self.book_tasks = set()
@@ -70,7 +73,15 @@ class Model(ReferenceModel):
             condition = instruction["condition"]
             sources = instruction["sources"]
             assert sources["chapter"]["position"] == 2
-            if condition == "本章和上一章所写的寿元扣减都应为十年。":
+            if condition == "第二章须复查刻度并保留记录，未执行修门。":
+                assert sources["previous"] is None
+                assert "她复核旧读数，把结果落在册上。" in sources["chapter"]["text"]
+                result = {
+                    "result": "pass",
+                    "reason": "有复核与记册证据，未写修门。",
+                    "evidence": [{"source": "chapter", "quote": "她复核旧读数，把结果落在册上。"}],
+                }
+            elif condition == "本章和上一章所写的寿元扣减都应为十年。":
                 assert sources["previous"]["position"] == 1
                 assert sources["setting"]["text"] == "施术固定扣减十年寿元。"
                 matches_cost = "施术后，宁禾折损了十年寿元。" in sources["previous"]["text"]
@@ -450,10 +461,12 @@ class Model(ReferenceModel):
             }
         while "原始任务" in instruction:
             instruction = instruction["原始任务"]
-        plot_unknown = PLOT_UNKNOWN_FIXTURE in instruction.get("作者原话", "")
+        author_text = instruction.get("作者原话", "")
+        plot_unknown = PLOT_UNKNOWN_FIXTURE in author_text
         scoped = instruction.get("情节核对契约版本") == "author-plot-audit/2"
         exclusive = scoped and PLOT_EXCLUSIVE_FIXTURE in instruction.get("作者原话", "")
         if instruction.get("动作") == "仅依据作者原话整理本场景情节":
+            call_id = "offline"
             item = {
                 "author_evidence": "AUTHOR0001",
                 "actor": "沈砚" if plot_unknown else "她",
@@ -463,6 +476,28 @@ class Model(ReferenceModel):
                 "result": "是否公开读数尚未确定" if plot_unknown else "不修门",
                 "certainty": "ambiguous" if plot_unknown else "explicit",
             }
+            if "工程接力歧义" in author_text:
+                assert self.relay_budget is not None
+                try:
+                    call_id = self.relay_budget.reserve(
+                        self.relay_budget.settings.providers[account],
+                        task_id,
+                        len((system + prompt).encode("utf-8")) + 2048,
+                        max_output,
+                        kwargs.get("run_limit"),
+                    )
+                except DomainError as error:
+                    raise RequestNotSent(error, task_id, account, "budget") from error
+                clarification = next(
+                    (source for source in instruction["可引用原文"] if "作者明确补充：" in source["text"]),
+                    None,
+                )
+                if clarification:
+                    assert "明确不修门" in clarification["text"]
+                    item["author_evidence"] = clarification["source_id"]
+                else:
+                    item.update(result="是否修门等待作者决定", certainty="ambiguous")
+                self.relay_budget.settle(call_id, {"input": 1, "output": 1})
             if scoped:
                 item.update(recipient_scope="unspecified", scope_condition="")
             if exclusive:
@@ -488,7 +523,7 @@ class Model(ReferenceModel):
                     }
                 ),
                 "usage": {"input": 1, "output": 1},
-                "call_id": "offline",
+                "call_id": call_id,
             }
         if instruction.get("动作") == "逐项对照作者情节解释与本次正文":
             return {
@@ -729,7 +764,16 @@ def main():
                     "offline-not-real",
                     Decimal("2"),
                     Decimal("8"),
-                )
+                ),
+                "offline-relay": Provider(
+                    "offline-relay",
+                    "deepseek",
+                    "offline-fixture",
+                    "https://example.invalid",
+                    "offline-relay-not-real",
+                    Decimal("2"),
+                    Decimal("8"),
+                ),
             },
             {"openai": Decimal("20"), "deepseek": Decimal("80")},
             test_mode=True,
@@ -743,7 +787,7 @@ def main():
         @asynccontextmanager
         async def lifespan(app):
             async with original(app):
-                worker = Worker(settings, Model())
+                worker = Worker(settings, Model(settings))
 
                 async def execute():
                     while True:

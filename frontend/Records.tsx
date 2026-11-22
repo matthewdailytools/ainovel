@@ -4,6 +4,7 @@ import type { Notify } from './App'
 import { GenreSettings } from './GenreProfile'
 import { AuthorIntentPanel } from './AuthorIntent'
 import { FinalizationPanel } from './FinalizationPanel'
+import { CompletionDelivery } from './CompletionDelivery'
 import { StoryGraph } from './StoryGraph'
 import { type FeedbackHandoff } from './feedbackRevision'
 
@@ -528,6 +529,7 @@ export function Records({
           <pre>{source}</pre>
         </section>
       )}
+      <CompletionDelivery key={branch.id} branchId={branch.id} refreshVersion={storyRevision} />
       <FinalizationPanel
         branchId={branch.id}
         refreshVersion={storyRevision}

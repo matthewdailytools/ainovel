@@ -102,8 +102,10 @@ def frozen_workflow_outline(tx, chapter):
 
 
 def assisted_outline(tx, chapter):
+    from .outline_relay import author_plot
+
     rows = tx.execute(
-        """SELECT t.id, t.payload, a.payload AS draft FROM artifacts a JOIN tasks t ON t.id=a.task_id
+        """SELECT t.id, t.payload, t.result, a.payload AS draft FROM artifacts a JOIN tasks t ON t.id=a.task_id
         WHERE a.branch_id=? AND a.chapter_id=? AND a.kind='chapter_draft' AND a.status<>'rejected'
         AND t.branch_id=a.branch_id AND t.kind='workflow' AND json_extract(t.payload, '$.mode')='assisted'
         ORDER BY a.created DESC,a.rowid DESC""",
@@ -115,11 +117,12 @@ def assisted_outline(tx, chapter):
         source = audit.get("source") or {}
         if source.get("kind") != "author_plot":
             continue
-        matching = [
-            plot["plot"]
-            for plot in json.loads(row["payload"]).get("plots", [])
-            if sha(plot["plot"]) == source.get("text_sha256")
-        ]
+        task = {"payload": json.loads(row["payload"]), "result": json.loads(row["result"])}
+        matching = []
+        for outline in task["payload"].get("plots", []):
+            plot = author_plot(task, outline["number"])
+            if sha(plot["plot"]) == source.get("text_sha256"):
+                matching.append(plot["plot"])
         if matching:
             return outline_value("author", matching[0], f"{row['id']}:{sha(matching[0])}", row["id"])
     return None

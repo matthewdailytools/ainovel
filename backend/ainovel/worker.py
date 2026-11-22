@@ -10,6 +10,7 @@ from pathlib import Path
 from time import time
 
 from . import chapter_item_check
+from . import outline_relay
 from .budget import Budget
 from .author_contract import compile_contract, legacy_contract
 from .db import Database, DomainError, dumps, uid
@@ -1692,6 +1693,7 @@ class Worker:
         conditional_enabled(self.task)
         applicability_enabled(self)
         prepare_plans = preparation_enabled(self)
+        relay_outlines = outline_relay.enabled(self.task)
         segment = payload.get("completion_scope", "whole_book") == "segment"
         branch_id = self.task["branch_id"]
         current_revision = self.domain.branch(branch_id)["story_revision"]
@@ -1786,6 +1788,10 @@ class Worker:
                     if prepared is None:
                         return
                     plot, prepared_contract = prepared
+                elif relay_outlines:
+                    prepared_contract = await outline_relay.prepare(self, plot, chapter)
+                    if prepared_contract is None:
+                        return
                 context = self.context(branch_id, chapter["id"])
                 fixed = payload["fixed"] + [item for item in plot["fixed"] if item not in payload["fixed"]]
                 findings = [
@@ -1868,7 +1874,7 @@ class Worker:
                     )
                     if not pending and payload.get("plot_contract_check") is True:
                         if payload["mode"] == "assisted":
-                            original = next((p for p in payload["plots"] if p["number"] == number), None)
+                            original = outline_relay.author_plot(self.task, number)
                             if original is None:
                                 raise DomainError(
                                     "workflow_progress", "本章原始作者情节缺失，未从候选反推。", 409

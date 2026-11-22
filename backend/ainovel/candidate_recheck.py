@@ -39,9 +39,10 @@ def source_view(domain, parent):
 
 def assisted_contract(source, parent, plot):
     """Reuse the saved author-only interpretation, never infer it from edited prose."""
+    from .outline_relay import author_plot
     from .plot_audit import VERSION as PLOT_VERSION, ScopedAuthorPlot, author_contract_issues
 
-    original = next((p for p in parent["payload"]["plots"] if p["number"] == plot["number"]), None)
+    original = author_plot(parent, plot["number"])
     audit = source["payload"].get("plot_audit", source["payload"].get("previous_plot_audit"))
     if (
         original != plot

@@ -731,6 +731,33 @@ details > label {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.completion-delivery .writing-workbench-actions {
+  margin-bottom: 14px;
+}
+.delivery-form {
+  min-inline-size: 0;
+  margin: 16px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+}
+.delivery-range {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+.delivery-text {
+  max-height: 26rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.delivery-gate {
+  padding-block: 4px;
+}
+.delivery-gate figure {
+  margin: 12px 0;
+}
 .technique-pin {
   margin-top: 12px;
 }

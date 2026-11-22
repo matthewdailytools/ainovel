@@ -58,6 +58,198 @@
         }
       }
     },
+    "/api/branches/{branch_id}/delivery": {
+      "get": {
+        "summary": "Delivery State",
+        "operationId": "delivery_state_api_branches__branch_id__delivery_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeliveryState" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/delivery/packages": {
+      "post": {
+        "summary": "Preview",
+        "operationId": "preview_api_branches__branch_id__delivery_packages_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PreviewInput" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Package" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/delivery/packages/{package_id}": {
+      "get": {
+        "summary": "Saved Package",
+        "operationId": "saved_package_api_branches__branch_id__delivery_packages__package_id__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "package_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Package Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Package" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/delivery/packages/{package_id}/finalize": {
+      "post": {
+        "summary": "Confirm",
+        "operationId": "confirm_api_branches__branch_id__delivery_packages__package_id__finalize_post",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "package_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Package Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConfirmInput" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Package" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/delivery/packages/{package_id}/files/{key}": {
+      "get": {
+        "summary": "Material",
+        "operationId": "material_api_branches__branch_id__delivery_packages__package_id__files__key__get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "package_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Package Id" }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": ["manuscript", "settings", "synopsis", "sample"],
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response" },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/{branch_id}/delivery/packages/{package_id}/download": {
+      "get": {
+        "summary": "Archive",
+        "operationId": "archive_api_branches__branch_id__delivery_packages__package_id__download_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          },
+          {
+            "name": "package_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Package Id" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response" },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
     "/api/session": {
       "get": {
         "summary": "Session",
@@ -3979,6 +4171,62 @@
           }
         }
       }
+    },
+    "/api/branches/{branch_id}/outline-relay": {
+      "get": {
+        "summary": "List Relay Outlines",
+        "operationId": "list_relay_outlines_api_branches__branch_id__outline_relay_get",
+        "parameters": [
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Branch Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/outline-relay/clarify": {
+      "post": {
+        "summary": "Clarify Relay",
+        "operationId": "clarify_relay_api_tasks__task_id__outline_relay_clarify_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Task Id" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Clarification" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4509,6 +4757,19 @@
         "required": ["title"],
         "title": "ChapterInput"
       },
+      "ChapterManifest": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "title": { "type": "string", "title": "Title" },
+          "position": { "type": "integer", "title": "Position" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "sha256": { "type": "string", "title": "Sha256" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "title", "position", "revision", "sha256"],
+        "title": "ChapterManifest"
+      },
       "ChapterOutline": {
         "properties": {
           "source": { "type": "string", "enum": ["author", "frozen_ai"], "title": "Source" },
@@ -4617,6 +4878,22 @@
         "type": "object",
         "required": ["id", "created", "base_revision", "result", "reason", "evidence", "sources"],
         "title": "CheckResult"
+      },
+      "Clarification": {
+        "properties": {
+          "checkpoint_id": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Checkpoint Id" },
+          "clarification": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Clarification" },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Client Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["checkpoint_id", "clarification", "client_request_id"],
+        "title": "Clarification"
       },
       "ConceptionCategory": {
         "properties": {
@@ -4899,6 +5176,21 @@
         "required": ["base_revision", "base_story_revision", "idempotency_key"],
         "title": "ConfirmConception"
       },
+      "ConfirmInput": {
+        "properties": {
+          "base_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Base Sha256" },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_sha256", "idempotency_key"],
+        "title": "ConfirmInput"
+      },
       "ContinuationInput": {
         "properties": {
           "client_request_id": {
@@ -5101,6 +5393,44 @@
         "required": ["kind", "text", "base_story_revision"],
         "title": "DefinitionInput"
       },
+      "DeliveryInput": {
+        "properties": {
+          "synopsis": { "type": "string", "maxLength": 6000, "title": "Synopsis", "default": "" },
+          "spoiler_scope": { "type": "string", "maxLength": 2000, "title": "Spoiler Scope", "default": "" },
+          "sample_start_chapter_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }],
+            "title": "Sample Start Chapter Id"
+          },
+          "sample_end_chapter_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }],
+            "title": "Sample End Chapter Id"
+          },
+          "notes": { "$ref": "#/components/schemas/ReviewNote" },
+          "sources": { "$ref": "#/components/schemas/ReviewSources" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DeliveryInput"
+      },
+      "DeliveryState": {
+        "properties": {
+          "basis_sha256": { "type": "string", "title": "Basis Sha256" },
+          "chapters": {
+            "items": { "$ref": "#/components/schemas/ChapterManifest" },
+            "type": "array",
+            "title": "Chapters"
+          },
+          "packages": {
+            "items": { "$ref": "#/components/schemas/Package" },
+            "type": "array",
+            "title": "Packages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["basis_sha256", "chapters", "packages"],
+        "title": "DeliveryState"
+      },
       "DownloadInput": {
         "properties": {
           "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
@@ -5215,6 +5545,26 @@
         "required": ["ref", "event_id", "record_sha256"],
         "title": "EventWitness"
       },
+      "Evidence": {
+        "properties": {
+          "chapter_id": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Chapter Id" },
+          "quote": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Quote" },
+          "revision": { "type": "integer", "title": "Revision" },
+          "start": { "type": "integer", "title": "Start" },
+          "end": { "type": "integer", "title": "End" },
+          "title": { "type": "string", "title": "Title" },
+          "position": { "type": "integer", "title": "Position" },
+          "origin": {
+            "type": "string",
+            "enum": ["author", "ledger", "chapter_check", "review"],
+            "title": "Origin"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "quote", "revision", "start", "end", "title", "position", "origin"],
+        "title": "Evidence"
+      },
       "EvidenceInput": {
         "properties": {
           "base_revision": { "type": "integer", "minimum": 0, "title": "Base Revision" },
@@ -5295,6 +5645,24 @@
         "required": ["chapter_id", "category", "text"],
         "title": "FeedbackInput"
       },
+      "FileManifest": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": ["manuscript", "settings", "synopsis", "sample"],
+            "title": "Key"
+          },
+          "name": { "type": "string", "title": "Name" },
+          "label": { "type": "string", "title": "Label" },
+          "sha256": { "type": "string", "title": "Sha256" },
+          "bytes": { "type": "integer", "title": "Bytes" },
+          "preview": { "type": "string", "title": "Preview" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["key", "name", "label", "sha256", "bytes", "preview"],
+        "title": "FileManifest"
+      },
       "FinalizationChecklist": {
         "properties": {
           "manuscript_read": { "type": "boolean", "title": "Manuscript Read" },
@@ -5332,6 +5700,29 @@
         "type": "object",
         "required": ["issue_id", "decision", "reason"],
         "title": "FinalizationDisposition"
+      },
+      "Gate": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": ["manuscript", "ending", "characters", "promises", "consistency", "materials"],
+            "title": "Id"
+          },
+          "label": { "type": "string", "title": "Label" },
+          "status": { "type": "string", "enum": ["pass", "pending", "blocked"], "title": "Status" },
+          "reason": { "type": "string", "title": "Reason" },
+          "note": { "type": "string", "title": "Note" },
+          "sources": {
+            "items": { "$ref": "#/components/schemas/Evidence" },
+            "type": "array",
+            "title": "Sources"
+          },
+          "evidence": { "items": { "type": "string" }, "type": "array", "title": "Evidence" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "label", "status", "reason", "note", "sources", "evidence"],
+        "title": "Gate"
       },
       "GenreProfileBasis": {
         "properties": {
@@ -5768,6 +6159,55 @@
         "required": ["title"],
         "title": "NovelInput"
       },
+      "OutlineSource": {
+        "properties": {
+          "chapter_id": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Chapter Id" },
+          "version": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Version" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "version"],
+        "title": "OutlineSource"
+      },
+      "Package": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "created": { "type": "number", "title": "Created" },
+          "basis_sha256": { "type": "string", "title": "Basis Sha256" },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "ready", "finished", "outdated"],
+            "title": "Status"
+          },
+          "finished": { "type": "boolean", "title": "Finished" },
+          "chapters": {
+            "items": { "$ref": "#/components/schemas/ChapterManifest" },
+            "type": "array",
+            "title": "Chapters"
+          },
+          "gates": { "items": { "$ref": "#/components/schemas/Gate" }, "type": "array", "title": "Gates" },
+          "files": {
+            "items": { "$ref": "#/components/schemas/FileManifest" },
+            "type": "array",
+            "title": "Files"
+          },
+          "input": { "$ref": "#/components/schemas/DeliveryInput" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created",
+          "basis_sha256",
+          "status",
+          "finished",
+          "chapters",
+          "gates",
+          "files",
+          "input"
+        ],
+        "title": "Package"
+      },
       "Passage": {
         "properties": {
           "start": { "type": "integer", "title": "Start" },
@@ -5886,6 +6326,33 @@
         "required": ["number", "title", "plot"],
         "title": "Plot"
       },
+      "PreviewInput": {
+        "properties": {
+          "synopsis": { "type": "string", "maxLength": 6000, "title": "Synopsis", "default": "" },
+          "spoiler_scope": { "type": "string", "maxLength": 2000, "title": "Spoiler Scope", "default": "" },
+          "sample_start_chapter_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }],
+            "title": "Sample Start Chapter Id"
+          },
+          "sample_end_chapter_id": {
+            "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }],
+            "title": "Sample End Chapter Id"
+          },
+          "notes": { "$ref": "#/components/schemas/ReviewNote" },
+          "sources": { "$ref": "#/components/schemas/ReviewSources" },
+          "base_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "title": "Base Sha256" },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["base_sha256", "idempotency_key"],
+        "title": "PreviewInput"
+      },
       "Promise": {
         "properties": {
           "title": { "type": "string", "maxLength": 200, "minLength": 1, "title": "Title" },
@@ -5938,6 +6405,16 @@
         "type": "object",
         "required": ["status"],
         "title": "PromiseStage"
+      },
+      "QuoteInput": {
+        "properties": {
+          "chapter_id": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Chapter Id" },
+          "quote": { "type": "string", "maxLength": 4000, "minLength": 1, "title": "Quote" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["chapter_id", "quote"],
+        "title": "QuoteInput"
       },
       "ReadingInput": {
         "properties": {
@@ -6211,6 +6688,50 @@
         "additionalProperties": false,
         "type": "object",
         "title": "ResumeInput"
+      },
+      "ReviewNote": {
+        "properties": {
+          "manuscript": { "type": "string", "maxLength": 4000, "title": "Manuscript", "default": "" },
+          "ending": { "type": "string", "maxLength": 4000, "title": "Ending", "default": "" },
+          "characters": { "type": "string", "maxLength": 4000, "title": "Characters", "default": "" },
+          "promises": { "type": "string", "maxLength": 4000, "title": "Promises", "default": "" },
+          "consistency": { "type": "string", "maxLength": 4000, "title": "Consistency", "default": "" },
+          "materials": { "type": "string", "maxLength": 4000, "title": "Materials", "default": "" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ReviewNote"
+      },
+      "ReviewSources": {
+        "properties": {
+          "ending": {
+            "items": { "$ref": "#/components/schemas/QuoteInput" },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Ending"
+          },
+          "characters": {
+            "items": { "$ref": "#/components/schemas/QuoteInput" },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Characters"
+          },
+          "promises": {
+            "items": { "$ref": "#/components/schemas/QuoteInput" },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Promises"
+          },
+          "consistency": {
+            "items": { "$ref": "#/components/schemas/QuoteInput" },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Consistency"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ReviewSources"
       },
       "SaveBrief": {
         "properties": {
@@ -6681,6 +7202,12 @@
             "type": "array",
             "maxItems": 100,
             "title": "Plots"
+          },
+          "outline_sources": {
+            "items": { "$ref": "#/components/schemas/OutlineSource" },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Outline Sources"
           },
           "chapters": { "type": "integer", "maximum": 100, "minimum": 1, "title": "Chapters", "default": 36 },
           "min_chars": {

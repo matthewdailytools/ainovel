@@ -17,6 +17,108 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/delivery': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Delivery State */
+    get: operations['delivery_state_api_branches__branch_id__delivery_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/delivery/packages': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Preview */
+    post: operations['preview_api_branches__branch_id__delivery_packages_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/delivery/packages/{package_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Saved Package */
+    get: operations['saved_package_api_branches__branch_id__delivery_packages__package_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/delivery/packages/{package_id}/finalize': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Confirm */
+    post: operations['confirm_api_branches__branch_id__delivery_packages__package_id__finalize_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/delivery/packages/{package_id}/files/{key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Material */
+    get: operations['material_api_branches__branch_id__delivery_packages__package_id__files__key__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/branches/{branch_id}/delivery/packages/{package_id}/download': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Archive */
+    get: operations['archive_api_branches__branch_id__delivery_packages__package_id__download_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/session': {
     parameters: {
       query?: never
@@ -2026,6 +2128,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/branches/{branch_id}/outline-relay': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Relay Outlines */
+    get: operations['list_relay_outlines_api_branches__branch_id__outline_relay_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/tasks/{task_id}/outline-relay/clarify': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Clarify Relay */
+    post: operations['clarify_relay_api_tasks__task_id__outline_relay_clarify_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -2401,6 +2537,19 @@ export interface components {
       /** Title */
       title: string
     }
+    /** ChapterManifest */
+    ChapterManifest: {
+      /** Id */
+      id: string
+      /** Title */
+      title: string
+      /** Position */
+      position: number
+      /** Revision */
+      revision: number
+      /** Sha256 */
+      sha256: string
+    }
     /** ChapterOutline */
     ChapterOutline: {
       /**
@@ -2503,6 +2652,15 @@ export interface components {
       /** Evidence */
       evidence: components['schemas']['CheckEvidence'][]
       sources: components['schemas']['Sources']
+    }
+    /** Clarification */
+    Clarification: {
+      /** Checkpoint Id */
+      checkpoint_id: string
+      /** Clarification */
+      clarification: string
+      /** Client Request Id */
+      client_request_id: string
     }
     /** ConceptionCategory */
     ConceptionCategory: {
@@ -2660,6 +2818,13 @@ export interface components {
        */
       note: string
     }
+    /** ConfirmInput */
+    ConfirmInput: {
+      /** Base Sha256 */
+      base_sha256: string
+      /** Idempotency Key */
+      idempotency_key: string
+    }
     /** ContinuationInput */
     ContinuationInput: {
       /** Client Request Id */
@@ -2797,6 +2962,34 @@ export interface components {
       /** Base Story Revision */
       base_story_revision: number
     }
+    /** DeliveryInput */
+    DeliveryInput: {
+      /**
+       * Synopsis
+       * @default
+       */
+      synopsis: string
+      /**
+       * Spoiler Scope
+       * @default
+       */
+      spoiler_scope: string
+      /** Sample Start Chapter Id */
+      sample_start_chapter_id?: string | null
+      /** Sample End Chapter Id */
+      sample_end_chapter_id?: string | null
+      notes?: components['schemas']['ReviewNote']
+      sources?: components['schemas']['ReviewSources']
+    }
+    /** DeliveryState */
+    DeliveryState: {
+      /** Basis Sha256 */
+      basis_sha256: string
+      /** Chapters */
+      chapters: components['schemas']['ChapterManifest'][]
+      /** Packages */
+      packages: components['schemas']['Package'][]
+    }
     /** DownloadInput */
     DownloadInput: {
       /** Title */
@@ -2901,6 +3094,28 @@ export interface components {
       /** Record Sha256 */
       record_sha256: string
     }
+    /** Evidence */
+    Evidence: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Quote */
+      quote: string
+      /** Revision */
+      revision: number
+      /** Start */
+      start: number
+      /** End */
+      end: number
+      /** Title */
+      title: string
+      /** Position */
+      position: number
+      /**
+       * Origin
+       * @enum {string}
+       */
+      origin: 'author' | 'ledger' | 'chapter_check' | 'review'
+    }
     /** EvidenceInput */
     EvidenceInput: {
       /** Base Revision */
@@ -2985,6 +3200,24 @@ export interface components {
        */
       source_quote: string
     }
+    /** FileManifest */
+    FileManifest: {
+      /**
+       * Key
+       * @enum {string}
+       */
+      key: 'manuscript' | 'settings' | 'synopsis' | 'sample'
+      /** Name */
+      name: string
+      /** Label */
+      label: string
+      /** Sha256 */
+      sha256: string
+      /** Bytes */
+      bytes: number
+      /** Preview */
+      preview: string
+    }
     /** FinalizationChecklist */
     FinalizationChecklist: {
       /** Manuscript Read */
@@ -3007,6 +3240,29 @@ export interface components {
       decision: 'not_an_error' | 'intentional_choice'
       /** Reason */
       reason: string
+    }
+    /** Gate */
+    Gate: {
+      /**
+       * Id
+       * @enum {string}
+       */
+      id: 'manuscript' | 'ending' | 'characters' | 'promises' | 'consistency' | 'materials'
+      /** Label */
+      label: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'pass' | 'pending' | 'blocked'
+      /** Reason */
+      reason: string
+      /** Note */
+      note: string
+      /** Sources */
+      sources: components['schemas']['Evidence'][]
+      /** Evidence */
+      evidence: string[]
     }
     /** GenreProfileBasis */
     GenreProfileBasis: {
@@ -3321,6 +3577,36 @@ export interface components {
        */
       brief: string
     }
+    /** OutlineSource */
+    OutlineSource: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Version */
+      version: string
+    }
+    /** Package */
+    Package: {
+      /** Id */
+      id: string
+      /** Created */
+      created: number
+      /** Basis Sha256 */
+      basis_sha256: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'draft' | 'ready' | 'finished' | 'outdated'
+      /** Finished */
+      finished: boolean
+      /** Chapters */
+      chapters: components['schemas']['ChapterManifest'][]
+      /** Gates */
+      gates: components['schemas']['Gate'][]
+      /** Files */
+      files: components['schemas']['FileManifest'][]
+      input: components['schemas']['DeliveryInput']
+    }
     /** Passage */
     Passage: {
       /** Start */
@@ -3412,6 +3698,29 @@ export interface components {
       /** Fixed */
       fixed?: string[]
     }
+    /** PreviewInput */
+    PreviewInput: {
+      /**
+       * Synopsis
+       * @default
+       */
+      synopsis: string
+      /**
+       * Spoiler Scope
+       * @default
+       */
+      spoiler_scope: string
+      /** Sample Start Chapter Id */
+      sample_start_chapter_id?: string | null
+      /** Sample End Chapter Id */
+      sample_end_chapter_id?: string | null
+      notes?: components['schemas']['ReviewNote']
+      sources?: components['schemas']['ReviewSources']
+      /** Base Sha256 */
+      base_sha256: string
+      /** Idempotency Key */
+      idempotency_key: string
+    }
     /** Promise */
     Promise: {
       /** Title */
@@ -3459,6 +3768,13 @@ export interface components {
        * @default
        */
       note: string
+    }
+    /** QuoteInput */
+    QuoteInput: {
+      /** Chapter Id */
+      chapter_id: string
+      /** Quote */
+      quote: string
     }
     /** ReadingInput */
     ReadingInput: {
@@ -3694,6 +4010,50 @@ export interface components {
        * @default false
        */
       pause_after_maintenance: boolean
+    }
+    /** ReviewNote */
+    ReviewNote: {
+      /**
+       * Manuscript
+       * @default
+       */
+      manuscript: string
+      /**
+       * Ending
+       * @default
+       */
+      ending: string
+      /**
+       * Characters
+       * @default
+       */
+      characters: string
+      /**
+       * Promises
+       * @default
+       */
+      promises: string
+      /**
+       * Consistency
+       * @default
+       */
+      consistency: string
+      /**
+       * Materials
+       * @default
+       */
+      materials: string
+    }
+    /** ReviewSources */
+    ReviewSources: {
+      /** Ending */
+      ending?: components['schemas']['QuoteInput'][]
+      /** Characters */
+      characters?: components['schemas']['QuoteInput'][]
+      /** Promises */
+      promises?: components['schemas']['QuoteInput'][]
+      /** Consistency */
+      consistency?: components['schemas']['QuoteInput'][]
     }
     /** SaveBrief */
     SaveBrief: {
@@ -4099,6 +4459,8 @@ export interface components {
       fixed?: string[]
       /** Plots */
       plots?: components['schemas']['Plot'][]
+      /** Outline Sources */
+      outline_sources?: components['schemas']['OutlineSource'][]
       /**
        * Chapters
        * @default 36
@@ -4205,6 +4567,201 @@ export interface operations {
         content: {
           'application/json': unknown
         }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  delivery_state_api_branches__branch_id__delivery_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeliveryState']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_api_branches__branch_id__delivery_packages_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PreviewInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Package']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  saved_package_api_branches__branch_id__delivery_packages__package_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        package_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Package']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_api_branches__branch_id__delivery_packages__package_id__finalize_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        package_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ConfirmInput']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Package']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  material_api_branches__branch_id__delivery_packages__package_id__files__key__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        package_id: string
+        key: 'manuscript' | 'settings' | 'synopsis' | 'sample'
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_api_branches__branch_id__delivery_packages__package_id__download_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+        package_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
       }
       /** @description Validation Error */
       422: {
@@ -8573,6 +9130,72 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['Recheck']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_relay_outlines_api_branches__branch_id__outline_relay_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        branch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  clarify_relay_api_tasks__task_id__outline_relay_clarify_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        task_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['Clarification']
       }
     }
     responses: {

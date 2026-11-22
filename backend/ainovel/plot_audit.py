@@ -508,6 +508,7 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
     if prepared_contract is None:
         contract = await interpret_plot(worker, author_text, source_kind=source_kind)
     else:
+        from . import outline_relay
         from .workflow_plan_preparation import frozen_contract
 
         if source_kind == "author_plot" and worker.task["kind"] == "candidate_recheck":
@@ -518,6 +519,12 @@ async def audit_plot(worker, author_text, text, number, *, source_kind=None, pre
             from .source_corrected_candidate_recheck import verified_author_contract
 
             contract = verified_author_contract(worker, author_text, number, prepared_contract)
+        elif (
+            source_kind == "author_plot"
+            and worker.task["kind"] == "workflow"
+            and outline_relay.enabled(worker.task)
+        ):
+            contract = outline_relay.frozen_contract(worker, author_text, number, prepared_contract)
         elif source_kind == "workflow_plan":
             contract = frozen_contract(worker, author_text, number, prepared_contract)
         else:

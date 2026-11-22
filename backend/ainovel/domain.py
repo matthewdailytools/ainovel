@@ -27,7 +27,11 @@ def same_task_payload(left, right):
             for k, v in value.items()
             if not (
                 (k in optional and v is None)
-                or (k in {"finding_indices", "story_chapter_ids", "inherit_story_record_ids"} and v == [])
+                or (
+                    k
+                    in {"finding_indices", "story_chapter_ids", "inherit_story_record_ids", "outline_sources"}
+                    and v == []
+                )
                 or (k == "context_position" and v == 0)
                 or (k == "completion_scope" and v == "whole_book")
                 or (k == "structure_max_output_tokens" and type(v) is int and v == 8192)
@@ -649,7 +653,7 @@ class Domain:
                 raise DomainError("idempotency", "该提交标识已用于不同输入，未创建新任务。", 409)
             return task
 
-    def queue(self, kind, payload, branch_id=None):
+    def queue(self, kind, payload, branch_id=None, *, outline_relay=None):
         previous = self.find_request(kind, payload)
         if previous:
             return previous
@@ -663,6 +667,10 @@ class Domain:
         profile = self.genre_profile(branch_id)
         contract = self.author_contract(branch_id)
         initial = {"genre_profile_snapshot": profile, "author_contract_snapshot": contract}
+        if outline_relay is not None:
+            if kind != "workflow" or not payload.get("outline_sources"):
+                raise DomainError("outline_relay", "章纲接力需要明确的工作流程。", 409)
+            initial["outline_relay"] = outline_relay
         if kind == "conception_generate":
             from .conception_generation import freeze
 

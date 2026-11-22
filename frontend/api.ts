@@ -166,6 +166,16 @@ export type Task = {
     plan_preparation_restart?: unknown
     expected_story_revision?: number
     plot_preparations?: unknown
+    outline_relay?: {
+      version: string
+      source_branch_id: string
+      sources: { number: number; source_position: number; outline_version: string }[]
+    }
+    outline_relay_waiting?: {
+      id: string
+      number: number
+      contract: { note: string; items: { certainty: string; author_evidence: string }[] }
+    }
   }
   payload: {
     completion_scope?: 'whole_book' | 'segment'

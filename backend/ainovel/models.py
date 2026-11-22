@@ -159,6 +159,11 @@ class Plot(Input):
     fixed: list[str] = Field(default_factory=list, max_length=20)
 
 
+class OutlineSource(Input):
+    chapter_id: str = Field(min_length=1, max_length=128)
+    version: str = Field(min_length=1, max_length=200)
+
+
 class WorkflowInput(Input):
     structure_max_output_tokens: int = Field(default=8192, ge=64, le=16_384, strict=True)
     plot_contract_check: bool = Field(default=False, strict=True)
@@ -177,6 +182,7 @@ class WorkflowInput(Input):
     brief: str = Field(min_length=1, max_length=30_000)
     fixed: list[str] = Field(default_factory=list, max_length=30)
     plots: list[Plot] = Field(default_factory=list, max_length=100)
+    outline_sources: list[OutlineSource] = Field(default_factory=list, max_length=100)
     chapters: int = Field(default=36, ge=1, le=100)
     min_chars: int = Field(default=2500, ge=200, le=10_000)
     max_chars: int = Field(default=3500, ge=200, le=15_000)

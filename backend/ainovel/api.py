@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 
 from . import chapter_item_check
+from . import outline_relay
 from .budget import Budget
 from .author_contract import assemble_contract, authored_payload
 from .db import Database, DomainError, dumps, uid
@@ -40,6 +41,7 @@ from .models import (
 from .settings import ROOT, Settings
 from .modules import MODULES, public_modules
 from .manual_finalization import register_routes as register_finalization_routes
+from .delivery import register_routes as register_delivery_routes
 from .targeted_revision import validate_targeted_revision
 from .candidate_recheck import CandidateRecheckInput, sha as candidate_sha
 from .conditional_continuation import (
@@ -131,6 +133,7 @@ def create_app(settings=None, schema_only=False):
     app.state.settings, app.state.db, app.state.domain = settings, db, domain
     app.state.budget, app.state.library = budget, library
     register_finalization_routes(app, domain)
+    register_delivery_routes(app, domain)
     csrf, cookie = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     jobs = set()
     origins = {
@@ -534,6 +537,7 @@ def create_app(settings=None, schema_only=False):
             contract, data.author_contract_basis.model_dump() if data.author_contract_basis else None
         )
         branch_id = uid()
+        relay = None
         with db.connect(True) as tx:
             if (
                 source
@@ -543,12 +547,16 @@ def create_app(settings=None, schema_only=False):
                 != source["story_revision"]
             ):
                 raise DomainError("story_changed", "源作品设定在创建时改变，请刷新后重试。", 409)
+            if data.outline_sources:
+                relay = outline_relay.freeze(tx, source, data)
             tx.execute(
                 "INSERT INTO branches(id,novel_id,name,mode,created) VALUES(?,?,?,?,?)",
                 (
                     branch_id,
                     data.novel_id,
-                    ("半自动" if data.mode == "assisted" else "全自动") + "独立稿 " + branch_id[:6],
+                    ("章纲接力" if relay else "半自动" if data.mode == "assisted" else "全自动")
+                    + "独立稿 "
+                    + branch_id[:6],
                     data.mode,
                     time(),
                 ),
@@ -582,7 +590,7 @@ def create_app(settings=None, schema_only=False):
                     data.inherit_story_record_ids,
                     data.inherit_source_revision,
                 )
-        return domain.queue("workflow", payload, branch_id)
+        return domain.queue("workflow", payload, branch_id, outline_relay=relay)
 
     @app.post("/api/branches/{branch_id}/definitions", status_code=201)
     def save_definition(branch_id: str, data: DefinitionInput):
@@ -720,6 +728,8 @@ def create_app(settings=None, schema_only=False):
         if current["status"] in ("blocked_runtime", "cancelled") and not data.acknowledge_unknown:
             raise DomainError("unknown_result", "上次调用可能已计费；确认账本后可明确重新派发。", 409)
         result = current["result"]
+        if result.get(outline_relay.WAITING):
+            raise DomainError("outline_relay_choice", "请先明确本章安排，再从章纲接力检查点继续。", 409)
         domain.check_genre_snapshot(current["branch_id"], result.get("genre_profile_snapshot"))
         domain.check_author_contract_snapshot(current["branch_id"], result.get("author_contract_snapshot"))
         reject_pending = None
@@ -899,7 +909,8 @@ def create_app(settings=None, schema_only=False):
         rows = db.all(
             "SELECT id FROM artifacts WHERE branch_id=?"
             " AND kind NOT IN ('conception_workspace','conception_completion','conception_handoff','conception_bundle',"
-            "'chapter_outline','chapter_item_check','continuity_ledger','chapter_technique_reference','project_brief')"
+            "'chapter_outline','chapter_item_check','continuity_ledger','chapter_technique_reference','project_brief',"
+            "'delivery_package','delivery_confirmation')"
             + (" AND chapter_id=?" if chapter_id else "")
             + " ORDER BY created DESC LIMIT 50",
             (branch_id, chapter_id) if chapter_id else (branch_id,),
@@ -1293,6 +1304,7 @@ def create_app(settings=None, schema_only=False):
     register_reference_routes(app, domain, provider_ready)
     register_extraction_routes(app, domain, provider_ready)
     chapter_item_check.register_routes(app, domain, provider_ready)
+    outline_relay.register_routes(app, domain)
 
     dist = ROOT / "dist"
     if dist.is_dir():

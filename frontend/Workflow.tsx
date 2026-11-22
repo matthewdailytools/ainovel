@@ -25,6 +25,7 @@ import { MemoryAcceptanceRecord, MemorySelectionPanel, useMemorySelection } from
 import { FrozenStructureOutputPolicy, StructureOutputSettings } from './StructureOutputSettings'
 import { PlanPreparationDetails, planPreparationNeedsReview } from './PlanPreparationDetails'
 import { PlanRestartPanel, PlanRestartReceipt } from './PlanRestartPanel'
+import { RelayDecision, RelayRange, submitRelayDecision, type RelayChapter } from './OutlineRelay'
 import type { ConceptionHandoff } from './conception'
 import {
   DEFAULT_STRUCTURE_OUTPUT_TOKENS,
@@ -58,6 +59,11 @@ export function WorkflowPage({
   onConceptionSettings: () => void
 }) {
   const [mode, setMode] = useState(initialMode)
+  const [relay, setRelay] = useState(false)
+  const [relayFirst, setRelayFirst] = useState('')
+  const [relayLast, setRelayLast] = useState('')
+  const [relayRefresh, setRelayRefresh] = useState(0)
+  const [relayOutlines, setRelayOutlines] = useState<{ branchId: string; chapters: RelayChapter[] }>()
   const [completionScope, setCompletionScope] = useState<'whole_book' | 'segment'>('whole_book')
   const [briefEdit, setBrief] = useState<string>()
   const [useConception, setUseConception] = useState(true)
@@ -108,8 +114,40 @@ export function WorkflowPage({
   const [conditionalContinueReason, setConditionalContinueReason] = useState('')
   const [conditionalContinueAccount, setConditionalContinueAccount] = useState('')
   const [status, setStatus] = useState('')
+  const relayChapters = relayOutlines?.branchId === branchId ? relayOutlines.chapters : []
+  const firstRelayIndex = relayChapters.findIndex((chapter) => chapter.id === relayFirst)
+  const lastRelayIndex = relayChapters.findIndex((chapter) => chapter.id === relayLast)
+  const relayRange =
+    firstRelayIndex >= 0 && lastRelayIndex >= firstRelayIndex
+      ? relayChapters.slice(firstRelayIndex, lastRelayIndex + 1)
+      : []
+  const confirmedOutlines = relayRange.flatMap((chapter) =>
+    chapter.outline && chapter.confirmed ? [{ ...chapter, outline: chapter.outline }] : [],
+  )
+  const validRelay =
+    !!relayRange.length &&
+    relayRange.length <= 100 &&
+    confirmedOutlines.length === relayRange.length &&
+    relayRange.every((chapter, offset) => chapter.position === relayRange[0].position + offset)
+  useEffect(() => {
+    if (!relay || !branchId) return
+    let active = true
+    void api<RelayChapter[]>(`/branches/${branchId}/outline-relay`)
+      .then((chapters) => {
+        if (active) setRelayOutlines({ branchId, chapters })
+      })
+      .catch((error: unknown) => {
+        if (active) notify(error)
+      })
+    return () => {
+      active = false
+    }
+  }, [branchId, relay, relayRefresh, notify])
   const formSignature = JSON.stringify([
     mode,
+    relay,
+    relayFirst,
+    relayLast,
     completionScope,
     briefEdit,
     fixed,
@@ -238,8 +276,15 @@ export function WorkflowPage({
       if (seenContract?.branch_id !== branchId) throw new Error('正在读取本书创作约定，请稍后再启动。')
       if (inheritance?.selected_ids.length && inheritance.source_branch_id !== branchId)
         throw new Error('继承来源工作版本已切换，请重新勾选。')
-      const parsed =
-        mode === 'assisted'
+      if (relay && !validRelay) throw new Error('请选择连续且已保存作者章纲的章节。')
+      const parsed = relay
+        ? confirmedOutlines.map((chapter, index) => ({
+            number: index + 1,
+            title: chapter.title,
+            plot: chapter.outline.text,
+            fixed: [],
+          }))
+        : mode === 'assisted'
           ? plots
               .split('\n')
               .filter((line) => line.trim())
@@ -258,25 +303,33 @@ export function WorkflowPage({
                 }
               })
           : []
-      const payload: WorkflowInput = {
+      const payload: WorkflowInput & { outline_sources?: { chapter_id: string; version: string }[] } = {
         novel_id: novel.id,
         source_branch_id: branchId || null,
         ...(conceptionSnapshotId ? { conception_snapshot_id: conceptionSnapshotId } : {}),
-        mode,
+        mode: relay ? 'assisted' : mode,
+        ...(relay
+          ? {
+              outline_sources: confirmedOutlines.map((chapter) => ({
+                chapter_id: chapter.id,
+                version: chapter.outline.version,
+              })),
+            }
+          : {}),
         completion_scope: completionScope,
-        brief,
+        brief: relay && !brief.trim() ? '按作者已经确认的章纲，完成所选章段。' : brief,
         fixed: fixed
           .split('\n')
           .map((v) => v.trim())
           .filter(Boolean),
         plots: parsed,
-        chapters: count,
+        chapters: relay ? relayRange.length : count,
         min_chars: minChars,
         max_chars: maxChars,
         account,
         adoption,
-        plot_contract_check: plotContractCheck,
-        source_identity_context: plotContractCheck && sourceIdentityContext,
+        plot_contract_check: relay || plotContractCheck,
+        source_identity_context: (relay || plotContractCheck) && sourceIdentityContext,
         structured_maintenance: structuredMaintenance,
         structure_max_output_tokens: workflowStructureOutput(structureMaxOutputTokens, structuredMaintenance),
         scene_maintenance: structuredMaintenance && sceneMaintenance,
@@ -374,23 +427,43 @@ export function WorkflowPage({
               notify={notify}
               onChange={setInheritance}
             />
-            <fieldset>
-              <legend>创作分工</legend>
-              <label className="radio-card">
-                <input type="radio" checked={mode === 'assisted'} onChange={() => setMode('assisted')} />
-                <span>
-                  <strong>半自动</strong>
-                  <small>你定章级或批量情节，AI 补写、检查并维护状态。</small>
-                </span>
-              </label>
-              <label className="radio-card">
-                <input type="radio" checked={mode === 'automatic'} onChange={() => setMode('automatic')} />
-                <span>
-                  <strong>全自动</strong>
-                  <small>你给设定与粗纲，系统细化章纲，无需逐章填写情节。</small>
-                </span>
-              </label>
-            </fieldset>
+            <label className="check">
+              <input type="checkbox" checked={relay} onChange={(event) => setRelay(event.target.checked)} />
+              从已确认章纲接力
+            </label>
+            {relay && (
+              <RelayRange
+                chapters={relayChapters}
+                first={relayFirst}
+                last={relayLast}
+                selectFirst={setRelayFirst}
+                selectLast={setRelayLast}
+                selected={relayRange}
+                reload={() => setRelayRefresh((value) => value + 1)}
+              />
+            )}
+            {relay && relayFirst && relayLast && !validRelay && (
+              <p className="small">请选择顺序连续且每章都有作者章纲的范围。</p>
+            )}
+            {!relay && (
+              <fieldset>
+                <legend>创作分工</legend>
+                <label className="radio-card">
+                  <input type="radio" checked={mode === 'assisted'} onChange={() => setMode('assisted')} />
+                  <span>
+                    <strong>半自动</strong>
+                    <small>你定章级或批量情节，AI 补写、检查并维护状态。</small>
+                  </span>
+                </label>
+                <label className="radio-card">
+                  <input type="radio" checked={mode === 'automatic'} onChange={() => setMode('automatic')} />
+                  <span>
+                    <strong>全自动</strong>
+                    <small>你给设定与粗纲，系统细化章纲，无需逐章填写情节。</small>
+                  </span>
+                </label>
+              </fieldset>
+            )}
             <label>
               本次任务范围
               <select
@@ -412,7 +485,7 @@ export function WorkflowPage({
                 rows={7}
                 value={brief}
                 onChange={(e) => setBrief(e.target.value)}
-                required
+                required={!relay}
                 maxLength={30_000}
               />
             </label>
@@ -425,7 +498,7 @@ export function WorkflowPage({
               {completionScope === 'segment' ? '本批适用固定条件（每行一条）' : '全书固定条件（每行一条）'}
               <textarea rows={3} value={fixed} onChange={(e) => setFixed(e.target.value)} />
             </label>
-            {mode === 'assisted' && (
+            {!relay && mode === 'assisted' && (
               <label>
                 作者批量情节（每行一章）
                 <textarea
@@ -448,7 +521,8 @@ export function WorkflowPage({
                   type="number"
                   min={1}
                   max={100}
-                  value={count}
+                  value={relay ? relayRange.length || '' : count}
+                  disabled={relay}
                   onChange={(e) => setCount(Number(e.target.value))}
                   required
                 />
@@ -537,13 +611,13 @@ export function WorkflowPage({
               onChange={setCharacterFieldRepair}
             />
             <PlotAuditOption
-              checked={plotContractCheck}
-              disabled={busy}
+              checked={relay || plotContractCheck}
+              disabled={busy || relay}
               onChange={setPlotContractCheck}
               identityChecked={sourceIdentityContext}
               onIdentityChange={setSourceIdentityContext}
             />
-            {plotContractCheck && mode === 'automatic' && (
+            {!relay && plotContractCheck && mode === 'automatic' && (
               <p className="small muted">
                 全自动会在写正文前明确自己的AI章纲，必要时最多两轮选择本章开放细节并核对，增加模型调用和费用。
                 原章纲、你的固定条件和剧情中尚未解开的疑问保持；未能明确时停止，不先写正文。AI选择不是作者新增锁定。
@@ -575,6 +649,7 @@ export function WorkflowPage({
               disabled={
                 busy ||
                 !modelReady ||
+                (relay && !validRelay) ||
                 seenGenre?.branch_id !== branchId ||
                 seenContract?.branch_id !== branchId
               }
@@ -606,7 +681,12 @@ export function WorkflowPage({
                 >
                   {visibleTasks.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.payload.mode === 'assisted' ? '半自动' : '全自动'} · {t.payload.account} ·{' '}
+                      {t.result.outline_relay
+                        ? '章纲接力'
+                        : t.payload.mode === 'assisted'
+                          ? '半自动'
+                          : '全自动'}{' '}
+                      · {t.payload.account} ·{' '}
                       {t.payload.completion_scope === 'segment' ? '阶段批次' : '整书完结'} · {label(t.status)}{' '}
                       · {new Date(t.created * 1000).toLocaleString('zh-CN')}
                     </option>
@@ -630,6 +710,33 @@ export function WorkflowPage({
                     value={Math.min((task.result.next_chapter || 1) - 1, task.payload.chapters || 36)}
                   />
                   <p role="status">{task.error || '生成、审查、事实和采纳分别留有记录。'}</p>
+                  {task.result.outline_relay && (
+                    <details>
+                      <summary>本批次冻结的接力章纲</summary>
+                      <ol>
+                        {task.result.outline_relay.sources.map((source) => (
+                          <li key={source.number}>
+                            来源第 {source.source_position} 章 · 版本 {source.outline_version}
+                          </li>
+                        ))}
+                      </ol>
+                    </details>
+                  )}
+                  {task.result.outline_relay_waiting && (
+                    <RelayDecision
+                      key={task.result.outline_relay_waiting.id}
+                      task={task}
+                      checkpoint={task.result.outline_relay_waiting}
+                      disabled={busy}
+                      clarify={(body) =>
+                        perform(async () => {
+                          const row = await submitRelayDecision(task, body)
+                          setTasks((previous) => previous.map((entry) => (entry.id === row.id ? row : entry)))
+                          setStatus('已保存作者补充，正在从本章写前检查点继续。')
+                        })
+                      }
+                    />
+                  )}
                   <p className="small muted">
                     {task.payload.completion_scope === 'segment'
                       ? '本次为阶段批次：范围检查通过只表示本批完成，未来终局与待回收承诺不被自动改为已闭合。'
@@ -796,6 +903,7 @@ export function WorkflowPage({
                     disabled={
                       busy ||
                       planWaiting ||
+                      !!task.result.outline_relay_waiting ||
                       (task.status === 'needs_review' &&
                         !!waitingId &&
                         (!waiting || candidateChanged || (structureWaiting && !regenerate))) ||
