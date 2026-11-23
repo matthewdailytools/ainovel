@@ -139,9 +139,9 @@ export function App() {
   return (
     <>
       <header className="topbar">
-        <a className="brand" href="#main" aria-label="ainovel 工作台">
+        <a className="brand" href="#main" aria-label="白金工作台">
           <span className="brand-mark">文</span>
-          <strong>ainovel</strong>
+          <strong>白金工作台</strong>
           <span className="local-label">本机创作</span>
         </a>
         <nav aria-label="主要页面">

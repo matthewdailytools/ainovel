@@ -23,5 +23,5 @@ if ($LASTEXITCODE -ne 0) { throw 'Type check failed.' }
 & $nodeRuntime node_modules/vite/bin/vite.js build
 if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
 $env:AINOVEL_PORT = "$Port"
-Write-Host "ainovel: http://127.0.0.1:$Port (keep this window open)"
+Write-Host "白金工作台 · http://127.0.0.1:$Port（请保留此窗口）"
 & .venv/Scripts/python.exe -m ainovel

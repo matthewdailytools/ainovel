@@ -1,4 +1,4 @@
-# ainovel
+# 白金工作台
 ai写小说，自用，根据使用进行迭代
 
 ## 当前目标
@@ -7,7 +7,7 @@ ai写小说，自用，根据使用进行迭代
 
 当前已提供本机网页工作台：手写与版本保护、局部辅助、资料书库、故事记录，以及半自动／全自动整书运行。工程验证与实际创作验收分别记录，生成质量和使用收益不因应用可运行而自动通过。实现与验收基线：2026-11-13—15。
 
-## 启动本机工作台
+## 启动白金工作台
 
 需要 PowerShell 7、npm 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。项目使用独立 Python 3.14.7 环境和 Node.js 24.22.3 构建，不改动全局 Node 版本。
 
@@ -20,7 +20,7 @@ if (-not (Test-Path ainovel.toml)) { Copy-Item ainovel.example.toml ainovel.toml
 ./scripts/run-workbench.ps1 -Install
 ```
 
-已有配置和依赖时双击 [启动工作台.cmd](启动工作台.cmd)，或运行 `./scripts/run-workbench.ps1`。打开 [本机工作台](http://127.0.0.1:8765)，保持启动窗口运行；关闭浏览器不会取消 Worker。端口占用时用 `./scripts/run-workbench.ps1 -Port 8766`，访问对应端口。
+已有配置和依赖时双击 [启动工作台.cmd](启动工作台.cmd)，或运行 `./scripts/run-workbench.ps1`。打开 [白金工作台](http://127.0.0.1:8765)，保持启动窗口运行。关闭浏览器后 Worker 会继续运行。端口占用时用 `./scripts/run-workbench.ps1 -Port 8766`，访问对应端口。
 
 **费用：两个 OpenAI Key 合计 USD 20，DeepSeek 单独 CNY 80。** 可在 `ainovel.toml` 降低额度，并为批次再设上限。换 Key、重启和恢复稿件不清零。配置为保守单价估算，未知调用保留费用预留；没有已配置单价的模型不会付费调用。当前用量与剩余额度在页面右上角查看。
 

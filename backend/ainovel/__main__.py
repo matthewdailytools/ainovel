@@ -10,9 +10,7 @@ from .settings import ROOT, Settings
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="ainovel 本机网页：serve / schema / backup / verify / restore"
-    )
+    parser = argparse.ArgumentParser(description="白金工作台：serve / schema / backup / verify / restore")
     parser.add_argument(
         "command", nargs="?", default="serve", choices=("serve", "schema", "backup", "verify", "restore")
     )

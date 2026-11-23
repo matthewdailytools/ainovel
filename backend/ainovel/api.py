@@ -131,7 +131,7 @@ def create_app(settings=None, schema_only=False):
             if token:
                 unregister(db, token)
 
-    app = FastAPI(title="ainovel 本机工作台", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="白金工作台", version="0.1.0", lifespan=lifespan)
     app.state.settings, app.state.db, app.state.domain = settings, db, domain
     app.state.budget, app.state.library = budget, library
     register_finalization_routes(app, domain)

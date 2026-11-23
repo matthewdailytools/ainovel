@@ -1,6 +1,6 @@
 {
   "openapi": "3.1.0",
-  "info": { "title": "ainovel 本机工作台", "version": "0.1.0" },
+  "info": { "title": "白金工作台", "version": "0.1.0" },
   "paths": {
     "/api/branches/{branch_id}/finalization": {
       "get": {
