@@ -24,7 +24,7 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
     .getByRole('textbox', { name: '章节正文', exact: true })
     .fill('原稿：她来到闸门前，准备检查外露结构。')
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(page.getByText('已保存', { exact: true })).toBeVisible()
+  await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '资料书库', exact: true }).click()
   await expect(
     page.getByText(

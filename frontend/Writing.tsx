@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
   api,
   label,
@@ -80,6 +80,8 @@ const actions = [
 const designActions = new Set<ModuleInput['action']>(['world.generate', 'character.generate', 'outline.plan'])
 const designKinds = new Set(['world', 'characters', 'outline'])
 const workspaceScopes = ['workspace-setting', 'workspace-chat']
+const savedLocally = '已保存到本机'
+const cachingDraft = '正在缓存到此浏览器…'
 const WorkspaceChat = lazy(() =>
   import('./WorkspaceChat').then(({ WorkspaceChat }) => ({ default: WorkspaceChat })),
 )
@@ -143,7 +145,15 @@ export function Writing({
     lastPaneWasSetting.current = !!setting
   }, [setting])
   const [editorKey, setEditorKey] = useState('')
+  const [focusedEditorKey, setFocusedEditorKey] = useState('')
   const [text, setText] = useState('')
+  const wordCount = useMemo(() => {
+    let count = 0
+    for (const character of text) {
+      if (!/\s/u.test(character)) count++
+    }
+    return count
+  }, [text])
   const [saved, setSaved] = useState('未打开章节')
   const [dirty, setDirty] = useState(0)
   const [selection, setSelection] = useState<Selection>({ start: 0, end: 0, text: '' })
@@ -219,6 +229,8 @@ export function Writing({
   const [rename, setRename] = useState('')
   const current = useRef<Chapter | undefined>(undefined)
   const draftText = useRef('')
+  const cachedDraft = useRef<Draft | undefined>(undefined)
+  const cacheRequest = useRef(0)
   const saving = useRef<Promise<Chapter> | null>(null)
   const pendingRequest = useRef<{ signature: string; key: string } | null>(null)
   const alive = useRef(true)
@@ -238,8 +250,8 @@ export function Writing({
     try {
       const row = await api<Chapter>(`/chapters/${id}`)
       if (!alive.current || token !== loadSequence.current) return
-      if (authoritative) await writeDraft({ id, base: row.revision, text: row.content, updated: Date.now() })
-      const draft = await readDraft(id)
+      if (authoritative) await cacheDraft(row, row.content)
+      const draft = authoritative ? undefined : await readDraft(id).catch(() => undefined)
       if (!alive.current || token !== loadSequence.current) return
       if (directionBasis && directionBasis.chapter_id !== id) {
         setDirectionBasis(undefined)
@@ -262,6 +274,7 @@ export function Writing({
       const recoverable =
         draft && !draft.fromOtherWindow && draft.text !== row.content && draft.base === row.revision
       draftText.current = recoverable ? draft.text : row.content
+      cachedDraft.current = recoverable ? draft : undefined
       const view = chapterViews.current.get(id)
       const sameDraft = !authoritative && view?.revision === row.revision
       const start = Math.min(draftText.current.length, at ?? (sameDraft ? view.cursor : 0))
@@ -270,9 +283,10 @@ export function Writing({
       setCursor(start)
       setEditorScroll(at === undefined && sameDraft ? view.scrollTop : undefined)
       setText(draftText.current)
-      setEditorKey(id + ':' + row.revision + ':' + Date.now())
+      const nextEditorKey = id + ':' + row.revision + ':' + Date.now()
+      setEditorKey(nextEditorKey)
       if (recoverable) {
-        setSaved('已恢复浏览器草稿，尚未保存到本机服务')
+        setSaved('已从此浏览器恢复草稿，等待保存到本机')
         setDirty((d) => d + 1)
       } else if (
         draft &&
@@ -281,7 +295,8 @@ export function Writing({
       ) {
         setRecovery(draft)
         setSaved('发现不同基线的浏览器草稿，请比较')
-      } else setSaved('已保存')
+      } else setSaved(savedLocally)
+      return nextEditorKey
     } finally {
       if (alive.current && token === loadSequence.current) setOpening(false)
     }
@@ -322,6 +337,16 @@ export function Writing({
       active = false
     }
   }, [branch.id])
+  async function cacheDraft(chapter: Chapter, text: string) {
+    const request = ++cacheRequest.current
+    const draft = { id: chapter.id, base: chapter.revision, text, updated: Date.now() }
+    const cached = await writeDraft(draft).then(
+      () => true,
+      () => false,
+    )
+    if (request === cacheRequest.current) cachedDraft.current = cached ? draft : undefined
+    return cached
+  }
   async function save(): Promise<Chapter> {
     if (saving.current) return saving.current
     const run = async (): Promise<Chapter> => {
@@ -329,8 +354,8 @@ export function Writing({
       while (current.current!.content !== draftText.current) {
         const snapshot: Chapter = current.current!
         const content: string = draftText.current
-        setSaved('保存中…')
-        await writeDraft({ id: snapshot.id, base: snapshot.revision, text: content, updated: Date.now() })
+        setSaved('正在保存到本机…')
+        await cacheDraft(snapshot, content)
         const row: Chapter = await api<Chapter>(`/chapters/${snapshot.id}`, 'PUT', {
           base_revision: snapshot.revision,
           content,
@@ -339,18 +364,26 @@ export function Writing({
         if (view?.revision === snapshot.revision)
           chapterViews.current.set(row.id, { ...view, revision: row.revision })
         current.current = row
-        await writeDraft({ id: row.id, base: row.revision, text: draftText.current, updated: Date.now() })
+        await cacheDraft(row, draftText.current)
         if (alive.current) setChapter(row)
       }
       if (alive.current) {
-        setSaved('已保存')
-        await refresh()
+        setSaved(savedLocally)
+        await refresh().catch(notify)
       }
       return current.current!
     }
     saving.current = run()
       .catch((error) => {
-        setSaved('保存失败，浏览器草稿保留；可下载草稿后比较')
+        const cached = cachedDraft.current
+        setSaved(
+          cached &&
+            cached.id === current.current?.id &&
+            cached.base === current.current.revision &&
+            cached.text === draftText.current
+            ? '保存失败，浏览器草稿保留；可下载草稿后比较'
+            : '保存到本机失败，请先下载当前草稿',
+        )
         throw error
       })
       .finally(() => {
@@ -359,19 +392,24 @@ export function Writing({
     return saving.current
   }
   function change(value: string) {
+    const snapshot = current.current
+    if (!snapshot) return
     draftText.current = value
     setText(value)
-    setSaved('未保存')
+    setSaved(cachingDraft)
     setDirty((d) => d + 1)
-    if (current.current)
-      void writeDraft({
-        id: current.current.id,
-        base: current.current.revision,
-        text: value,
-        updated: Date.now(),
-      }).catch(() => {
-        setSaved('浏览器草稿保存失败，请立即保存或下载草稿')
-      })
+    const pending = cacheDraft(snapshot, value)
+    const request = cacheRequest.current
+    void pending.then((cached) => {
+      if (!alive.current || current.current !== snapshot || request !== cacheRequest.current) return
+      setSaved((status) =>
+        status === cachingDraft
+          ? cached
+            ? '草稿已缓存到此浏览器'
+            : '浏览器草稿缓存失败，请保存到本机或下载草稿'
+          : status,
+      )
+    })
   }
   useEffect(() => {
     function remember() {
@@ -589,8 +627,11 @@ export function Writing({
         title: `第${chapters.length + 1}章`,
       })
       await refresh()
-      await loadChapter(row.id, undefined, false, true)
-      if (current.current?.id === row.id) setSetting(undefined)
+      const key = await loadChapter(row.id, undefined, false, true)
+      if (key) {
+        setSetting(undefined)
+        setFocusedEditorKey(key)
+      }
     })
   }
   async function loadAdviceDirection(source: Artifact, selected: string): Promise<boolean> {
@@ -947,32 +988,36 @@ export function Writing({
             onClose={() => setImportOpen(false)}
           />
         )}
-        <div className="manuscript-toolbar">
-          <span className="eyebrow">作者工作稿</span>
-          <span className="save-status" role="status">
-            {saved}
-          </span>
-          <button
-            onClick={() =>
-              void doAction(async () => {
-                await save()
-              })
-            }
-            disabled={!chapter || busy}
-          >
-            保存
-          </button>
-          <button
-            onClick={() => void toggleHistory()}
-            disabled={!chapter || busy || opening || historyLoading}
-            aria-busy={historyLoading}
-          >
-            版本历史
-          </button>
-          {historyLoading && <span role="status">正在读取当前章版本历史…</span>}
-        </div>
         {chapter ? (
           <>
+            <div className="manuscript-toolbar" role="group" aria-label="正文工具栏">
+              <div className="manuscript-actions">
+                <div className="manuscript-count" role="group" aria-label="字数" title="计入标点，忽略空白">
+                  字数 <strong>{wordCount.toLocaleString('zh-CN')}</strong> 字
+                </div>
+                <button
+                  className="primary"
+                  onClick={() =>
+                    void doAction(async () => {
+                      await save()
+                    })
+                  }
+                  disabled={busy || opening}
+                >
+                  保存
+                </button>
+                <button
+                  onClick={() => void toggleHistory()}
+                  disabled={busy || opening || historyLoading}
+                  aria-busy={historyLoading}
+                >
+                  版本历史
+                </button>
+              </div>
+              <div className="save-status" role="status">
+                {historyLoading ? '正在读取当前章版本历史…' : saved}
+              </div>
+            </div>
             <div className="chapter-heading">
               <span>第 {chapter.position} 章</span>
               <label>
@@ -991,7 +1036,7 @@ export function Writing({
                 />
               </label>
               <div className="muted">
-                {[...text].filter((c) => !/\s/u.test(c)).length} 非空白字符 · 修订 {chapter.revision}
+                修订 {chapter.revision}
                 {chapter.stale ? ' · 受前文修改影响，需重新审阅' : ''}
               </div>
             </div>
@@ -1011,12 +1056,9 @@ export function Writing({
                 <Difference before={chapter.content} after={recovery.text} />
                 <button
                   onClick={() => {
-                    draftText.current = recovery.text
-                    setText(recovery.text)
-                    setEditorKey(chapter.id + ':recovered:' + Date.now())
                     setRecovery(undefined)
-                    setDirty((d) => d + 1)
-                    setSaved('待保存的人工合并稿')
+                    change(recovery.text)
+                    setEditorKey(chapter.id + ':recovered:' + Date.now())
                   }}
                 >
                   将此草稿载入编辑区
@@ -1024,13 +1066,8 @@ export function Writing({
                 <button
                   onClick={() => {
                     setRecovery(undefined)
-                    void writeDraft({
-                      id: chapter.id,
-                      base: chapter.revision,
-                      text: chapter.content,
-                      updated: Date.now(),
-                    })
-                    setSaved('已保存')
+                    void cacheDraft(chapter, chapter.content)
+                    setSaved(savedLocally)
                   }}
                 >
                   使用本机服务稿
@@ -1066,6 +1103,7 @@ export function Writing({
                 ))}
               </div>
             )}
+            <h2 className="editor-label">正文</h2>
             <Editor
               id={editorKey}
               initial={text}
@@ -1073,6 +1111,7 @@ export function Writing({
               scrollTop={editorScroll}
               revealSelection={ledgerSelection}
               readOnly={busy || opening}
+              focusOnOpen={focusedEditorKey === editorKey}
               onChange={change}
               onSelection={(selected) => {
                 reading.current.cursor = selected.end

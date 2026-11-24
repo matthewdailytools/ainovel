@@ -34,5 +34,6 @@ export async function writeDraft(draft: Draft): Promise<void> {
       .put({ ...draft, id: draft.id + '@' + windowId, chapter_id: draft.id, window_id: windowId })
     transaction.oncomplete = () => resolve()
     transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error)
   })
 }

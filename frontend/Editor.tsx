@@ -1,6 +1,13 @@
 import { useEffect, useRef } from 'react'
 import { Compartment, EditorState } from '@codemirror/state'
-import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view'
+import {
+  EditorView,
+  keymap,
+  lineNumbers,
+  highlightActiveLine,
+  drawSelection,
+  placeholder,
+} from '@codemirror/view'
 import { history, historyKeymap, defaultKeymap } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { MergeView } from '@codemirror/merge'
@@ -13,6 +20,7 @@ export function Editor({
   scrollTop,
   revealSelection,
   readOnly = false,
+  focusOnOpen = false,
   onChange,
   onSelection,
   onViewPosition,
@@ -23,12 +31,14 @@ export function Editor({
   scrollTop?: number
   revealSelection?: { start: number; end: number }
   readOnly?: boolean
+  focusOnOpen?: boolean
   onChange: (text: string) => void
   onSelection: (selection: Selection) => void
   onViewPosition?: (cursor: number, scrollTop: number) => void
 }) {
   const mount = useRef<HTMLDivElement>(null)
   const instance = useRef<EditorView | null>(null)
+  const focusedId = useRef<string | undefined>(undefined)
   const permission = useRef(new Compartment())
   const callbacks = useRef({ onChange, onSelection, onViewPosition })
   callbacks.current = { onChange, onSelection, onViewPosition }
@@ -44,6 +54,7 @@ export function Editor({
           history(),
           drawSelection(),
           highlightActiveLine(),
+          placeholder('在这里开始写正文…'),
           markdown(),
           EditorView.lineWrapping,
           keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -66,7 +77,6 @@ export function Editor({
             '.cm-content': { padding: '28px 24px 120px' },
             '.cm-gutters': { background: 'transparent', color: '#66716d', border: 'none', fontSize: '12px' },
             '.cm-activeLine': { background: '#edf4f130' },
-            '&.cm-focused': { outline: '2px solid #327260', outlineOffset: '-2px' },
           }),
         ],
       }),
@@ -101,6 +111,13 @@ export function Editor({
       ]),
     })
   }, [readOnly, id])
+  useEffect(() => {
+    const view = instance.current
+    if (!view || !focusOnOpen || readOnly || focusedId.current === id) return
+    focusedId.current = id
+    mount.current?.scrollIntoView({ block: 'nearest' })
+    view.focus()
+  }, [focusOnOpen, id, readOnly])
   useEffect(() => {
     const view = instance.current
     if (!view || !revealSelection || revealSelection.end > view.state.doc.length) return

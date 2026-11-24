@@ -49,7 +49,13 @@ export function useWritingContext(branchId: string, chapter?: Chapter) {
 
   const current =
     state?.path === path && state?.revision === revision && state?.request === request ? state : undefined
-  return { data: current?.data, error: current?.error, reload: () => setRequest((value) => value + 1) }
+  return {
+    data: current?.data,
+    error: current?.error,
+    // Keep the chapter outline visible while its context is being revalidated.
+    displayedOutline: state?.path === path ? state?.data?.outline : undefined,
+    reload: () => setRequest((value) => value + 1),
+  }
 }
 
 export function ChapterOutline({
@@ -66,7 +72,7 @@ export function ChapterOutline({
   const [draft, setDraft] = useState<{ text: string; version: string | null }>()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const outline = context.data?.outline
+  const outline = context.displayedOutline
   useLeaveGuard(!!draft, '未保存的本章章纲')
 
   async function saveOutline(event: React.FormEvent) {
@@ -90,13 +96,13 @@ export function ChapterOutline({
 
   const source = context.error
     ? '读取失败'
-    : !context.data
-      ? '读取中'
-      : outline?.source === 'author'
-        ? '作者章纲'
-        : outline?.source === 'frozen_ai'
-          ? '冻结 AI 章纲'
-          : '暂无章纲'
+    : outline?.source === 'author'
+      ? '作者章纲'
+      : outline?.source === 'frozen_ai'
+        ? '冻结 AI 章纲'
+        : outline === null
+          ? '暂无章纲'
+          : '读取中'
 
   return (
     <details className="writing-outline" open>
@@ -114,7 +120,7 @@ export function ChapterOutline({
           {!draft && <p className="writing-outline-text">{outline.text}</p>}
         </>
       )}
-      {context.data && !outline && !draft && (
+      {!context.error && !outline && !draft && (
         <p className="small muted">可以直接写作，也可以先记下本章安排。</p>
       )}
       {draft ? (
@@ -150,10 +156,10 @@ export function ChapterOutline({
           </div>
         </form>
       ) : (
-        context.data && (
+        !context.error && (
           <button
             type="button"
-            disabled={disabled}
+            disabled={disabled || !context.data}
             onClick={() => setDraft({ text: outline?.text ?? '', version: outline?.version ?? null })}
           >
             {outline?.source === 'author' ? '编辑章纲' : '记下作者章纲'}
