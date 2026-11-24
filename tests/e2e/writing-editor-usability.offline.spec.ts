@@ -128,14 +128,26 @@ test('首章从可见正文框开始写作，字数随输入更新，自动保�
   await expect(history).toBeFocused()
   await expect(editor).toContainText(continuation)
 
+  await editor.press('End')
+  await page.keyboard.insertText('风又起了。')
   await page.evaluate(() => window.scrollTo(0, 0))
-  const beforeBudget = await position()
-  const budget = page.getByRole('button', { name: '账户与预算', exact: true })
-  await budget.click()
-  await expect(page.getByRole('dialog', { name: '账户与预算', exact: true })).toBeVisible()
-  expect(Math.abs((await position()).top - beforeBudget.top)).toBeLessThanOrEqual(1)
+  const beforeSettings = await position()
+  const settingsButton = page.getByRole('button', { name: '设置', exact: true })
+  await settingsButton.click()
+  const settings = page.getByRole('dialog', { name: '设置', exact: true })
+  await expect(settings.getByRole('heading', { name: '模型与预算', exact: true })).toBeVisible()
+  await expect(settings.getByRole('heading', { name: '本机数据', exact: true })).toBeVisible()
+  await expect(settings.getByRole('combobox', { name: '模型账户', exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('combobox', { name: '模型账户', exact: true, includeHidden: true }),
+  ).toHaveCount(1)
+  expect(Math.abs((await position()).top - beforeSettings.top)).toBeLessThanOrEqual(1)
   await page.keyboard.press('Escape')
-  await expect(budget).toBeFocused()
+  await expect(settings).toBeHidden()
+  await expect(settingsButton).toBeFocused()
+  await expect(editor).toContainText('风又起了。')
+  await save.click()
+  await expect(saved).toHaveText('已保存到本机')
 
   await info.attach('writing-first-fold-desktop', {
     contentType: 'application/json',
@@ -203,7 +215,7 @@ test('窄屏首屏可写作，目录和 AI 面板返回后保留正文与光标'
     await editor.press('ArrowLeft')
     await assistant.click()
     await expect(page.getByRole('region', { name: 'AI 对话', exact: true })).toBeVisible()
-    await expect(page.getByRole('combobox', { name: '模型账户', exact: true })).toBeVisible()
+    await expect(page.getByRole('combobox', { name: '模型账户', exact: true })).toHaveCount(0)
     await page.getByRole('button', { name: '关闭创作辅助', exact: true }).click()
     await expect(assistant).toBeFocused()
     const original = await editor.textContent()
@@ -212,6 +224,17 @@ test('窄屏首屏可写作，目录和 AI 面板返回后保留正文与光标'
     await expect(editor).toHaveText(original!.replace('。', '又。'))
     await save.click()
     await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible()
+
+    await page.evaluate(() => window.scrollTo(0, 0))
+    const settingsButton = page.getByRole('button', { name: '设置', exact: true })
+    await expect(settingsButton).toBeInViewport()
+    await settingsButton.click()
+    const settings = page.getByRole('dialog', { name: '设置', exact: true })
+    await expect(settings.getByRole('combobox', { name: '模型账户', exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await page.keyboard.press('Escape')
+    await expect(settings).toBeHidden()
+    await expect(settingsButton).toBeFocused()
   }
   expect(await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).toMatchObject({
     content: '云来了又又。',
@@ -220,6 +243,46 @@ test('窄屏首屏可写作，目录和 AI 面板返回后保留正文与光标'
     contentType: 'application/json',
     body: JSON.stringify(measurements),
   })
+})
+
+test('模型账户通过全局设置切换，换工作区与刷新后继续使用所选账户', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('.new-novel summary').click()
+  await page.getByRole('textbox', { name: '作品名称', exact: true }).fill('后台验证 · 全局模型账户')
+  await page.getByRole('button', { name: '创建并开始写作', exact: true }).click()
+  await page.getByRole('button', { name: '新建第一章', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toBeEditable()
+
+  const settingsButton = page.getByRole('button', { name: '设置', exact: true })
+  const settings = page.getByRole('dialog', { name: '设置', exact: true })
+  const account = settings.getByRole('combobox', { name: '模型账户', exact: true })
+  const close = settings.getByRole('button', { name: '关闭设置', exact: true })
+  await expect(page.getByRole('combobox', { name: '模型账户', exact: true })).toHaveCount(0)
+  await settingsButton.click()
+  await expect(account).toHaveValue('offline')
+  await account.selectOption('offline-relay')
+  await close.click()
+  await expect(settingsButton).toBeFocused()
+
+  for (const workspace of ['资料书库', '整书创作', '写作']) {
+    const destination = page.getByRole('button', { name: workspace, exact: true })
+    await destination.click()
+    await expect(destination).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByRole('combobox', { name: '模型账户', exact: true })).toHaveCount(0)
+    await settingsButton.click()
+    await expect(account).toHaveValue('offline-relay')
+    await page.keyboard.press('Escape')
+    await expect(settingsButton).toBeFocused()
+  }
+
+  await page.reload()
+  await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toBeEditable()
+  await settingsButton.click()
+  await expect(account).toHaveValue('offline-relay')
+  await close.click()
+  const assistant = page.getByRole('region', { name: 'AI 对话', exact: true })
+  await assistant.getByText('对话设置与发送范围', { exact: true }).click()
+  await expect(assistant.getByText(/模型账户 offline-relay/)).toBeVisible()
 })
 
 test('正文服务保存失败后，同一标签页恢复未提交草稿且其他章仍读自己的正文', async ({ page }) => {

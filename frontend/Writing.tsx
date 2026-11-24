@@ -166,7 +166,6 @@ export function Writing({
   conceptionHandoff,
   onConceptionSettings,
   projectControls,
-  modelControl,
 }: {
   novel: Novel
   branch: Branch
@@ -178,7 +177,6 @@ export function Writing({
   conceptionHandoff?: ConceptionHandoff
   onConceptionSettings: () => void
   projectControls?: ReactNode
-  modelControl?: ReactNode
 }) {
   const [importOpen, setImportOpen] = useState(false)
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -1460,7 +1458,6 @@ export function Writing({
             draftDirty={!setting && (!!recovery || opening || text !== chapter?.content)}
           />
         </Suspense>
-        {modelControl}
         <div className="writing-chapter-tools" hidden={!!setting}>
           <h2>本章工具与设置</h2>
           {chapter && !opening && (

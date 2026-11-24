@@ -254,22 +254,12 @@ small {
   background: #e8efe8;
   color: #1d5140;
 }
-.budget-button {
-  margin-left: auto;
-  background: transparent;
-  border: 0;
-  font-size: 11px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px 12px;
-  max-width: 260px;
-}
-.budget-button > span:last-child {
-  display: block;
-  width: 100%;
-  font-size: 11px;
-  color: #596b63;
+.app-settings-trigger {
+  flex: none;
+  margin-inline-start: auto;
+  min-height: 36px;
+  padding: 4px 12px;
+  font-size: 0.933rem;
 }
 .workspace-bar {
   min-height: 76px;
@@ -297,12 +287,6 @@ small {
   min-width: 145px;
   background: #fffefa;
   font-size: 13px;
-}
-.model-select {
-  margin-left: auto !important;
-}
-.model-select select {
-  max-width: 270px;
 }
 .new-novel {
   position: relative;
@@ -367,21 +351,18 @@ small {
   border-block: 1px solid #c3955f;
   gap: 16px;
 }
-.settings {
-  padding: 28px;
-  background: #fffefa;
-  border-bottom: 1px solid var(--line);
-}
 .account-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-block: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: 12px;
+  margin-block: 12px;
 }
 .account-grid .card {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+  padding: 12px;
 }
 .table-scroll {
   max-width: 100%;
@@ -1114,7 +1095,7 @@ details > label {
   font-size: 0.875rem;
 }
 .writing-sheet,
-.settings-writing {
+.app-settings-dialog {
   color: var(--ink);
   background: var(--paper);
   border: 1px solid var(--control);
@@ -1125,11 +1106,69 @@ details > label {
   overflow: auto;
   overflow-wrap: anywhere;
 }
-.settings-writing:not([open]) {
-  display: none;
+.app-settings-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100% - 24px);
+  padding: 0;
+  overflow: hidden;
+}
+.app-settings-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+  padding: 12px clamp(12px, 3vw, 24px);
+  border-bottom: 1px solid var(--line);
+}
+.app-settings-header h2 {
+  margin: 0;
+}
+.app-settings-body {
+  min-height: 0;
+  padding: 16px clamp(12px, 3vw, 24px) 24px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.app-settings-section + .app-settings-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.app-settings-section h3 {
+  margin: 0 0 12px;
+  font-size: 1.06rem;
+}
+.app-settings-section > label {
+  max-width: 26rem;
+}
+.app-settings-budgets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 8px;
+  margin: 12px 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.app-settings-budgets li {
+  min-width: 0;
+  padding: 8px 12px;
+  background: var(--tint);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.app-settings-data-path {
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  background: #f6f7f4;
+  border: 1px solid var(--line);
+  border-radius: 6px;
 }
 .writing-sheet::backdrop,
-.settings-writing::backdrop {
+.app-settings-dialog::backdrop {
   background: #1f392c65;
 }
 .writing-sheet-header {
@@ -1158,8 +1197,7 @@ details > label {
 .topbar-writing .brand strong {
   font-size: 1.35rem;
 }
-.topbar-writing .local-label,
-.topbar-writing .budget-button > span:not(:last-child) {
+.topbar-writing .local-label {
   display: none;
 }
 .topbar-writing .nav {
@@ -1167,16 +1205,6 @@ details > label {
   min-height: 36px;
   padding: 5px 9px;
   white-space: nowrap;
-}
-.topbar-writing .budget-button {
-  min-height: 36px;
-  padding: 4px 6px;
-}
-.topbar-writing .budget-button > span:last-child {
-  font-size: 0.8rem;
-}
-.assistant-panel .model-select {
-  margin: 0 0 12px !important;
 }
 .candidates {
   border-top: 1px solid var(--line);
@@ -1577,9 +1605,6 @@ summary {
   .nav {
     flex: 1;
   }
-  .budget-button {
-    margin-left: auto;
-  }
   .topbar-writing nav {
     flex-wrap: wrap;
     justify-content: flex-start;
@@ -1597,14 +1622,8 @@ summary {
   .search-bar .grow {
     flex-basis: 100%;
   }
-  .account-grid {
-    grid-template-columns: 1fr;
-  }
   .assessment-list {
     grid-template-columns: 1fr;
-  }
-  .model-select {
-    margin-left: 0 !important;
   }
   .workspace-bar > label {
     flex: 1;
@@ -1719,11 +1738,6 @@ summary {
   .brand strong {
     font-size: 21px;
   }
-  .budget-button {
-    max-width: 175px;
-    padding: 0;
-    font-size: 10px;
-  }
   .topbar nav .nav {
     font-size: 12px;
     padding: 8px;
@@ -1743,9 +1757,6 @@ summary {
     min-width: 100%;
     max-width: 100%;
     font-size: 11px;
-  }
-  .model-select {
-    flex-basis: 100% !important;
   }
   .new-novel {
     flex-basis: 100%;

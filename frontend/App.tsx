@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, startSession, type Account, type Branch, type Config, type Novel } from './api'
+import { api, startSession, type Branch, type Config, type Novel } from './api'
+import { AppSettings } from './AppSettings'
 import { Writing } from './Writing'
 import { LibraryPage } from './Library'
 import { WorkflowPage } from './Workflow'
@@ -18,6 +19,7 @@ const workspaces = [
   ['workflow', '整书创作'],
   ['records', '故事与审阅'],
 ] as const
+const accountPreferenceKey = 'ainovel-model-account'
 
 export function App() {
   const [ready, setReady] = useState(false)
@@ -42,7 +44,6 @@ export function App() {
   const [settings, setSettings] = useState(false)
   const [navigationOpen, setNavigationOpen] = useState(false)
   const navigationToggle = useRef<HTMLButtonElement>(null)
-  const budgetDialog = useRef<HTMLDialogElement>(null)
   const [dataDir, setDataDir] = useState('')
   const notify: Notify = useCallback((e) => setError(e instanceof Error ? e.message : String(e)), [])
   const refreshConfig = useCallback(async () => setConfig(await api<Config>('/config')), [])
@@ -68,7 +69,13 @@ export function App() {
         setNovels(rows)
         const last = localStorage.getItem('ainovel-novel')
         setNovelId(rows.find((n) => n.id === last)?.id || rows[0]?.id || '')
-        setAccount(configuration.accounts.find((a) => a.configured && a.priced)?.id || 'openai_1')
+        const preferredAccount = localStorage.getItem(accountPreferenceKey)
+        setAccount(
+          configuration.accounts.find((a) => a.id === preferredAccount)?.id ||
+            configuration.accounts.find((a) => a.configured && a.priced)?.id ||
+            configuration.accounts[0]?.id ||
+            'openai_1',
+        )
         setReady(true)
       } catch (e) {
         if (active) notify(e)
@@ -124,6 +131,14 @@ export function App() {
       setPage('workflow')
     }
   }
+  function selectAccount(id: string) {
+    setAccount(id)
+    try {
+      localStorage.setItem(accountPreferenceKey, id)
+    } catch {
+      notify(new Error('无法在此浏览器记住模型账户。当前页面会使用本次选择。'))
+    }
+  }
   async function createNovel(event: React.FormEvent) {
     event.preventDefault()
     if (creating || !title.trim()) return
@@ -151,11 +166,6 @@ export function App() {
   const selectedAccount = config?.accounts.find((a) => a.id === account)
   const selectedConception = conceptionHandoff?.branchId === branch?.id ? conceptionHandoff : undefined
   const writingActive = page === 'writing' && !!novel && !!branch
-  const BudgetPanel = writingActive ? 'dialog' : 'section'
-  useEffect(() => {
-    if (settings && writingActive && budgetDialog.current && !budgetDialog.current.open)
-      budgetDialog.current.showModal()
-  }, [settings, writingActive])
   const navigation = (
     <nav id="workbench-pages" aria-label="主要页面">
       {workspaces.map(([id, name]) => (
@@ -231,19 +241,6 @@ export function App() {
       </details>
     </>
   )
-  const modelControl = (
-    <label className="model-select">
-      模型账户
-      <select value={account} onChange={(e) => setAccount(e.target.value)}>
-        {config?.accounts.map((a: Account) => (
-          <option key={a.id} value={a.id}>
-            {a.id} · {a.model}
-            {!a.configured ? '（未配置）' : ''}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
   return (
     <>
       <header className={writingActive ? 'topbar topbar-writing' : 'topbar'}>
@@ -280,18 +277,14 @@ export function App() {
           navigation
         )}
         <button
-          className="budget-button"
-          onClick={() => setSettings(!settings)}
-          aria-expanded={writingActive ? undefined : settings}
-          aria-haspopup={writingActive ? 'dialog' : undefined}
+          className="app-settings-trigger"
+          type="button"
+          onClick={() => setSettings(true)}
+          aria-haspopup="dialog"
+          aria-controls={settings ? 'app-settings' : undefined}
+          disabled={!ready || !config}
         >
-          {config?.budget.map((b) => (
-            <span key={b.provider}>
-              {b.currency === 'USD' ? '$' : '¥'}
-              {(b.settled + b.reserved_unknown).toFixed(2)} / {b.limit}
-            </span>
-          ))}
-          <span>账户与预算</span>
+          设置
         </button>
       </header>
       {error && (
@@ -308,93 +301,16 @@ export function App() {
         </main>
       ) : (
         <>
-          {settings && (
-            <BudgetPanel
-              ref={writingActive ? budgetDialog : undefined}
-              className={writingActive ? 'settings settings-writing' : 'settings'}
-              aria-label="账户与预算"
-              onClose={writingActive ? () => setSettings(false) : undefined}
-            >
-              {writingActive && (
-                <button className="settings-writing-close" onClick={() => budgetDialog.current?.close()}>
-                  收起设置
-                </button>
-              )}
-              <div>
-                <h2>模型账户与共享预算</h2>
-                <p>
-                  两个 OpenAI Key 共用 USD 20；DeepSeek 单独 CNY
-                  80。余额为本应用累计用量的保守估算，未知费用继续占用预留。更换 Key、恢复稿件均不清零。
-                </p>
-                <p className="muted">数据位置：{dataDir}。配置更改后重启本机服务和 Worker。</p>
-              </div>
-              <div className="account-grid">
-                {config?.accounts.map((a) => (
-                  <div className="card" key={a.id}>
-                    <strong>{a.id}</strong>
-                    <span>{a.model}</span>
-                    <span>
-                      {a.configured ? '密钥已配置' : '密钥未配置'} ·{' '}
-                      {a.priced ? '单价已配置' : '缺少单价，禁止调用'}
-                    </span>
-                    <small>
-                      每百万 Token：输入 {a.input_rate}／输出 {a.output_rate} {a.currency}
-                    </small>
-                    <a href={a.price_source} target="_blank" rel="noreferrer">
-                      配置单价依据
-                    </a>
-                  </div>
-                ))}
-              </div>
-              <details>
-                <summary>调用记录与费用预留</summary>
-                {config?.budget.map((b) => (
-                  <div key={b.provider}>
-                    <p>
-                      {b.provider}：已结算估算 {b.settled.toFixed(4)}；预留／未知{' '}
-                      {b.reserved_unknown.toFixed(4)}；剩余 {b.remaining.toFixed(4)} {b.currency}
-                    </p>
-                    <div className="table-scroll">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>账户</th>
-                            <th>模型</th>
-                            <th>状态</th>
-                            <th>输入／输出 Token</th>
-                            <th>估算／预留</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {b.calls.map((c) => (
-                            <tr key={c.id}>
-                              <td>{c.account}</td>
-                              <td>{c.model}</td>
-                              <td>{c.status}</td>
-                              <td>
-                                {c.input_tokens ?? '未知'} / {c.output_tokens ?? '未知'}
-                              </td>
-                              <td>
-                                {((c.charged ?? c.reserved) / 1e6).toFixed(5)} {b.currency}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
-              </details>
-              <p>{config?.sending_scope}</p>
-              {!writingActive && <button onClick={() => setSettings(false)}>收起设置</button>}
-            </BudgetPanel>
+          {settings && config && (
+            <AppSettings
+              config={config}
+              dataDir={dataDir}
+              account={selectedAccount}
+              onSelectAccount={selectAccount}
+              onClose={() => setSettings(false)}
+            />
           )}
-          {!writingActive && (
-            <div className="workspace-bar">
-              {projectControls}
-              {modelControl}
-            </div>
-          )}
+          {!writingActive && <div className="workspace-bar">{projectControls}</div>}
           <main id="main">
             {!novel && page !== 'library' ? (
               <div className="welcome">
@@ -490,7 +406,6 @@ export function App() {
                         {projectControls}
                       </div>
                     }
-                    modelControl={modelControl}
                   />
                 )}
                 {page === 'library' && (
