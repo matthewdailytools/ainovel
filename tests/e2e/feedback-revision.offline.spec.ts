@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { openWritingPanel } from './helpers/writingPanels'
 
 test('人工反馈：定位旧来源、确认当前稿、作者选区生成候选并保留未选正文', async ({ page }) => {
   await page.goto('/')
@@ -71,6 +72,7 @@ test('人工反馈：定位旧来源、确认当前稿、作者选区生成候�
   const history = await (await page.request.get(`/api/chapters/${chapter.id}/history`)).json()
   expect(history.some((row: { content: string }) => row.content === current)).toBeTruthy()
   await page.setViewportSize({ width: 320, height: 800 })
+  await openWritingPanel(page, 'AI 对话')
   const clear = panel.getByRole('button', { name: '退出反馈修订，保留正文', exact: true })
   await clear.focus()
   await expect(clear).toBeFocused()

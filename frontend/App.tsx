@@ -11,6 +11,14 @@ import { confirmLeave } from './leaveGuard'
 import type { FeedbackHandoff } from './feedbackRevision'
 
 export type Notify = (error: unknown) => void
+const workspaces = [
+  ['writing', '写作'],
+  ['ideation', '小说构思'],
+  ['library', '资料书库'],
+  ['workflow', '整书创作'],
+  ['records', '故事与审阅'],
+] as const
+
 export function App() {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
@@ -32,6 +40,9 @@ export function App() {
   const [title, setTitle] = useState('')
   const [creating, setCreating] = useState(false)
   const [settings, setSettings] = useState(false)
+  const [navigationOpen, setNavigationOpen] = useState(false)
+  const navigationToggle = useRef<HTMLButtonElement>(null)
+  const budgetDialog = useRef<HTMLDialogElement>(null)
   const [dataDir, setDataDir] = useState('')
   const notify: Notify = useCallback((e) => setError(e instanceof Error ? e.message : String(e)), [])
   const refreshConfig = useCallback(async () => setConfig(await api<Config>('/config')), [])
@@ -92,7 +103,10 @@ export function App() {
     return () => clearInterval(timer)
   }, [ready, refreshConfig, notify])
   function navigate(id: string) {
-    if (id !== page && confirmLeave()) setPage(id)
+    if (id !== page && !confirmLeave()) return
+    if (id === page && navigationOpen) navigationToggle.current?.focus()
+    setNavigationOpen(false)
+    if (id !== page) setPage(id)
   }
   function openConceptionWorkspace() {
     if (!confirmLeave()) return
@@ -136,33 +150,141 @@ export function App() {
   const branch = branches.find((b) => b.id === branchId && b.novel_id === novelId)
   const selectedAccount = config?.accounts.find((a) => a.id === account)
   const selectedConception = conceptionHandoff?.branchId === branch?.id ? conceptionHandoff : undefined
+  const writingActive = page === 'writing' && !!novel && !!branch
+  const BudgetPanel = writingActive ? 'dialog' : 'section'
+  useEffect(() => {
+    if (settings && writingActive && budgetDialog.current && !budgetDialog.current.open)
+      budgetDialog.current.showModal()
+  }, [settings, writingActive])
+  const navigation = (
+    <nav id="workbench-pages" aria-label="主要页面">
+      {workspaces.map(([id, name]) => (
+        <button
+          key={id}
+          className={page === id ? 'nav active' : 'nav'}
+          aria-current={page === id ? 'page' : undefined}
+          onClick={() => navigate(id)}
+        >
+          {name}
+        </button>
+      ))}
+    </nav>
+  )
+  const projectControls = (
+    <>
+      <label>
+        作品
+        <select
+          value={novelId}
+          onChange={(e) => {
+            if (e.target.value === novelId) return
+            if (!confirmLeave()) {
+              e.target.value = novelId
+              return
+            }
+            setBranches([])
+            setBranchId('')
+            setNovelId(e.target.value)
+          }}
+        >
+          <option value="" disabled>
+            选择作品
+          </option>
+          {novels.map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        工作版本
+        <select
+          value={branchId}
+          onChange={(e) => {
+            if (e.target.value === branchId) return
+            if (confirmLeave()) setBranchId(e.target.value)
+            else e.target.value = branchId
+          }}
+        >
+          <option value="" disabled>
+            选择版本
+          </option>
+          {branches.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <details className="new-novel">
+        <summary>＋ 新建作品</summary>
+        <form onSubmit={createNovel}>
+          <label>
+            作品名称
+            <input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} />
+          </label>
+          <button className="primary" disabled={creating}>
+            {creating ? '创建中…' : '创建并开始写作'}
+          </button>
+        </form>
+      </details>
+    </>
+  )
+  const modelControl = (
+    <label className="model-select">
+      模型账户
+      <select value={account} onChange={(e) => setAccount(e.target.value)}>
+        {config?.accounts.map((a: Account) => (
+          <option key={a.id} value={a.id}>
+            {a.id} · {a.model}
+            {!a.configured ? '（未配置）' : ''}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
   return (
     <>
-      <header className="topbar">
+      <header className={writingActive ? 'topbar topbar-writing' : 'topbar'}>
         <a className="brand" href="#main" aria-label="白金工作台">
           <span className="brand-mark">文</span>
           <strong>白金工作台</strong>
           <span className="local-label">本机创作</span>
         </a>
-        <nav aria-label="主要页面">
-          {[
-            ['writing', '写作'],
-            ['ideation', '小说构思'],
-            ['library', '资料书库'],
-            ['workflow', '整书创作'],
-            ['records', '故事与审阅'],
-          ].map(([id, name]) => (
+        {writingActive ? (
+          <div
+            className={'workbench-navigation' + (navigationOpen ? ' workbench-navigation-open' : '')}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setNavigationOpen(false)
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape' || !navigationOpen) return
+              setNavigationOpen(false)
+              navigationToggle.current?.focus()
+            }}
+          >
             <button
-              key={id}
-              className={page === id ? 'nav active' : 'nav'}
-              aria-current={page === id ? 'page' : undefined}
-              onClick={() => navigate(id)}
+              ref={navigationToggle}
+              type="button"
+              className="workbench-navigation-toggle"
+              aria-controls="workbench-pages"
+              aria-expanded={navigationOpen}
+              onClick={() => setNavigationOpen(!navigationOpen)}
             >
-              {name}
+              写作
             </button>
-          ))}
-        </nav>
-        <button className="budget-button" onClick={() => setSettings(!settings)} aria-expanded={settings}>
+            {navigation}
+          </div>
+        ) : (
+          navigation
+        )}
+        <button
+          className="budget-button"
+          onClick={() => setSettings(!settings)}
+          aria-expanded={writingActive ? undefined : settings}
+          aria-haspopup={writingActive ? 'dialog' : undefined}
+        >
           {config?.budget.map((b) => (
             <span key={b.provider}>
               {b.currency === 'USD' ? '$' : '¥'}
@@ -187,7 +309,17 @@ export function App() {
       ) : (
         <>
           {settings && (
-            <section className="settings" aria-label="账户与预算">
+            <BudgetPanel
+              ref={writingActive ? budgetDialog : undefined}
+              className={writingActive ? 'settings settings-writing' : 'settings'}
+              aria-label="账户与预算"
+              onClose={writingActive ? () => setSettings(false) : undefined}
+            >
+              {writingActive && (
+                <button className="settings-writing-close" onClick={() => budgetDialog.current?.close()}>
+                  收起设置
+                </button>
+              )}
               <div>
                 <h2>模型账户与共享预算</h2>
                 <p>
@@ -254,79 +386,15 @@ export function App() {
                 ))}
               </details>
               <p>{config?.sending_scope}</p>
-              <button onClick={() => setSettings(false)}>收起设置</button>
-            </section>
+              {!writingActive && <button onClick={() => setSettings(false)}>收起设置</button>}
+            </BudgetPanel>
           )}
-          <div className="workspace-bar">
-            <label>
-              作品
-              <select
-                value={novelId}
-                onChange={(e) => {
-                  if (e.target.value === novelId) return
-                  if (!confirmLeave()) {
-                    e.target.value = novelId
-                    return
-                  }
-                  setBranches([])
-                  setBranchId('')
-                  setNovelId(e.target.value)
-                }}
-              >
-                <option value="" disabled>
-                  选择作品
-                </option>
-                {novels.map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {n.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              工作版本
-              <select
-                value={branchId}
-                onChange={(e) => {
-                  if (e.target.value === branchId) return
-                  if (confirmLeave()) setBranchId(e.target.value)
-                  else e.target.value = branchId
-                }}
-              >
-                <option value="" disabled>
-                  选择版本
-                </option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <details className="new-novel">
-              <summary>＋ 新建作品</summary>
-              <form onSubmit={createNovel}>
-                <label>
-                  作品名称
-                  <input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} />
-                </label>
-                <button className="primary" disabled={creating}>
-                  {creating ? '创建中…' : '创建并开始写作'}
-                </button>
-              </form>
-            </details>
-            <label className="model-select">
-              模型账户
-              <select value={account} onChange={(e) => setAccount(e.target.value)}>
-                {config?.accounts.map((a: Account) => (
-                  <option key={a.id} value={a.id}>
-                    {a.id} · {a.model}
-                    {!a.configured ? '（未配置）' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          {!writingActive && (
+            <div className="workspace-bar">
+              {projectControls}
+              {modelControl}
+            </div>
+          )}
           <main id="main">
             {!novel && page !== 'library' ? (
               <div className="welcome">
@@ -417,6 +485,12 @@ export function App() {
                     onClearFeedback={() => setFeedbackHandoff(undefined)}
                     conceptionHandoff={selectedConception}
                     onConceptionSettings={openConceptionWorkspace}
+                    projectControls={
+                      <div className="writing-project-controls" role="group" aria-label="作品与工作版本">
+                        {projectControls}
+                      </div>
+                    }
+                    modelControl={modelControl}
                   />
                 )}
                 {page === 'library' && (

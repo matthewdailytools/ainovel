@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
+import { openWritingPanel } from './helpers/writingPanels'
 
 type Fixture = {
   id: string
@@ -139,12 +140,15 @@ test.describe.serial('提取场景重核：隔离离线真实API', () => {
 
   test('场景面板修改时间必须选原文，320px实际30px文字及键盘可操作', async ({ page, request }, testInfo) => {
     const fixture = await getFixture()
-    await page.setViewportSize({ width: 320, height: 860 })
     await openTarget(page, fixture)
+    await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toBeVisible()
+    await page.setViewportSize({ width: 320, height: 860 })
+    await openWritingPanel(page, '目录')
     await page.getByRole('button', { name: /^01 回铺章/ }).click()
     await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue(
       '回铺章——保留长中文标题及原文范围',
     )
+    await openWritingPanel(page, 'AI 对话')
     await page.getByText('场景时点与人物当前状态', { exact: true }).click()
     const editor = page.getByRole('region', {
       name: '场景时点绑定',

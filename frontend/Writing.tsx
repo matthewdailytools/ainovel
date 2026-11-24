@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   api,
   label,
@@ -105,6 +105,56 @@ const presets = [
   '悬念：信息差有依据，线索可以回查，章末保留明确的问题。',
 ]
 
+type WorkspacePanel = 'tree' | 'assistant'
+
+function WritingSheet({
+  title,
+  onClose,
+  children,
+  ownClose = false,
+  opener,
+}: {
+  title: string
+  onClose: () => void
+  children: ReactNode
+  ownClose?: boolean
+  opener?: HTMLElement | null
+}) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const element = dialog.current
+    if (!element) return
+    const previousFocus = opener ?? document.activeElement
+    element.showModal()
+    return () => {
+      element.close()
+      requestAnimationFrame(() => {
+        if (document.activeElement === document.body && previousFocus instanceof HTMLElement)
+          previousFocus.focus({ preventScroll: true })
+      })
+    }
+  }, [opener])
+  return (
+    <dialog
+      ref={dialog}
+      className="writing-sheet"
+      aria-label={title}
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
+    >
+      {!ownClose && (
+        <header className="writing-sheet-header">
+          <h2>{title}</h2>
+          <button onClick={onClose}>关闭{title}</button>
+        </header>
+      )}
+      {children}
+    </dialog>
+  )
+}
+
 export function Writing({
   novel,
   branch,
@@ -115,6 +165,8 @@ export function Writing({
   onClearFeedback,
   conceptionHandoff,
   onConceptionSettings,
+  projectControls,
+  modelControl,
 }: {
   novel: Novel
   branch: Branch
@@ -125,6 +177,8 @@ export function Writing({
   onClearFeedback: () => void
   conceptionHandoff?: ConceptionHandoff
   onConceptionSettings: () => void
+  projectControls?: ReactNode
+  modelControl?: ReactNode
 }) {
   const [importOpen, setImportOpen] = useState(false)
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -138,6 +192,12 @@ export function Writing({
   const [settingsVersion, setSettingsVersion] = useState(0)
   const settingPane = useRef<HTMLElement>(null)
   const chapterPane = useRef<HTMLElement>(null)
+  const treePane = useRef<HTMLElement>(null)
+  const assistantPane = useRef<HTMLElement>(null)
+  const outlinePane = useRef<HTMLDivElement>(null)
+  const panelTrigger = useRef<HTMLElement | null>(null)
+  const [workspacePanel, setWorkspacePanel] = useState<WorkspacePanel>()
+  const [showOutline, setShowOutline] = useState(false)
   const lastPaneWasSetting = useRef(false)
   useEffect(() => {
     if (setting) settingPane.current?.focus()
@@ -169,6 +229,7 @@ export function Writing({
   })
   const pendingReading = useRef<Promise<void> | null>(null)
   const [recovery, setRecovery] = useState<Draft>()
+  const [showRecovery, setShowRecovery] = useState(false)
   const writingContext = useWritingContext(branch.id, chapter)
   const ledger = useContinuityLedger(branch.id, chapter)
   const [ledgerTarget, setLedgerTarget] = useState<LedgerTarget>()
@@ -225,6 +286,7 @@ export function Writing({
   const [showHistory, setShowHistory] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
   const historyRequest = useRef(0)
+  const historyOpener = useRef<HTMLButtonElement>(null)
   const candidateRequest = useRef(0)
   const [rename, setRename] = useState('')
   const current = useRef<Chapter | undefined>(undefined)
@@ -269,8 +331,10 @@ export function Writing({
       setRename(row.title)
       setHistory([])
       setShowHistory(false)
+      setShowOutline(false)
       setCandidateId('')
       setRecovery(undefined)
+      setShowRecovery(false)
       const recoverable =
         draft && !draft.fromOtherWindow && draft.text !== row.content && draft.base === row.revision
       draftText.current = recoverable ? draft.text : row.content
@@ -294,7 +358,11 @@ export function Writing({
         (draft.base !== row.revision || draft.fromOtherWindow)
       ) {
         setRecovery(draft)
-        setSaved('发现不同基线的浏览器草稿，请比较')
+        setSaved(
+          draft.base === row.revision
+            ? '发现其他窗口的浏览器草稿，请比较'
+            : '发现不同基线的浏览器草稿，请比较',
+        )
       } else setSaved(savedLocally)
       return nextEditorKey
     } finally {
@@ -356,16 +424,22 @@ export function Writing({
         const content: string = draftText.current
         setSaved('正在保存到本机…')
         await cacheDraft(snapshot, content)
-        const row: Chapter = await api<Chapter>(`/chapters/${snapshot.id}`, 'PUT', {
+        const savedRow: Chapter = await api<Chapter>(`/chapters/${snapshot.id}`, 'PUT', {
           base_revision: snapshot.revision,
           content,
         })
+        const title = current.current?.title
+        const row: Chapter =
+          current.current?.id === snapshot.id && title !== undefined && title !== snapshot.title
+            ? { ...savedRow, title }
+            : savedRow
         const view = chapterViews.current.get(row.id)
         if (view?.revision === snapshot.revision)
           chapterViews.current.set(row.id, { ...view, revision: row.revision })
         current.current = row
         await cacheDraft(row, draftText.current)
-        if (alive.current) setChapter(row)
+        if (alive.current && current.current?.id === row.id && current.current.revision === row.revision)
+          setChapter(current.current)
       }
       if (alive.current) {
         setSaved(savedLocally)
@@ -586,31 +660,155 @@ export function Writing({
       const versions = await api<typeof history>(`/chapters/${chapterId}/history`)
       if (!matchesTarget()) return
       setHistory(versions)
-      setShowHistory((shown) => !shown)
+      setShowHistory(true)
     } catch (error) {
       if (alive.current && historyRequest.current === request) notify(error)
     } finally {
       if (alive.current && historyRequest.current === request) setHistoryLoading(false)
     }
   }
+  function closeWorkspacePanel(restoreFocus = true) {
+    setWorkspacePanel(undefined)
+    if (restoreFocus && workspacePanel === 'assistant') setShowOutline(false)
+    const opener = panelTrigger.current
+    panelTrigger.current = null
+    if (restoreFocus && opener?.getClientRects().length) opener.focus({ preventScroll: true })
+  }
+  function openWorkspacePanel(panel: WorkspacePanel, opener?: HTMLElement, focusClose = true) {
+    panelTrigger.current = opener ?? null
+    setWorkspacePanel(panel)
+    if (focusClose)
+      requestAnimationFrame(() => {
+        const element = (panel === 'tree' ? treePane : assistantPane).current
+        const close = element?.querySelector<HTMLButtonElement>('.workspace-panel-close')
+        if (close?.getClientRects().length) close.focus({ preventScroll: true })
+      })
+  }
+  useEffect(() => {
+    if (!workspacePanel) return
+    const handlePanelKeys = (event: KeyboardEvent) => {
+      const element = (workspacePanel === 'tree' ? treePane : assistantPane).current
+      if (
+        event.isComposing ||
+        event.defaultPrevented ||
+        document.querySelector('dialog[open]') ||
+        !element?.querySelector('.workspace-panel-close')?.getClientRects().length
+      )
+        return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeWorkspacePanel()
+      }
+      if (event.key === 'Tab') {
+        const controls = Array.from(
+          element.querySelectorAll<HTMLElement>(
+            'button, input, textarea, select, summary, a[href], [tabindex="0"]',
+          ),
+        ).filter(
+          (control) =>
+            control.tabIndex >= 0 && !control.matches(':disabled') && control.getClientRects().length,
+        )
+        const first = controls[0]
+        const last = controls.at(-1)
+        const focused = document.activeElement
+        if (!element.contains(focused) || focused === (event.shiftKey ? first : last)) {
+          event.preventDefault()
+          const next = event.shiftKey ? last : first
+          next?.focus()
+        }
+      }
+    }
+    window.addEventListener('keydown', handlePanelKeys)
+    return () => window.removeEventListener('keydown', handlePanelKeys)
+  }, [workspacePanel])
+  const outlineSource = writingContext.error
+    ? '读取失败'
+    : writingContext.displayedOutline?.source === 'author'
+      ? '作者章纲'
+      : writingContext.displayedOutline?.source === 'frozen_ai'
+        ? '冻结 AI 章纲'
+        : writingContext.displayedOutline === null
+          ? '暂无'
+          : '读取中'
+  function toggleOutline(opener: HTMLButtonElement) {
+    const panelIsHidden = !assistantPane.current?.getClientRects().length
+    if (showOutline && !panelIsHidden && outlinePane.current?.querySelector('details')?.open) {
+      setShowOutline(false)
+      return
+    }
+    openWorkspacePanel('assistant', opener, false)
+    setShowOutline(true)
+    requestAnimationFrame(() => {
+      const details = outlinePane.current?.querySelector('details')
+      if (!details) return
+      details.open = true
+      const summary = details.querySelector('summary')
+      summary?.focus({ preventScroll: true })
+      summary?.scrollIntoView({ block: 'nearest' })
+    })
+  }
+  function showChapterChecks(opener: HTMLButtonElement) {
+    openWorkspacePanel('assistant', opener, false)
+    requestAnimationFrame(() => {
+      const checks = assistantPane.current?.querySelector<HTMLElement>('[aria-label="本章校验"]')
+      if (!checks) return
+      checks.tabIndex = -1
+      checks.focus({ preventScroll: true })
+      checks.scrollIntoView({ block: 'nearest' })
+    })
+  }
+  async function renameChapter(value: string) {
+    const snapshot = current.current
+    const title = value.trim()
+    if (!snapshot || !title || title === snapshot.title) {
+      setRename(snapshot?.title ?? '')
+      return
+    }
+    await doAction(async () => {
+      const row = await api<Chapter>(`/chapters/${snapshot.id}`, 'PATCH', { title })
+      if (!alive.current || current.current?.id !== row.id) return
+      const renamed = { ...current.current, title: row.title }
+      current.current = renamed
+      setChapter(renamed)
+      setRename(row.title)
+      setChapters((rows) => rows.map((c) => (c.id === row.id ? { ...c, title: row.title } : c)))
+    })
+  }
+  function finishChapterNavigation() {
+    const focus = !!treePane.current?.querySelector('.workspace-panel-close')?.getClientRects().length
+    closeWorkspacePanel(false)
+    if (focus) requestAnimationFrame(() => chapterPane.current?.focus({ preventScroll: true }))
+  }
   function chooseSetting(kind: SettingKind) {
-    if (busy || opening || loading || setting === kind || !confirmLeave(workspaceScopes)) return
+    if (busy || opening || loading) return
+    if (setting === kind) {
+      closeWorkspacePanel(false)
+      settingPane.current?.focus({ preventScroll: true })
+      return
+    }
+    if (!confirmLeave(workspaceScopes)) return
     void doAction(async () => {
       if (current.current && draftText.current !== current.current.content) await save()
+      closeWorkspacePanel(false)
       setSetting(kind)
     })
   }
   function chooseChapter(id: string) {
     if (busy || opening || loading) return
     if (current.current?.id === id) {
-      if (setting && confirmLeave(workspaceScopes)) setSetting(undefined)
+      if (setting && !confirmLeave(workspaceScopes)) return
+      setSetting(undefined)
+      finishChapterNavigation()
       return
     }
     if (!(setting ? confirmLeave(workspaceScopes) : confirmLeave())) return
     void doAction(async () => {
       if (current.current && draftText.current !== current.current.content) await save()
       await loadChapter(id, undefined, false, true)
-      if (current.current?.id === id) setSetting(undefined)
+      if (current.current?.id === id) {
+        setSetting(undefined)
+        finishChapterNavigation()
+      }
     })
   }
   function settingsSaved() {
@@ -629,6 +827,7 @@ export function Writing({
       await refresh()
       const key = await loadChapter(row.id, undefined, false, true)
       if (key) {
+        closeWorkspacePanel(false)
         setSetting(undefined)
         setFocusedEditorKey(key)
       }
@@ -778,6 +977,7 @@ export function Writing({
           : [target, ...rows],
       )
       setCandidateId(target.id)
+      openWorkspacePanel('assistant', undefined, false)
     })
   }
   function visitLedger(target: LedgerTarget) {
@@ -788,7 +988,15 @@ export function Writing({
       const row = current.current
       if (row?.id !== target.chapter_id) return
       setLedgerTarget({ ...target })
-      if (!target.source) return
+      if (!target.source) {
+        openWorkspacePanel(
+          'assistant',
+          document.activeElement instanceof HTMLElement ? document.activeElement : undefined,
+          false,
+        )
+        return
+      }
+      closeWorkspacePanel(false)
       const { start, end, quote, revision } = target.source
       if (row.revision !== revision || row.content.slice(start, end) !== quote) {
         ledger.reload()
@@ -798,16 +1006,45 @@ export function Writing({
       setLedgerSelection({ start: editorOffset(start), end: editorOffset(end) })
     })
   }
+  const panelButtons = (
+    <>
+      <button
+        className="workspace-panel-trigger workspace-panel-trigger-tree"
+        aria-controls="writing-directory"
+        aria-expanded={workspacePanel === 'tree'}
+        onClick={(event) => openWorkspacePanel('tree', event.currentTarget)}
+      >
+        目录
+      </button>
+      <button
+        className="workspace-panel-trigger workspace-panel-trigger-assistant"
+        aria-controls="writing-assistant"
+        aria-expanded={workspacePanel === 'assistant'}
+        onClick={(event) => openWorkspacePanel('assistant', event.currentTarget)}
+      >
+        AI 对话
+      </button>
+    </>
+  )
   return (
     <div className="writing-layout">
-      <aside className="chapter-sidebar" aria-label="作品目录">
+      <aside
+        ref={treePane}
+        id="writing-directory"
+        className={`chapter-sidebar${workspacePanel === 'tree' ? ' workspace-panel-open' : ''}`}
+        aria-label="作品目录"
+      >
+        <button className="workspace-panel-close" onClick={() => closeWorkspacePanel()}>
+          关闭目录
+        </button>
+        {projectControls}
         <div className="section-title">
           <span className="eyebrow">作品目录</span>
           <button onClick={createChapter} disabled={busy || loading}>
             ＋ 新章
           </button>
         </div>
-        <h2>{novel.title}</h2>
+        {!projectControls && <h2>{novel.title}</h2>}
         <p className="muted">
           {loading
             ? '正在读取章节…'
@@ -959,6 +1196,7 @@ export function Writing({
       </aside>
       {setting && (
         <section ref={settingPane} className="workspace-setting-pane" aria-label="设定编辑" tabIndex={-1}>
+          <div className="writing-pane-navigation">{panelButtons}</div>
           <Suspense fallback={<p role="status">正在打开设定…</p>}>
             <WorkspaceSettings
               key={setting}
@@ -980,18 +1218,53 @@ export function Writing({
         hidden={!!setting}
       >
         {importOpen && (
-          <ManuscriptImport
-            key={branch.id}
-            branchId={branch.id}
-            notify={notify}
-            onImported={refresh}
-            onClose={() => setImportOpen(false)}
-          />
+          <WritingSheet
+            title="长篇拆章导入工作区"
+            onClose={() => {
+              if (confirmLeave()) setImportOpen(false)
+            }}
+            ownClose
+          >
+            <ManuscriptImport
+              key={branch.id}
+              branchId={branch.id}
+              notify={notify}
+              onImported={refresh}
+              onClose={() => setImportOpen(false)}
+            />
+          </WritingSheet>
         )}
         {chapter ? (
           <>
             <div className="manuscript-toolbar" role="group" aria-label="正文工具栏">
               <div className="manuscript-actions">
+                <div className="chapter-identity">
+                  {chapter.title.replace(/\s/gu, '') !== `第${chapter.position}章` && (
+                    <span>第 {chapter.position} 章</span>
+                  )}
+                  <label className="chapter-title">
+                    <span className="sr-only">章节标题</span>
+                    <input
+                      value={rename}
+                      title={chapter.title}
+                      readOnly={busy || opening}
+                      onChange={(event) => setRename(event.currentTarget.value)}
+                      onBlur={(event) => void renameChapter(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          event.currentTarget.blur()
+                        } else if (event.key === 'Escape') {
+                          event.preventDefault()
+                          setRename(chapter.title)
+                        }
+                      }}
+                      maxLength={200}
+                    />
+                  </label>
+                </div>
+                {panelButtons}
                 <div className="manuscript-count" role="group" aria-label="字数" title="计入标点，忽略空白">
                   字数 <strong>{wordCount.toLocaleString('zh-CN')}</strong> 字
                 </div>
@@ -1006,50 +1279,51 @@ export function Writing({
                 >
                   保存
                 </button>
+              </div>
+              <div className="manuscript-secondary">
                 <button
-                  onClick={() => void toggleHistory()}
+                  aria-expanded={showOutline}
+                  aria-controls="writing-chapter-outline"
+                  onClick={(event) => toggleOutline(event.currentTarget)}
+                >
+                  章纲 · {outlineSource}
+                </button>
+                <button
+                  onClick={(event) => {
+                    historyOpener.current = event.currentTarget
+                    void toggleHistory()
+                  }}
                   disabled={busy || opening || historyLoading}
                   aria-busy={historyLoading}
+                  aria-haspopup="dialog"
                 >
                   版本历史
                 </button>
-              </div>
-              <div className="save-status" role="status">
-                {historyLoading ? '正在读取当前章版本历史…' : saved}
-              </div>
-            </div>
-            <div className="chapter-heading">
-              <span>第 {chapter.position} 章</span>
-              <label>
-                <span className="sr-only">章节标题</span>
-                <input
-                  value={rename}
-                  onChange={(e) => setRename(e.target.value)}
-                  onBlur={() => {
-                    if (rename.trim() && rename !== chapter.title)
-                      void doAction(async () => {
-                        await api(`/chapters/${chapter.id}`, 'PATCH', { title: rename.trim() })
-                        await refresh()
-                      })
-                  }}
-                  maxLength={200}
-                />
-              </label>
-              <div className="muted">
-                修订 {chapter.revision}
-                {chapter.stale ? ' · 受前文修改影响，需重新审阅' : ''}
+                {!!chapter.stale && (
+                  <button
+                    disabled={busy || opening}
+                    onClick={(event) => showChapterChecks(event.currentTarget)}
+                  >
+                    待复检
+                  </button>
+                )}
+                {recovery && (
+                  <button aria-haspopup="dialog" onClick={() => setShowRecovery(true)}>
+                    查看草稿
+                  </button>
+                )}
+                <div className="save-status" role="status">
+                  {saved}
+                </div>
               </div>
             </div>
-            <ChapterOutline
-              key={chapter.id}
-              branchId={branch.id}
-              chapterId={chapter.id}
-              context={writingContext}
-              disabled={busy || opening}
-            />
-            {recovery && (
-              <div className="notice">
-                <strong>浏览器草稿与服务中的修订不同。</strong>
+            {recovery && showRecovery && (
+              <WritingSheet title="待恢复草稿" onClose={() => setShowRecovery(false)}>
+                <strong>
+                  {recovery.base === chapter.revision
+                    ? '发现另一个窗口留下的浏览器草稿。'
+                    : '浏览器草稿与服务中的修订不同。'}
+                </strong>
                 <p>
                   草稿基线 {recovery.base}，当前修订 {chapter.revision}。请比较后决定，服务稿尚未改动。
                 </p>
@@ -1057,8 +1331,11 @@ export function Writing({
                 <button
                   onClick={() => {
                     setRecovery(undefined)
+                    setShowRecovery(false)
                     change(recovery.text)
-                    setEditorKey(chapter.id + ':recovered:' + Date.now())
+                    const key = chapter.id + ':recovered:' + Date.now()
+                    setEditorKey(key)
+                    setFocusedEditorKey(key)
                   }}
                 >
                   将此草稿载入编辑区
@@ -1066,42 +1343,49 @@ export function Writing({
                 <button
                   onClick={() => {
                     setRecovery(undefined)
+                    setShowRecovery(false)
                     void cacheDraft(chapter, chapter.content)
                     setSaved(savedLocally)
                   }}
                 >
                   使用本机服务稿
                 </button>
-              </div>
+              </WritingSheet>
             )}
             {showHistory && (
-              <div className="history">
-                <h3>恢复会生成新修订，当前稿保留在历史中</h3>
-                {history.map((h) => (
-                  <details key={h.id}>
-                    <summary>
-                      修订 {h.revision} · {h.cause}
-                    </summary>
-                    <pre>{h.content || '（空稿）'}</pre>
-                    <button
-                      disabled={busy}
-                      onClick={() =>
-                        void doAction(async () => {
-                          const row = await save()
-                          await api(`/chapters/${chapter.id}/restore`, 'POST', {
-                            base_revision: row.revision,
-                            revision_id: h.id,
+              <WritingSheet
+                title="版本历史"
+                onClose={() => setShowHistory(false)}
+                opener={historyOpener.current}
+              >
+                <div className="history">
+                  <h3>恢复会生成新修订，当前稿保留在历史中</h3>
+                  {history.map((h) => (
+                    <details key={h.id}>
+                      <summary>
+                        修订 {h.revision} · {h.cause}
+                      </summary>
+                      <pre>{h.content || '（空稿）'}</pre>
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          void doAction(async () => {
+                            const row = await save()
+                            await api(`/chapters/${chapter.id}/restore`, 'POST', {
+                              base_revision: row.revision,
+                              revision_id: h.id,
+                            })
+                            await loadChapter(chapter.id, 0, true)
+                            await refresh()
                           })
-                          await loadChapter(chapter.id, 0, true)
-                          await refresh()
-                        })
-                      }
-                    >
-                      恢复为新修订
-                    </button>
-                  </details>
-                ))}
-              </div>
+                        }
+                      >
+                        恢复为新修订
+                      </button>
+                    </details>
+                  ))}
+                </div>
+              </WritingSheet>
             )}
             <h2 className="editor-label">正文</h2>
             <Editor
@@ -1134,6 +1418,7 @@ export function Writing({
           </>
         ) : (
           <div className="empty">
+            <div className="writing-pane-navigation">{panelButtons}</div>
             <h2>{loading ? '正在读取作品' : '从一个场景开始'}</h2>
             <p>{loading ? '正在恢复章节与工作位置…' : '你可以先写，再慢慢整理人物和世界。'}</p>
             <button className="primary" onClick={createChapter} disabled={busy || loading}>
@@ -1142,7 +1427,26 @@ export function Writing({
           </div>
         )}
       </section>
-      <aside className="assistant-panel" aria-label="创作辅助">
+      <aside
+        ref={assistantPane}
+        id="writing-assistant"
+        className={`assistant-panel${workspacePanel === 'assistant' ? ' workspace-panel-open' : ''}`}
+        aria-label="创作辅助"
+      >
+        <button className="workspace-panel-close" onClick={() => closeWorkspacePanel()}>
+          关闭创作辅助
+        </button>
+        <div id="writing-chapter-outline" ref={outlinePane} hidden={!!setting || !showOutline}>
+          {chapter && (
+            <ChapterOutline
+              key={chapter.id}
+              branchId={branch.id}
+              chapterId={chapter.id}
+              context={writingContext}
+              disabled={busy || opening}
+            />
+          )}
+        </div>
         <Suspense fallback={<p role="status">正在打开 AI 对话…</p>}>
           <WorkspaceChat
             key={setting || chapter?.id || 'empty'}
@@ -1156,6 +1460,7 @@ export function Writing({
             draftDirty={!setting && (!!recovery || opening || text !== chapter?.content)}
           />
         </Suspense>
+        {modelControl}
         <div className="writing-chapter-tools" hidden={!!setting}>
           <h2>本章工具与设置</h2>
           {chapter && !opening && (

@@ -240,6 +240,9 @@ small {
   display: flex;
   gap: 8px;
 }
+.workbench-navigation-toggle {
+  display: none;
+}
 .nav {
   border: 0;
   background: transparent;
@@ -322,6 +325,37 @@ small {
   flex-direction: column;
   align-items: stretch;
   margin-bottom: 14px;
+}
+.writing-project-controls {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.writing-project-controls label {
+  margin: 0;
+  gap: 2px;
+  font-size: 0.8rem;
+}
+.writing-project-controls select {
+  padding: 4px 8px;
+  min-height: 34px;
+  font-size: 0.9rem;
+}
+.writing-project-controls .new-novel summary {
+  min-height: 32px;
+  padding: 5px 2px;
+}
+.writing-project-controls .new-novel form {
+  position: static;
+  min-width: 0;
+  padding: 10px;
+  box-shadow: none;
+}
+.writing-project-controls .new-novel form button {
+  margin-top: 8px;
+  width: 100%;
 }
 .alert {
   display: flex;
@@ -584,13 +618,17 @@ details > label {
 }
 .writing-layout {
   display: grid;
-  grid-template-columns: minmax(200px, 16%) minmax(0, 1fr) minmax(320px, 26%);
-  min-height: calc(100vh - 155px);
+  grid-template-columns: 216px minmax(0, 1fr) 320px;
+  min-height: calc(100dvh - 56px);
   max-width: 1900px;
   margin: auto;
+  --writing-inset: 16px;
+  --manuscript-font-size: 1.2rem;
+  --manuscript-line-height: 1.8;
+  --editor-inline-padding: 20px;
 }
 .chapter-sidebar {
-  padding: 24px 18px;
+  padding: 16px 12px;
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -598,7 +636,7 @@ details > label {
   background: #f1f3ee;
   min-width: 0;
 }
-@media (min-width: 851px) {
+@media (min-width: 768px) {
   .chapter-sidebar {
     position: sticky;
     top: 0;
@@ -669,7 +707,7 @@ details > label {
   padding: 12px 10px;
   align-items: flex-start;
   color: #405347;
-  font-size: 13px;
+  font-size: 0.933rem;
   font-weight: 400;
   min-width: 0;
   min-height: 34px;
@@ -695,7 +733,7 @@ details > label {
 }
 .chapter-list small {
   font-weight: 400;
-  font-size: 10px;
+  font-size: 0.8rem;
   margin-top: 4px;
   color: #57665b;
 }
@@ -776,18 +814,22 @@ details > label {
   position: sticky;
   top: 0;
   z-index: 3;
-  padding: 10px clamp(12px, 3vw, 28px) 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px var(--writing-inset) 8px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
 }
-.manuscript-actions {
+.manuscript-actions,
+.manuscript-secondary {
   display: flex;
-  align-items: baseline;
-  gap: 6px 10px;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
   flex-wrap: wrap;
 }
 .manuscript-count {
-  margin-right: auto;
+  margin-inline-start: auto;
   font-size: 0.875rem;
   color: var(--ink);
   white-space: nowrap;
@@ -802,37 +844,54 @@ details > label {
   min-height: 38px;
   padding: 5px 10px;
 }
+.manuscript-secondary button {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 0.875rem;
+}
 .save-status {
   min-height: 1lh;
-  margin-top: 3px;
   font-size: 0.8rem;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
-.chapter-heading {
-  padding: 34px 40px 20px;
+.manuscript-secondary .save-status {
+  margin-inline-start: auto;
+  text-align: end;
 }
-.chapter-heading > span {
-  font-size: 11px;
-  color: #6b776c;
-  letter-spacing: 2px;
+.chapter-identity {
+  display: flex;
+  align-items: center;
+  flex: 1 1 12rem;
+  min-width: 0;
+  gap: 8px;
 }
-.chapter-heading label {
+.chapter-identity > span {
+  flex: none;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.chapter-title {
+  flex: 1;
+  min-width: 0;
   margin: 0;
 }
-.chapter-heading input {
-  font-size: 25px;
-  border: 0;
-  background: transparent;
-  padding: 8px 0;
-  font-family: Georgia, 'Songti SC', 'SimSun', serif;
+.chapter-title input {
+  min-height: 38px;
+  padding: 3px 8px;
+  background: #f8f8f3;
+  font-size: 1.25rem;
   font-weight: 650;
-  line-height: 1.5;
+  line-height: 1.4;
+  text-overflow: ellipsis;
 }
-.chapter-heading .muted {
-  font-size: 10px;
+.workspace-panel-trigger,
+.workspace-panel-close,
+.writing-pane-navigation {
+  display: none;
 }
 .writing-outline {
-  margin: 0 clamp(16px, 4vw, 40px) 12px;
+  margin: 0 0 12px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -972,19 +1031,25 @@ details > label {
   white-space: normal;
 }
 .editor-label {
-  margin: 0 clamp(12px, 3vw, 28px) 6px;
+  width: calc(100% - 2 * var(--writing-inset));
+  max-width: calc(36 * var(--manuscript-font-size) + 2 * var(--editor-inline-padding) + 32px);
+  margin: 10px auto 4px;
   font-size: 1rem;
   line-height: 1.5;
 }
 .editor {
   flex: 0 0 auto;
-  min-height: 460px;
-  height: 60vh;
-  margin-inline: clamp(12px, 3vw, 28px);
+  min-height: 22rem;
+  height: max(22rem, calc(100dvh - 13rem));
+  width: calc(100% - 2 * var(--writing-inset));
+  max-width: calc(36em + 2 * var(--editor-inline-padding) + 32px);
+  max-width: calc(36ic + 2 * var(--editor-inline-padding) + 32px);
+  margin-inline: auto;
   border: 1px solid var(--control);
   border-radius: 6px;
   background: #fff;
-  scroll-margin-block-start: 6rem;
+  scroll-margin-block-start: 7rem;
+  font-size: var(--manuscript-font-size);
 }
 .editor:focus-within {
   border-color: var(--green);
@@ -1010,38 +1075,108 @@ details > label {
   padding: 4px 8px;
 }
 .assistant-panel {
-  padding: 24px 20px;
+  padding: 16px;
   background: #f7f8f3;
   border-left: 1px solid var(--line);
   min-width: 0;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100dvh;
+  overflow: auto;
 }
 .assistant-panel h2 {
   font-size: 16px;
 }
 .assistant-panel .badge {
-  font-size: 9px;
+  font-size: 0.8rem;
   padding: 3px 5px;
 }
 .assistant-panel label {
-  font-size: 12px;
-  margin-bottom: 14px;
+  font-size: 0.933rem;
+  margin-bottom: 12px;
 }
 .assistant-panel input,
 .assistant-panel select,
 .assistant-panel textarea {
-  font-size: 12px;
+  font-size: 0.933rem;
 }
 .assistant-panel form > .small {
-  font-size: 10px;
+  font-size: 0.8rem;
 }
 .assistant-panel .primary {
-  font-size: 12px;
+  font-size: 0.933rem;
 }
 .assistant-panel summary {
-  font-size: 11px;
+  font-size: 0.875rem;
 }
 .assistant-panel .check {
-  font-size: 11px;
+  font-size: 0.875rem;
+}
+.writing-sheet,
+.settings-writing {
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--control);
+  border-radius: 8px;
+  width: min(48rem, calc(100% - 24px));
+  max-height: min(52rem, calc(100dvh - 24px));
+  padding: clamp(12px, 3vw, 24px);
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.settings-writing:not([open]) {
+  display: none;
+}
+.writing-sheet::backdrop,
+.settings-writing::backdrop {
+  background: #1f392c65;
+}
+.writing-sheet-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.writing-sheet-header h2 {
+  margin: 0;
+}
+.writing-sheet .history {
+  max-height: none;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+}
+.topbar-writing {
+  position: relative;
+  min-height: 56px;
+  padding: 5px 20px;
+  gap: 16px;
+}
+.topbar-writing .brand strong {
+  font-size: 1.35rem;
+}
+.topbar-writing .local-label,
+.topbar-writing .budget-button > span:not(:last-child) {
+  display: none;
+}
+.topbar-writing .nav {
+  flex: none;
+  min-height: 36px;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+.topbar-writing .budget-button {
+  min-height: 36px;
+  padding: 4px 6px;
+}
+.topbar-writing .budget-button > span:last-child {
+  font-size: 0.8rem;
+}
+.assistant-panel .model-select {
+  margin: 0 0 12px !important;
 }
 .candidates {
   border-top: 1px solid var(--line);
@@ -1363,13 +1498,41 @@ summary {
 }
 @media (min-width: 1500px) {
   .writing-layout {
-    grid-template-columns: 240px minmax(480px, 1fr) 380px;
+    grid-template-columns: 240px minmax(0, 1fr) 340px;
   }
-  .chapter-heading {
-    padding-left: 64px;
+}
+@media (max-width: 1199px) {
+  .writing-layout {
+    grid-template-columns: 208px minmax(0, 1fr);
   }
-  .editor .cm-content {
-    padding-inline: 48px !important;
+  .writing-layout > .assistant-panel {
+    display: none;
+  }
+  .writing-layout > .assistant-panel.workspace-panel-open {
+    display: block;
+    position: fixed;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: 22;
+    width: min(100%, 26rem);
+    max-height: 100dvh;
+    overflow: auto;
+    overscroll-behavior: contain;
+    box-shadow: 0 0 22px #233a3333;
+  }
+  .assistant-panel .workspace-panel-close,
+  .workspace-panel-trigger.workspace-panel-trigger-assistant {
+    display: inline-flex;
+  }
+  .workspace-panel-close {
+    align-self: flex-start;
+    margin-bottom: 10px;
+  }
+  .writing-pane-navigation {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px var(--writing-inset) 0;
   }
 }
 @media (max-width: 1100px) {
@@ -1390,18 +1553,6 @@ summary {
   }
   .workspace-bar select {
     max-width: 200px;
-  }
-  .writing-layout {
-    grid-template-columns: 175px minmax(260px, 1fr) 300px;
-  }
-  .chapter-sidebar {
-    padding: 22px 12px;
-  }
-  .assistant-panel {
-    padding: 22px 16px;
-  }
-  .chapter-heading {
-    padding: 28px 24px 16px;
   }
   .reader-layout {
     grid-template-columns: 170px minmax(260px, 1fr);
@@ -1429,13 +1580,9 @@ summary {
   .budget-button {
     margin-left: auto;
   }
-  .writing-layout {
-    grid-template-columns: 160px minmax(0, 1fr);
-  }
-  .assistant-panel {
-    grid-column: 1/-1;
-    border-left: 0;
-    border-top: 1px solid var(--line);
+  .topbar-writing nav {
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
   .workflow-grid,
   .records-grid {
@@ -1470,6 +1617,99 @@ summary {
   }
   .welcome h1 {
     font-size: 38px;
+  }
+}
+@media (max-width: 767px) {
+  .topbar-writing {
+    padding: 4px 12px;
+    gap: 6px;
+  }
+  .topbar-writing .brand {
+    gap: 6px;
+  }
+  .topbar-writing .brand strong {
+    font-size: 1.06rem;
+    letter-spacing: 0;
+  }
+  .topbar-writing .brand-mark {
+    width: 28px;
+    height: 28px;
+    font-size: 0.933rem;
+  }
+  .topbar-writing .workbench-navigation-toggle {
+    display: inline-flex;
+    padding-inline: 8px;
+    min-height: 36px;
+    font-size: 0.875rem;
+  }
+  .topbar-writing .workbench-navigation-toggle::after {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border: solid currentColor;
+    border-width: 0 1px 1px 0;
+    transform: translateY(-2px) rotate(45deg);
+  }
+  .topbar-writing .workbench-navigation > nav {
+    display: none;
+  }
+  .topbar-writing .workbench-navigation-open > nav {
+    display: flex;
+    position: absolute;
+    z-index: 21;
+    width: auto;
+    inset: 100% 12px auto;
+    padding: 8px;
+    background: var(--paper);
+    border: 1px solid var(--control);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px #233a3325;
+  }
+  .writing-layout {
+    grid-template-columns: minmax(0, 1fr);
+    --writing-inset: 12px;
+    --editor-inline-padding: 10px;
+  }
+  .writing-layout > .chapter-sidebar {
+    display: none;
+  }
+  .writing-layout > .chapter-sidebar.workspace-panel-open {
+    display: flex;
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: 0;
+    z-index: 22;
+    width: min(100%, 26rem);
+    max-height: 100dvh;
+    overflow: auto;
+    overscroll-behavior: contain;
+    box-shadow: 0 0 22px #233a3333;
+  }
+  .chapter-sidebar .workspace-panel-close,
+  .workspace-panel-trigger.workspace-panel-trigger-tree {
+    display: inline-flex;
+  }
+  .chapter-identity {
+    flex-basis: 100%;
+  }
+  .chapter-title input {
+    font-size: 1.125rem;
+  }
+  .manuscript-toolbar {
+    padding-block: 8px;
+    gap: 6px;
+  }
+  .manuscript-actions button {
+    min-height: 38px;
+    padding-inline: 8px;
+  }
+  .manuscript-secondary button {
+    padding-inline: 6px;
+    font-size: 0.8rem;
+  }
+  .editor {
+    height: max(22rem, calc(100dvh - 16rem));
+    scroll-margin-block-start: 11rem;
   }
 }
 @media (max-width: 520px) {
@@ -1516,27 +1756,6 @@ summary {
     width: 100%;
     margin-top: 8px;
   }
-  .writing-layout {
-    display: flex;
-    flex-direction: column;
-  }
-  .chapter-sidebar {
-    padding: 16px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .chapter-sidebar h2,
-  .chapter-sidebar > .muted {
-    display: none;
-  }
-  .manuscript-tree {
-    overflow: auto;
-    max-height: 48dvh;
-    padding: 2px 4px;
-  }
-  .chapter-list button {
-    font-size: 12px;
-  }
   .sidebar-bottom {
     display: flex;
     flex-wrap: wrap;
@@ -1553,16 +1772,8 @@ summary {
   .sidebar-bottom textarea {
     min-height: 52px;
   }
-  .chapter-heading {
-    padding: 24px 24px 12px;
-  }
-  .editor {
-    min-height: 400px;
-    height: 55vh;
-  }
-  .assistant-panel {
-    display: block;
-    padding: 24px 20px;
+  .topbar-writing {
+    padding: 4px 12px;
   }
   .assistant-panel .section-title {
     margin-bottom: 20px;
@@ -1629,8 +1840,11 @@ summary {
     font-size: 15px;
     padding: 14px;
   }
-  .cm-content {
-    padding-inline: 12px !important;
+}
+@media (max-width: 360px) {
+  .manuscript-secondary .save-status {
+    flex-basis: 100%;
+    text-align: start;
   }
 }
 .genre-settings,

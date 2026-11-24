@@ -53,6 +53,7 @@ test('可选立项恢复、旧稿调序导入与手法卡固定引用', async ({
   await page.getByRole('button', { name: '保存', exact: true }).click()
   const [{ id: baselineId, title: baselineTitle }] = await chapters()
   await expect.poll(async () => (await manuscript(baselineId)).content).toBe(opening)
+  await page.getByRole('button', { name: '章纲 · 暂无', exact: true }).click()
   await page.getByRole('button', { name: '记下作者章纲', exact: true }).click()
   await page.getByRole('textbox', { name: '本章安排', exact: true }).fill(outline)
   await page.getByRole('button', { name: '保存章纲', exact: true }).click()
@@ -171,6 +172,7 @@ test('可选立项恢复、旧稿调序导入与手法卡固定引用', async ({
   expect(await manuscript(baselineId)).toEqual(baseline)
   await workspace.getByRole('button', { name: '关闭导入工作区', exact: true }).click()
   await expect(editor.locator('.cm-line')).toHaveText(opening)
+  await page.getByRole('button', { name: '章纲 · 作者章纲', exact: true }).click()
   await expect(page.getByText(outline, { exact: true })).toBeVisible()
 
   const referencesUrl = (chapterId: string) => `${branch}/chapters/${chapterId}/technique-references`

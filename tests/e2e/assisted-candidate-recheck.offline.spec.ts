@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { openWritingPanel } from './helpers/writingPanels'
 
 test('半自动候选编辑后沿用作者原情节复检，保留原稿、历史与待审流程', async ({ page }, info) => {
   await page.goto('/')
@@ -74,6 +75,7 @@ test('半自动候选编辑后沿用作者原情节复检，保留原稿、历�
   const panel = page.getByRole('region', { name: '候选复检报告', exact: true })
   await expect(panel).toContainText('模型标复检通过，仍须作者核对。')
   await page.setViewportSize({ width: 320, height: 800 })
+  await openWritingPanel(page, 'AI 对话')
   await page.evaluate(() => (document.documentElement.style.fontSize = '200%'))
   const target = panel.getByRole('button', { name: '查看目标候选', exact: true })
   await target.focus()

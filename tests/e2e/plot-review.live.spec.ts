@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, relative, resolve } from 'node:path'
+import { openWritingPanel } from './helpers/writingPanels'
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -93,6 +94,7 @@ test('日常实例：真实情节报告只读显示及历史规则说明，不�
   const desktop = testInfo.outputPath('plot-review-desktop.png')
   await page.screenshot({ path: desktop })
   await page.setViewportSize({ width: 320, height: 800 })
+  await openWritingPanel(page, 'AI 对话')
   await page.evaluate(() => {
     document.documentElement.style.fontSize = '200%'
   })

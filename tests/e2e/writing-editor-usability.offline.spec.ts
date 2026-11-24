@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
-test('首章从可见正文框开始写作，字数随输入更新，自动保存保持位置', async ({ page }) => {
-  await page.setViewportSize({ width: 1100, height: 760 })
+test('首章从可见正文框开始写作，字数随输入更新，自动保存保持位置', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
   await page.goto('/')
   await page.locator('.new-novel summary').click()
   await page.getByRole('textbox', { name: '作品名称', exact: true }).fill('后台验证 · 首章直接写作')
@@ -26,8 +26,11 @@ test('首章从可见正文框开始写作，字数随输入更新，自动保�
   const saved = toolbar.getByRole('status')
   const editor = writing.getByRole('textbox', { name: '章节正文', exact: true })
   const frame = writing.locator('.editor')
-  const outline = writing.getByText('本章章纲 · 暂无章纲', { exact: true })
-  const outlineAction = writing.getByRole('button', { name: '记下作者章纲', exact: true })
+  const outline = toolbar.getByRole('button', { name: '章纲 · 暂无', exact: true })
+  const outlineAction = page
+    .getByRole('complementary', { name: '创作辅助', exact: true })
+    .getByRole('button', { name: '记下作者章纲', exact: true })
+  const history = toolbar.getByRole('button', { name: '版本历史', exact: true })
   const displayedCount = (amount: number) => new RegExp(`^字数\\s*${amount}\\s*字$`)
   const nextSave = () =>
     page.waitForResponse(
@@ -48,9 +51,19 @@ test('首章从可见正文框开始写作，字数随输入更新，自动保�
   await expect(frame).toHaveCSS('border-top-style', 'solid')
   await expect(count).toHaveText(displayedCount(0))
   await expect(save).toBeInViewport()
+  const identity = toolbar.locator('.chapter-identity')
+  await expect(identity.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue(/^第\s*1\s*章$/)
+  await expect(identity.getByText(/^第\s*1\s*章$/, { exact: true })).toBeHidden()
+  await expect(writing.getByText(/^修订 \d+$/)).toHaveCount(0)
+  await page.evaluate(() => window.scrollTo(0, 0))
+  const firstFold = await position()
+  expect(firstFold.top).toBeGreaterThan(0)
+  expect(firstFold.top).toBeLessThanOrEqual(200)
   await expect(outline).toBeVisible()
-  if (!(await outlineAction.isVisible())) await outline.click()
+  await expect(outlineAction).toBeHidden()
+  await outline.click()
   await expect(outlineAction).toBeVisible()
+  expect(Math.abs((await position()).top - firstFold.top)).toBeLessThanOrEqual(1)
   await editor.focus()
   await frame.evaluate((element) => {
     window.scrollBy(0, Math.max(0, element.getBoundingClientRect().top - 180))
@@ -104,6 +117,109 @@ test('首章从可见正文框开始写作，字数随输入更新，自动保�
   expect((await explicitSave).ok()).toBeTruthy()
   await expect(saved).toHaveText('已保存到本机')
   expect(await (await page.request.get(savePath)).json()).toMatchObject({ content: draft + continuation })
+
+  const beforeHistory = await position()
+  await history.click()
+  const historyPane = page.getByRole('dialog', { name: '版本历史', exact: true })
+  await expect(historyPane).toBeVisible()
+  await expect(historyPane.locator('summary').first()).toContainText(/^修订 \d+/)
+  expect(Math.abs((await position()).top - beforeHistory.top)).toBeLessThanOrEqual(1)
+  await historyPane.getByRole('button', { name: '关闭版本历史', exact: true }).click()
+  await expect(history).toBeFocused()
+  await expect(editor).toContainText(continuation)
+
+  await page.evaluate(() => window.scrollTo(0, 0))
+  const beforeBudget = await position()
+  const budget = page.getByRole('button', { name: '账户与预算', exact: true })
+  await budget.click()
+  await expect(page.getByRole('dialog', { name: '账户与预算', exact: true })).toBeVisible()
+  expect(Math.abs((await position()).top - beforeBudget.top)).toBeLessThanOrEqual(1)
+  await page.keyboard.press('Escape')
+  await expect(budget).toBeFocused()
+
+  await info.attach('writing-first-fold-desktop', {
+    contentType: 'application/json',
+    body: JSON.stringify({ width: 1280, height: 720, ...firstFold }),
+  })
+})
+
+test('窄屏首屏可写作，目录和 AI 面板返回后保留正文与光标', async ({ page }, info) => {
+  await page.goto('/')
+  await page.locator('.new-novel summary').click()
+  await page.getByRole('textbox', { name: '作品名称', exact: true }).fill('后台验证 · 窄屏首屏')
+  await page.getByRole('button', { name: '创建并开始写作', exact: true }).click()
+  const created = page.waitForResponse(
+    (response) => response.url().endsWith('/chapters') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: '新建第一章', exact: true }).click()
+  const chapter = await (await created).json()
+  const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
+  const title = page.getByRole('textbox', { name: '章节标题', exact: true })
+  const save = page.getByRole('button', { name: '保存', exact: true })
+  await expect(title).toBeEditable()
+  const titleText = '山径夜话'
+  await title.fill(titleText)
+  await title.press('Tab')
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).title)
+    .toBe(titleText)
+  await editor.fill('云来了。')
+  await save.click()
+  await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(editor).toHaveText('云来了。')
+
+  const frame = page.getByRole('region', { name: '正文写作', exact: true }).locator('.editor')
+  const measurements: { width: number; height: number; editorTop: number; documentWidth: number }[] = []
+  for (const { width, height } of [
+    { width: 390, height: 844 },
+    { width: 320, height: 720 },
+  ]) {
+    await page.setViewportSize({ width, height })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    const directory = page.getByRole('button', { name: '目录', exact: true })
+    const assistant = page.getByRole('button', { name: 'AI 对话', exact: true })
+    for (const control of [directory, assistant, save]) await expect(control).toBeInViewport()
+    const measure = () =>
+      frame.evaluate((element) => ({
+        width: innerWidth,
+        height: innerHeight,
+        editorTop: Math.round(element.getBoundingClientRect().top),
+        documentWidth: document.documentElement.scrollWidth,
+      }))
+    const before = await measure()
+    measurements.push(before)
+    if (width === 390) expect(before.editorTop).toBeLessThanOrEqual(260)
+    expect(before.documentWidth).toBeLessThanOrEqual(width)
+
+    await directory.click()
+    const tree = page.getByRole('navigation', { name: '作品树', exact: true })
+    await expect(tree.getByRole('button', { name: /山径夜话/, exact: false })).toBeVisible()
+    await page.getByRole('button', { name: '关闭目录', exact: true }).click()
+    await expect(directory).toBeFocused()
+    await expect(tree).toBeHidden()
+
+    await editor.press('End')
+    await editor.press('ArrowLeft')
+    await assistant.click()
+    await expect(page.getByRole('region', { name: 'AI 对话', exact: true })).toBeVisible()
+    await expect(page.getByRole('combobox', { name: '模型账户', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '关闭创作辅助', exact: true }).click()
+    await expect(assistant).toBeFocused()
+    const original = await editor.textContent()
+    await editor.focus()
+    await page.keyboard.insertText('又')
+    await expect(editor).toHaveText(original!.replace('。', '又。'))
+    await save.click()
+    await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible()
+  }
+  expect(await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).toMatchObject({
+    content: '云来了又又。',
+  })
+  await info.attach('writing-first-fold-viewports', {
+    contentType: 'application/json',
+    body: JSON.stringify(measurements),
+  })
 })
 
 test('正文服务保存失败后，同一标签页恢复未提交草稿且其他章仍读自己的正文', async ({ page }) => {

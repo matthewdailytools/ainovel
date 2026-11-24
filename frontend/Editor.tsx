@@ -72,9 +72,13 @@ export function Editor({
             }
           }),
           EditorView.theme({
-            '&': { height: '100%', fontSize: '17px' },
-            '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.95', overflow: 'auto' },
-            '.cm-content': { padding: '28px 24px 120px' },
+            '&': { height: '100%' },
+            '.cm-scroller': {
+              fontFamily: 'inherit',
+              lineHeight: 'var(--manuscript-line-height)',
+              overflow: 'auto',
+            },
+            '.cm-content': { padding: '16px var(--editor-inline-padding) 120px', lineBreak: 'strict' },
             '.cm-gutters': { background: 'transparent', color: '#66716d', border: 'none', fontSize: '12px' },
             '.cm-activeLine': { background: '#edf4f130' },
           }),

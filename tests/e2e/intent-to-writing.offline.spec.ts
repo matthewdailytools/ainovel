@@ -1,5 +1,6 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
+import { openWritingPanel } from './helpers/writingPanels'
 
 const IDEA = '我想写一个女修城器师靠借尺检查闸门追查旧账的故事，不修门，不战斗。'
 const ORIGINAL = '作者原稿：她来到闸门前，先观察公开刻度。😀𠮷'
@@ -179,6 +180,7 @@ async function runAuthorTask(page: Page, testInfo: TestInfo, withDesigns: boolea
     await page.getByRole('button', { name: '恢复最近任务的输入', exact: true }).click()
     await expect(scopeField).toHaveValue('chapter')
     await page.setViewportSize({ width: 320, height: 800 })
+    await openWritingPanel(page, 'AI 对话')
     await page.evaluate(() => {
       document.documentElement.style.fontSize = '200%'
     })

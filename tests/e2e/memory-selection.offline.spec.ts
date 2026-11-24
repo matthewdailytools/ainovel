@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openWritingPanel } from './helpers/writingPanels'
 
 async function source(page: Page, label: string, plotCheck = false, variant = '') {
   const session = await (await page.request.get('/api/session')).json()
@@ -80,6 +81,7 @@ test('写作按原时点逐项采纳：遗漏需理由、失败同nonce重试、
   await reason.fill('正文没有午后的依据，暂不采纳该项时点😀𠮷。')
   await expect(accept).toBeEnabled()
   await page.setViewportSize({ width: 320, height: 900 })
+  await openWritingPanel(page, 'AI 对话')
   await page.evaluate(() => {
     const sizes = [...document.querySelectorAll('*')].map(
       (element) => [element, parseFloat(getComputedStyle(element).fontSize)] as const,
@@ -150,6 +152,7 @@ test('写作按原时点逐项采纳：遗漏需理由、失败同nonce重试、
     receipt,
   )
   await page.reload()
+  await openWritingPanel(page, 'AI 对话')
   await page.getByRole('combobox', { name: '比较候选', exact: true }).selectOption(row.candidate.id)
   const restoredRecord = page.getByText('正文采纳与记忆选择记录', { exact: true })
   await restoredRecord.click()

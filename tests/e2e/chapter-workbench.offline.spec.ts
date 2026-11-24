@@ -13,6 +13,8 @@ const foreshadowing = '她把来历未明的青石收进袖中。'
 const revisedForeshadowing = '她把来历未明的青石藏进左袖。'
 
 async function selectChapter(page: Page, title: string) {
+  const directory = page.getByRole('button', { name: '目录', exact: true })
+  if (await directory.isVisible()) await directory.click()
   await page.locator('.chapter-list button').filter({ hasText: title }).click()
   await expect(page.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue(title)
 }
@@ -70,13 +72,14 @@ test('相邻两章：章纲、设定原文、前章改稿影响、单项复检�
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
-  const outlinePanel = page.getByText(/^本章章纲 · /)
+  const outlinePanel = page.getByRole('button', { name: /^章纲 · / })
   await expect(editor.locator('.cm-line')).toHaveText(first.content.split('\n'))
-  await expect(outlinePanel).toHaveText('本章章纲 · 暂无章纲')
+  await expect(outlinePanel).toHaveText('章纲 · 暂无')
+  await outlinePanel.click()
   await page.getByRole('button', { name: '记下作者章纲', exact: true }).click()
   await page.getByRole('textbox', { name: '本章安排', exact: true }).fill(outline)
   await page.getByRole('button', { name: '保存章纲', exact: true }).click()
-  await expect(outlinePanel).toHaveText('本章章纲 · 作者章纲')
+  await expect(outlinePanel).toHaveText('章纲 · 作者章纲')
   await expect(page.getByText(outline, { exact: true })).toBeVisible()
   await outlinePanel.press('Enter')
   await expect(page.getByText(outline, { exact: true })).toBeHidden()
@@ -118,7 +121,7 @@ test('相邻两章：章纲、设定原文、前章改稿影响、单项复检�
   expect(fact.ok(), await fact.text()).toBeTruthy()
 
   await selectChapter(page, secondTitle)
-  await expect(outlinePanel).toHaveText('本章章纲 · 暂无章纲')
+  await expect(outlinePanel).toHaveText('章纲 · 暂无')
   await expect(editor).toBeEditable()
   const continued = second.content + '\n她把匣盖放回桌上。'
   await editor.press('ControlOrMeta+End')
@@ -296,7 +299,9 @@ test('全自动工作批次的写作页显示该章写前冻结的 AI 章纲', a
   await page.getByRole('button', { name: '写作', exact: true }).click()
   for (const [index, chapter] of chapters.entries()) {
     await selectChapter(page, chapter.title)
-    await expect(page.getByText('本章章纲 · 冻结 AI 章纲', { exact: true })).toBeVisible()
+    const outline = page.getByRole('button', { name: '章纲 · 冻结 AI 章纲', exact: true })
+    await expect(outline).toBeVisible()
+    if ((await outline.getAttribute('aria-expanded')) !== 'true') await outline.click()
     const preparation = task.result.plot_preparations[String(index + 1)]
     expect(preparation.status).toBe('ready')
     await expect(page.getByText(preparation.effective_plot, { exact: true })).toBeVisible()

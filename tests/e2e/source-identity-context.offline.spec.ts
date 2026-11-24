@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { assertActualDoubleText } from './helpers/actualTextScale'
+import { openWritingPanel } from './helpers/writingPanels'
 
 const source = 'source-identity-e2e：沈砚从渡口一位修船匠借得旧尺，约定后日归还。'
 const version = 'source-identity-context/1'
@@ -62,6 +63,7 @@ test('补写可主动核对原角色限定，独立报告保留原解释与原�
   await expect(flowDetails).toContainText('来源未知不等于正文违约')
   await flowDetails.screenshot({ path: info.outputPath('source-flow-desktop.png') })
   await page.setViewportSize({ width: 320, height: 800 })
+  await openWritingPanel(page, 'AI 对话')
   await assertActualDoubleText(
     page,
     {
@@ -112,6 +114,7 @@ test('补写可主动核对原角色限定，独立报告保留原解释与原�
     await route.fulfill({ response, json: malformed(await response.json()) })
   })
   await page.reload()
+  await openWritingPanel(page, 'AI 对话')
   await page.getByRole('combobox', { name: '比较候选', exact: true }).selectOption(artifact.id)
   const invalid = page.getByRole('region', { name: '情节逐项核对', exact: true })
   await expect(invalid).toContainText('情节核对报告格式无法核对，不能视为一致；原始报告仍保留。')

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { assertActualDoubleText } from './helpers/actualTextScale'
+import { openWritingPanel } from './helpers/writingPanels'
 
 type Fixture = {
   novel_id: string
@@ -101,6 +102,7 @@ test('来源纠偏完整作者路径：独立回执、显式正文复检、只�
   await expect(report.getByRole('button', { name: /采纳|拒绝|保存候选/ })).toHaveCount(0)
   await report.getByText('情节逐项核对 · 模型标一致，仍须作者核对', { exact: true }).click()
   await page.setViewportSize({ width: 320, height: 800 })
+  await openWritingPanel(page, 'AI 对话')
   await assertActualDoubleText(
     page,
     {

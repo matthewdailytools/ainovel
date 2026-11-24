@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { openWritingPanel } from './helpers/writingPanels'
 import { createHash } from 'node:crypto'
 import type { Task } from '../../frontend/api'
 
@@ -128,10 +129,12 @@ test('未触发全书约定：写作与复检只读呈现、键盘和320px实际
   page.on('pageerror', (error) => errors.push(error.message))
   const measurements = []
   for (const id of [candidate.id, report.id]) {
+    await page.setViewportSize({ width: 1280, height: 900 })
     await page.reload()
-    await page.setViewportSize({ width: 320, height: 900 })
     await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
-    await page.getByRole('button', { name: '写作', exact: true }).click()
+    await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toBeVisible()
+    await page.setViewportSize({ width: 320, height: 900 })
+    await openWritingPanel(page, 'AI 对话')
     const selector = page.getByRole('combobox', { name: '比较候选', exact: true })
     await selector.selectOption(id)
     const notice = page.getByRole('region', { name: '本章未触发的全书约定', exact: true })

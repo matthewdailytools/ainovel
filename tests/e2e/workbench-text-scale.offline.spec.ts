@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { openWritingPanel } from './helpers/writingPanels'
 
 test('窄屏新建作品：普通和实际翻倍文字下表单均可见，键盘提交不改旧作品', async ({ page }, info) => {
   await page.setViewportSize({ width: 320, height: 900 })
@@ -21,6 +22,8 @@ test('窄屏新建作品：普通和实际翻倍文字下表单均可见，键�
     })
   ).json()
   await page.reload()
+  await expect(page.getByRole('button', { name: '目录', exact: true })).toBeVisible()
+  await openWritingPanel(page, '目录')
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(seed.id)
   let submissions = 0
   await page.route('**/api/novels', async (route) => {
@@ -31,6 +34,7 @@ test('窄屏新建作品：普通和实际翻倍文字下表单均可见，键�
   })
   const before = await (await page.request.get('/api/novels')).json()
   const budget = (await (await page.request.get('/api/config')).json()).budget
+  await openWritingPanel(page, '目录')
   await page.locator('.new-novel summary').click()
   const form = page.locator('.new-novel form')
   const title = page.getByRole('textbox', { name: '作品名称', exact: true })
@@ -70,8 +74,9 @@ test('窄屏新建作品：普通和实际翻倍文字下表单均可见，键�
   const created = novels.find((novel: { title: string }) => novel.title === name)
   expect(created).toBeDefined()
   expect(created.id).toBe(returned.id)
-  await expect(page.getByRole('combobox', { name: '作品', exact: true })).toHaveValue(created.id)
   await expect(page.getByRole('button', { name: '新建第一章', exact: true })).toBeVisible()
+  await openWritingPanel(page, '目录')
+  await expect(page.getByRole('combobox', { name: '作品', exact: true })).toHaveValue(created.id)
   expect(submissions).toBe(1)
   expect(await (await page.request.get(`/api/chapters/${original.id}`)).json()).toEqual(kept)
   expect((await (await page.request.get('/api/config')).json()).budget).toEqual(budget)
@@ -126,16 +131,29 @@ test('五个工作区实际文字翻倍：长参考来源仍可阅读并用键�
     // measured once, without scaling a previous view a second time.
     await page.reload()
     await page.setViewportSize({ width: 320, height: 900 })
+    await expect(page.getByRole('button', { name: '目录', exact: true })).toBeVisible()
+    await openWritingPanel(page, '目录')
     await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
-    const nav = page.getByRole('button', { name: view, exact: true })
+    const closeDirectory = page.getByRole('button', { name: '关闭目录', exact: true })
+    if (await closeDirectory.isVisible()) await closeDirectory.click()
+    const narrowMenu = page.locator('.workbench-navigation-toggle')
+    await narrowMenu.click()
+    const nav = page
+      .getByRole('navigation', { name: '主要页面' })
+      .getByRole('button', { name: view, exact: true })
     await nav.click()
-    await expect(nav).toHaveAttribute('aria-current', 'page')
+    await expect(
+      page
+        .getByRole('navigation', { name: '主要页面', includeHidden: true })
+        .getByRole('button', { name: view, exact: true, includeHidden: true }),
+    ).toHaveAttribute('aria-current', 'page')
     if (view === '写作')
       await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toBeVisible()
     else await expect(page.getByRole('heading', { name: view, exact: true })).toBeVisible()
     if (view === '资料书库')
       await expect(page.locator('.reader-layout button.wide').filter({ hasText: name })).toBeVisible()
-    const previous = await nav.evaluate((element) => parseFloat(getComputedStyle(element).fontSize))
+    const control = view === '写作' ? narrowMenu : nav
+    const previous = await control.evaluate((element) => parseFloat(getComputedStyle(element).fontSize))
     await page.evaluate(() => {
       const sizes = [...document.querySelectorAll('*')].map(
         (element) => [element, parseFloat(getComputedStyle(element).fontSize)] as const,
@@ -150,7 +168,9 @@ test('五个工作区实际文字翻倍：长参考来源仍可阅读并用键�
       viewport: innerWidth,
     }))
     measurements.push({ view, ...measured })
-    expect(await nav.evaluate((element) => parseFloat(getComputedStyle(element).fontSize))).toBe(previous * 2)
+    expect(await control.evaluate((element) => parseFloat(getComputedStyle(element).fontSize))).toBe(
+      previous * 2,
+    )
     expect(measured.document, `${view} should keep the page within the viewport`).toBeLessThanOrEqual(
       measured.viewport,
     )

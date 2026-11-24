@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { openWritingPanel } from './helpers/writingPanels'
 
 test('U01：空白手写、卡点方向、作者选择、补写、拒绝、采纳与恢复', async ({ page }) => {
   await page.goto('/')
@@ -44,7 +45,8 @@ test('U01：空白手写、卡点方向、作者选择、补写、拒绝、采�
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   const editor = page.getByRole('textbox', { name: '章节正文', exact: true })
-  await expect(editor).toHaveText('')
+  await expect(editor.getByText('在这里开始写正文…', { exact: true })).toBeVisible()
+  expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content).toBe('')
   const original = '她站在闸门前。😀𠮷'
   await editor.fill(original)
   await page.getByRole('button', { name: '保存', exact: true }).click()
@@ -125,6 +127,7 @@ test('U01：空白手写、卡点方向、作者选择、补写、拒绝、采�
   expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content).toBe(continued)
   expect((await (await page.request.get(`/api/artifacts/${advice.id}`)).json()).status).toBe('candidate')
   await page.setViewportSize({ width: 320, height: 800 })
+  await openWritingPanel(page, 'AI 对话')
   await page.evaluate(() => {
     document.documentElement.style.fontSize = '200%'
   })

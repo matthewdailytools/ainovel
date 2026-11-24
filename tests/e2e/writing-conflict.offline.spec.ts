@@ -38,11 +38,13 @@ test('双窗口保存冲突：保留中文本地输入与先提交原稿，刷�
     expect((await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content).toBe(first)
     other.once('dialog', (dialog) => dialog.accept())
     await other.reload()
-    await expect(other.getByText('浏览器草稿与服务中的修订不同。', { exact: true })).toBeVisible()
+    await other.getByRole('button', { name: '查看草稿', exact: true }).click()
+    const recovery = other.getByRole('dialog', { name: '待恢复草稿', exact: true })
+    await expect(recovery.getByText(/修订不同/)).toBeVisible()
     await expect(
-      other.getByRole('textbox', { name: '章节正文', exact: true }).locator('.cm-line'),
+      other.getByRole('textbox', { name: '章节正文', exact: true, includeHidden: true }).locator('.cm-line'),
     ).toHaveText(first.split('\n'))
-    await other.getByRole('button', { name: '将此草稿载入编辑区', exact: true }).click()
+    await recovery.getByRole('button', { name: '将此草稿载入编辑区', exact: true }).click()
     await expect(other.getByRole('textbox', { name: '章节正文', exact: true })).toHaveText(second)
     await expect
       .poll(async () => (await (await page.request.get(`/api/chapters/${chapter.id}`)).json()).content)

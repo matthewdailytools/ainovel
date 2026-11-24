@@ -253,6 +253,7 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
     .filter({ hasText: '原稿：她来到闸门前，准备检查外露结构。' })
   await originalHistory.locator('summary').click()
   await expect(originalHistory.locator('pre')).toHaveText('原稿：她来到闸门前，准备检查外露结构。')
+  await page.getByRole('button', { name: '关闭版本历史', exact: true }).click()
 
   await returnToReference()
   const checkedSaved = await checkReference('对照检查当前已保存手写稿', true)

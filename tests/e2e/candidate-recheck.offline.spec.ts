@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { createHash } from 'node:crypto'
+import { openWritingPanel } from './helpers/writingPanels'
 
 test('旧列表到达后重新选择读取已保存候选，另一窗口变更仍保留未保存编辑', async ({ page }) => {
   await page.goto('/')
@@ -174,6 +175,7 @@ test('候选编辑、同契约复检、再次复检与历史回看，作者采�
   const first = await checkCandidate()
   const firstBytes = JSON.stringify(first.report)
   await page.setViewportSize({ width: 320, height: 800 })
+  await openWritingPanel(page, 'AI 对话')
   await page.evaluate(() => (document.documentElement.style.fontSize = '200%'))
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy()
   await first.panel.getByText('复检前候选与检查记录', { exact: true }).click()

@@ -30,8 +30,11 @@ export async function manuscriptImportFlow(page: Page) {
   })
   await workspace.getByRole('button', { name: '关闭导入工作区', exact: true }).click()
   await expect(workspace.getByRole('textbox', { name: '章节标题', exact: true })).toHaveValue('渡口与铜牌')
-  page.once('dialog', (dialog) => dialog.dismiss())
-  await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('导入章界与映射')
+    await dialog.dismiss()
+  })
+  await page.keyboard.press('Escape')
   await expect(workspace).toBeVisible()
   await workspace.getByRole('button', { name: '保存章界与映射草稿', exact: true }).click()
   await expect(workspace.getByText('章界和映射草稿已保存，刷新后可从预览历史恢复。')).toBeVisible()

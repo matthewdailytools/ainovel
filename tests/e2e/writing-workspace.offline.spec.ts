@@ -1,4 +1,5 @@
 import { expect, test, type APIResponse } from '@playwright/test'
+import { openWritingPanel } from './helpers/writingPanels'
 
 async function read(response: APIResponse) {
   expect(response.ok(), await response.text()).toBeTruthy()
@@ -127,8 +128,10 @@ test('分卷树、设定编辑与按节点对话共用写作工作区，快速�
 
   await page.setViewportSize({ width: 320, height: 900 })
   await page.addStyleTag({ content: 'html { font-size: 200%; }' })
+  await openWritingPanel(page, '目录')
   await world.click()
   await expect(settingPane.getByRole('textbox', { name: '世界设定正文', exact: true })).toHaveValue(canonical)
+  await openWritingPanel(page, 'AI 对话')
   await expect(chat.getByText(/序号 2.*再说一次限制/)).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(321)
   await page.screenshot({ path: info.outputPath('mobile-writing-workspace.png') })
