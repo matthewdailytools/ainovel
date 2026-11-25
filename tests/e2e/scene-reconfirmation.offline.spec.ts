@@ -40,6 +40,7 @@ async function openTarget(page: Page, fixture: Fixture) {
 async function openWorkbench(page: Page, fixture: Fixture) {
   await openTarget(page, fixture)
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await page.getByText('长篇结构与整理', { exact: true }).click()
   await page.getByText('重新核对已保存的提取场景', { exact: true }).click()
   const area = page.getByRole('region', {
     name: '提取场景重核工作台',
@@ -388,6 +389,7 @@ test.describe.serial('提取场景重核：隔离离线真实API', () => {
     for (mode of ['missing', 'unknown', 'archived']) {
       await openTarget(page, fixture)
       await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+      await page.getByText('长篇结构与整理', { exact: true }).click()
       await page.getByText('重新核对已保存的提取场景', { exact: true }).click()
       const area = page.getByRole('region', { name: '提取场景重核工作台', exact: true })
       await area.getByLabel('场景所在章节').selectOption(fixture.chapter_id)
@@ -416,6 +418,7 @@ test.describe.serial('提取场景重核：隔离离线真实API', () => {
     })
     await openTarget(page, fixture)
     await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+    await page.getByText('长篇结构与整理', { exact: true }).click()
     await page.getByText('重新核对已保存的提取场景', { exact: true }).click()
     const area = page.getByRole('region', { name: '提取场景重核工作台', exact: true })
     await area.getByLabel('场景所在章节').selectOption(fixture.chapter_id)

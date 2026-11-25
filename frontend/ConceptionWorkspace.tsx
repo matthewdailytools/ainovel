@@ -62,8 +62,9 @@ export function ConceptionWorkspace({
   const [instruction, setInstruction] = useState('')
   const [budget, setBudget] = useState('')
   const [completionNote, setCompletionNote] = useState('')
-  const [storyOpen, setStoryOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [storyVisited, setStoryVisited] = useState(false)
+  const [settingsVisited, setSettingsVisited] = useState(false)
+  const generationPanel = useRef<HTMLDetailsElement>(null)
   const [tasks, setTasks] = useState<GenerationTask[]>([])
   const [taskId, setTaskId] = useState('')
   const [candidate, setCandidate] = useState<{
@@ -372,42 +373,50 @@ export function ConceptionWorkspace({
     ).length || 0
   const badBudget = !!budget && (!Number.isFinite(Number(budget)) || Number(budget) <= 0)
   const aiLocked = busy || dirty || !!activeTask || !modelReady || badBudget
+  const generationStatus = activeTask
+    ? label(activeTask.status)
+    : taskError || artifactError
+      ? '有事项待处理'
+      : candidate?.artifact.status === 'candidate'
+        ? '草案待核对'
+        : task && ['blocked_runtime', 'cancelled', 'paused'].includes(task.status)
+          ? '有任务可续跑'
+          : ''
   const index = category ? categories.indexOf(category) : -1
 
   return (
     <div className="conception-workspace">
       <section className="card" aria-label="按类别完善小说设定">
         <h2>构思工作台</h2>
-        <p className="small muted">{branch.name} · 从任意类别开始，随时返回补充，也可以先跳过。</p>
         {feedback('settings')}
         {storageError && <p role="alert">{storageError}</p>}
         {!state && <p>{error ? '构思设定暂时无法读取。' : '正在读取这本小说的构思设定…'}</p>}
-        <div className="actions">
-          <button type="button" disabled={busy} onClick={() => void perform(refresh)}>
-            核对最新修订
-          </button>
-          {dirty && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                if (window.confirm('放弃本窗口尚未保存的编辑，载入已保存构思？'))
-                  void perform(async () => {
-                    await refresh()
-                    if (alive.current) clearDraft()
-                  })
-              }}
-            >
-              放弃本次编辑
+        <details className="page-disclosure">
+          <summary>修订与草稿{dirty ? ' · 有未保存编辑' : ''}</summary>
+          {state && <p className="small muted">保存修订 {state.revision}</p>}
+          <div className="actions">
+            <button type="button" disabled={busy} onClick={() => void perform(refresh)}>
+              核对最新修订
             </button>
-          )}
-        </div>
+            {dirty && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  if (window.confirm('放弃本窗口尚未保存的编辑，载入已保存构思？'))
+                    void perform(async () => {
+                      await refresh()
+                      if (alive.current) clearDraft()
+                    })
+                }}
+              >
+                放弃本次编辑
+              </button>
+            )}
+          </div>
+        </details>
         {state && category && (
           <>
-            <p className="small muted">
-              保存修订 {state.revision} · {dirty ? '有未保存编辑' : '已保存'}
-              {activeTask ? ' · 有生成任务运行中' : ''}
-            </p>
             {conflict && (
               <p role="alert">本窗口草稿所用的构思或正文修订已变化。请先另存需要的编辑，再载入最新版本。</p>
             )}
@@ -595,7 +604,8 @@ export function ConceptionWorkspace({
                 </div>
               </fieldset>
             </section>
-            <div className="conception-add-category">
+            <details className="conception-add-category page-disclosure">
+              <summary>新建类别</summary>
               <label>
                 类别名称
                 <input
@@ -616,13 +626,13 @@ export function ConceptionWorkspace({
               >
                 添加构思类别
               </button>
-            </div>
+            </details>
           </>
         )}
       </section>
 
-      <section className="card" id="conception-generation" aria-label="构思生成与草案">
-        <h2>AI 构思辅助</h2>
+      <details className="card page-disclosure" id="conception-generation" ref={generationPanel}>
+        <summary>AI 构思辅助{generationStatus ? ` · ${generationStatus}` : ''}</summary>
         {feedback('generation')}
         <p className="small">生成会发送本次要求、本工作版本已保存的构思、创作约定与题材。结果保留为草案。</p>
         {!modelReady && <p className="small muted">模型账户尚未配置密钥或单价。手动编辑和确认仍可使用。</p>}
@@ -639,16 +649,19 @@ export function ConceptionWorkspace({
               placeholder="例如：主角靠修补旧物破案。重点补出谜底与前文线索的关系。"
             />
           </label>
-          <label>
-            本次任务预算上限（可选，使用所选账户币种）
-            <input
-              type="number"
-              min={0.01}
-              step={0.01}
-              value={budget}
-              onChange={(event) => setBudget(event.target.value)}
-            />
-          </label>
+          <details className="page-disclosure">
+            <summary>本次任务预算{budget ? ` · ${budget}` : ''}</summary>
+            <label>
+              本次任务预算上限（可选，使用所选账户币种）
+              <input
+                type="number"
+                min={0.01}
+                step={0.01}
+                value={budget}
+                onChange={(event) => setBudget(event.target.value)}
+              />
+            </label>
+          </details>
           {badBudget && <p className="small">请填写大于零的本次预算，或留空使用账户剩余预算。</p>}
           <p className="small muted">
             当前类别：{category?.title || '尚未读取'}。一键生成会依次处理未暂缓的类别。
@@ -673,17 +686,21 @@ export function ConceptionWorkspace({
         </fieldset>
         {taskError && <p role="alert">{taskError}</p>}
         {!!tasks.length && (
-          <label>
-            构思任务记录
-            <select value={task?.id || taskId} onChange={(event) => setTaskId(event.target.value)}>
-              {tasks.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.payload.operation === 'world_extract' ? '旧作世界设定' : '构思生成'} ·{' '}
-                  {label(row.status)} · {new Date(row.created * 1000).toLocaleString()} · {row.id.slice(0, 8)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <details className="page-disclosure">
+            <summary>构思任务历史（{tasks.length}）</summary>
+            <label>
+              构思任务记录
+              <select value={task?.id || taskId} onChange={(event) => setTaskId(event.target.value)}>
+                {tasks.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.payload.operation === 'world_extract' ? '旧作世界设定' : '构思生成'} ·{' '}
+                    {label(row.status)} · {new Date(row.created * 1000).toLocaleString()} ·{' '}
+                    {row.id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </details>
         )}
         {task && (
           <div aria-live="polite" className="conception-task">
@@ -754,11 +771,16 @@ export function ConceptionWorkspace({
             onAdopt={(selected) => void perform(() => adopt(candidate.artifact.id, selected), 'generation')}
           />
         )}
-      </section>
+      </details>
 
-      <details className="card" onToggle={(event) => setSettingsOpen(event.currentTarget.open)}>
+      <details
+        className="card page-disclosure"
+        onToggle={(event) => {
+          if (event.currentTarget.open) setSettingsVisited(true)
+        }}
+      >
         <summary>创作约定与频道题材</summary>
-        {settingsOpen && (
+        {settingsVisited && (
           <>
             <AuthorIntentPanel
               branchId={branch.id}
@@ -773,25 +795,43 @@ export function ConceptionWorkspace({
         )}
       </details>
 
-      <details className="card" onToggle={(event) => setStoryOpen(event.currentTarget.open)}>
+      <details
+        className="card page-disclosure"
+        onToggle={(event) => {
+          if (event.currentTarget.open) setStoryVisited(true)
+        }}
+      >
         <summary>从旧作正文反向提取</summary>
         <p className="small">
           在本工作版本选择保存的章节，核对提取候选与原文后逐项采用。采用的正文记录与上面的未来构思分别保存。
         </p>
-        {storyOpen && (
+        {storyVisited && (
           <>
             {feedback('reverse')}
             {task?.payload.operation === 'world_extract' && (
               <p className="small">
                 当前提取任务{label(task.status)}。{' '}
-                <a href="#conception-generation">查看世界设定草案与任务记录</a>
+                <a
+                  href="#conception-generation"
+                  onClick={() => {
+                    if (generationPanel.current) {
+                      generationPanel.current.open = true
+                      generationPanel.current.querySelector('summary')?.focus({ preventScroll: true })
+                    }
+                  }}
+                >
+                  查看世界设定草案与任务记录
+                </a>
               </p>
             )}
             <ConceptionWorldExtract
               branchId={branch.id}
               storyRevision={state?.story_revision}
               locked={!state || busy || dirty || !!activeTask || !modelReady}
-              onExtract={(ids, amount) => void perform(() => extractWorld(ids, amount), 'reverse')}
+              onExtract={(ids, amount) => {
+                if (generationPanel.current) generationPanel.current.open = true
+                void perform(() => extractWorld(ids, amount), 'reverse')
+              }}
             />
             <StoryGraph
               branchId={branch.id}
@@ -807,21 +847,21 @@ export function ConceptionWorkspace({
       <section className="card" aria-label="构思核对与交接">
         <h2>完整度与作者确认</h2>
         {feedback('confirmation')}
-        <p className="small">提示供你决定是否继续完善。保留待办也可以确认。</p>
         {state && (
           <>
             {state.issues.length ? (
-              <ul className="conception-issues">
-                {state.issues.map(({ category_id, message }, index) => (
-                  <li key={`${category_id}-${index}`}>
-                    {state.categories.find((entry) => entry.id === category_id)?.title || '构思核对'} ·{' '}
-                    {message}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>当前已保存构思暂无完整度提示。</p>
-            )}
+              <details className="page-disclosure">
+                <summary>完整度提示（{state.issues.length}）</summary>
+                <ul className="conception-issues">
+                  {state.issues.map(({ category_id, message }, index) => (
+                    <li key={`${category_id}-${index}`}>
+                      {state.categories.find((entry) => entry.id === category_id)?.title || '构思核对'} ·{' '}
+                      {message}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
             {confirmation && (
               <p className="notice">
                 {confirmation.current ? '当前构思已确认' : '上次确认已成为历史'} · 构思修订{' '}
@@ -846,15 +886,18 @@ export function ConceptionWorkspace({
                 </ul>
               </details>
             )}
-            <label>
-              保留事项说明
-              <textarea
-                rows={2}
-                maxLength={4000}
-                value={completionNote}
-                onChange={(event) => setCompletionNote(event.target.value)}
-              />
-            </label>
+            <details className="page-disclosure">
+              <summary>补充保留事项{completionNote.trim() ? ' · 已填写' : ''}</summary>
+              <label>
+                保留事项说明
+                <textarea
+                  rows={2}
+                  maxLength={4000}
+                  value={completionNote}
+                  onChange={(event) => setCompletionNote(event.target.value)}
+                />
+              </label>
+            </details>
             <div className="actions">
               <button
                 className="primary"

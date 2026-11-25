@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, type Branch, type Chapter, type Fact } from './api'
 import type { Notify } from './App'
 import { GenreSettings } from './GenreProfile'
@@ -30,18 +30,62 @@ type Feedback = {
   text: string
   source_quote: string
 }
+
+function RecordsPanel({
+  title,
+  status,
+  reveal = false,
+  onFirstOpen,
+  children,
+}: {
+  title: string
+  status?: string
+  reveal?: boolean
+  onFirstOpen?: () => void
+  children: ReactNode
+}) {
+  const details = useRef<HTMLDetailsElement>(null)
+  const [visited, setVisited] = useState(reveal)
+  useEffect(() => {
+    if (!reveal || !details.current) return
+    details.current.open = true
+    details.current.querySelector('summary')?.focus()
+  }, [reveal])
+  return (
+    <details
+      ref={details}
+      className="page-disclosure"
+      onToggle={(event) => {
+        if (!event.currentTarget.open || visited) return
+        setVisited(true)
+        onFirstOpen?.()
+      }}
+    >
+      <summary>
+        <span>{title}</span>
+        {status && <small className="muted">{status}</small>}
+      </summary>
+      {(visited || reveal) && children}
+    </details>
+  )
+}
+
 export function Records({
   branch,
   account,
   modelReady,
   notify,
   onReviseFeedback,
+  initialPanel,
+  structureArtifactId,
 }: {
   branch: Branch
   account: string
   modelReady: boolean
   notify: Notify
   onReviseFeedback: (feedback: FeedbackHandoff) => void
+  initialPanel?: 'settings' | 'structure'
+  structureArtifactId?: string
 }) {
   const [facts, setFacts] = useState<Fact[]>([])
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -53,6 +97,7 @@ export function Records({
   const [feedbackText, setFeedbackText] = useState('')
   const [quote, setQuote] = useState('')
   const [source, setSource] = useState('')
+  const sourceDialog = useRef<HTMLDialogElement>(null)
   const [rawHits, setRawHits] = useState<(Chapter & { snippet: string; start: number; end: number })[]>([])
   const [completion, setCompletion] = useState<Completion>()
   const [assessment, setAssessment] = useState('creative')
@@ -84,12 +129,11 @@ export function Records({
   const [storyRevision, setStoryRevision] = useState(0)
   const keys = ['准备', '查找', '提示调整', '等待', '核查', '返修', '整理保存', '基线总计']
   async function refresh() {
-    const [f, c, b, a, z, context] = await Promise.all([
+    const [f, c, b, a, context] = await Promise.all([
       api<Fact[]>(`/branches/${branch.id}/facts`),
       api<Chapter[]>(`/branches/${branch.id}/chapters`),
       api<Feedback[]>(`/branches/${branch.id}/feedback`),
       api<Completion>(`/branches/${branch.id}/completion`),
-      api<{ id: string; bytes: number }[]>('/backups'),
       api<{ branch: Branch; definitions: typeof definitions }>(`/branches/${branch.id}/context`),
     ])
     setFacts(f)
@@ -97,13 +141,15 @@ export function Records({
     setChapterId((current) => current || c[0]?.id || '')
     setFeedback(b)
     setCompletion(a)
-    setBackups(z)
     setDefinitions(context.definitions)
     setStoryRevision(context.branch.story_revision)
   }
   useEffect(() => {
     void refresh().catch(notify)
   }, [branch.id])
+  useEffect(() => {
+    if (source && !sourceDialog.current?.open) sourceDialog.current?.showModal()
+  }, [source])
   async function perform(fn: () => Promise<unknown>) {
     if (busy) return
     setBusy(true)
@@ -118,38 +164,37 @@ export function Records({
   const displayed = facts.filter(
     (f) => f.position <= at && (!query || `${f.subject}${f.statement}${f.story_time}`.includes(query)),
   )
+  const rechecks = facts.filter((fact) => fact.stale).length
+  const completionStatus = completion?.accepted
+    ? '作者验收已通过'
+    : completion?.author_finalized
+      ? '作者已确认定稿，工具验收另行记录'
+      : completion?.production_complete
+        ? '生成完成，待作者验收'
+        : undefined
   return (
     <div className="page-pad records-page">
       <div className="page-heading">
         <div>
-          <span className="eyebrow">事实有出处，判断有记录</span>
           <h1>故事与审阅</h1>
-          <p>{branch.name} · 事实、人物认知、承诺与作者判断分别保留。</p>
         </div>
         <button onClick={() => void perform(refresh)} disabled={busy}>
           刷新当前版本
         </button>
       </div>
-      <AuthorIntentPanel
-        branchId={branch.id}
-        novelId={branch.novel_id}
-        account={account}
-        modelReady={modelReady}
-        notify={notify}
-        onSaved={refresh}
-      />
-      <GenreSettings key={branch.id} branchId={branch.id} notify={notify} onSaved={refresh} />
-      <StoryGraph
-        key={'story-' + branch.id}
-        branchId={branch.id}
-        notify={notify}
-        onSaved={refresh}
-        account={account}
-        modelReady={modelReady}
-      />
+      <RecordsPanel title="长篇结构与整理" reveal={initialPanel === 'structure'}>
+        <StoryGraph
+          key={'story-' + branch.id}
+          branchId={branch.id}
+          notify={notify}
+          onSaved={refresh}
+          account={account}
+          modelReady={modelReady}
+          initialArtifactId={structureArtifactId}
+        />
+      </RecordsPanel>
       <div className="records-grid">
-        <section className="card">
-          <h2>故事状态与影响</h2>
+        <RecordsPanel title="故事状态与影响" status={rechecks ? `${rechecks} 条待复检` : undefined}>
           <div className="form-grid">
             <label>
               人物、事项或时点关键词
@@ -365,9 +410,11 @@ export function Records({
               </button>
             </form>
           </details>
-        </section>
-        <section className="card">
-          <h2>作者反馈与定向修订</h2>
+        </RecordsPanel>
+        <RecordsPanel
+          title="作者反馈与定向修订"
+          status={feedback.length ? `${feedback.length} 条反馈` : undefined}
+        >
           <form
             onSubmit={(event) => {
               event.preventDefault()
@@ -446,13 +493,24 @@ export function Records({
               </button>
             </article>
           ))}
-        </section>
+        </RecordsPanel>
       </div>
-      <section className="card">
-        <h2>其他已采用设定</h2>
-        <p>
-          按需维护人物、世界与粗纲。创作约定和题材在上方独立维护。新整书版本可继承当前已采用设定，已有正文与已发生事实不会被复制为另一版本的生成结果。
-        </p>
+      <RecordsPanel title="创作约定与频道题材" reveal={initialPanel === 'settings'}>
+        <AuthorIntentPanel
+          branchId={branch.id}
+          novelId={branch.novel_id}
+          account={account}
+          modelReady={modelReady}
+          notify={notify}
+          onSaved={refresh}
+        />
+        <GenreSettings key={branch.id} branchId={branch.id} notify={notify} onSaved={refresh} />
+      </RecordsPanel>
+      <RecordsPanel
+        title="其他已采用设定"
+        status={definitions.length ? `${definitions.length} 项` : undefined}
+      >
+        <p>可在这里维护人物、世界与粗纲。创建整书版本时可继承已采用的设定。</p>
         <details>
           <summary>手动编写或调整设定</summary>
           <form
@@ -519,36 +577,35 @@ export function Records({
             <pre>{d.payload.text}</pre>
           </details>
         ))}
-      </section>
+      </RecordsPanel>
       {source && (
-        <section className="card source-review">
-          <div className="section-title">
-            <h2>来源与定位</h2>
-            <button onClick={() => setSource('')}>关闭来源</button>
+        <dialog
+          ref={sourceDialog}
+          className="writing-sheet source-review"
+          aria-labelledby="records-source-title"
+          onClose={() => setSource('')}
+        >
+          <div className="writing-sheet-header">
+            <h2 id="records-source-title">来源与定位</h2>
+            <button type="button" onClick={() => sourceDialog.current?.close()}>
+              关闭来源
+            </button>
           </div>
           <pre>{source}</pre>
-        </section>
+        </dialog>
       )}
-      <CompletionDelivery key={branch.id} branchId={branch.id} refreshVersion={storyRevision} />
-      <FinalizationPanel
-        branchId={branch.id}
-        refreshVersion={storyRevision}
-        notify={notify}
-        onFinalized={refresh}
-      />
-      <section className="card acceptance">
-        <div className="section-title">
-          <h2>整书验收</h2>
-          <span className="badge">
-            {completion?.accepted
-              ? '作者验收已通过'
-              : completion?.author_finalized
-                ? '作者已确认定稿，工具验收另行记录'
-                : completion?.production_complete
-                  ? '生成完成，待作者验收'
-                  : '尚未满足整书完成条件'}
-          </span>
-        </div>
+      <RecordsPanel title="完本验收与交付">
+        <CompletionDelivery key={branch.id} branchId={branch.id} refreshVersion={storyRevision} />
+      </RecordsPanel>
+      <RecordsPanel title="作者定稿确认">
+        <FinalizationPanel
+          branchId={branch.id}
+          refreshVersion={storyRevision}
+          notify={notify}
+          onFinalized={refresh}
+        />
+      </RecordsPanel>
+      <RecordsPanel title="整书验收" status={completionStatus}>
         {completion && (
           <>
             <p>
@@ -657,10 +714,14 @@ export function Records({
             将验收绑定到当前故事修订
           </button>
         </form>
-      </section>
-      <section className="card">
+      </RecordsPanel>
+      <RecordsPanel
+        title="备份与恢复演练"
+        onFirstOpen={() => {
+          void api<{ id: string; bytes: number }[]>('/backups').then(setBackups).catch(notify)
+        }}
+      >
         <div className="section-title">
-          <h2>备份与恢复演练</h2>
           <button
             className="primary"
             disabled={busy}
@@ -669,7 +730,7 @@ export function Records({
                 const b = await api<{ id: string }>('/backups', 'POST')
                 const check = await api(`/backups/${b.id}/verify`, 'POST')
                 setBackupResult(JSON.stringify(check, null, 2))
-                await refresh()
+                setBackups(await api<{ id: string; bytes: number }[]>('/backups'))
               })
             }
           >
@@ -697,7 +758,7 @@ export function Records({
           </div>
         ))}
         {backupResult && <pre role="status">{backupResult}</pre>}
-      </section>
+      </RecordsPanel>
     </div>
   )
 }

@@ -91,6 +91,7 @@ async function fixture(page: Page) {
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await page.getByText('长篇结构与整理', { exact: true }).click()
   const workspace = page.getByRole('region', { name: '长篇人物时点与多线工作台', exact: true })
   await workspace.getByText('查询人物在故事时点知道什么、具有什么', { exact: true }).click()
   await workspace.getByRole('combobox', { name: '查询人物', exact: true }).selectOption(person)

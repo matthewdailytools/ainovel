@@ -126,6 +126,7 @@ test('候选编辑、同契约复检、再次复检与历史回看，作者采�
   await page.getByLabel('每章字数下限').fill('200')
   await page.getByLabel('每章字数上限').fill('600')
   await page.getByRole('combobox', { name: '采纳政策', exact: true }).selectOption('manual')
+  await page.getByText('写作与检查设置', { exact: true }).click()
   await page.getByRole('checkbox', { name: '额外逐项核对本次情节', exact: true }).check()
   const workflowResponse = page.waitForResponse(
     (r) => r.url().endsWith('/api/workflows') && r.request().method() === 'POST',
@@ -239,9 +240,10 @@ test('候选编辑、同契约复检、再次复检与历史回看，作者采�
   const structureId = (await readTask(workflow.id)).result.waiting_structure
   expect(typeof structureId).toBe('string')
   await page.getByRole('button', { name: '打开此批次的结构审阅', exact: true }).click()
-  await page.getByText('按保存稿整理人物、事件、状态和伏笔候选', { exact: true }).click()
   const structure = page.getByRole('region', { name: '结构化整理与确认', exact: true })
-  await structure.getByRole('combobox', { name: '保存的结构候选', exact: true }).selectOption(structureId)
+  await expect(structure.getByRole('combobox', { name: '保存的结构候选', exact: true })).toHaveValue(
+    structureId,
+  )
   await expect(structure.getByRole('checkbox', { name: /^采用人物：/ })).toHaveCount(1)
   for (const box of await structure.getByRole('checkbox', { name: /^采用/ }).all()) await box.check()
   await structure.getByRole('button', { name: '确认采用所选结构（不修改正文）', exact: true }).click()

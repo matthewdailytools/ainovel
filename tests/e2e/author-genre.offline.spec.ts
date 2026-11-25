@@ -14,6 +14,7 @@ test('手动创作约定与女频无CP题材：保存、预览、重载及跨作
   const selector = page.getByRole('combobox', { name: '作品', exact: true })
   await selector.selectOption(novels[0].id)
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await page.getByText('创作约定与频道题材', { exact: true }).click()
   const intent = page.locator('#author-intent')
   const genre = page.locator('#genre-settings')
   const authorText = '女频无CP事业成长。让读者先紧张后释然，追问谁改了账本；交易最终失败，不战斗。😀𠮷'
@@ -23,6 +24,13 @@ test('手动创作约定与女频无CP题材：保存、预览、重载及跨作
   const budgetBefore = (await (await page.request.get('/api/config')).json()).budget
   await intent.getByText('编写或整理创作约定（确认后生效）', { exact: true }).click()
   await intent.getByRole('textbox', { name: '作者原话与创作想法', exact: true }).fill(authorText)
+  const settings = page.getByText('创作约定与频道题材', { exact: true })
+  await settings.click()
+  await expect(intent.getByRole('textbox', { name: '作者原话与创作想法', exact: true })).toBeHidden()
+  await settings.click()
+  await expect(intent.getByRole('textbox', { name: '作者原话与创作想法', exact: true })).toHaveValue(
+    authorText,
+  )
   await intent.getByRole('textbox', { name: '情绪与阅读体验（可留空）', exact: true }).fill('先紧张后释然')
   await intent.getByRole('textbox', { name: '核心钩子与追问（可留空）', exact: true }).fill('谁改了账本')
   await intent.getByRole('textbox', { name: '故事方向（可留空）', exact: true }).fill('靠核验证据取得主动')
@@ -71,6 +79,7 @@ test('手动创作约定与女频无CP题材：保存、预览、重载及跨作
 
   await page.reload()
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await page.getByText('创作约定与频道题材', { exact: true }).click()
   await intent.getByText('编写或整理创作约定（确认后生效）', { exact: true }).click()
   await expect(intent.getByRole('textbox', { name: '作者原话与创作想法', exact: true })).toHaveValue(
     authorText,
@@ -89,6 +98,7 @@ test('手动创作约定与女频无CP题材：保存、预览、重载及跨作
 
   await selector.selectOption(novels[1].id)
   await expect(page.getByRole('combobox', { name: '工作版本', exact: true })).toHaveValue(novels[1].branch_id)
+  await settings.click()
   await intent.getByText('编写或整理创作约定（确认后生效）', { exact: true }).click()
   await expect(intent.getByRole('textbox', { name: '作者原话与创作想法', exact: true })).toHaveValue('')
   await expect(

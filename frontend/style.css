@@ -288,6 +288,19 @@ small {
   background: #fffefa;
   font-size: 13px;
 }
+.workspace-bar-compact {
+  min-height: 46px;
+  padding: 6px clamp(12px, 3vw, 24px);
+  column-gap: 12px;
+  row-gap: 4px;
+}
+.workspace-bar-compact select {
+  min-height: 32px;
+  padding: 3px 8px;
+}
+.workspace-bar-compact .new-novel > summary {
+  min-height: 32px;
+}
 .new-novel {
   position: relative;
   font-size: 13px;
@@ -408,6 +421,29 @@ summary {
 details[open] > summary {
   margin-bottom: 14px;
 }
+.page-disclosure {
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+}
+.page-disclosure.card {
+  padding: 0 clamp(12px, 2vw, 20px);
+}
+.page-disclosure > summary {
+  min-height: 38px;
+  padding-block: 9px;
+  font-size: 0.933rem;
+  color: var(--ink);
+}
+.page-disclosure[open] {
+  padding-block-end: 12px;
+}
+.page-disclosure[open] > summary {
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
 details > label {
   margin-top: 12px;
 }
@@ -430,7 +466,7 @@ details > label {
 }
 .page-pad {
   max-width: 1600px;
-  padding: 40px 36px 64px;
+  padding: 20px clamp(12px, 3vw, 28px) 48px;
   margin: auto;
 }
 .ideation-page {
@@ -445,13 +481,7 @@ details > label {
 .conception-navigation {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 24px clamp(12px, 4vw, 36px) 0;
-}
-.conception-navigation + .page-pad {
-  padding-top: 20px;
+  gap: 6px;
 }
 .conception-navigation [aria-pressed='true'],
 .conception-steps [aria-current='step'] {
@@ -509,9 +539,7 @@ details > label {
   max-width: 100%;
 }
 .conception-add-category {
-  border-top: 1px solid var(--line);
-  margin-top: 16px;
-  padding-top: 16px;
+  margin-top: 12px;
 }
 .conception-links,
 .conception-issues {
@@ -544,13 +572,19 @@ details > label {
 .page-heading {
   display: flex;
   justify-content: space-between;
-  gap: 24px;
-  align-items: flex-start;
-  margin-bottom: 28px;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.page-heading h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.4;
 }
 .page-heading p {
   color: #596b63;
-  margin-bottom: 0;
+  margin: 4px 0 0;
 }
 .page-heading .eyebrow {
   display: block;
@@ -1188,19 +1222,19 @@ details > label {
   margin: 0;
   padding: 0;
 }
-.topbar-writing {
+.topbar-compact {
   position: relative;
   min-height: 56px;
   padding: 5px 20px;
   gap: 16px;
 }
-.topbar-writing .brand strong {
+.topbar-compact .brand strong {
   font-size: 1.35rem;
 }
-.topbar-writing .local-label {
+.topbar-compact .local-label {
   display: none;
 }
-.topbar-writing .nav {
+.topbar-compact .nav {
   flex: none;
   min-height: 36px;
   padding: 5px 9px;
@@ -1367,6 +1401,33 @@ pre {
 .reader-layout > .card {
   padding: 20px;
 }
+.library-page .reader-layout {
+  grid-template-columns: minmax(170px, 210px) minmax(0, 1fr);
+}
+.library-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.library-tools > details {
+  min-width: 0;
+  max-width: 100%;
+}
+.library-tools > details[open] {
+  flex-basis: 100%;
+}
+.library-reader-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  margin-block: 8px;
+}
+.library-reader-controls label {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
 .reader-layout .wide {
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -1439,6 +1500,23 @@ blockquote {
   grid-template-columns: minmax(300px, 1.1fr) minmax(300px, 0.9fr);
   gap: 24px;
   align-items: start;
+}
+.records-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.records-page > .page-heading,
+.records-page > .page-disclosure,
+.records-grid > .page-disclosure {
+  margin-block: 0;
+}
+.records-grid {
+  gap: 8px;
+}
+.records-page .page-disclosure > summary small {
+  margin-inline-start: 8px;
+  font-weight: 400;
 }
 .form-grid {
   display: grid;
@@ -1574,10 +1652,13 @@ summary {
   .topbar nav {
     gap: 2px;
   }
-  .workspace-bar {
+  .workspace-bar:not(.workspace-bar-compact) {
     flex-wrap: wrap;
     gap: 12px;
     padding: 12px 20px;
+  }
+  .workspace-bar-compact {
+    flex-wrap: wrap;
   }
   .workspace-bar select {
     max-width: 200px;
@@ -1587,9 +1668,6 @@ summary {
   }
   .reader-layout > aside:last-child {
     grid-column: 1/-1;
-  }
-  .page-pad {
-    padding: 28px 24px 48px;
   }
 }
 @media (max-width: 850px) {
@@ -1605,7 +1683,7 @@ summary {
   .nav {
     flex: 1;
   }
-  .topbar-writing nav {
+  .topbar-compact nav {
     flex-wrap: wrap;
     justify-content: flex-start;
   }
@@ -1628,9 +1706,6 @@ summary {
   .workspace-bar > label {
     flex: 1;
   }
-  .page-heading {
-    flex-direction: column;
-  }
   .import-card {
     width: 100%;
   }
@@ -1639,29 +1714,29 @@ summary {
   }
 }
 @media (max-width: 767px) {
-  .topbar-writing {
+  .topbar-compact {
     padding: 4px 12px;
     gap: 6px;
   }
-  .topbar-writing .brand {
+  .topbar-compact .brand {
     gap: 6px;
   }
-  .topbar-writing .brand strong {
+  .topbar-compact .brand strong {
     font-size: 1.06rem;
     letter-spacing: 0;
   }
-  .topbar-writing .brand-mark {
+  .topbar-compact .brand-mark {
     width: 28px;
     height: 28px;
     font-size: 0.933rem;
   }
-  .topbar-writing .workbench-navigation-toggle {
+  .topbar-compact .workbench-navigation-toggle {
     display: inline-flex;
     padding-inline: 8px;
     min-height: 36px;
     font-size: 0.875rem;
   }
-  .topbar-writing .workbench-navigation-toggle::after {
+  .topbar-compact .workbench-navigation-toggle::after {
     content: '';
     width: 5px;
     height: 5px;
@@ -1669,10 +1744,10 @@ summary {
     border-width: 0 1px 1px 0;
     transform: translateY(-2px) rotate(45deg);
   }
-  .topbar-writing .workbench-navigation > nav {
+  .topbar-compact .workbench-navigation > nav {
     display: none;
   }
-  .topbar-writing .workbench-navigation-open > nav {
+  .topbar-compact .workbench-navigation-open > nav {
     display: flex;
     position: absolute;
     z-index: 21;
@@ -1758,6 +1833,13 @@ summary {
     max-width: 100%;
     font-size: 11px;
   }
+  .workspace-bar-compact {
+    padding: 6px 12px;
+    gap: 4px 8px;
+  }
+  .workspace-bar-compact > .new-novel {
+    flex-basis: auto;
+  }
   .new-novel {
     flex-basis: 100%;
   }
@@ -1783,7 +1865,7 @@ summary {
   .sidebar-bottom textarea {
     min-height: 52px;
   }
-  .topbar-writing {
+  .topbar-compact {
     padding: 4px 12px;
   }
   .assistant-panel .section-title {
@@ -1795,7 +1877,7 @@ summary {
     padding-top: 24px;
   }
   .page-pad {
-    padding: 28px 16px 48px;
+    padding: 12px 12px 40px;
   }
   .card {
     padding: 20px 16px;
@@ -1818,9 +1900,6 @@ summary {
     flex-basis: 100%;
   }
   .search-bar button {
-    width: 100%;
-  }
-  .page-heading button {
     width: 100%;
   }
   .welcome {

@@ -42,6 +42,7 @@ export function WorkflowPage({
   notify,
   onStarted,
   onGenreSettings,
+  onStructureReview,
   initialMode = 'assisted',
   conceptionHandoff,
   onConceptionSettings,
@@ -54,6 +55,7 @@ export function WorkflowPage({
   notify: Notify
   onStarted: (id: string) => Promise<void>
   onGenreSettings: () => void
+  onStructureReview: (artifactId: string) => void
   initialMode?: 'assisted' | 'automatic'
   conceptionHandoff?: ConceptionHandoff
   onConceptionSettings: () => void
@@ -196,6 +198,10 @@ export function WorkflowPage({
     visibleTasks.find((t) => t.id === selectedTask) ||
     visibleTasks.find((t) => t.branch_id === branchId) ||
     visibleTasks[0]
+  const taskRunning = task?.status === 'queued' || task?.status === 'running'
+  const taskResumable =
+    !!task &&
+    ['paused', 'blocked_runtime', 'cancelled', 'needs_review', 'blocked_creative'].includes(task.status)
   const waitingId = task?.result.waiting_structure || task?.result.waiting_artifact
   conditionalTarget.current = `${novel.id}/${task?.id || ''}`
   const waiting = loadedWaiting?.id === waitingId ? loadedWaiting : undefined
@@ -365,68 +371,34 @@ export function WorkflowPage({
       setStatus('已创建独立工作版本。执行记录、费用和干预不会与另一模式混淆。')
     })
   }
+  const briefField = (
+    <label>
+      作品设定、粗纲与结局方向
+      <textarea
+        rows={5}
+        value={brief}
+        onChange={(event) => setBrief(event.target.value)}
+        required={!relay}
+        maxLength={30_000}
+      />
+    </label>
+  )
   return (
     <div className="page-pad workflow-page">
       <div className="page-heading">
         <div>
-          <span className="eyebrow">从情节，到一部小说</span>
           <h1>整书创作</h1>
-          <p>创作分工、采纳方式和任务范围分别设置。每次启动都建立独立工作版本。</p>
         </div>
-        <button
-          onClick={() => {
-            setBrief(story.brief)
-            setFixed(story.fixed.join('\n'))
-            setCount(36)
-            setPlots(story.chapters.map((p) => `${p.title} | ${p.plot} | ${p.fixed.join('；')}`).join('\n'))
-            setStatus('已载入原创验收简报《雾港潮尺》。尚未提交，不会产生费用。')
-          }}
-        >
-          载入原创验收简报
-        </button>
+        {task && (
+          <a href="#workflow-checkpoints" className="button">
+            查看任务与检查点 · {label(task.status)}
+          </a>
+        )}
       </div>
-      <p role="status">{status}</p>
+      {status && <p role="status">{status}</p>}
       <div className="workflow-grid">
-        <section className="card">
+        <section className="card" aria-label="创建创作批次">
           <form onSubmit={start}>
-            {conception && (
-              <div className="notice">
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={useConception}
-                    onChange={(event) => setUseConception(event.target.checked)}
-                  />
-                  使用已确认构思（修订 {conception.revision}）
-                </label>
-                <p className="small">
-                  {mode === 'assisted'
-                    ? '你可以继续编辑简报并填写逐章情节。'
-                    : '你可以继续编辑简报与固定条件。'}
-                </p>
-                <button type="button" onClick={onConceptionSettings}>
-                  回到构思工作台
-                </button>
-              </div>
-            )}
-            <AuthorContractNotice
-              branchId={branchId}
-              onSettings={onGenreSettings}
-              onResolved={setSeenContract}
-            />
-            <GenreProfileNotice
-              branchId={branchId}
-              onSettings={onGenreSettings}
-              scope="新建半自动／全自动批次的规划、写作、审查与修订"
-              onResolved={setSeenGenre}
-            />
-            <StoryInheritance
-              key={branchId}
-              branchId={branchId}
-              busy={busy}
-              notify={notify}
-              onChange={setInheritance}
-            />
             <label className="check">
               <input type="checkbox" checked={relay} onChange={(event) => setRelay(event.target.checked)} />
               从已确认章纲接力
@@ -476,34 +448,16 @@ export function WorkflowPage({
             </label>
             <p className="small">
               {completionScope === 'segment'
-                ? '完成本批情节、篇幅、状态维护与范围审查后记录阶段完成。后续终局和未到回收时点的伏笔继续保留，不将本批标为全书完结。'
-                : '全部章数完成后核对主冲突、作者终局与已维护承诺；存在未闭合或严重问题时，全书仍未完成。'}
+                ? '按所选章节验收本批，后续终局与待回收伏笔继续保留。'
+                : '写完计划章数后核对主冲突、作者终局与已维护承诺。'}
             </p>
-            <label>
-              作品设定、粗纲与结局方向
-              <textarea
-                rows={7}
-                value={brief}
-                onChange={(e) => setBrief(e.target.value)}
-                required={!relay}
-                maxLength={30_000}
-              />
-            </label>
-            {seenContract?.branch_id === branchId && seenContract.author_text && (
-              <button type="button" disabled={busy} onClick={() => setBrief(seenContract.author_text)}>
-                沿用当前创作约定作为简报
-              </button>
-            )}
-            <label>
-              {completionScope === 'segment' ? '本批适用固定条件（每行一条）' : '全书固定条件（每行一条）'}
-              <textarea rows={3} value={fixed} onChange={(e) => setFixed(e.target.value)} />
-            </label>
+            {!relay && briefField}
             {!relay && mode === 'assisted' && (
               <label>
                 作者批量情节（每行一章）
                 <textarea
                   className="plot-input"
-                  rows={10}
+                  rows={6}
                   value={plots}
                   onChange={(e) => setPlots(e.target.value)}
                   required
@@ -551,10 +505,6 @@ export function WorkflowPage({
               </label>
             </div>
             <label>
-              写作设置
-              <textarea rows={3} value={profile} onChange={(e) => setProfile(e.target.value)} />
-            </label>
-            <label>
               采纳政策
               <select
                 value={adoption}
@@ -568,82 +518,175 @@ export function WorkflowPage({
                 <option value="automatic">通过本章检查后自动采纳</option>
               </select>
             </label>
-            <label>
-              <span className="check">
+            {adoption === 'automatic' && (
+              <p className="small">通过本章检查后，正文自动写入本次新建的工作版本。</p>
+            )}
+            <details className="page-disclosure">
+              <summary>
+                来源与固定条件{useConception && conception ? ` · 构思修订 ${conception.revision}` : ''}
+              </summary>
+              {relay && briefField}
+              {conception && (
+                <div className="notice">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={useConception}
+                      onChange={(event) => setUseConception(event.target.checked)}
+                    />
+                    使用已确认构思（修订 {conception.revision}）
+                  </label>
+                  <p className="small">
+                    {mode === 'assisted'
+                      ? '你可以继续编辑简报并填写逐章情节。'
+                      : '你可以继续编辑简报与固定条件。'}
+                  </p>
+                  <button type="button" onClick={onConceptionSettings}>
+                    回到构思工作台
+                  </button>
+                </div>
+              )}
+              <AuthorContractNotice
+                branchId={branchId}
+                onSettings={onGenreSettings}
+                onResolved={setSeenContract}
+              />
+              <GenreProfileNotice
+                branchId={branchId}
+                onSettings={onGenreSettings}
+                scope="新建半自动／全自动批次的规划、写作、审查与修订"
+                onResolved={setSeenGenre}
+              />
+              <StoryInheritance
+                key={branchId}
+                branchId={branchId}
+                busy={busy}
+                notify={notify}
+                onChange={setInheritance}
+              />
+              <label>
+                {completionScope === 'segment' ? '本批适用固定条件（每行一条）' : '全书固定条件（每行一条）'}
+                <textarea rows={3} value={fixed} onChange={(e) => setFixed(e.target.value)} />
+              </label>
+              {seenContract?.branch_id === branchId && seenContract.author_text && (
+                <button type="button" disabled={busy} onClick={() => setBrief(seenContract.author_text)}>
+                  沿用当前创作约定作为简报
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setBrief(story.brief)
+                  setFixed(story.fixed.join('\n'))
+                  setCount(36)
+                  setPlots(
+                    story.chapters.map((p) => `${p.title} | ${p.plot} | ${p.fixed.join('；')}`).join('\n'),
+                  )
+                  setStatus('已载入原创验收简报《雾港潮尺》。尚未提交，不会产生费用。')
+                }}
+              >
+                载入原创验收简报
+              </button>
+            </details>
+            <details className="page-disclosure">
+              <summary>写作与检查设置</summary>
+              <label>
+                写作设置
+                <textarea rows={3} value={profile} onChange={(e) => setProfile(e.target.value)} />
+              </label>
+              <label>
+                <span className="check">
+                  <input
+                    type="checkbox"
+                    checked={structuredMaintenance}
+                    onChange={(e) => {
+                      setStructuredMaintenance(e.target.checked)
+                      if (!e.target.checked) setCharacterFieldRepair(false)
+                    }}
+                  />
+                  每章采用后整理人物、时点、事件和伏笔
+                </span>
+                <span className="small">
+                  增加模型调用，计入同一批次及共享预算；人工政策需确认结构，旧事实纠错会停下等待核对。
+                </span>
+              </label>
+              {structuredMaintenance && (
+                <StructureOutputSettings
+                  value={structureMaxOutputTokens}
+                  disabled={busy}
+                  onChange={setStructureMaxOutputTokens}
+                />
+              )}
+              <label className="check">
                 <input
                   type="checkbox"
-                  checked={structuredMaintenance}
-                  onChange={(e) => {
-                    setStructuredMaintenance(e.target.checked)
-                    if (!e.target.checked) setCharacterFieldRepair(false)
-                  }}
+                  disabled={!structuredMaintenance}
+                  checked={structuredMaintenance && sceneMaintenance}
+                  onChange={(e) => setSceneMaintenance(e.target.checked)}
                 />
-                每章采用后整理人物、时点、事件和伏笔
-              </span>
-              <span className="small">
-                增加模型调用，计入同一批次及共享预算；人工政策需确认结构，旧事实纠错会停下等待核对。
-              </span>
-            </label>
-            {structuredMaintenance && (
-              <StructureOutputSettings
-                value={structureMaxOutputTokens}
-                disabled={busy}
-                onChange={setStructureMaxOutputTokens}
-              />
-            )}
-            <label className="check">
-              <input
-                type="checkbox"
-                disabled={!structuredMaintenance}
-                checked={structuredMaintenance && sceneMaintenance}
-                onChange={(e) => setSceneMaintenance(e.target.checked)}
-              />
-              同时维护新正文的场景范围
-            </label>
-            <p className="small">
-              与结构使用同一次整理调用；按新正文重新定位，未知时点明确保留。作者编辑过的旧绑定需核对后替换。
-            </p>
-            <CharacterFieldRepairOption
-              checked={characterFieldRepair}
-              adoption={adoption}
-              maintenance={structuredMaintenance}
-              busy={busy}
-              onChange={setCharacterFieldRepair}
-            />
-            <PlotAuditOption
-              checked={relay || plotContractCheck}
-              disabled={busy || relay}
-              onChange={setPlotContractCheck}
-              identityChecked={sourceIdentityContext}
-              onIdentityChange={setSourceIdentityContext}
-            />
-            {!relay && plotContractCheck && mode === 'automatic' && (
-              <p className="small muted">
-                全自动会在写正文前明确自己的AI章纲，必要时最多两轮选择本章开放细节并核对，增加模型调用和费用。
-                原章纲、你的固定条件和剧情中尚未解开的疑问保持；未能明确时停止，不先写正文。AI选择不是作者新增锁定。
+                同时维护新正文的场景范围
+              </label>
+              <p className="small">
+                与结构使用同一次整理调用；按新正文重新定位，未知时点明确保留。作者编辑过的旧绑定需核对后替换。
               </p>
-            )}
-            <label>
-              本批次预算（可低于共享总上限）
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={runLimit}
-                onChange={(e) => setRunLimit(e.target.value)}
-                placeholder="留空则仍受服务商共享总上限保护"
+              <CharacterFieldRepairOption
+                checked={characterFieldRepair}
+                adoption={adoption}
+                maintenance={structuredMaintenance}
+                busy={busy}
+                onChange={setCharacterFieldRepair}
               />
-            </label>
-            <div className="notice">
-              <p>
-                当前账户：{account}。共享预算和调用记录见顶栏「设置」。并发为 1，每项最多自动修订 2
-                轮。未知超时保留费用预留并停止。字数为正文非空白字符数，含标点。
-              </p>
-              <p>自动采纳会写入本次新建版本。模型审查结果需经作者最终审阅；写满章数不会自动通过整书验收。</p>
-              <p>
-                自动维护仅按本章原文兑现无旧引用、断言保持一致的计划；改写已有事实、档案或带历史来源的计划会停下核对。
-              </p>
-            </div>
+              <PlotAuditOption
+                checked={relay || plotContractCheck}
+                disabled={busy || relay}
+                onChange={setPlotContractCheck}
+                identityChecked={sourceIdentityContext}
+                onIdentityChange={setSourceIdentityContext}
+              />
+              {!relay && plotContractCheck && mode === 'automatic' && (
+                <p className="small muted">
+                  全自动会在写正文前明确自己的AI章纲，必要时最多两轮选择本章开放细节并核对，增加模型调用和费用。
+                  原章纲、你的固定条件和剧情中尚未解开的疑问保持；未能明确时停止，不先写正文。AI选择不是作者新增锁定。
+                </p>
+              )}
+            </details>
+            <details
+              className="page-disclosure"
+              onInvalid={(event) => {
+                event.currentTarget.open = true
+              }}
+            >
+              <summary>
+                预算与执行说明
+                {runLimit
+                  ? ` · ${runLimit} ${accounts.find((entry) => entry.id === account)?.currency ?? ''}`
+                  : ''}
+              </summary>
+              <label>
+                本批次预算（可低于共享总上限）
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={runLimit}
+                  onChange={(e) => setRunLimit(e.target.value)}
+                  placeholder="留空则仍受服务商共享总上限保护"
+                />
+              </label>
+              <div className="notice">
+                <p>
+                  共享预算和调用记录见顶栏「设置」。并发为 1，每项最多自动修订 2
+                  轮。未知超时保留费用预留并停止。字数为正文非空白字符数，含标点。
+                </p>
+                <p>
+                  自动采纳会写入本次新建版本。模型审查结果需经作者最终审阅；写满章数不会自动通过整书验收。
+                </p>
+                <p>
+                  自动维护仅按本章原文兑现无旧引用、断言保持一致的计划；改写已有事实、档案或带历史来源的计划会停下核对。
+                </p>
+              </div>
+            </details>
+            <p className="small muted">执行账户 {account} · 启动时创建独立工作版本</p>
             <button
               className="primary wide"
               disabled={
@@ -659,15 +702,19 @@ export function WorkflowPage({
                 : !modelReady
                   ? '请先配置模型账户和单价'
                   : seenGenre?.branch_id !== branchId || seenContract?.branch_id !== branchId
-                    ? '正在读取来源题材配置…'
+                    ? '等待来源配置，可展开「来源与固定条件」核对'
                     : '创建独立版本并启动'}
             </button>
           </form>
         </section>
-        <section className="card run-monitor">
+        <section
+          className="card run-monitor"
+          id="workflow-checkpoints"
+          aria-labelledby="workflow-checkpoints-title"
+          tabIndex={-1}
+        >
           <div className="section-title">
-            <h2>任务与检查点</h2>
-            <span className="badge">持久执行</span>
+            <h2 id="workflow-checkpoints-title">任务与检查点</h2>
           </div>
           {visibleTasks.length ? (
             <>
@@ -709,19 +756,7 @@ export function WorkflowPage({
                     max={task.payload.chapters}
                     value={Math.min((task.result.next_chapter || 1) - 1, task.payload.chapters || 36)}
                   />
-                  <p role="status">{task.error || '生成、审查、事实和采纳分别留有记录。'}</p>
-                  {task.result.outline_relay && (
-                    <details>
-                      <summary>本批次冻结的接力章纲</summary>
-                      <ol>
-                        {task.result.outline_relay.sources.map((source) => (
-                          <li key={source.number}>
-                            来源第 {source.source_position} 章 · 版本 {source.outline_version}
-                          </li>
-                        ))}
-                      </ol>
-                    </details>
-                  )}
+                  {task.error && <p role="status">{task.error}</p>}
                   {task.result.outline_relay_waiting && (
                     <RelayDecision
                       key={task.result.outline_relay_waiting.id}
@@ -737,35 +772,6 @@ export function WorkflowPage({
                       }
                     />
                   )}
-                  <p className="small muted">
-                    {task.payload.completion_scope === 'segment'
-                      ? '本次为阶段批次：范围检查通过只表示本批完成，未来终局与待回收承诺不被自动改为已闭合。'
-                      : '本次为整书范围：所有已维护承诺与核心终局通过后，才记录模型生产完成。'}
-                  </p>
-                  <p className="small muted">
-                    执行账户：{task.payload.account} · 本次预算上限：
-                    {task.payload.budget_limit ?? '服务商共享上限'}{' '}
-                    {accounts.find((a) => a.id === task.payload.account)?.currency}
-                  </p>
-                  {task.result.continued_from && (
-                    <p className="small muted">已承接上次检查点；原稿、费用历史与修订轮次保留。</p>
-                  )}
-                  <FrozenCharacterFieldRepairPolicy
-                    enabled={task.payload.character_field_repair}
-                    version={task.result.character_field_repair_version}
-                  />
-                  <FrozenStructureOutputPolicy
-                    value={task.payload.structure_max_output_tokens}
-                    maintenance={task.payload.structured_maintenance === true}
-                  />
-                  <FrozenPlotAuditPolicy
-                    enabled={task.payload.plot_contract_check}
-                    identityEnabled={task.payload.source_identity_context}
-                    identityVersion={task.result.source_identity_context_version}
-                    flowVersion={task.result.flow_source_entailment_version}
-                    mode={task.payload.mode}
-                    version={task.result.plot_contract_version}
-                  />
                   <PlanPreparationDetails
                     mode={task.payload.mode}
                     enabled={task.payload.plot_contract_check}
@@ -790,8 +796,49 @@ export function WorkflowPage({
                       await onStarted(row.branch_id)
                     }}
                   />
-                  <details>
-                    <summary>本批次冻结的频道与题材</summary>
+                  <details className="page-disclosure" key={task.id}>
+                    <summary>本批次设置与依据</summary>
+                    <p className="small muted">
+                      {task.payload.completion_scope === 'segment'
+                        ? '本次为阶段批次：范围检查通过只表示本批完成，未来终局与待回收承诺不被自动改为已闭合。'
+                        : '本次为整书范围：所有已维护承诺与核心终局通过后，才记录模型生产完成。'}
+                    </p>
+                    <p className="small muted">
+                      执行账户：{task.payload.account} · 本次预算上限：
+                      {task.payload.budget_limit ?? '服务商共享上限'}{' '}
+                      {accounts.find((a) => a.id === task.payload.account)?.currency}
+                    </p>
+                    {task.result.continued_from && (
+                      <p className="small muted">已承接上次检查点；原稿、费用历史与修订轮次保留。</p>
+                    )}
+                    <FrozenCharacterFieldRepairPolicy
+                      enabled={task.payload.character_field_repair}
+                      version={task.result.character_field_repair_version}
+                    />
+                    <FrozenStructureOutputPolicy
+                      value={task.payload.structure_max_output_tokens}
+                      maintenance={task.payload.structured_maintenance === true}
+                    />
+                    <FrozenPlotAuditPolicy
+                      enabled={task.payload.plot_contract_check}
+                      identityEnabled={task.payload.source_identity_context}
+                      identityVersion={task.result.source_identity_context_version}
+                      flowVersion={task.result.flow_source_entailment_version}
+                      mode={task.payload.mode}
+                      version={task.result.plot_contract_version}
+                    />
+                    {task.result.outline_relay && (
+                      <details>
+                        <summary>本批次冻结的接力章纲</summary>
+                        <ol>
+                          {task.result.outline_relay.sources.map((source) => (
+                            <li key={source.number}>
+                              来源第 {source.source_position} 章 · 版本 {source.outline_version}
+                            </li>
+                          ))}
+                        </ol>
+                      </details>
+                    )}
                     {task.result.author_contract_snapshot && (
                       <details>
                         <summary>本次任务冻结的创作约定</summary>
@@ -805,9 +852,7 @@ export function WorkflowPage({
                     !task.result.genre_profile_snapshot.legacy_unconfigured ? (
                       <GenreProfileDetails profile={task.result.genre_profile_snapshot} />
                     ) : (
-                      <p className="small muted">
-                        这是未冻结题材装配的历史批次，恢复时沿用原有范围。当前配置不会被自动套入旧稿；新配置用于新建批次。
-                      </p>
+                      <p className="small muted">历史批次没有冻结题材配置，续跑沿用其原有范围。</p>
                     )}
                   </details>
                   {task.result.continued_to && (
@@ -823,30 +868,32 @@ export function WorkflowPage({
                       打开续跑任务
                     </button>
                   )}
-                  <div className="actions">
-                    <button
-                      disabled={!['queued', 'running'].includes(task.status)}
-                      onClick={() =>
-                        void perform(async () => {
-                          await api(`/tasks/${task.id}/pause`, 'POST')
-                          await refresh()
-                        })
-                      }
-                    >
-                      章间暂停
-                    </button>
-                    <button
-                      disabled={!['queued', 'running'].includes(task.status) || !!task.cancel}
-                      onClick={() =>
-                        void perform(async () => {
-                          await api(`/tasks/${task.id}/cancel`, 'POST')
-                          await refresh()
-                        })
-                      }
-                    >
-                      {task.cancel ? '正在取消…' : '取消当前执行'}
-                    </button>
-                  </div>
+                  {taskRunning && (
+                    <div className="actions">
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          void perform(async () => {
+                            await api(`/tasks/${task.id}/pause`, 'POST')
+                            await refresh()
+                          })
+                        }
+                      >
+                        章间暂停
+                      </button>
+                      <button
+                        disabled={busy || !!task.cancel}
+                        onClick={() =>
+                          void perform(async () => {
+                            await api(`/tasks/${task.id}/cancel`, 'POST')
+                            await refresh()
+                          })
+                        }
+                      >
+                        {task.cancel ? '正在取消…' : '取消当前执行'}
+                      </button>
+                    </div>
+                  )}
                   {['blocked_runtime', 'cancelled'].includes(task.status) && (
                     <label className="check">
                       <input
@@ -857,10 +904,16 @@ export function WorkflowPage({
                       已查看费用记录，明确同意恢复时可能产生新调用
                     </label>
                   )}
-                  <label className="check">
-                    <input type="checkbox" checked={changes} onChange={(e) => setChanges(e.target.checked)} />
-                    前文已修改时，从最早失效章重新检查并按需修订
-                  </label>
+                  {taskResumable && (
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={changes}
+                        onChange={(e) => setChanges(e.target.checked)}
+                      />
+                      前文已修改时，从最早失效章重新检查并按需修订
+                    </label>
+                  )}
                   {task.result.conditional_book_policy_version === undefined &&
                     ((task.status === 'needs_review' && !!waitingId) || !!task.result.pending_structure) && (
                       <label className="check">
@@ -899,38 +952,33 @@ export function WorkflowPage({
                         )}
                       </>
                     )}
-                  <button
-                    disabled={
-                      busy ||
-                      planWaiting ||
-                      !!task.result.outline_relay_waiting ||
-                      (task.status === 'needs_review' &&
-                        !!waitingId &&
-                        (!waiting || candidateChanged || (structureWaiting && !regenerate))) ||
-                      ![
-                        'paused',
-                        'blocked_runtime',
-                        'cancelled',
-                        'needs_review',
-                        'blocked_creative',
-                      ].includes(task.status)
-                    }
-                    onClick={() =>
-                      void perform(async () => {
-                        await api(`/tasks/${task.id}/resume`, 'POST', {
-                          acknowledge_unknown: unknown,
-                          acknowledge_changes: changes,
-                          regenerate_pending: regenerate,
-                          reason: retryReason,
-                          candidate_revision: waiting?.candidate_revision ?? 0,
-                          pause_after_maintenance: pauseAfterMaintenance,
+                  {taskResumable && (
+                    <button
+                      disabled={
+                        busy ||
+                        planWaiting ||
+                        !!task.result.outline_relay_waiting ||
+                        (task.status === 'needs_review' &&
+                          !!waitingId &&
+                          (!waiting || candidateChanged || (structureWaiting && !regenerate)))
+                      }
+                      onClick={() =>
+                        void perform(async () => {
+                          await api(`/tasks/${task.id}/resume`, 'POST', {
+                            acknowledge_unknown: unknown,
+                            acknowledge_changes: changes,
+                            regenerate_pending: regenerate,
+                            reason: retryReason,
+                            candidate_revision: waiting?.candidate_revision ?? 0,
+                            pause_after_maintenance: pauseAfterMaintenance,
+                          })
+                          await refresh()
                         })
-                        await refresh()
-                      })
-                    }
-                  >
-                    从保存的检查点恢复
-                  </button>
+                      }
+                    >
+                      从保存的检查点恢复
+                    </button>
+                  )}
                   {planWaiting && (
                     <p role="status">
                       章纲准备尚未通过，请核对执行记录。可在上方调整简报后创建独立批次，本批记录和原稿保留；恢复不会重置开放选择轮次。
@@ -1142,8 +1190,10 @@ export function WorkflowPage({
                         disabled={busy}
                         onClick={() =>
                           void perform(async () => {
+                            const artifactId = task.result.waiting_structure
+                            if (!artifactId) return
                             await onStarted(task.branch_id)
-                            onGenreSettings()
+                            onStructureReview(artifactId)
                           })
                         }
                       >
@@ -1261,9 +1311,7 @@ export function WorkflowPage({
               )}
             </>
           ) : (
-            <div className="empty-note">
-              启动后可在这里查看进度、暂停与恢复。浏览器关闭后，只要本机服务和 Worker 保持运行，任务会继续。
-            </div>
+            <div className="empty-note">启动批次后，在这里查看进度和检查点。</div>
           )}
         </section>
       </div>

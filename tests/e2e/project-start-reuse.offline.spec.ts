@@ -186,9 +186,11 @@ test('可选立项恢复、旧稿调序导入与手法卡固定引用', async ({
   const reader = page.getByRole('textbox', { name: '资料原文', exact: true })
   await expect(reader).toHaveValue(oldManuscript)
   await reader.press('ControlOrMeta+A')
+  await page.getByText('摘录笔记与参考目标', { exact: true }).click()
   await page
     .getByRole('textbox', { name: '参考学习目标', exact: true })
     .fill('分析有限交付如何留下下一步行动。')
+  await page.getByText('摘录笔记与参考目标', { exact: true }).click()
   const sessionCreated = page.waitForResponse(
     (response) =>
       response.url().endsWith('/api/reference-sessions') && response.request().method() === 'POST',
@@ -197,6 +199,7 @@ test('可选立项恢复、旧稿调序导入与手法卡固定引用', async ({
   const reference = await read(await sessionCreated)
   const referenceUrl = `/api/reference-sessions/${reference.id}`
   expect(reference.payload.source.file_hash).toBe(hash)
+  expect(reference.payload.goal).toBe('分析有限交付如何留下下一步行动。')
   await expect(page.getByRole('heading', { name: '参考仿写工作区', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '添加手工写法卡', exact: true }).click()
 

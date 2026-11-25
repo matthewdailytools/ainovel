@@ -37,6 +37,7 @@ export function App() {
   const [quickConception, setQuickConception] = useState(false)
   const [conceptionHandoff, setConceptionHandoff] = useState<ConceptionHandoff>()
   const [workflowMode, setWorkflowMode] = useState<'assisted' | 'automatic'>('assisted')
+  const [recordsVisit, setRecordsVisit] = useState<{ panel: 'settings' | 'structure'; artifactId?: string }>()
   const [feedbackHandoff, setFeedbackHandoff] = useState<FeedbackHandoff>()
   const [account, setAccount] = useState('openai_1')
   const [title, setTitle] = useState('')
@@ -111,9 +112,17 @@ export function App() {
   }, [ready, refreshConfig, notify])
   function navigate(id: string) {
     if (id !== page && !confirmLeave()) return
-    if (id === page && navigationOpen) navigationToggle.current?.focus()
+    if (navigationOpen) navigationToggle.current?.focus()
     setNavigationOpen(false)
-    if (id !== page) setPage(id)
+    if (id !== page) {
+      setRecordsVisit(undefined)
+      setPage(id)
+    }
+  }
+  function openRecords(panel: 'settings' | 'structure', artifactId?: string) {
+    if (!confirmLeave()) return
+    setRecordsVisit({ panel, artifactId })
+    setPage('records')
   }
   function openConceptionWorkspace() {
     if (!confirmLeave()) return
@@ -166,6 +175,7 @@ export function App() {
   const selectedAccount = config?.accounts.find((a) => a.id === account)
   const selectedConception = conceptionHandoff?.branchId === branch?.id ? conceptionHandoff : undefined
   const writingActive = page === 'writing' && !!novel && !!branch
+  const workspaceActive = ready && (!!novel || page === 'library')
   const navigation = (
     <nav id="workbench-pages" aria-label="主要页面">
       {workspaces.map(([id, name]) => (
@@ -194,6 +204,7 @@ export function App() {
             }
             setBranches([])
             setBranchId('')
+            setRecordsVisit(undefined)
             setNovelId(e.target.value)
           }}
         >
@@ -213,8 +224,10 @@ export function App() {
           value={branchId}
           onChange={(e) => {
             if (e.target.value === branchId) return
-            if (confirmLeave()) setBranchId(e.target.value)
-            else e.target.value = branchId
+            if (confirmLeave()) {
+              setRecordsVisit(undefined)
+              setBranchId(e.target.value)
+            } else e.target.value = branchId
           }}
         >
           <option value="" disabled>
@@ -243,13 +256,13 @@ export function App() {
   )
   return (
     <>
-      <header className={writingActive ? 'topbar topbar-writing' : 'topbar'}>
+      <header className={workspaceActive ? 'topbar topbar-compact' : 'topbar'}>
         <a className="brand" href="#main" aria-label="白金工作台">
           <span className="brand-mark">文</span>
           <strong>白金工作台</strong>
           <span className="local-label">本机创作</span>
         </a>
-        {writingActive ? (
+        {workspaceActive ? (
           <div
             className={'workbench-navigation' + (navigationOpen ? ' workbench-navigation-open' : '')}
             onBlur={(event) => {
@@ -269,7 +282,7 @@ export function App() {
               aria-expanded={navigationOpen}
               onClick={() => setNavigationOpen(!navigationOpen)}
             >
-              写作
+              {workspaces.find(([id]) => id === page)?.[1]}
             </button>
             {navigation}
           </div>
@@ -310,7 +323,11 @@ export function App() {
               onClose={() => setSettings(false)}
             />
           )}
-          {!writingActive && <div className="workspace-bar">{projectControls}</div>}
+          {!writingActive && (
+            <div className={workspaceActive ? 'workspace-bar workspace-bar-compact' : 'workspace-bar'}>
+              {projectControls}
+            </div>
+          )}
           <main id="main">
             {!novel && page !== 'library' ? (
               <div className="welcome">
@@ -342,23 +359,26 @@ export function App() {
             ) : (
               <>
                 {page === 'ideation' && branch && (
-                  <>
-                    <nav className="conception-navigation" aria-label="构思方式">
-                      <button
-                        type="button"
-                        aria-pressed={!quickConception}
-                        onClick={() => quickConception && confirmLeave() && setQuickConception(false)}
-                      >
-                        按类别构思
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={quickConception}
-                        onClick={() => !quickConception && confirmLeave() && setQuickConception(true)}
-                      >
-                        快速构思
-                      </button>
-                    </nav>
+                  <div className="page-pad conception-page">
+                    <div className="page-heading">
+                      <h1>小说构思</h1>
+                      <nav className="conception-navigation" aria-label="构思方式">
+                        <button
+                          type="button"
+                          aria-pressed={!quickConception}
+                          onClick={() => quickConception && confirmLeave() && setQuickConception(false)}
+                        >
+                          按类别构思
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={quickConception}
+                          onClick={() => !quickConception && confirmLeave() && setQuickConception(true)}
+                        >
+                          快速构思
+                        </button>
+                      </nav>
+                    </div>
                     {quickConception ? (
                       <Ideation
                         key={branch.id}
@@ -368,26 +388,16 @@ export function App() {
                         onWriting={() => openConceptionDestination('writing')}
                       />
                     ) : (
-                      <div className="page-pad conception-page">
-                        <div className="page-heading">
-                          <div>
-                            <h1>小说构思</h1>
-                            <p>
-                              {novel?.title} · {branch.name}
-                            </p>
-                          </div>
-                        </div>
-                        <ConceptionWorkspace
-                          key={branch.id}
-                          branch={branch}
-                          account={account}
-                          modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
-                          notify={notify}
-                          onHandoff={openConceptionDestination}
-                        />
-                      </div>
+                      <ConceptionWorkspace
+                        key={branch.id}
+                        branch={branch}
+                        account={account}
+                        modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
+                        notify={notify}
+                        onHandoff={openConceptionDestination}
+                      />
                     )}
-                  </>
+                  </div>
                 )}
                 {page === 'writing' && novel && branch && (
                   <Writing
@@ -433,13 +443,16 @@ export function App() {
                     onStarted={async (id) => {
                       await refreshBranches(novel.id, id, selectionGeneration)
                     }}
-                    onGenreSettings={() => navigate('records')}
+                    onGenreSettings={() => openRecords('settings')}
+                    onStructureReview={(artifactId) => openRecords('structure', artifactId)}
                   />
                 )}
                 {page === 'records' && branch && (
                   <Records
                     key={branch.id}
                     branch={branch}
+                    initialPanel={recordsVisit?.panel}
+                    structureArtifactId={recordsVisit?.artifactId}
                     account={account}
                     modelReady={!!selectedAccount?.configured && !!selectedAccount?.priced}
                     notify={notify}

@@ -39,6 +39,7 @@ test('人工反馈：定位旧来源、确认当前稿、作者选区生成候�
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await page.getByText('作者反馈与定向修订', { exact: true }).click()
   await page.getByRole('button', { name: '打开此反馈的局部修订', exact: true }).click()
   const panel = page.getByRole('region', { name: '手动反馈局部修订', exact: true })
   await expect(panel).toContainText('来源修订 1')

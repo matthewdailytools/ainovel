@@ -82,6 +82,7 @@ test('日常实例：人物字段待核报告、原文与刷新只读核验，�
   await page.goto('/')
   await expect(page.getByRole('combobox', { name: '工作版本', exact: true })).toHaveValue(branchId)
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await page.getByText('长篇结构与整理', { exact: true }).click()
   await page.getByText('按保存稿整理人物、事件、状态和伏笔候选', { exact: true }).click()
   const panel = page.getByRole('region', { name: '结构化整理与确认', exact: true })
   await panel.getByRole('combobox', { name: '保存的结构候选', exact: true }).selectOption(artifactId)

@@ -38,6 +38,7 @@ for (const unresolved of [false, true]) {
     await page.getByLabel('每章字数下限').fill('200')
     await page.getByLabel('每章字数上限').fill('600')
     await page.getByRole('combobox', { name: '采纳政策', exact: true }).selectOption('automatic')
+    await page.getByText('写作与检查设置', { exact: true }).click()
     await page.getByRole('checkbox', { name: '额外逐项核对本次情节', exact: true }).check()
     const response = page.waitForResponse(
       (r) => r.url().endsWith('/api/workflows') && r.request().method() === 'POST',

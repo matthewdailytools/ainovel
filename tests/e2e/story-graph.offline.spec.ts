@@ -19,6 +19,7 @@ test('长篇工作台：人物、原文事件、时点状态和多线图', async
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await page.getByText('长篇结构与整理', { exact: true }).click()
   const workspace = page.getByRole('region', { name: '长篇人物时点与多线工作台' })
   await workspace.getByRole('textbox', { name: '记录名称', exact: true }).fill('宁禾')
   await workspace.getByRole('textbox', { name: '别名（每行一个）', exact: true }).fill('小宁')

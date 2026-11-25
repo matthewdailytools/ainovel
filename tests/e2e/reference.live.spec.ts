@@ -39,6 +39,7 @@ test('日常实例：独立参考学习手工流程，无模型调用或原稿�
   ).toBeVisible()
   await page.reload()
   await page.getByRole('button', { name: '资料书库', exact: true }).click()
+  await page.getByText('参考学习历史', { exact: true }).click()
   await page.getByRole('button', { name: new RegExp(`${marker}.txt · .* · 修订`) }).click()
   await expect(page.getByRole('checkbox', { name: /本次采用/ })).toBeChecked()
   const after = await (await page.request.get('/api/config')).json()

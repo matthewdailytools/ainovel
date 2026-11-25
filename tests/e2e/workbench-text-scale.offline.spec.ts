@@ -150,9 +150,11 @@ test('五个工作区实际文字翻倍：长参考来源仍可阅读并用键�
     if (view === '写作')
       await expect(page.getByRole('textbox', { name: '章节正文', exact: true })).toBeVisible()
     else await expect(page.getByRole('heading', { name: view, exact: true })).toBeVisible()
-    if (view === '资料书库')
+    if (view === '资料书库') {
+      await page.getByText(/^参考学习历史/).click()
       await expect(page.locator('.reader-layout button.wide').filter({ hasText: name })).toBeVisible()
-    const control = view === '写作' ? narrowMenu : nav
+    }
+    const control = narrowMenu
     const previous = await control.evaluate((element) => parseFloat(getComputedStyle(element).fontSize))
     await page.evaluate(() => {
       const sizes = [...document.querySelectorAll('*')].map(

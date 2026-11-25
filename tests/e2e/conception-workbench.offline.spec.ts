@@ -61,6 +61,7 @@ test('按作品保存同级分类与项目，刷新恢复，并带缺项确认�
   const name = '账簿复核制度'
   const title = '纸面副本必须当场核对'
   const detail = '记录人在场时复述读数，留存签名；缺页不得推定内容。😀𠮷'
+  await page.getByText('新建类别', { exact: true }).click()
   await page.getByRole('textbox', { name: '类别名称', exact: true }).fill(name)
   await page.getByRole('button', { name: '添加构思类别', exact: true }).click()
   await page.getByRole('button', { name: '添加构思项目', exact: true }).click()
@@ -101,6 +102,7 @@ test('按作品保存同级分类与项目，刷新恢复，并带缺项确认�
 
   const before = await readWorkbench(page, base)
   expect(before.issues.length).toBeGreaterThan(0)
+  await page.getByText('补充保留事项', { exact: true }).click()
   await page
     .getByRole('textbox', { name: '保留事项说明', exact: true })
     .fill('先写第一章，人物和结局仍待作者核对。')
@@ -146,9 +148,15 @@ test('逐类和一键生成均保留草案，采用所选项目并确认后交�
   const initial = await readWorkbench(page, base)
   expect(initial.categories.length).toBeGreaterThanOrEqual(6)
   const active = initial.categories[0]
-  await page
-    .getByRole('textbox', { name: '构思要求', exact: true })
-    .fill('写一个修表学徒查找旧账缺页的故事。')
+  const generation = page.locator('#conception-generation > summary')
+  const instruction = page.getByRole('textbox', { name: '构思要求', exact: true })
+  await expect(instruction).toBeHidden()
+  await generation.click()
+  await instruction.fill('写一个修表学徒查找旧账缺页的故事。')
+  await generation.click()
+  await expect(instruction).toBeHidden()
+  await generation.click()
+  await expect(instruction).toHaveValue('写一个修表学徒查找旧账缺页的故事。')
   const review = page.getByRole('region', { name: '核对 AI 草案', exact: true })
   for (const [button, category, covers] of [
     ['生成当前类别', active.id, [active.id]],
@@ -204,6 +212,7 @@ test('逐类和一键生成均保留草案，采用所选项目并确认后交�
   await expect
     .poll(async () => (await readWorkbench(page, base)).categories[0].items.map((item) => item.title))
     .toEqual([candidate])
+  await page.getByText('补充保留事项', { exact: true }).click()
   await page
     .getByRole('textbox', { name: '保留事项说明', exact: true })
     .fill('其余条目暂不采用，写作时继续核对。')
@@ -281,6 +290,7 @@ test('从构思工作台核对旧作正文候选，采用来源记录并保留�
     .toBe('渡口借尺登记')
   await page.getByText('按保存稿整理人物、事件、状态和伏笔候选', { exact: true }).click()
   const panel = page.getByRole('region', { name: '结构化整理与确认', exact: true })
+  await panel.getByText('生成新的结构候选', { exact: true }).click()
   await panel.getByRole('checkbox', { name: '1 · 渡口暗号', exact: true }).check()
   await panel.getByRole('button', { name: '从所选保存稿生成结构候选', exact: true }).click()
   await expect(panel.getByRole('checkbox', { name: '采用人物：宁禾', exact: true })).toBeVisible()

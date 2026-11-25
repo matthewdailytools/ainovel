@@ -96,12 +96,14 @@ export function StoryGraph({
   onSaved,
   account,
   modelReady,
+  initialArtifactId,
 }: {
   branchId: string
   notify: Notify
   onSaved: () => Promise<void>
   account: string
   modelReady: boolean
+  initialArtifactId?: string
 }) {
   const [graph, setGraph] = useState<Graph>()
   const [draft, setDraft] = useState<Payload>(fresh('character'))
@@ -288,6 +290,7 @@ export function StoryGraph({
         recordNames={Object.fromEntries(graph.records.map((r) => [r.id, r.payload.title]))}
         account={account}
         modelReady={modelReady}
+        initialArtifactId={initialArtifactId}
         notify={notify}
         onAdopted={async () => {
           const next = await api<Graph>(`/branches/${branchId}/story-graph`)

@@ -322,14 +322,7 @@ export function Ideation({
   }
   const locked = !!busy || !!activeTask || !initialized
   return (
-    <div className="page-pad ideation-page">
-      <div className="page-heading">
-        <div>
-          <span className="eyebrow">从一句想法开始</span>
-          <h1>小说构思</h1>
-          <p>写下一句想法，展开从起因、发展到高潮与结局的完整故事。</p>
-        </div>
-      </div>
+    <div className="ideation-page">
       <section className="card">
         <form
           onSubmit={(event) => {
@@ -383,14 +376,16 @@ export function Ideation({
             )}
           </div>
           <p className="small muted">
-            AI方案包含人物动机、核心矛盾、发展转折、高潮结局与伏笔回收。直接采用只记录你自己的想法。
-          </p>
-          <p className="small muted">
             {modelReady
               ? `生成使用 ${account}，计入现有共享预算。`
-              : '模型账户尚未配置，可以直接采用自己的想法。'}{' '}
-            发送当前想法和本工作版本的已采用设定、约定及相关故事上下文；不发送书库资料。
+              : '模型账户尚未配置，可以直接采用自己的想法。'}
           </p>
+          <details className="page-disclosure">
+            <summary>生成范围与说明</summary>
+            <p className="small">
+              生成会发送当前想法、本工作版本的已采用设定、创作约定和相关故事上下文。直接采用只记录你的想法。
+            </p>
+          </details>
         </form>
       </section>
       {storageError && (

@@ -201,6 +201,7 @@ test('半自动情节核对：冻结author_plot且歧义未知停供，不自动
     .getByLabel('作者批量情节（每行一章）')
     .fill(`量潮 | ${uncertainPlot}\n后章 | 继续核对记录，不提前公开`)
   await page.getByRole('combobox', { name: '采纳政策', exact: true }).selectOption('automatic')
+  await page.getByText('写作与检查设置', { exact: true }).click()
   const option = page.getByRole('checkbox', { name: '额外逐项核对本次情节', exact: true })
   await expect(option).not.toBeChecked()
   await option.check()
@@ -231,6 +232,7 @@ test('半自动情节核对：冻结author_plot且歧义未知停供，不自动
   expect(audit.source).toEqual({ kind: 'author_plot', text_sha256: sha(uncertainPlot) })
   expect(audit.items[0]).toMatchObject({ author_evidence: uncertainPlot, certainty: 'ambiguous' })
   expect(audit.checks[0].result).toBe('unknown')
+  await page.getByText('本批次设置与依据', { exact: true }).click()
   await expect(
     page.getByText(/本任务冻结的情节逐项核对：已开启（额外模型费用）。核对来源是作者提供的本章情节。/),
   ).toBeVisible()
@@ -269,6 +271,7 @@ test('v2仅向守卫：正向与unknown接收者并存保留原pass并降未知�
   await page.getByLabel('每章字数上限').fill('600')
   await page.getByLabel('作者批量情节（每行一章）').fill(`交付 | ${exclusivePlot}\n以后 | 继续核对来源`)
   await page.getByRole('combobox', { name: '采纳政策', exact: true }).selectOption('automatic')
+  await page.getByText('写作与检查设置', { exact: true }).click()
   await page.getByRole('checkbox', { name: '额外逐项核对本次情节', exact: true }).check()
   const response = page.waitForResponse(
     (r) => r.url().endsWith('/api/workflows') && r.request().method() === 'POST',

@@ -181,6 +181,7 @@ test('完本六项分别确认、未通过仍可预览原稿、旧新交付快�
     consistency: checkQuote,
   }
   await records.click()
+  await page.getByText('完本验收与交付', { exact: true }).click()
 
   async function create(withEvidence: boolean) {
     await delivery.getByRole('button', { name: /^(准备交付材料|新建交付快照)$/ }).click()
@@ -341,6 +342,7 @@ test('完本六项分别确认、未通过仍可预览原稿、旧新交付快�
   await expect.poll(async () => (await read(await page.request.get(ending.url))).content).toBe(revisedSecond)
   const current = await read(await page.request.get(ending.url))
   await records.click()
+  await page.getByText('完本验收与交付', { exact: true }).click()
   await history.selectOption(original.id)
   await expect(selected.getByRole('heading', { name: '历史快照', exact: true })).toBeVisible()
   expect(unpackZip(await download('下载完整交付包'))).toEqual(oldFiles)
@@ -417,12 +419,14 @@ test('已确认章纲接力：预算停止、换账户保留范围、作者补�
   await scope.getByText(opening.title, { exact: true }).click()
   await expect(scope.getByText(firstOutline, { exact: true })).toBeVisible()
   await page.getByRole('combobox', { name: '本次任务范围', exact: true }).selectOption('segment')
+  await page.getByText('来源与固定条件', { exact: true }).click()
   await page
     .getByRole('textbox', { name: '作品设定、粗纲与结局方向', exact: true })
     .fill('宁禾检查闸门并记录读数；本批仅验证两章接力。')
   await page.getByRole('spinbutton', { name: '每章字数下限', exact: false }).fill('200')
   await page.getByRole('spinbutton', { name: '每章字数上限', exact: false }).fill('600')
   await page.getByRole('combobox', { name: '采纳政策', exact: true }).selectOption('automatic')
+  await page.getByText('预算与执行说明', { exact: true }).click()
   await page.getByRole('spinbutton', { name: '本批次预算（可低于共享总上限）', exact: true }).fill('0.01')
   const startedResponse = page.waitForResponse(
     (r) => r.url().endsWith('/api/workflows') && r.request().method() === 'POST',

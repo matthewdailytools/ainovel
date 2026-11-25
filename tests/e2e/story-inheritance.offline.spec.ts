@@ -58,6 +58,7 @@ test('新版本结构继承：明确勾选、依赖漏选阻止、历史隔离�
   await page.reload()
   await page.getByRole('combobox', { name: '作品', exact: true }).selectOption(novel.id)
   await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  await page.getByText('来源与固定条件', { exact: true }).click()
   await page.getByText('新版本继承人物与结构计划 · 已选0项', { exact: true }).click()
   await expect(page.getByRole('checkbox', { name: '继承人物档案：宁禾', exact: true })).not.toBeChecked()
   await page.getByText('查看不能继承的历史或失效记录', { exact: true }).click()
@@ -71,6 +72,7 @@ test('新版本结构继承：明确勾选、依赖漏选阻止、历史隔离�
   await page.getByLabel('每章字数下限').fill('200')
   await page.getByLabel('每章字数上限').fill('600')
   await page.getByRole('combobox', { name: '采纳政策', exact: true }).selectOption('automatic')
+  await page.getByText('写作与检查设置', { exact: true }).click()
   await page.getByRole('checkbox', { name: '每章采用后整理人物、时点、事件和伏笔' }).uncheck()
   const failedPromise = page.waitForResponse(
     (r) => r.url().endsWith('/api/workflows') && r.request().method() === 'POST',

@@ -33,6 +33,7 @@ async function runAuthorTask(page: Page, testInfo: TestInfo, withDesigns: boolea
     .toBe(1)
 
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await page.getByText('创作约定与频道题材', { exact: true }).click()
   const intent = page.locator('#author-intent')
   await intent.getByText('编写或整理创作约定（确认后生效）', { exact: true }).click()
   await intent.getByRole('textbox', { name: '作者原话与创作想法', exact: true }).fill(IDEA)

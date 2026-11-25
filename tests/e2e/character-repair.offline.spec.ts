@@ -80,6 +80,7 @@ async function startFromUi(page: Page, cannot = false, late = false) {
   const original = await get<{ content: string; revision: number }>(page, `/api/chapters/${chapter.id}`)
 
   await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  await page.getByText('写作与检查设置', { exact: true }).click()
   const policy = page.getByRole('checkbox', { name: '允许有限修订未采纳人物字段', exact: true })
   await expect(policy).not.toBeChecked()
   await page.getByRole('radio', { name: /^全自动/ }).check()
@@ -111,6 +112,7 @@ async function startFromUi(page: Page, cannot = false, late = false) {
   await expect
     .poll(async () => (await get<Task>(page, `/api/tasks/${started.id}`)).status, { timeout: 30_000 })
     .toBe(cannot ? 'needs_review' : 'segment_complete')
+  await page.getByText('本批次设置与依据', { exact: true }).click()
   await expect(page.getByLabel('本批次人物字段修订政策', { exact: true })).toHaveText(
     '人物字段有限修订：已启用，最多2轮；初稿时确定全部AI新人物非空说明、档案范围，每轮只修当前未获支持项，范围不临时扩大。增加调用费用，保留原候选与修订记录。',
   )
@@ -120,6 +122,7 @@ async function startFromUi(page: Page, cannot = false, late = false) {
 
 async function extractionPanel(page: Page) {
   await page.getByRole('button', { name: '故事与审阅', exact: true }).click()
+  await page.getByText('长篇结构与整理', { exact: true }).click()
   await page.getByText('按保存稿整理人物、事件、状态和伏笔候选', { exact: true }).click()
   return page.getByRole('region', { name: '结构化整理与确认', exact: true })
 }
@@ -226,6 +229,7 @@ test('人物有限修订：真实界面开启、独立复检、原稿及父报�
   await expect(repair).toBeVisible()
   expect(await repair.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
   const viewParent = repair.getByRole('button', { name: '查看原候选', exact: true })
+  await expect(viewParent).toBeEnabled()
   await viewParent.focus()
   await expect(viewParent).toBeFocused()
   await page.screenshot({

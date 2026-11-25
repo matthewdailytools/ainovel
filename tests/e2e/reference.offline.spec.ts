@@ -26,6 +26,10 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '资料书库', exact: true }).click()
+  await expect(page.getByRole('button', { name: '搜索正文', exact: true })).toBeVisible()
+  await expect(page.getByRole('combobox', { name: '正文范围', exact: true })).toBeHidden()
+  await expect(page.getByLabel('选择 TXT／Markdown／EPUB', { exact: true })).toBeHidden()
+  await page.getByText('＋ 导入本地资料', { exact: true }).click()
   await expect(
     page.getByText(
       '阅读与搜索使用导入时正文快照，外部原件变化不会自动重读；同名重新导入会建立独立资料，旧摘录与参考保持原快照。',
@@ -78,6 +82,8 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   await expect(page.getByLabel('参考试写候选')).toHaveValue(/螺栓/)
   await page.reload()
   await page.getByRole('button', { name: '资料书库', exact: true }).click()
+  await expect(page.getByRole('button', { name: /自拟参考.txt · .* · 修订/ })).toBeHidden()
+  await page.getByText('参考学习历史', { exact: true }).click()
   await page.getByRole('button', { name: /自拟参考.txt · .* · 修订/ }).click()
   await expect(page.getByLabel('参考试写候选')).toHaveValue(/螺栓/)
   await page.getByText('阶段任务与历史规则版本', { exact: true }).click()
@@ -174,6 +180,7 @@ test('书库选段到拆解、方案、试写、对照采纳和历史恢复', as
   }
   async function returnToReference() {
     await page.getByRole('button', { name: '资料书库', exact: true }).click()
+    await page.getByText('参考学习历史', { exact: true }).click()
     await page.getByRole('button', { name: /自拟参考.txt · .* · 修订/ }).click()
     await expect(page.getByLabel('参考试写候选')).toBeVisible()
   }

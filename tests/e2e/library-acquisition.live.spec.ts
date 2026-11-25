@@ -24,7 +24,8 @@ test('日常书库：官方单页获取、阅读搜索回源、摘录及写作�
   await page.getByRole('button', { name: '资料书库', exact: true }).click()
   const query = page.getByRole('textbox', { name: '书名、主题或正文词语', exact: true })
   await query.fill(title)
-  await page.getByText('按维基文库页面标题获取／查看下载任务', { exact: true }).click()
+  await page.getByText('维基文库与下载任务', { exact: true }).click()
+  await page.getByText('按页面标题直接获取', { exact: true }).click()
   await page.getByRole('combobox', { name: '获取范围', exact: true }).selectOption('page_text')
   const reusedJob = process.env.AINOVEL_EXISTING_OFFICIAL_JOB
   let job: { id: string }
@@ -67,6 +68,7 @@ test('日常书库：官方单页获取、阅读搜索回源、摘录及写作�
   const reader = page.getByRole('textbox', { name: '资料原文', exact: true })
   await expect(reader).toHaveValue(/洞庭/)
   await expect(reader).toHaveValue(/先天下之憂而憂/)
+  await page.getByText('检索范围与说明', { exact: true }).click()
   await page.getByRole('combobox', { name: '正文范围', exact: true }).selectOption('book')
   const searches = []
   for (const term of ['洞庭', '先天下之憂而憂']) {
@@ -97,6 +99,7 @@ test('日常书库：官方单页获取、阅读搜索回源、摘录及写作�
       matching: result.matching,
     })
   }
+  await page.getByText('摘录笔记与参考目标', { exact: true }).click()
   await page
     .getByRole('textbox', { name: '摘录笔记', exact: true })
     .fill('后台验证：借鉴忧乐对照的表达机制，仅选本句，未把公版资料当作本书事实。')

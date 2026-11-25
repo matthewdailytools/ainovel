@@ -10,6 +10,7 @@ test('日常实例：结构继承只读查看、默认不选，仅维护测试�
     readOnlyStory.branchId,
   )
   await page.getByRole('button', { name: '整书创作', exact: true }).click()
+  await page.getByText('来源与固定条件', { exact: true }).click()
   const summary = page.getByText('新版本继承人物与结构计划 · 已选0项', { exact: true })
   await summary.click()
   const panel = summary.locator('..')

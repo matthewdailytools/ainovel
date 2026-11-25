@@ -165,6 +165,7 @@ export function StoryExtraction({
   notify,
   onAdopted,
   recordNames,
+  initialArtifactId,
 }: {
   branchId: string
   storyRevision: number
@@ -174,10 +175,11 @@ export function StoryExtraction({
   notify: Notify
   onAdopted: () => Promise<void>
   recordNames: Record<string, string>
+  initialArtifactId?: string
 }) {
   const [chosenChapters, setChosenChapters] = useState<string[]>([])
   const [history, setHistory] = useState<History>({ tasks: [], artifacts: [] })
-  const [artifactSelection, setArtifactSelection] = useState({ branchId, id: '' })
+  const [artifactSelection, setArtifactSelection] = useState({ branchId, id: initialArtifactId || '' })
   const artifactId = artifactSelection.branchId === branchId ? artifactSelection.id : ''
   const [loadedArtifact, setLoadedArtifact] = useState<{ branchId: string; value: ExtractionArtifact }>()
   const [selected, setSelected] = useState<string[]>([])
@@ -401,72 +403,79 @@ export function StoryExtraction({
     abandoned: '放弃',
   }
   return (
-    <details>
+    <details open={initialArtifactId ? true : undefined}>
       <summary>按保存稿整理人物、事件、状态和伏笔候选</summary>
       <section aria-label="结构化整理与确认">
-        <p>
-          只发送本批所选保存稿及当前记录索引；模型推导保留为候选。请选择原文范围，完成后逐项核对来源与未知，再明确采用。单批最多20章、5万字符，超过时分批整理。
-        </p>
         <p role="status">{message}</p>
-        <fieldset>
-          <legend>本次整理的保存稿</legend>
-          {chapters.map((c) => (
-            <label className="check" key={c.id}>
-              <input
-                type="checkbox"
-                disabled={busy}
-                checked={chosenChapters.includes(c.id)}
-                onChange={(e) =>
-                  setChosenChapters((old) =>
-                    e.target.checked ? [...old, c.id] : old.filter((id) => id !== c.id),
-                  )
+        <details>
+          <summary>生成新的结构候选</summary>
+          <p>
+            只发送本批所选保存稿及当前记录索引；模型推导保留为候选。请选择原文范围，完成后逐项核对来源与未知，再明确采用。单批最多20章、5万字符，超过时分批整理。
+          </p>
+          <fieldset>
+            <legend>本次整理的保存稿</legend>
+            {chapters.map((c) => (
+              <label className="check" key={c.id}>
+                <input
+                  type="checkbox"
+                  disabled={busy}
+                  checked={chosenChapters.includes(c.id)}
+                  onChange={(e) =>
+                    setChosenChapters((old) =>
+                      e.target.checked ? [...old, c.id] : old.filter((id) => id !== c.id),
+                    )
+                  }
+                />
+                {c.position} · {c.title}
+                {c.stale ? '（待复检）' : ''}
+              </label>
+            ))}
+          </fieldset>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={includeScenes}
+              disabled={busy}
+              onChange={(e) => setIncludeScenes(e.target.checked)}
+            />
+            同时提议新正文的场景范围
+          </label>
+          <StructureOutputSettings value={maxOutputTokens} disabled={busy} onChange={setMaxOutputTokens} />
+          <button
+            disabled={
+              busy ||
+              !modelReady ||
+              !chosenChapters.length ||
+              chosenChapters.length > 20 ||
+              running.length > 0
+            }
+            onClick={() =>
+              void perform(async () => {
+                const body: Omit<Schemas['StartExtraction'], 'client_request_id'> = {
+                  base_story_revision: storyRevision,
+                  chapter_ids: chosenChapters,
+                  account,
+                  include_scene_ranges: includeScenes,
+                  max_output_tokens: maxOutputTokens,
                 }
-              />
-              {c.position} · {c.title}
-              {c.stale ? '（待复检）' : ''}
-            </label>
-          ))}
-        </fieldset>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={includeScenes}
-            disabled={busy}
-            onChange={(e) => setIncludeScenes(e.target.checked)}
-          />
-          同时提议新正文的场景范围
-        </label>
-        <StructureOutputSettings value={maxOutputTokens} disabled={busy} onChange={setMaxOutputTokens} />
-        <button
-          disabled={
-            busy || !modelReady || !chosenChapters.length || chosenChapters.length > 20 || running.length > 0
-          }
-          onClick={() =>
-            void perform(async () => {
-              const body: Omit<Schemas['StartExtraction'], 'client_request_id'> = {
-                base_story_revision: storyRevision,
-                chapter_ids: chosenChapters,
-                account,
-                include_scene_ranges: includeScenes,
-                max_output_tokens: maxOutputTokens,
-              }
-              const signature = JSON.stringify(body)
-              if (pending.current?.signature !== signature)
-                pending.current = { signature, key: crypto.randomUUID() }
-              await api(`/branches/${branchId}/story-extractions`, 'POST', {
-                ...body,
-                client_request_id: pending.current.key,
+                const signature = JSON.stringify(body)
+                if (pending.current?.signature !== signature)
+                  pending.current = { signature, key: crypto.randomUUID() }
+                await api(`/branches/${branchId}/story-extractions`, 'POST', {
+                  ...body,
+                  client_request_id: pending.current.key,
+                })
+                setSubmittedInput(inputSignature)
+                pending.current = null
+                setHistory(await api(`/branches/${branchId}/story-extractions`))
+                setMessage('整理任务已提交，正文和正式故事记录尚未改变。')
               })
-              setSubmittedInput(inputSignature)
-              pending.current = null
-              setHistory(await api(`/branches/${branchId}/story-extractions`))
-              setMessage('整理任务已提交，正文和正式故事记录尚未改变。')
-            })
-          }
-        >
-          从所选保存稿生成结构候选
-        </button>
-        {!modelReady && <p>未配置可用模型时仍可手工维护长篇记录。</p>}
+            }
+          >
+            从所选保存稿生成结构候选
+          </button>
+          {!modelReady && <p>未配置可用模型时仍可手工维护长篇记录。</p>}
+        </details>
         {running.map((t) => (
           <div className="notice" key={t.id}>
             <p>{label(t.status)} · 关闭页面不取消任务，重新打开可查看。</p>

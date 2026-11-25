@@ -62,6 +62,7 @@ export function LibraryPage({
   const [note, setNote] = useState('')
   const [selection, setSelection] = useState({ start: 0, end: 0, text: '' })
   const [status, setStatus] = useState('')
+  const localImport = useRef<HTMLDetailsElement>(null)
   const reader = useRef<HTMLTextAreaElement>(null)
   const progress = useRef({ revision: 0 })
   async function refresh() {
@@ -152,6 +153,7 @@ export function LibraryPage({
     )
   }
   const book = books.find((b) => b.id === bookId)
+  const activeJobs = jobs.filter((job) => ['queued', 'downloading'].includes(job.status)).length
   if (studyId)
     return (
       <ReferenceWorkspace
@@ -168,23 +170,9 @@ export function LibraryPage({
   return (
     <div className="library-page page-pad">
       <div className="page-heading">
-        <div>
-          <span className="eyebrow">资料，回到原文</span>
-          <h1>资料书库</h1>
-          <p>找书、阅读、搜索，再把有出处的片段带回创作。</p>
-          <p className="small muted">
-            阅读与搜索使用导入时正文快照，外部原件变化不会自动重读；同名重新导入会建立独立资料，旧摘录与参考保持原快照。
-          </p>
-        </div>
-        <details className="card import-card">
+        <h1>资料书库</h1>
+        <details ref={localImport} className="page-disclosure import-card">
           <summary>＋ 导入本地资料</summary>
-          <label>
-            文字编码
-            <select value={encoding} onChange={(e) => setEncoding(e.target.value)}>
-              <option value="utf-8-sig">UTF-8（默认）</option>
-              <option value="gb18030">GB18030</option>
-            </select>
-          </label>
           <label className="file-control">
             选择 TXT／Markdown／EPUB
             <input
@@ -200,13 +188,27 @@ export function LibraryPage({
                   const row = await api<Book>('/library/import', 'POST', form)
                   await refresh()
                   await openBook(row.id)
+                  if (localImport.current) localImport.current.open = false
                   setStatus('资料已入库：' + label(row.status))
                 })
                 event.target.value = ''
               }}
             />
           </label>
-          <p className="small muted">上限 20 MiB；原件保留，EPUB 以纯文本阅读。PDF／OCR 尚未实现。</p>
+          <details className="page-disclosure">
+            <summary>文字编码设置</summary>
+            <label>
+              文字编码
+              <select value={encoding} onChange={(e) => setEncoding(e.target.value)}>
+                <option value="utf-8-sig">UTF-8（默认）</option>
+                <option value="gb18030">GB18030</option>
+              </select>
+            </label>
+          </details>
+          <p className="small muted">文件上限 20 MiB。EPUB 以纯文本阅读，导入后保留原件。</p>
+          <p className="small muted">
+            阅读与搜索使用导入时正文快照，外部原件变化不会自动重读；同名重新导入会建立独立资料，旧摘录与参考保持原快照。
+          </p>
         </details>
       </div>
       <form
@@ -226,42 +228,54 @@ export function LibraryPage({
             maxLength={200}
           />
         </label>
-        <label>
-          正文范围
-          <select value={scope} onChange={(e) => setScope(e.target.value)}>
-            <option value="all">已入库资料</option>
-            <option value="book" disabled={!bookId}>
-              当前书籍
-            </option>
-            <option value="novel" disabled={!novelId}>
-              本作品资料包来源
-            </option>
-          </select>
-        </label>
         <button className="primary" disabled={busy}>
           搜索正文
         </button>
-        <button
-          type="button"
-          disabled={busy || !query}
-          onClick={() =>
-            void perform(async () => {
-              setCatalog(await api(`/library/catalog?q=${encodeURIComponent(query)}`))
-              setStatus('找到的是书目，下载解析后才可搜索正文。')
-            })
-          }
-        >
-          查找维基文库书目
-        </button>
       </form>
-      <p className="small muted">
-        短词采用精确子串检索；三字及以上先检索可用 trigram 索引，再校验连续原文。每个正文单元显示首个命中；TXT
-        单元相邻重叠 200 字符，边界命中可能重复。
-      </p>
-      <p role="status">{busy ? '处理中…' : status}</p>
-      {!!catalog.length && (
-        <section className="card">
-          <h2>外部书目</h2>
+      <div className="library-tools">
+        <details className="page-disclosure">
+          <summary>
+            <span>检索范围与说明</span>
+            {scope !== 'all' && <small> · {scope === 'book' ? '当前书籍' : '本作品资料包来源'}</small>}
+          </summary>
+          <label>
+            正文范围
+            <select value={scope} onChange={(e) => setScope(e.target.value)}>
+              <option value="all">已入库资料</option>
+              <option value="book" disabled={!bookId}>
+                当前书籍
+              </option>
+              <option value="novel" disabled={!novelId}>
+                本作品资料包来源
+              </option>
+            </select>
+          </label>
+          <p className="small muted">检索校验连续原文，每个单元返回首个命中。TXT 单元边界可能出现重复。</p>
+        </details>
+        <details className="page-disclosure">
+          <summary>
+            <span>维基文库与下载任务</span>
+            {activeJobs > 0 ? (
+              <small> · {activeJobs} 项下载任务进行中</small>
+            ) : jobs[0]?.status === 'failed' ? (
+              <small> · 最近任务失败</small>
+            ) : null}
+          </summary>
+          <p className="small muted">在上方搜索框填写书名或页面标题，再查找书目或直接获取。</p>
+          <button
+            type="button"
+            disabled={busy || !query}
+            onClick={() =>
+              void perform(async () => {
+                const rows = await api<typeof catalog>(`/library/catalog?q=${encodeURIComponent(query)}`)
+                setCatalog(rows)
+                setStatus(rows.length ? '找到的是书目，下载解析后才可搜索正文。' : '维基文库未找到匹配书目。')
+              })
+            }
+          >
+            查找维基文库书目
+          </button>
+          {catalog.length > 0 && <h2>外部书目</h2>}
           {catalog.map((c) => (
             <div className="catalog-row" key={c.title}>
               <div>
@@ -286,56 +300,56 @@ export function LibraryPage({
               </button>
             </div>
           ))}
-        </section>
-      )}
-      <details>
-        <summary>按维基文库页面标题获取／查看下载任务</summary>
-        <p className="small">
-          使用官方 WS Export 或 MediaWiki
-          API；网络或来源失败会保留失败状态，不声称已取得正文。单页面获取适合页面内已有全文的短书，多页面书籍需
-          EPUB 或分别获取。
-        </p>
-        <label>
-          获取范围
-          <select value={downloadFormat} onChange={(e) => setDownloadFormat(e.target.value)}>
-            <option value="epub">整书 EPUB 导出</option>
-            <option value="page_text">当前单页面 TXT（不跟随子页面）</option>
-          </select>
-        </label>
-        <button
-          disabled={!query || busy}
-          onClick={() =>
-            void perform(async () => {
-              await api('/library/download', 'POST', { title: query, format: downloadFormat })
-              await refresh()
-            })
-          }
-        >
-          按当前输入的页面标题获取
-        </button>
-        {jobs.map((j) => (
-          <div className="catalog-row" key={j.id}>
-            <span>
-              {j.title} · {label(j.status)}
-              {j.error && <small>{j.error}</small>}
-            </span>
-            {['queued', 'downloading'].includes(j.status) ? (
-              <button
-                onClick={() =>
-                  void perform(async () => {
-                    await api(`/library/jobs/${j.id}/cancel`, 'POST')
-                    await refresh()
-                  })
-                }
-              >
-                取消下载
-              </button>
-            ) : j.book_id ? (
-              <button onClick={() => void perform(() => openBook(j.book_id))}>阅读</button>
-            ) : null}
-          </div>
-        ))}
-      </details>
+          <details className="page-disclosure">
+            <summary>按页面标题直接获取</summary>
+            <p className="small muted">整书使用官方 EPUB 导出。单页面 TXT 只获取该页正文。</p>
+            <label>
+              获取范围
+              <select value={downloadFormat} onChange={(e) => setDownloadFormat(e.target.value)}>
+                <option value="epub">整书 EPUB 导出</option>
+                <option value="page_text">当前单页面 TXT（不跟随子页面）</option>
+              </select>
+            </label>
+            <button
+              disabled={!query || busy}
+              onClick={() =>
+                void perform(async () => {
+                  await api('/library/download', 'POST', { title: query, format: downloadFormat })
+                  await refresh()
+                  setStatus('已提交官方获取任务。')
+                })
+              }
+            >
+              按当前输入的页面标题获取
+            </button>
+          </details>
+          {jobs.map((j) => (
+            <div className="catalog-row" key={j.id}>
+              <span>
+                {j.title} · {label(j.status)}
+                {j.error && <small>{j.error}</small>}
+              </span>
+              {['queued', 'downloading'].includes(j.status) ? (
+                <button
+                  onClick={() =>
+                    void perform(async () => {
+                      await api(`/library/jobs/${j.id}/cancel`, 'POST')
+                      await refresh()
+                    })
+                  }
+                >
+                  取消下载
+                </button>
+              ) : j.book_id ? (
+                <button onClick={() => void perform(() => openBook(j.book_id))}>阅读</button>
+              ) : null}
+            </div>
+          ))}
+        </details>
+      </div>
+      <div className="library-status" role="status">
+        {busy ? '处理中…' : status}
+      </div>
       {search && (
         <section className="search-results">
           <div className="section-title">
@@ -389,18 +403,52 @@ export function LibraryPage({
           ) : (
             <p className="muted">导入资料，或从维基文库获取可用书籍。</p>
           )}
-          {!!units.length && (
-            <label>
-              阅读单元
-              <select value={unit?.id || ''} onChange={(e) => void perform(() => openUnit(e.target.value))}>
-                {units.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.position} · {u.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+          <details className="page-disclosure">
+            <summary>
+              <span>参考学习历史</span> <small>· {studies.length} 项</small>
+            </summary>
+            {studies.map((study) => (
+              <button className="wide" key={study.id} onClick={() => setStudyId(study.id)}>
+                {study.payload.source.title} · {study.payload.goal.slice(0, 35)} · 修订{study.revision}
+              </button>
+            ))}
+            {studies.length === 0 && <p className="muted">选中原文即可开始参考学习。</p>}
+          </details>
+          <details className="page-disclosure">
+            <summary>
+              <span>当前资料包</span> <small>· {excerpts.length} 条摘录</small>
+            </summary>
+            {excerpts.length ? (
+              excerpts.map((e) => (
+                <div className="excerpt" key={e.id}>
+                  <button className="text-button" onClick={() => void perform(() => openUnit(e.unit_id))}>
+                    {e.title} ↗ 原文
+                  </button>
+                  <blockquote>{e.quote}</blockquote>
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      void perform(async () => {
+                        const value = await api<ReferenceSession>('/reference-sessions', 'POST', {
+                          unit_id: e.unit_id,
+                          start: e.start,
+                          end: e.end,
+                          quote: e.quote,
+                          goal: studyGoal,
+                        })
+                        setStudyId(value.id)
+                      })
+                    }
+                  >
+                    从此摘录拆解写法
+                  </button>
+                  <p>{e.note}</p>
+                </div>
+              ))
+            ) : (
+              <p className="muted">选中原文、记录用途并保存。发送给模型前可逐项选择。</p>
+            )}
+          </details>
         </aside>
         <section className="card reader">
           <div className="section-title">
@@ -408,7 +456,7 @@ export function LibraryPage({
             {unit && <span className="badge">原文 · 只读</span>}
           </div>
           {book && (
-            <details>
+            <details className="page-disclosure">
               <summary>来源与处理范围 · {label(book.status)}</summary>
               <p>{book.source}</p>
               <p className="small">导入文件 SHA-256：{book.file_hash}</p>
@@ -417,6 +465,35 @@ export function LibraryPage({
           )}
           {unit ? (
             <>
+              <div className="library-reader-controls">
+                {units.length > 1 && (
+                  <label>
+                    阅读单元
+                    <select value={unit.id} onChange={(e) => void perform(() => openUnit(e.target.value))}>
+                      {units.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.position} · {u.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    void perform(async () => {
+                      const result = await api<{ revision: number }>(
+                        `/library/books/${unit.book_id}/progress?unit_id=${unit.id}&offset=${selection.end}&base_revision=${progress.current.revision}`,
+                        'PUT',
+                      )
+                      progress.current.revision = result.revision
+                      setStatus('阅读位置已保存。')
+                    })
+                  }
+                >
+                  记住阅读位置
+                </button>
+              </div>
               <label>
                 <span className="sr-only">资料原文</span>
                 <textarea
@@ -434,82 +511,70 @@ export function LibraryPage({
                   }}
                 />
               </label>
-              <div className="excerpt-form">
-                <label>
-                  摘录笔记
-                  <textarea
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    rows={2}
-                    placeholder="选中原文后，记录它对当前创作的用途"
-                  />
-                </label>
-                <p className="small">
-                  已选 {selection.text.length} 个 UTF-16 单元；资料不会自动变成小说事实。
-                </p>
-                <label>
-                  参考学习目标
-                  <textarea
-                    value={studyGoal}
-                    onChange={(e) => setStudyGoal(e.target.value)}
-                    rows={2}
-                    maxLength={3000}
-                  />
-                </label>
-                <button
-                  disabled={busy || !selection.text || !studyGoal.trim()}
-                  onClick={() =>
-                    void perform(async () => {
-                      const value = await api<ReferenceSession>('/reference-sessions', 'POST', {
-                        unit_id: unit.id,
-                        start: selection.start,
-                        end: selection.end,
-                        quote: selection.text,
-                        goal: studyGoal,
+              {!!selection.text && (
+                <div className="excerpt-form">
+                  <p className="small">已选 {selection.text.length} 个 UTF-16 单元。</p>
+                  <details className="page-disclosure">
+                    <summary>摘录笔记与参考目标</summary>
+                    <label>
+                      摘录笔记
+                      <textarea
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        rows={2}
+                        placeholder="选中原文后，记录它对当前创作的用途"
+                      />
+                    </label>
+                    <label>
+                      参考学习目标
+                      <textarea
+                        value={studyGoal}
+                        onChange={(e) => setStudyGoal(e.target.value)}
+                        rows={2}
+                        maxLength={3000}
+                      />
+                    </label>
+                  </details>
+                  <button
+                    disabled={busy || !studyGoal.trim()}
+                    onClick={() =>
+                      void perform(async () => {
+                        const value = await api<ReferenceSession>('/reference-sessions', 'POST', {
+                          unit_id: unit.id,
+                          start: selection.start,
+                          end: selection.end,
+                          quote: selection.text,
+                          goal: studyGoal,
+                        })
+                        setStudyId(value.id)
                       })
-                      setStudyId(value.id)
-                    })
-                  }
-                >
-                  拆解这段写法
-                </button>
-                <button
-                  className="primary"
-                  disabled={!selection.text || busy}
-                  onClick={() =>
-                    void perform(async () => {
-                      await api('/library/excerpts', 'POST', {
-                        unit_id: unit.id,
-                        ...selection,
-                        quote: selection.text,
-                        text: undefined,
-                        note,
-                        novel_id: novelId || null,
+                    }
+                  >
+                    拆解这段写法
+                  </button>
+                  <button
+                    className="primary"
+                    disabled={busy}
+                    onClick={() =>
+                      void perform(async () => {
+                        await api('/library/excerpts', 'POST', {
+                          unit_id: unit.id,
+                          ...selection,
+                          quote: selection.text,
+                          text: undefined,
+                          note,
+                          novel_id: novelId || null,
+                        })
+                        await refresh()
+                        setNote('')
+                        setStatus('摘录已保存，可在写作页主动选入资料包。')
                       })
-                      await refresh()
-                      setNote('')
-                      setStatus('摘录已保存，可在写作页主动选入资料包。')
-                    })
-                  }
-                >
-                  保存摘录与出处
-                </button>
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    void perform(async () => {
-                      const result = await api<{ revision: number }>(
-                        `/library/books/${unit.book_id}/progress?unit_id=${unit.id}&offset=${selection.end}&base_revision=${progress.current.revision}`,
-                        'PUT',
-                      )
-                      progress.current.revision = result.revision
-                      setStatus('阅读位置已保存。')
-                    })
-                  }
-                >
-                  记住阅读位置
-                </button>
-              </div>
+                    }
+                  >
+                    保存摘录与出处
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <p className="empty-note">
@@ -517,45 +582,6 @@ export function LibraryPage({
             </p>
           )}
         </section>
-        <aside className="card">
-          <h2>参考学习历史</h2>
-          {studies.map((study) => (
-            <button className="wide" key={study.id} onClick={() => setStudyId(study.id)}>
-              {study.payload.source.title} · {study.payload.goal.slice(0, 35)} · 修订{study.revision}
-            </button>
-          ))}
-          <h2>当前资料包</h2>
-          {excerpts.length ? (
-            excerpts.map((e) => (
-              <div className="excerpt" key={e.id}>
-                <button className="text-button" onClick={() => void perform(() => openUnit(e.unit_id))}>
-                  {e.title} ↗ 原文
-                </button>
-                <blockquote>{e.quote}</blockquote>
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    void perform(async () => {
-                      const value = await api<ReferenceSession>('/reference-sessions', 'POST', {
-                        unit_id: e.unit_id,
-                        start: e.start,
-                        end: e.end,
-                        quote: e.quote,
-                        goal: studyGoal,
-                      })
-                      setStudyId(value.id)
-                    })
-                  }
-                >
-                  从此摘录拆解写法
-                </button>
-                <p>{e.note}</p>
-              </div>
-            ))
-          ) : (
-            <p className="muted">选中原文、记录用途并保存。发送给模型前可逐项选择。</p>
-          )}
-        </aside>
       </div>
     </div>
   )
